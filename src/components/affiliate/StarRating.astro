@@ -1,0 +1,15 @@
+---
+interface Props {
+  rating?: number;
+}
+
+const { rating = 0 } = Astro.props;
+const fullStars = Math.round(Math.max(0, Math.min(5, rating)));
+---
+
+<div class="flex items-center gap-1" aria-label={`Rated ${rating} out of 5`}>
+  {Array.from({ length: 5 }, (_, index) => (
+    <span class={index < fullStars ? 'text-amber-500' : 'text-slate-300'}>★</span>
+  ))}
+  <span class="ml-2 text-sm font-medium text-slate-600">{rating.toFixed(1)}</span>
+</div>

@@ -1,0 +1,30 @@
+---
+export const prerender = false;
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Breadcrumbs from '../../components/seo/Breadcrumbs.astro';
+import AffiliateDisclosure from '../../components/affiliate/AffiliateDisclosure.astro';
+import DealCard from '../../components/affiliate/DealCard.astro';
+import { buildMeta, buildOfferSchema } from '../../lib/seo';
+import { getDealBySlug } from '../../lib/api';
+
+const slug = Astro.params.slug ?? '';
+const deal = await getDealBySlug(slug);
+if (!deal) return Astro.redirect('/deals');
+
+const meta = buildMeta({
+  title: deal.dealTitle,
+  description: deal.description,
+  pathname: `/deals/${deal.slug}`,
+});
+---
+
+<BaseLayout {...meta} schema={buildOfferSchema(deal, `/deals/${deal.slug}`, deal.dealTitle)}>
+  <section class="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+    <Breadcrumbs items={[{ name: 'Home', href: '/' }, { name: 'Deals', href: '/deals' }, { name: deal.brandName, href: `/deals/${deal.slug}` }]} />
+    <div class="mt-6 space-y-6">
+      <AffiliateDisclosure />
+      <DealCard deal={deal} />
+    </div>
+  </section>
+</BaseLayout>

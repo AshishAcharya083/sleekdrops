@@ -1,0 +1,37 @@
+---
+export const prerender = false;
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Breadcrumbs from '../../components/seo/Breadcrumbs.astro';
+import AffiliateDisclosure from '../../components/affiliate/AffiliateDisclosure.astro';
+import PromoCard from '../../components/affiliate/PromoCard.astro';
+import { buildMeta, buildOfferSchema } from '../../lib/seo';
+import { getPromoBySlug } from '../../lib/api';
+
+const slug = Astro.params.slug ?? '';
+const promo = await getPromoBySlug(slug);
+
+if (!promo) {
+  return Astro.redirect('/promos');
+}
+
+const meta = buildMeta({
+  title: promo.promoTitle,
+  description: promo.description,
+  pathname: `/promos/${promo.slug}`,
+});
+---
+
+<BaseLayout {...meta} schema={buildOfferSchema(promo, `/promos/${promo.slug}`, promo.promoTitle)}>
+  <section class="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+    <Breadcrumbs items={[{ name: 'Home', href: '/' }, { name: 'Promos', href: '/promos' }, { name: promo.operatorName, href: `/promos/${promo.slug}` }]} />
+    <div class="mt-6 space-y-6">
+      <AffiliateDisclosure />
+      <PromoCard promo={promo} />
+      <div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+        <h2 class="font-display text-2xl font-bold text-ink">Offer details</h2>
+        <p class="mt-4 text-sm leading-7 text-slate-600">{promo.terms ?? 'Terms are supplied via the upstream API and should be kept current for compliance.'}</p>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

@@ -1,0 +1,29 @@
+---
+export const prerender = false;
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Breadcrumbs from '../../components/seo/Breadcrumbs.astro';
+import DealCard from '../../components/affiliate/DealCard.astro';
+import { buildCategorySchema, buildMeta } from '../../lib/seo';
+import { getDeals } from '../../lib/api';
+
+const deals = await getDeals();
+const meta = buildMeta({
+  title: 'Live deals',
+  description: 'SleekDrops keeps deal pages server-rendered so sale pricing, stock state, and expiry details stay fresh for shoppers and search engines.',
+  pathname: '/deals',
+});
+---
+
+<BaseLayout {...meta} schema={buildCategorySchema('Deals', '/deals', meta.description)}>
+  <section class="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+    <Breadcrumbs items={[{ name: 'Home', href: '/' }, { name: 'Deals', href: '/deals' }]} />
+    <div class="mt-6 rounded-[2rem] border border-slate-200 bg-white p-8 shadow-card">
+      <h1 class="font-display text-4xl font-bold text-ink">Live deals</h1>
+      <p class="mt-4 max-w-reading text-lg leading-8 text-slate-600">Deals stay SSR for always-fresh prices and expiry handling.</p>
+    </div>
+    <div class="mt-8 grid gap-6">
+      {deals.map((deal) => <DealCard deal={deal} />)}
+    </div>
+  </section>
+</BaseLayout>

@@ -1,0 +1,20 @@
+---
+export const prerender = true;
+
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { buildCategorySchema, buildMeta } from '../lib/seo';
+
+const meta = buildMeta({
+  title: 'Privacy policy',
+  description:
+    'Review how SleekDrops handles analytics, affiliate attribution, and user privacy across its Astro-powered editorial frontend.',
+  pathname: '/privacy',
+});
+---
+
+<BaseLayout {...meta} schema={buildCategorySchema('Privacy policy', '/privacy', meta.description)}>
+  <section class="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
+    <h1 class="font-display text-4xl font-bold text-ink">Privacy policy</h1>
+    <p class="mt-6 text-lg leading-8 text-slate-600">This frontend stores no direct user data. Analytics, attribution, and server logs should be governed by the deployment provider and linked affiliate partners as the stack evolves.</p>
+  </section>
+</BaseLayout>

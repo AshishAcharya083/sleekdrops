@@ -1,0 +1,22 @@
+---
+import Badge from '../ui/Badge.astro';
+import type { Post } from '../../types';
+
+interface Props {
+  post: Post;
+}
+
+const { post } = Astro.props;
+---
+
+<header>
+  <Badge label={post.category} />
+  <h1 class="mt-4 font-display text-4xl font-bold tracking-tight text-ink sm:text-5xl">{post.title}</h1>
+  <p class="mt-5 max-w-reading text-lg leading-8 text-slate-600">{post.description}</p>
+  <div class="mt-6 flex flex-wrap gap-4 text-sm font-medium text-slate-500">
+    <span>{post.author}</span>
+    <span>{new Date(post.publishedAt).toLocaleDateString('en-AU', { dateStyle: 'long' })}</span>
+    <span>{post.readingTime} min read</span>
+    {post.updatedAt && <span>Updated {new Date(post.updatedAt).toLocaleDateString('en-AU', { dateStyle: 'medium' })}</span>}
+  </div>
+</header>

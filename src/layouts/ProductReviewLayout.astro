@@ -1,0 +1,42 @@
+---
+import { Image } from 'astro:assets';
+import Breadcrumbs from '../components/seo/Breadcrumbs.astro';
+import AffiliateDisclosure from '../components/affiliate/AffiliateDisclosure.astro';
+import ProsConsList from '../components/affiliate/ProsConsList.astro';
+import ProductCard from '../components/affiliate/ProductCard.astro';
+import PostBody from '../components/blog/PostBody.astro';
+import type { Author, Post, Product } from '../types';
+import AuthorCard from '../components/ui/AuthorCard.astro';
+
+interface Props {
+  post: Post;
+  product?: Product | null;
+  author?: Author;
+}
+
+const { post, product, author } = Astro.props;
+const hero = product?.imageUrl ?? post.featuredImage ?? '/og-default.png';
+---
+
+<section class="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+  <Breadcrumbs items={[{ name: 'Home', href: '/' }, { name: 'Reviews', href: '/reviews' }, { name: post.title, href: `/reviews/${post.slug}` }]} />
+  <div class="content-grid mt-6">
+    <article class="min-w-0 space-y-8">
+      <AffiliateDisclosure />
+      <div class="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-card">
+        <p class="text-xs font-semibold uppercase tracking-[0.25em] text-summit">Quick verdict</p>
+        <h1 class="mt-4 font-display text-4xl font-bold text-ink sm:text-5xl">{post.title}</h1>
+        <p class="mt-4 max-w-reading text-lg leading-8 text-slate-600">{post.description}</p>
+      </div>
+      <Image src={hero} alt={post.title} width={1200} height={630} class="rounded-[2rem] object-cover" />
+      {product && <ProductCard product={product} />}
+      {product && <ProsConsList pros={product.pros} cons={product.cons} />}
+      <div class="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-card">
+        <PostBody content={post.content} />
+      </div>
+    </article>
+    <aside class="space-y-6">
+      {author && <AuthorCard author={author} />}
+    </aside>
+  </div>
+</section>

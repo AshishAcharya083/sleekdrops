@@ -1,0 +1,20 @@
+---
+export const prerender = true;
+
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { buildCategorySchema, buildMeta } from '../lib/seo';
+
+const meta = buildMeta({
+  title: 'About SleekDrops',
+  description:
+    'Learn how SleekDrops structures reviews, deals, promo coverage, and high-performance publishing around SEO-safe Astro architecture.',
+  pathname: '/about',
+});
+---
+
+<BaseLayout {...meta} schema={buildCategorySchema('About SleekDrops', '/about', meta.description)}>
+  <section class="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
+    <h1 class="font-display text-4xl font-bold text-ink">About SleekDrops</h1>
+    <p class="mt-6 text-lg leading-8 text-slate-600">SleekDrops is a frontend-first editorial destination for affiliate reviews, buying guides, deals, and promo coverage. The site consumes all content from a shared API and is tuned for crawlability, freshness, and rich results eligibility.</p>
+  </section>
+</BaseLayout>

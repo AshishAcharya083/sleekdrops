@@ -1,0 +1,50 @@
+---
+export const prerender = true;
+
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import CategoryLayout from '../../../layouts/CategoryLayout.astro';
+import { getAllCategories, getPosts } from '../../../lib/api';
+import { buildCategorySchema, buildMeta } from '../../../lib/seo';
+
+export async function getStaticPaths() {
+  const categories = await getAllCategories();
+  const pathGroups = await Promise.all(
+    categories.map(async (category) => {
+      const response = await getPosts({ category, page: 1, limit: 12 });
+      return Array.from({ length: response.totalPages }, (_, index) => ({
+        params: {
+          category,
+          page: index === 0 ? undefined : String(index + 1),
+        },
+      }));
+    }),
+  );
+  return pathGroups.flat();
+}
+
+const category = Astro.params.category ?? 'category';
+const currentPage = Number(Astro.params.page ?? 1);
+const response = await getPosts({ category, page: currentPage, limit: 12 });
+const basePath = `/category/${category}`;
+const siteUrl = import.meta.env.SITE_URL ?? 'https://sleekdrops.com';
+const meta = buildMeta({
+  title: `${category} market coverage`,
+  description:
+    `Browse SleekDrops ${category} coverage with clean pagination, fast rendering, and structured metadata tuned for category archive discovery.`,
+  pathname: currentPage === 1 ? basePath : `${basePath}/${currentPage}`,
+  noindex: currentPage > 3,
+  prevUrl: currentPage > 1 ? `${siteUrl}${currentPage === 2 ? basePath : `${basePath}/${currentPage - 1}`}` : undefined,
+  nextUrl: currentPage < response.totalPages ? `${siteUrl}${basePath}/${currentPage + 1}` : undefined,
+});
+---
+
+<BaseLayout {...meta} schema={buildCategorySchema(`${category} archive`, currentPage === 1 ? basePath : `${basePath}/${currentPage}`, meta.description)}>
+  <CategoryLayout
+    title={`${category[0]?.toUpperCase() ?? ''}${category.slice(1)} Archive`}
+    description="Category pages stay self-canonical and noindex deep pagination after page three."
+    posts={response.data}
+    currentPage={currentPage}
+    totalPages={response.totalPages}
+    basePath={basePath}
+  />
+</BaseLayout>

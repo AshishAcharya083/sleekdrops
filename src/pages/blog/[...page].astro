@@ -1,0 +1,39 @@
+---
+export const prerender = true;
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import CategoryLayout from '../../layouts/CategoryLayout.astro';
+import { buildCategorySchema, buildMeta } from '../../lib/seo';
+import { getPosts } from '../../lib/api';
+
+export async function getStaticPaths() {
+  const response = await getPosts({ page: 1, limit: 12 });
+  return Array.from({ length: Math.max(0, response.totalPages - 1) }, (_, index) => ({
+    params: { page: String(index + 2) },
+  }));
+}
+
+const currentPage = Number(Astro.params.page ?? 1);
+const posts = await getPosts({ page: currentPage, limit: 12 });
+const siteUrl = import.meta.env.SITE_URL ?? 'https://sleekdrops.com';
+const meta = buildMeta({
+  title: `Blog archive page ${currentPage}`,
+  description:
+    'Paginated SleekDrops archive pages remain self-canonical, crawlable, and lightweight even as article volume grows beyond one thousand posts.',
+  pathname: `/blog/${currentPage}`,
+  noindex: currentPage > 3,
+  prevUrl: currentPage > 2 ? `${siteUrl}/blog/${currentPage - 1}` : `${siteUrl}/blog`,
+  nextUrl: currentPage < posts.totalPages ? `${siteUrl}/blog/${currentPage + 1}` : undefined,
+});
+---
+
+<BaseLayout {...meta} schema={buildCategorySchema('SleekDrops Blog', `/blog/${currentPage}`, meta.description)}>
+  <CategoryLayout
+    title="SleekDrops Blog"
+    description="Paginated archive pages for SleekDrops editorial coverage."
+    posts={posts.data}
+    currentPage={currentPage}
+    totalPages={posts.totalPages}
+    basePath="/blog"
+  />
+</BaseLayout>

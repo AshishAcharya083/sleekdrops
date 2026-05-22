@@ -1,0 +1,40 @@
+---
+type CellValue = string | boolean | number | undefined;
+
+interface ProductRow {
+  name: string;
+  values: Record<string, CellValue>;
+}
+
+interface Props {
+  products: ProductRow[];
+  features: string[];
+}
+
+const { products, features } = Astro.props;
+
+function formatValue(value: CellValue): string {
+  if (typeof value === 'boolean') return value ? '✓' : '✕';
+  if (typeof value === 'number') return `${value}/5`;
+  return value ?? '-';
+}
+---
+
+<div class="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-card">
+  <table class="min-w-full divide-y divide-slate-200 text-left text-sm">
+    <thead class="bg-slate-50">
+      <tr>
+        <th class="px-4 py-3 font-semibold text-slate-600">Product</th>
+        {features.map((feature) => <th class="px-4 py-3 font-semibold text-slate-600">{feature}</th>)}
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+      {products.map((product) => (
+        <tr>
+          <td class="px-4 py-3 font-medium text-ink">{product.name}</td>
+          {features.map((feature) => <td class="px-4 py-3 text-slate-600">{formatValue(product.values[feature])}</td>)}
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>

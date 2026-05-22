@@ -1,0 +1,33 @@
+---
+import { Image } from 'astro:assets';
+import BuyButton from './BuyButton.astro';
+import type { Deal } from '../../types';
+
+interface Props {
+  deal: Deal;
+}
+
+const { deal } = Astro.props;
+const logo = deal.logoUrl ?? '/og-default.png';
+---
+
+<article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+  <div class="flex items-start gap-4">
+    <Image src={logo} alt={deal.brandName} width={96} height={96} class="h-16 w-16 rounded-2xl object-cover" />
+    <div class="flex-1">
+      <h2 class="font-display text-2xl font-bold text-ink">
+        <a href={`/deals/${deal.slug}`} class="hover:text-summit">{deal.dealTitle}</a>
+      </h2>
+      <p class="mt-2 text-sm leading-7 text-slate-600">{deal.description}</p>
+      <div class="mt-4 flex flex-wrap gap-4 text-sm font-medium text-slate-700">
+        {deal.originalPrice && <span>Was ${deal.originalPrice}</span>}
+        {deal.dealPrice && <span>Now ${deal.dealPrice}</span>}
+        {deal.discountPct && <span>Save {deal.discountPct}%</span>}
+      </div>
+    </div>
+  </div>
+  <div class="mt-5 flex items-center justify-between gap-4">
+    <span class="text-xs uppercase tracking-[0.2em] text-slate-500">{deal.expiresAt ? `Ends ${new Date(deal.expiresAt).toLocaleDateString('en-AU')}` : 'Limited time'}</span>
+    <BuyButton href={deal.affiliateUrl} label="View deal" />
+  </div>
+</article>

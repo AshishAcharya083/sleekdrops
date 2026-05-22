@@ -1,0 +1,51 @@
+---
+export const prerender = true;
+
+import BaseLayout from '../layouts/BaseLayout.astro';
+import CategoryNav from '../components/layout/CategoryNav.astro';
+import PostGrid from '../components/blog/PostGrid.astro';
+import DealCard from '../components/affiliate/DealCard.astro';
+import { buildHomeSchema, buildMeta } from '../lib/seo';
+import { getDeals, getPosts } from '../lib/api';
+
+const [posts, deals] = await Promise.all([
+  getPosts({ page: 1, limit: 6 }),
+  getDeals(),
+]);
+
+const meta = buildMeta({
+  title: 'Product reviews, deals and promo codes',
+  description: 'SleekDrops publishes scalable product reviews, buying guides, deals, and promo pages with SEO-first Astro architecture and affiliate-safe UX.',
+  pathname: '/',
+});
+---
+
+<BaseLayout {...meta} schema={buildHomeSchema()}>
+  <section class="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+    <div class="grid gap-8 lg:grid-cols-[1.3fr_0.7fr]">
+      <div class="rounded-[2rem] bg-ink p-8 text-white shadow-card sm:p-12">
+        <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-300">SEO-first affiliate frontend</p>
+        <h1 class="mt-4 max-w-3xl font-display text-5xl font-bold tracking-tight sm:text-6xl">
+          SleekDrops turns evergreen buying content into fast, structured revenue pages.
+        </h1>
+        <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-200">
+          Reviews, deals, promos, and guides are fetched from a shared API and rendered for crawlability, freshness, and rich-result eligibility.
+        </p>
+        <div class="mt-8">
+          <CategoryNav />
+        </div>
+      </div>
+      <div class="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-card">
+        <p class="text-xs font-semibold uppercase tracking-[0.25em] text-summit">Featured deal</p>
+        {deals[0] ? <div class="mt-4"><DealCard deal={deals[0]} /></div> : <p class="mt-4 text-sm leading-7 text-slate-600">Deals will appear here once the backend API is connected.</p>}
+      </div>
+    </div>
+    <section class="mt-16">
+      <div class="mb-6 flex items-center justify-between">
+        <h2 class="font-display text-3xl font-bold text-ink">Latest articles</h2>
+        <a class="text-sm font-semibold text-summit hover:text-ember" href="/blog">Browse all posts</a>
+      </div>
+      <PostGrid posts={posts.data} />
+    </section>
+  </section>
+</BaseLayout>

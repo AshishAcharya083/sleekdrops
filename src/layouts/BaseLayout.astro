@@ -1,0 +1,37 @@
+---
+import Header from '../components/layout/Header.astro';
+import Footer from '../components/layout/Footer.astro';
+import SEOHead from '../components/seo/SEOHead.astro';
+import '../styles/global.css';
+import type { Thing, WithContext } from 'schema-dts';
+
+interface Props {
+  title: string;
+  description: string;
+  canonicalUrl: string;
+  image?: string;
+  type?: 'website' | 'article';
+  noindex?: boolean;
+  schema?: WithContext<Thing>;
+  prevUrl?: string;
+  nextUrl?: string;
+}
+
+const props = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <SEOHead {...props} />
+  </head>
+  <body>
+    <Header />
+    <main>
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

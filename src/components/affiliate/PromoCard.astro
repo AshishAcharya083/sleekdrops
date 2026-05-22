@@ -1,0 +1,32 @@
+---
+import { Image } from 'astro:assets';
+import BuyButton from './BuyButton.astro';
+import StarRating from './StarRating.astro';
+import type { Promo } from '../../types';
+
+interface Props {
+  promo: Promo;
+}
+
+const { promo } = Astro.props;
+const logo = promo.logoUrl ?? '/og-default.png';
+---
+
+<article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+  <div class="flex items-start gap-4">
+    <Image src={logo} alt={promo.operatorName} width={96} height={96} class="h-16 w-16 rounded-2xl object-cover" />
+    <div class="flex-1">
+      <h2 class="font-display text-2xl font-bold text-ink">
+        <a href={`/promos/${promo.slug}`} class="hover:text-summit">{promo.promoTitle}</a>
+      </h2>
+      <p class="mt-2 text-sm leading-7 text-slate-600">{promo.description}</p>
+    </div>
+  </div>
+  <div class="mt-5 flex flex-wrap items-center justify-between gap-4">
+    <div>
+      {promo.promoCode && <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Code: {promo.promoCode}</p>}
+      {promo.rating && <StarRating rating={promo.rating} />}
+    </div>
+    <BuyButton href={promo.affiliateUrl} label="Claim offer" />
+  </div>
+</article>

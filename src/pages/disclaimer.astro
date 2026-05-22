@@ -1,0 +1,20 @@
+---
+export const prerender = true;
+
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { buildCategorySchema, buildMeta } from '../lib/seo';
+
+const meta = buildMeta({
+  title: 'Affiliate disclaimer',
+  description:
+    'SleekDrops publishes affiliate-led product content and discloses commercial relationships while preserving editorial independence.',
+  pathname: '/disclaimer',
+});
+---
+
+<BaseLayout {...meta} schema={buildCategorySchema('Disclaimer', '/disclaimer', meta.description)}>
+  <section class="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
+    <h1 class="font-display text-4xl font-bold text-ink">Affiliate disclaimer</h1>
+    <p class="mt-6 text-lg leading-8 text-slate-600">SleekDrops may earn compensation from qualified clicks and purchases through affiliate links. Editorial decisions remain independent and review coverage aims to stay balanced and useful.</p>
+  </section>
+</BaseLayout>

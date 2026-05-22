@@ -1,0 +1,49 @@
+---
+export const prerender = true;
+
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import CategoryLayout from '../../../layouts/CategoryLayout.astro';
+import { getAllTags, getPosts } from '../../../lib/api';
+import { buildCategorySchema, buildMeta } from '../../../lib/seo';
+
+export async function getStaticPaths() {
+  const tags = await getAllTags();
+  const pathGroups = await Promise.all(
+    tags.map(async (tag) => {
+      const response = await getPosts({ tag, page: 1, limit: 12 });
+      return Array.from({ length: response.totalPages }, (_, index) => ({
+        params: {
+          tag,
+          page: index === 0 ? undefined : String(index + 1),
+        },
+      }));
+    }),
+  );
+  return pathGroups.flat();
+}
+
+const tag = Astro.params.tag ?? 'tag';
+const currentPage = Number(Astro.params.page ?? 1);
+const response = await getPosts({ tag, page: currentPage, limit: 12 });
+const basePath = `/tag/${tag}`;
+const siteUrl = import.meta.env.SITE_URL ?? 'https://sleekdrops.com';
+const meta = buildMeta({
+  title: `${tag} topic archive`,
+  description: `Follow SleekDrops posts tagged ${tag} through stable pagination and archive metadata tuned for search engines.`,
+  pathname: currentPage === 1 ? basePath : `${basePath}/${currentPage}`,
+  noindex: currentPage > 3,
+  prevUrl: currentPage > 1 ? `${siteUrl}${currentPage === 2 ? basePath : `${basePath}/${currentPage - 1}`}` : undefined,
+  nextUrl: currentPage < response.totalPages ? `${siteUrl}${basePath}/${currentPage + 1}` : undefined,
+});
+---
+
+<BaseLayout {...meta} schema={buildCategorySchema(`${tag} archive`, currentPage === 1 ? basePath : `${basePath}/${currentPage}`, meta.description)}>
+  <CategoryLayout
+    title={`Tag: ${tag}`}
+    description="Tag archives surface related editorial clusters while preserving crawl budget with self-canonical pagination."
+    posts={response.data}
+    currentPage={currentPage}
+    totalPages={response.totalPages}
+    basePath={basePath}
+  />
+</BaseLayout>

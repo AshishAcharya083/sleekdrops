@@ -1,0 +1,39 @@
+---
+export const prerender = true;
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
+import { buildMeta, buildPostSchema } from '../../lib/seo';
+import { getAllAuthors, getPostBySlug, getPosts, getRelatedPosts } from '../../lib/api';
+
+export async function getStaticPaths() {
+  const posts = await getPosts({ page: 1, limit: 1000 });
+  return posts.data.map((post) => ({ params: { slug: post.slug } }));
+}
+
+const slug = Astro.params.slug ?? '';
+const post = await getPostBySlug(slug);
+
+if (!post) {
+  return Astro.redirect('/blog');
+}
+
+const [relatedPosts, authors] = await Promise.all([
+  getRelatedPosts(post.slug, post.category),
+  getAllAuthors(),
+]);
+
+const author = authors.find((entry) => entry.slug === post.author || entry.name === post.author);
+const meta = buildMeta({
+  title: post.seoTitle ?? post.title,
+  description: post.seoDescription ?? post.description,
+  pathname: `/blog/${post.slug}`,
+  image: post.featuredImage,
+  type: 'article',
+  noindex: post.noindex,
+});
+---
+
+<BaseLayout {...meta} schema={buildPostSchema(post)}>
+  <BlogPostLayout post={post} author={author} relatedPosts={relatedPosts.filter((entry) => entry.slug !== post.slug).slice(0, 3)} />
+</BaseLayout>

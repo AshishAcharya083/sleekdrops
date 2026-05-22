@@ -1,0 +1,20 @@
+---
+import PostGrid from './PostGrid.astro';
+import type { Post } from '../../types';
+
+interface Props {
+  posts: Post[];
+}
+
+const { posts } = Astro.props;
+---
+
+{posts.length > 0 && (
+  <section class="mt-16">
+    <div class="mb-6 flex items-center justify-between">
+      <h2 class="font-display text-2xl font-bold text-ink">Related coverage</h2>
+      <a class="text-sm font-semibold text-summit hover:text-ember" href="/blog">See all posts</a>
+    </div>
+    <PostGrid posts={posts} />
+  </section>
+)}
