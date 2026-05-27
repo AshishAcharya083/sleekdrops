@@ -1,0 +1,62 @@
+---
+import type { GetStaticPaths, Page } from 'astro';
+import BaseLayout from '@layouts/BaseLayout.astro';
+import ListingHero from '@components/blog/ListingHero.astro';
+import PostGrid from '@components/blog/PostGrid.astro';
+import Pagination from '@components/blog/Pagination.astro';
+import { getPostsByType, type BlogPost } from '@lib/posts';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
+
+export const getStaticPaths = (async ({ paginate }) => {
+  const reviews = await getPostsByType('review');
+  return paginate(reviews, { pageSize: 9 });
+}) satisfies GetStaticPaths;
+
+interface Props { page: Page<BlogPost>; }
+const { page } = Astro.props;
+
+const desc =
+  'Single-product reviews — tested for two weeks against the nearest competitor, scored honestly, and never sponsored.';
+
+const meta = buildMeta({
+  title: page.currentPage === 1 ? 'Reviews' : `Reviews — page ${page.currentPage}`,
+  description: desc,
+  pathname: page.url.current,
+  prevUrl: page.url.prev ?? undefined,
+  nextUrl: page.url.next ?? undefined,
+});
+---
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema('Reviews', '/reviews', desc)}
+  active="blog"
+>
+  <ListingHero
+    eyebrow="Independent · Two-week test minimum"
+    titleHtml="The <em>reviews</em>."
+    dek={desc}
+  />
+  <div class="container">
+    <div class="listing-grid">
+      {page.data.length === 0 ? (
+        <p class="empty">No reviews yet. The desk is testing.</p>
+      ) : (
+        <PostGrid posts={page.data} columns={3} />
+      )}
+    </div>
+    <Pagination
+      currentPage={page.currentPage}
+      lastPage={page.lastPage}
+      basePath="/reviews"
+    />
+  </div>
+</BaseLayout>
+
+<style>
+  .listing-grid { padding: 48px 0 16px; }
+  .empty {
+    padding: 96px 0;
+    text-align: center;
+    color: var(--muted);
+  }
+</style>

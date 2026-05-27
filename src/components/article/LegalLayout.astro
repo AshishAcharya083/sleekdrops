@@ -1,0 +1,125 @@
+---
+import Eyebrow from '@components/ui/Eyebrow.astro';
+
+/**
+ * LegalLayout — shared chrome for /privacy and /disclaimer. Sticky TOC
+ * on the left, prose on the right.
+ */
+export interface Props {
+  eyebrow: string;
+  titleHtml: string;
+  updated: string;
+  toc: { href: string; label: string }[];
+}
+const { eyebrow, titleHtml, updated, toc } = Astro.props;
+---
+<section class="legal-hero">
+  <div class="container">
+    <Eyebrow>{eyebrow}</Eyebrow>
+    <h1 set:html={titleHtml} />
+    <div class="updated">Last updated: {updated}</div>
+  </div>
+</section>
+
+<div class="container">
+  <div class="legal-layout">
+    <nav class="legal-nav" data-toc aria-label="Document sections">
+      <h6>On this page</h6>
+      <ul>
+        {toc.map((item) => (
+          <li><a href={item.href}>{item.label}</a></li>
+        ))}
+      </ul>
+    </nav>
+    <div class="legal-body">
+      <slot />
+    </div>
+  </div>
+</div>
+
+<style>
+  .legal-hero {
+    padding: 64px 0 32px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .legal-hero h1 {
+    font-family: var(--font-display);
+    font-size: clamp(48px, 7vw, 88px);
+    line-height: 0.98;
+    letter-spacing: -0.03em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 16px 0 18px;
+  }
+  .legal-hero h1 :global(em) { font-style: italic; }
+  .legal-hero .updated { font-size: 13px; color: var(--muted); letter-spacing: 0.04em; }
+
+  .legal-layout {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 64px;
+    padding: 64px 0 96px;
+  }
+  @media (max-width: 900px) { .legal-layout { grid-template-columns: 1fr; } }
+  .legal-nav { position: sticky; top: 100px; align-self: start; }
+  .legal-nav h6 {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+    margin: 0 0 16px;
+  }
+  .legal-nav ul { list-style: none; padding: 0; margin: 0; }
+  .legal-nav li {
+    border-left: 1px solid var(--hairline);
+    padding: 7px 0 7px 14px;
+    font-size: 13px;
+  }
+  .legal-nav li.active { border-left-color: var(--ink); }
+  .legal-nav a { color: var(--muted); text-decoration: none; }
+  .legal-nav li.active a { color: var(--ink); font-weight: 600; }
+  .legal-nav a:hover { color: var(--ink); }
+
+  .legal-body {
+    max-width: 64ch;
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.75;
+    color: var(--ink-2);
+  }
+  .legal-body :global(> * + *) { margin-top: 1.4em; }
+  .legal-body :global(h2) {
+    font-family: var(--font-display);
+    font-size: 36px;
+    letter-spacing: -0.02em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 2em 0 0.4em;
+    scroll-margin-top: 100px;
+  }
+  .legal-body :global(h2 em) { font-style: italic; }
+  .legal-body :global(h2:first-of-type) { margin-top: 0; }
+  .legal-body :global(p),
+  .legal-body :global(li) { color: var(--ink-2); }
+  .legal-body :global(strong) { color: var(--ink); }
+  .legal-body :global(ul) { padding-left: 1.25em; }
+  .legal-body :global(li) { margin: 0.5em 0; }
+  .legal-body :global(.summary) {
+    background: var(--surface-2);
+    border-radius: 14px;
+    padding: 24px 28px;
+    margin: 0 0 32px;
+    font-size: 16px;
+  }
+  .legal-body :global(.summary strong) {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+</style>

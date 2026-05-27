@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 56" fill="none">
+  
+  <g transform="translate(0, 4)">
+    <rect width="48" height="48" rx="14" fill="#0F0F0E"></rect>
+    <path d="M24 12 C 18 20, 14 26, 14 31 C 14 36.5, 18 40, 24 40 C 30 40, 34 36.5, 34 31 C 34 26, 30 20, 24 12 Z" fill="#FAFAF7"></path>
+    <circle cx="20.5" cy="29" r="2" fill="#0F0F0E"></circle>
+  </g>
+  
+  <text x="62" y="36" font-family="&#39;Instrument Serif&#39;, &#39;Times New Roman&#39;, serif" font-size="30" font-weight="400" fill="#0F0F0E" letter-spacing="-0.5">SleekDrops</text>
+</svg>

@@ -1,3 +1,23 @@
-<div class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium leading-6 text-amber-900">
-  SleekDrops earns a commission when you click affiliate links at no extra cost to you. Our reviews are independent and unbiased.
-</div>
+---
+/**
+ * AffiliateDisclosure — the mandatory disclosure block shown on every
+ * page that carries affiliate links. Tone (per the design system) is
+ * calm and informational, not shouty.
+ */
+---
+<aside class="disclosure" role="note" aria-label="Affiliate disclosure">
+  <strong>Disclosure.</strong> SleekDrops earns a commission when you click affiliate links — at no extra cost to you. Our reviews are independent. We test the product before linking it.
+</aside>
+
+<style>
+  .disclosure {
+    background: var(--surface-2);
+    border-radius: 12px;
+    padding: 14px 18px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin-bottom: 32px;
+  }
+  .disclosure strong { color: var(--ink); }
+</style>

@@ -1,0 +1,60 @@
+---
+import type { MarkdownHeading } from 'astro';
+
+/**
+ * TableOfContents — sticky aside that lists h2 and h3 headings from the
+ * markdown post. Indents h3s. Receives the headings array directly from
+ * `await post.render()` so we don't reparse the body.
+ */
+export interface Props {
+  headings: MarkdownHeading[];
+}
+const { headings } = Astro.props;
+const items = headings.filter((h) => h.depth === 2 || h.depth === 3);
+---
+{items.length > 0 && (
+  <nav class="toc" data-toc aria-label="On this page">
+    <h6>On this page</h6>
+    <ul>
+      {items.map((h) => (
+        <li class:list={[{ indent: h.depth === 3 }]}>
+          <a href={`#${h.slug}`}>{h.text}</a>
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+
+<style>
+  .toc {
+    padding: 24px 0;
+    border-top: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+  }
+  h6 {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+    margin: 0 0 16px;
+  }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li {
+    font-size: 13px;
+    padding: 7px 0 7px 14px;
+    border-left: 1px solid var(--hairline);
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+  li.active { border-left-color: var(--ink); }
+  li a {
+    color: var(--muted);
+    text-decoration: none;
+    transition: color var(--dur-fast);
+    display: block;
+  }
+  li.active a { color: var(--ink); font-weight: 600; }
+  li a:hover { color: var(--ink); }
+  li.indent { padding-left: 26px; font-size: 12px; }
+</style>

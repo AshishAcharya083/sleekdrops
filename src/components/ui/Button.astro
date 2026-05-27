@@ -1,0 +1,70 @@
+---
+/**
+ * Button — renders <a> when `href` is set, otherwise <button>.
+ *
+ * Variants: primary (default ink), accent (orange), outline.
+ * Pass `arrow` to append the animated arrow glyph.
+ */
+type Variant = 'primary' | 'accent' | 'outline';
+
+export interface Props {
+  href?: string;
+  variant?: Variant;
+  arrow?: boolean;
+  type?: 'button' | 'submit';
+  rel?: string;
+  class?: string;
+}
+
+const {
+  href,
+  variant = 'primary',
+  arrow = false,
+  type = 'button',
+  rel,
+  class: className,
+} = Astro.props;
+
+const classes = ['btn', `btn-${variant}`, className].filter(Boolean).join(' ');
+const Tag = href ? 'a' : 'button';
+---
+<Tag
+  class={classes}
+  {...href ? { href, rel } : { type }}
+>
+  <slot />
+  {arrow && <span class="arrow" aria-hidden="true">→</span>}
+</Tag>
+
+<style>
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-body);
+    font-weight: 600;
+    border: 0;
+    cursor: pointer;
+    transition: all var(--dur-base) var(--ease-out);
+    text-decoration: none;
+    padding: 12px 22px;
+    border-radius: 999px;
+    font-size: 14px;
+  }
+  .btn-primary { background: var(--ink); color: var(--paper); }
+  .btn-primary:hover { background: var(--ink-2); transform: translateY(-1px); color: var(--paper); }
+  .btn-accent { background: var(--accent); color: #fff; }
+  .btn-accent:hover { background: var(--accent-hover); transform: translateY(-1px); color: #fff; }
+  .btn-outline {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--hairline-strong);
+    padding: 11px 21px;
+  }
+  .btn-outline:hover { border-color: var(--ink); color: var(--ink); transform: translateY(-1px); }
+  .arrow {
+    display: inline-block;
+    transition: transform var(--dur-fast) var(--ease-out);
+  }
+  .btn:hover .arrow { transform: translateX(3px); }
+</style>

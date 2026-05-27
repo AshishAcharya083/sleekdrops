@@ -1,20 +1,38 @@
 ---
-import PostGrid from './PostGrid.astro';
-import type { Post } from '../../types';
+import PostCard from './PostCard.astro';
+import type { BlogPost } from '@lib/posts';
 
-interface Props {
-  posts: Post[];
-}
-
+export interface Props { posts: BlogPost[]; }
 const { posts } = Astro.props;
 ---
-
 {posts.length > 0 && (
-  <section class="mt-16">
-    <div class="mb-6 flex items-center justify-between">
-      <h2 class="font-display text-2xl font-bold text-ink">Related coverage</h2>
-      <a class="text-sm font-semibold text-summit hover:text-ember" href="/blog">See all posts</a>
+  <section class="related">
+    <h3>Keep <em>reading</em></h3>
+    <div class="related-grid">
+      {posts.map((post) => <PostCard post={post} />)}
     </div>
-    <PostGrid posts={posts} />
   </section>
 )}
+
+<style>
+  .related {
+    margin: 96px 0 0;
+    padding: 56px 0 0;
+    border-top: 1px solid var(--hairline);
+  }
+  h3 {
+    font-family: var(--font-display);
+    font-size: 40px;
+    letter-spacing: -0.02em;
+    font-weight: 400;
+    margin: 0 0 32px;
+    color: var(--ink);
+  }
+  h3 em { font-style: italic; }
+  .related-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  @media (max-width: 900px) { .related-grid { grid-template-columns: 1fr; } }
+</style>

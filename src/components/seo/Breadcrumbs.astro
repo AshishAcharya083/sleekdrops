@@ -1,24 +1,52 @@
 ---
 import JsonLd from './JsonLd.astro';
-import { buildBreadcrumbSchema } from '../../lib/seo';
-import type { BreadcrumbItem } from '../../types';
+import { buildBreadcrumbSchema, type BreadcrumbItem } from '@lib/seo';
 
-interface Props {
-  items: BreadcrumbItem[];
-}
-
+/**
+ * Breadcrumb trail with paired JSON-LD. Last item renders as plain text.
+ */
+export interface Props { items: BreadcrumbItem[]; }
 const { items } = Astro.props;
-const schema = buildBreadcrumbSchema(items);
 ---
-
-<nav aria-label="Breadcrumb" class="text-sm text-slate-500">
-  <ol class="flex flex-wrap items-center gap-2">
-    {items.map((item, index) => (
-      <li class="flex items-center gap-2">
-        <a href={item.href} class="hover:text-summit">{item.name}</a>
-        {index < items.length - 1 && <span>/</span>}
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+  <ol>
+    {items.map((item, i) => (
+      <li>
+        {i < items.length - 1
+          ? <a href={item.href}>{item.name}</a>
+          : <span aria-current="page">{item.name}</span>}
+        {i < items.length - 1 && <span class="sep" aria-hidden="true">/</span>}
       </li>
     ))}
   </ol>
 </nav>
-<JsonLd schema={schema} />
+<JsonLd schema={buildBreadcrumbSchema(items)} />
+
+<style>
+  .breadcrumbs {
+    padding: 32px 0 8px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .breadcrumbs ol {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0;
+  }
+  .breadcrumbs li {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+  }
+  .breadcrumbs a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .breadcrumbs a:hover { color: var(--accent); }
+  .breadcrumbs [aria-current="page"] { color: var(--ink); }
+  .breadcrumbs .sep { margin: 0 8px; color: var(--hairline-strong); }
+</style>

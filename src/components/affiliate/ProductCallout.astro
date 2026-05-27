@@ -1,0 +1,105 @@
+---
+import Button from '@components/ui/Button.astro';
+import Eyebrow from '@components/ui/Eyebrow.astro';
+import type { Product } from '@data/products';
+
+/**
+ * ProductCallout — dark "editor's choice" panel inserted into the
+ * article body. Carries an affiliate link with sponsored nofollow rel.
+ */
+export interface Props {
+  product: Product;
+  eyebrow?: string;
+}
+const { product, eyebrow = "Editor's choice" } = Astro.props;
+---
+<aside class="product-callout">
+  <div class="logo" aria-hidden="true">{product.brandMark}</div>
+  <div>
+    <Eyebrow dot accent>{eyebrow}</Eyebrow>
+    <h4>{product.name}</h4>
+    <p class="desc">{product.tagline}</p>
+  </div>
+  <div class="cta">
+    <div class="price">
+      {product.offer.price}
+      {product.offer.priceWas && <span class="price-was">{product.offer.priceWas}</span>}
+    </div>
+    <Button href={product.offer.href} variant="accent" arrow rel="sponsored nofollow">
+      View at {product.offer.retailer}
+    </Button>
+  </div>
+</aside>
+
+<style>
+  .product-callout {
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 20px;
+    padding: 32px;
+    margin: 32px 0;
+    display: grid;
+    grid-template-columns: 80px 1fr auto;
+    gap: 24px;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .product-callout::after {
+    content: "";
+    position: absolute;
+    right: -50px; bottom: -50px;
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(228, 119, 87, 0.2), transparent 70%);
+  }
+  .logo {
+    width: 80px;
+    height: 80px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #4A4A48, #2A2A28);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-display);
+    font-size: 36px;
+    color: var(--paper);
+  }
+  .product-callout :global(.eyebrow) { color: var(--accent); }
+  h4 {
+    font-family: var(--font-display);
+    font-size: 28px;
+    margin: 6px 0 4px;
+    letter-spacing: -0.015em;
+    color: var(--paper);
+    font-weight: 400;
+  }
+  .desc { font-size: 14px; opacity: 0.65; margin: 0; }
+  .cta {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-end;
+    position: relative;
+    z-index: 1;
+  }
+  .price {
+    font-family: var(--font-display);
+    font-size: 32px;
+    letter-spacing: -0.02em;
+    color: var(--paper);
+  }
+  .price-was {
+    font-size: 14px;
+    text-decoration: line-through;
+    opacity: 0.5;
+    margin-left: 8px;
+  }
+
+  @media (max-width: 700px) {
+    .product-callout {
+      grid-template-columns: 1fr;
+      text-align: left;
+    }
+    .cta { align-items: flex-start; }
+  }
+</style>

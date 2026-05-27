@@ -1,0 +1,43 @@
+---
+/**
+ * Eyebrow — small uppercase label. Pass `accent` for the orange variant
+ * and `dot` to render the pulsing indicator dot used in hero / live areas.
+ */
+export interface Props {
+  accent?: boolean;
+  dot?: boolean;
+  class?: string;
+}
+const { accent = false, dot = false, class: className } = Astro.props;
+const classes = ['eyebrow', accent && 'eyebrow--accent', className].filter(Boolean).join(' ');
+---
+<div class={classes}>
+  {dot && <span class="dot" aria-hidden="true" />}
+  <slot />
+</div>
+
+<style>
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+  }
+  .eyebrow--accent { color: var(--accent); }
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: currentColor;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.6; transform: scale(1.4); }
+  }
+</style>

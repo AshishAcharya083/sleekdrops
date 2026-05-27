@@ -1,25 +1,143 @@
-<footer class="mt-20 border-t border-slate-200 bg-white">
-  <div class="mx-auto grid max-w-7xl gap-8 px-4 py-12 text-sm text-slate-600 sm:px-6 md:grid-cols-3 lg:px-8">
-    <div>
-      <h2 class="font-display text-lg font-bold text-ink">SleekDrops</h2>
-      <p class="mt-3 leading-7">SEO-first product reviews, deals, and promo coverage built for speed, scalability, and affiliate compliance.</p>
+---
+import BrandMark from '@components/ui/BrandMark.astro';
+import { categories } from '@data/categories';
+
+const exploreLinks = [
+  { label: 'All posts', href: '/blog' },
+  { label: 'Reviews', href: '/reviews' },
+  { label: 'Buying guides', href: '/guides' },
+  { label: "Today's deals", href: '/deals' },
+];
+const year = new Date().getFullYear();
+---
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-col">
+        <BrandMark />
+        <p>Honest reviews, side-by-side comparisons, and the day's best deal — in your inbox before coffee.</p>
+      </div>
+
+      <div class="footer-col">
+        <h6>Explore</h6>
+        <ul>
+          {exploreLinks.map((l) => <li><a href={l.href}>{l.label}</a></li>)}
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h6>Categories</h6>
+        <ul>
+          {categories.map((c) => (
+            <li><a href={`/category/${c.slug}`}>{c.name}</a></li>
+          ))}
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h6>Subscribe</h6>
+        <p>One honest deal, every morning. Free.</p>
+        <form class="footer-newsletter" data-mock-form data-mock-label="✓ Joined">
+          <input type="email" placeholder="you@inbox.com" required aria-label="Email address" />
+          <button type="submit">Join</button>
+        </form>
+      </div>
     </div>
-    <div>
-      <h3 class="font-semibold text-ink">Explore</h3>
-      <ul class="mt-3 space-y-2">
-        <li><a class="hover:text-summit" href="/blog">All Posts</a></li>
-        <li><a class="hover:text-summit" href="/reviews">Reviews</a></li>
-        <li><a class="hover:text-summit" href="/deals">Deals</a></li>
-        <li><a class="hover:text-summit" href="/promos">Promos</a></li>
-        <li><a class="hover:text-summit" href="/disclaimer">Disclaimer</a></li>
-      </ul>
-    </div>
-    <div>
-      <h3 class="font-semibold text-ink">Legal</h3>
-      <ul class="mt-3 space-y-2">
-        <li><a class="hover:text-summit" href="/privacy">Privacy</a></li>
-        <li><a class="hover:text-summit" href="/about">About</a></li>
-      </ul>
+
+    <div class="footer-bottom">
+      <span>© {year} SleekDrops. All reviews are independent.</span>
+      <span class="footer-links">
+        <a href="/about">About</a>
+        <a href="/contact">Contact</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/disclaimer">Disclaimer</a>
+      </span>
     </div>
   </div>
 </footer>
+
+<style>
+  .site-footer {
+    border-top: 1px solid var(--hairline);
+    padding: 64px 0 48px;
+    margin-top: 96px;
+    background: var(--paper);
+  }
+  .footer-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 1fr 1.4fr;
+    gap: 48px;
+    margin-bottom: 48px;
+  }
+  .footer-col :global(.brand) { margin-bottom: 16px; }
+  .footer-col h6 {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+    margin: 0 0 16px;
+  }
+  .footer-col ul { list-style: none; padding: 0; margin: 0; }
+  .footer-col li { margin-bottom: 10px; }
+  .footer-col a {
+    font-size: 14px;
+    color: var(--ink);
+    text-decoration: none;
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+  .footer-col a:hover { color: var(--accent); }
+  .footer-col p {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--muted);
+    margin: 0 0 14px;
+  }
+  .footer-newsletter {
+    display: flex;
+    background: var(--surface);
+    border: 1px solid var(--hairline-strong);
+    border-radius: 999px;
+    overflow: hidden;
+    padding: 4px 4px 4px 18px;
+  }
+  .footer-newsletter input {
+    flex: 1;
+    border: 0;
+    outline: none;
+    background: transparent;
+    font-family: var(--font-body);
+    font-size: 14px;
+    color: var(--ink);
+  }
+  .footer-newsletter button {
+    background: var(--ink);
+    color: var(--paper);
+    border: 0;
+    padding: 10px 18px;
+    border-radius: 999px;
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .footer-bottom {
+    padding-top: 32px;
+    border-top: 1px solid var(--hairline);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    color: var(--muted);
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .footer-links { display: flex; gap: 18px; flex-wrap: wrap; }
+  .footer-links a { color: var(--muted); text-decoration: none; }
+  .footer-links a:hover { color: var(--accent); }
+
+  @media (max-width: 900px) {
+    .footer-grid { grid-template-columns: 1fr; gap: 32px; }
+  }
+</style>

@@ -1,15 +1,30 @@
 ---
-interface Props {
-  rating?: number;
+/**
+ * StarRating — unicode-star row, accent-coloured for filled stars and
+ * muted for empty. Half-star not represented (rounded to nearest whole
+ * for the visual; the numeric `4.3` lives next to it).
+ */
+export interface Props {
+  rating: number;
+  max?: number;
 }
-
-const { rating = 0 } = Astro.props;
-const fullStars = Math.round(Math.max(0, Math.min(5, rating)));
+const { rating, max = 5 } = Astro.props;
+const filled = Math.round(rating);
+const empty = Math.max(0, max - filled);
 ---
-
-<div class="flex items-center gap-1" aria-label={`Rated ${rating} out of 5`}>
-  {Array.from({ length: 5 }, (_, index) => (
-    <span class={index < fullStars ? 'text-amber-500' : 'text-slate-300'}>★</span>
-  ))}
-  <span class="ml-2 text-sm font-medium text-slate-600">{rating.toFixed(1)}</span>
+<div class="stars" aria-label={`Rated ${rating.toFixed(1)} out of ${max} stars`}>
+  {Array.from({ length: filled }).map(() => <span class="full" aria-hidden="true">★</span>)}
+  {Array.from({ length: empty }).map(() => <span class="dim"  aria-hidden="true">★</span>)}
 </div>
+
+<style>
+  .stars {
+    display: inline-flex;
+    gap: 2px;
+    font-size: 16px;
+    letter-spacing: 2px;
+    line-height: 1;
+  }
+  .full { color: var(--accent); }
+  .dim  { color: var(--hairline-strong); }
+</style>

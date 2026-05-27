@@ -1,0 +1,44 @@
+---
+/**
+ * BrandMark — the SleekDrops glyph + wordmark, wrapped in a link.
+ * Reused by Header and Footer. Pass `compact` to drop the wordmark.
+ */
+export interface Props { href?: string; compact?: boolean; }
+const { href = '/', compact = false } = Astro.props;
+---
+<a class="brand" href={href}>
+  <span class="mark">
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M16 6 C 11 12, 7.5 17, 7.5 21.5 C 7.5 26, 11 28.5, 16 28.5 C 21 28.5, 24.5 26, 24.5 21.5 C 24.5 17, 21 12, 16 6 Z" fill="#FAFAF7"/>
+      <circle cx="13" cy="20" r="1.5" fill="#0F0F0E"/>
+    </svg>
+  </span>
+  {!compact && <span class="wordmark">SleekDrops</span>}
+</a>
+
+<style>
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+  }
+  .brand .mark {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    background: var(--ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .brand .mark svg { width: 20px; height: 20px; }
+  .wordmark {
+    font-family: var(--font-display);
+    font-size: 26px;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+</style>

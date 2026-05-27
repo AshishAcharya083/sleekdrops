@@ -1,37 +1,71 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Space+Grotesk:wght@500;700&display=swap');
+/* SleekDrops — Global element + utility styles.
+   Layer on top of tokens.css. Component-scoped styles live in <style> blocks. */
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+* { box-sizing: border-box; }
 
-body {
-  @apply bg-slate-50 font-body text-ink antialiased;
-  background-image:
-    radial-gradient(circle at top left, rgba(11, 95, 255, 0.12), transparent 30%),
-    linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+html, body { margin: 0; padding: 0; }
+
+/* ============ LAYOUT ============ */
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+}
+.container {
+  max-width: var(--max-content);
+  margin: 0 auto;
+  padding: 0 32px;
+  width: 100%;
+}
+.container--narrow { max-width: 880px; }
+
+main {
+  flex: 1;
+  padding-top: 80px; /* offset for sticky header */
 }
 
-html {
-  scroll-behavior: smooth;
+/* ============ READING PROGRESS BAR ============ */
+.progress-bar {
+  position: fixed;
+  top: 0; left: 0;
+  height: 2px;
+  width: 0;
+  background: var(--accent);
+  z-index: 100;
+  transition: width 80ms linear;
 }
 
-.content-grid {
-  @apply mx-auto grid max-w-7xl gap-8 px-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:px-8;
+/* ============ COMMON UTILITIES ============ */
+.eyebrow--accent { color: var(--accent); }
+
+/* Synthetic image fills — placeholders for cover art */
+.fill { position: relative; }
+.fill-1 { background: linear-gradient(135deg, #D5C9B8 0%, #B89F82 50%, #8B7158 100%); }
+.fill-2 { background: linear-gradient(135deg, #2A2A28 0%, #4A4A48 100%); }
+.fill-3 { background: linear-gradient(135deg, #C9D5C5 0%, #82A485 50%, #4F7252 100%); }
+.fill-4 { background: linear-gradient(135deg, #E5C9B8 0%, #C49A82 50%, #934E2A 100%); }
+.fill-5 { background: linear-gradient(135deg, #B8C5D5 0%, #8294B8 50%, #4F627B 100%); }
+.fill-6 { background: linear-gradient(135deg, #D5C9D5 0%, #B89FB8 50%, #735873 100%); }
+.fill-7 { background: linear-gradient(135deg, #1A1817 0%, #2A2A28 100%); }
+.fill-8 { background: linear-gradient(135deg, #F4E4D5 0%, #E5C49F 100%); }
+.fill::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.18), transparent 60%);
+  pointer-events: none;
+}
+.fill .markstamp {
+  position: absolute;
+  bottom: 14px; right: 16px;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 13px;
+  color: rgba(255,255,255,0.4);
+  letter-spacing: -0.005em;
+  z-index: 1;
 }
 
-.prose-content h2 {
-  @apply mt-10 text-2xl font-bold tracking-tight text-ink;
-}
-
-.prose-content h3 {
-  @apply mt-8 text-xl font-semibold text-ink;
-}
-
-.prose-content p,
-.prose-content li {
-  @apply text-base leading-8 text-slate-700;
-}
-
-.prose-content ul {
-  @apply my-6 list-disc space-y-3 pl-6;
+@media (max-width: 900px) {
+  .container { padding: 0 20px; }
 }

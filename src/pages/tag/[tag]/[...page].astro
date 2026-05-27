@@ -1,49 +1,83 @@
 ---
-export const prerender = true;
+import type { GetStaticPaths, Page } from 'astro';
+import BaseLayout from '@layouts/BaseLayout.astro';
+import Breadcrumbs from '@components/seo/Breadcrumbs.astro';
+import ListingHero from '@components/blog/ListingHero.astro';
+import PostGrid from '@components/blog/PostGrid.astro';
+import Pagination from '@components/blog/Pagination.astro';
+import { getAllPosts, getPostsByTag, type BlogPost } from '@lib/posts';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
+import { slugify } from '@lib/format';
 
-import BaseLayout from '../../../layouts/BaseLayout.astro';
-import CategoryLayout from '../../../layouts/CategoryLayout.astro';
-import { getAllTags, getPosts } from '../../../lib/api';
-import { buildCategorySchema, buildMeta } from '../../../lib/seo';
+export const getStaticPaths = (async ({ paginate }) => {
+  const posts = await getAllPosts();
+  const tags = new Set<string>();
+  for (const post of posts) {
+    for (const t of post.data.tags) tags.add(t);
+  }
 
-export async function getStaticPaths() {
-  const tags = await getAllTags();
-  const pathGroups = await Promise.all(
-    tags.map(async (tag) => {
-      const response = await getPosts({ tag, page: 1, limit: 12 });
-      return Array.from({ length: response.totalPages }, (_, index) => ({
-        params: {
-          tag,
-          page: index === 0 ? undefined : String(index + 1),
-        },
-      }));
-    }),
-  );
-  return pathGroups.flat();
-}
+  const out = [];
+  for (const tag of tags) {
+    const tagged = await getPostsByTag(tag);
+    const paginated = paginate(tagged, {
+      params: { tag: slugify(tag) },
+      pageSize: 9,
+      props: { tag },
+    });
+    out.push(...paginated);
+  }
+  return out;
+}) satisfies GetStaticPaths;
 
-const tag = Astro.params.tag ?? 'tag';
-const currentPage = Number(Astro.params.page ?? 1);
-const response = await getPosts({ tag, page: currentPage, limit: 12 });
-const basePath = `/tag/${tag}`;
-const siteUrl = import.meta.env.SITE_URL ?? 'https://sleekdrops.com';
+interface Props { page: Page<BlogPost>; tag: string; }
+const { page, tag } = Astro.props;
+const slug = slugify(tag);
+const desc = `Every post tagged with “${tag}.”`;
+
 const meta = buildMeta({
-  title: `${tag} topic archive`,
-  description: `Follow SleekDrops posts tagged ${tag} through stable pagination and archive metadata tuned for search engines.`,
-  pathname: currentPage === 1 ? basePath : `${basePath}/${currentPage}`,
-  noindex: currentPage > 3,
-  prevUrl: currentPage > 1 ? `${siteUrl}${currentPage === 2 ? basePath : `${basePath}/${currentPage - 1}`}` : undefined,
-  nextUrl: currentPage < response.totalPages ? `${siteUrl}${basePath}/${currentPage + 1}` : undefined,
+  title:
+    page.currentPage === 1
+      ? `#${tag}`
+      : `#${tag} — page ${page.currentPage}`,
+  description: desc,
+  pathname: page.url.current,
+  prevUrl: page.url.prev ?? undefined,
+  nextUrl: page.url.next ?? undefined,
 });
 ---
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema(`#${tag}`, `/tag/${slug}`, desc)}
+  active="blog"
+>
+  <div class="container">
+    <Breadcrumbs
+      items={[
+        { name: 'Home', href: '/' },
+        { name: 'Blog', href: '/blog' },
+        { name: `#${tag}`, href: `/tag/${slug}` },
+      ]}
+    />
+  </div>
 
-<BaseLayout {...meta} schema={buildCategorySchema(`${tag} archive`, currentPage === 1 ? basePath : `${basePath}/${currentPage}`, meta.description)}>
-  <CategoryLayout
-    title={`Tag: ${tag}`}
-    description="Tag archives surface related editorial clusters while preserving crawl budget with self-canonical pagination."
-    posts={response.data}
-    currentPage={currentPage}
-    totalPages={response.totalPages}
-    basePath={basePath}
+  <ListingHero
+    eyebrow="Tag"
+    titleHtml={`Tagged <em>${tag}</em>.`}
+    dek={desc}
   />
+
+  <div class="container">
+    <div class="listing-grid">
+      <PostGrid posts={page.data} columns={3} />
+    </div>
+    <Pagination
+      currentPage={page.currentPage}
+      lastPage={page.lastPage}
+      basePath={`/tag/${slug}`}
+    />
+  </div>
 </BaseLayout>
+
+<style>
+  .listing-grid { padding: 48px 0 16px; }
+</style>

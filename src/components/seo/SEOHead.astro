@@ -1,47 +1,62 @@
 ---
-import type { Thing, WithContext } from 'schema-dts';
 import JsonLd from './JsonLd.astro';
+import type { Thing, WithContext } from 'schema-dts';
+import type { MetaPayload } from '@lib/seo';
 
-interface Props {
-  title: string;
-  description: string;
-  canonicalUrl: string;
-  image?: string;
-  type?: 'website' | 'article';
-  noindex?: boolean;
+/**
+ * SEOHead — every meta tag we ship on every page. Pass the MetaPayload
+ * from buildMeta() plus an optional structured-data `schema`.
+ *
+ * Also bootstraps dark mode before paint so the theme never flashes.
+ */
+export interface Props extends MetaPayload {
   schema?: WithContext<Thing>;
-  prevUrl?: string;
-  nextUrl?: string;
 }
 
 const {
   title,
   description,
   canonicalUrl,
-  image = `${import.meta.env.SITE_URL ?? 'https://sleekdrops.com'}/og-default.png`,
-  type = 'website',
-  noindex = false,
-  schema,
+  image,
+  type,
+  noindex,
   prevUrl,
   nextUrl,
+  schema,
 } = Astro.props;
 ---
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<meta name="generator" content={Astro.generator} />
 
 <title>{title} | SleekDrops</title>
 <meta name="description" content={description} />
 <link rel="canonical" href={canonicalUrl} />
 <meta name="robots" content={noindex ? 'noindex, follow' : 'index, follow'} />
+
+<meta property="og:type" content={type} />
+<meta property="og:url" content={canonicalUrl} />
+<meta property="og:site_name" content="SleekDrops" />
 <meta property="og:title" content={`${title} | SleekDrops`} />
 <meta property="og:description" content={description} />
 <meta property="og:image" content={image} />
-<meta property="og:url" content={canonicalUrl} />
-<meta property="og:type" content={type} />
-<meta property="og:site_name" content="SleekDrops" />
+
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content={`${title} | SleekDrops`} />
 <meta name="twitter:description" content={description} />
 <meta name="twitter:image" content={image} />
+
 <link rel="alternate" type="application/rss+xml" title="SleekDrops RSS Feed" href="/rss.xml" />
 {prevUrl && <link rel="prev" href={prevUrl} />}
 {nextUrl && <link rel="next" href={nextUrl} />}
 {schema && <JsonLd schema={schema} />}
+
+<script is:inline>
+  (function () {
+    try {
+      var t = localStorage.getItem('sd-theme');
+      if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    } catch (_) {}
+  })();
+</script>

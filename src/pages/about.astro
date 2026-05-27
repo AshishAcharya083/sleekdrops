@@ -1,20 +1,270 @@
 ---
-export const prerender = true;
+import BaseLayout from '@layouts/BaseLayout.astro';
+import Eyebrow from '@components/ui/Eyebrow.astro';
+import { listAuthors, authorInitials } from '@data/authors';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
 
-import BaseLayout from '../layouts/BaseLayout.astro';
-import { buildCategorySchema, buildMeta } from '../lib/seo';
+const team = listAuthors();
 
 const meta = buildMeta({
   title: 'About SleekDrops',
   description:
-    'Learn how SleekDrops structures reviews, deals, promo coverage, and high-performance publishing around SEO-safe Astro architecture.',
+    "SleekDrops publishes honest product reviews, side-by-side comparisons, and one daily deal worth your inbox. Independent, ad-free, and quietly opinionated since 2023.",
   pathname: '/about',
 });
 ---
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema('About SleekDrops', '/about', meta.description)}
+  active="about"
+>
+  <section class="about-hero">
+    <div class="container">
+      <Eyebrow>About SleekDrops</Eyebrow>
+      <h1>A buying guide you'd <em>actually</em> pay for.</h1>
+      <p class="lede">{meta.description}</p>
+    </div>
+  </section>
 
-<BaseLayout {...meta} schema={buildCategorySchema('About SleekDrops', '/about', meta.description)}>
-  <section class="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
-    <h1 class="font-display text-4xl font-bold text-ink">About SleekDrops</h1>
-    <p class="mt-6 text-lg leading-8 text-slate-600">SleekDrops is a frontend-first editorial destination for affiliate reviews, buying guides, deals, and promo coverage. The site consumes all content from a shared API and is tuned for crawlability, freshness, and rich results eligibility.</p>
+  <section class="principles">
+    <div class="container">
+      <h2>Three rules we don't <em>break</em>.</h2>
+      <div class="principles-grid">
+        <div class="principle">
+          <span class="num">01 / Independence</span>
+          <h3>No <em>paid</em> placements. Ever.</h3>
+          <p>Every product on this site was either bought with our own money or borrowed for testing. We don't take sponsorships, we don't run "promoted" posts, and we will tell you when we're wrong.</p>
+        </div>
+        <div class="principle">
+          <span class="num">02 / Method</span>
+          <h3>If we couldn't <em>test</em> it, we don't review it.</h3>
+          <p>Reviews require at least two weeks of real-world use against the nearest competitor. Buying guides require side-by-side testing across at least three contenders. No spec sheet reviews, no hot takes.</p>
+        </div>
+        <div class="principle">
+          <span class="num">03 / Honesty</span>
+          <h3>The <em>cons</em> column is always full.</h3>
+          <p>Every product has flaws. Our reviews surface them — 2 to 4 honest disadvantages, always. If we can't think of any, we haven't tested it long enough yet.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="team">
+    <div class="container">
+      <div class="team-head">
+        <h2>The <em>desk</em>.</h2>
+        <p>A small editorial team. Each reviewer covers one or two categories deeply, not all of them shallowly.</p>
+      </div>
+      <div class="team-grid">
+        {team.map((author) => (
+          <a class="member" href={`/author/${author.id}`}>
+            <div class="avatar" aria-hidden="true">{authorInitials(author)}</div>
+            <span class="role">{author.role}</span>
+            <h4>{author.name}</h4>
+            <p>{author.bio}</p>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="stats-band">
+    <div class="container">
+      <Eyebrow accent dot>The numbers</Eyebrow>
+      <h2>Two years, 320 reviews, <em>zero</em> sponsored posts.</h2>
+      <div class="row">
+        <div><div class="num">320</div><div class="lbl">Reviews published</div></div>
+        <div><div class="num"><em>0</em></div><div class="lbl">Paid placements</div></div>
+        <div><div class="num">38k</div><div class="lbl">Newsletter readers</div></div>
+        <div><div class="num">4.7</div><div class="lbl">Average rating given</div></div>
+      </div>
+    </div>
   </section>
 </BaseLayout>
+
+<style>
+  .about-hero { padding: 80px 0 64px; border-bottom: 1px solid var(--hairline); }
+  .about-hero h1 {
+    font-family: var(--font-display);
+    font-size: clamp(64px, 9vw, 128px);
+    line-height: 0.95;
+    letter-spacing: -0.035em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 16px 0 32px;
+    max-width: 16ch;
+  }
+  .about-hero h1 em { font-style: italic; color: var(--accent); }
+  .about-hero .lede {
+    font-size: 24px;
+    line-height: 1.5;
+    color: var(--muted);
+    max-width: 56ch;
+  }
+
+  .principles { padding: 80px 0; border-bottom: 1px solid var(--hairline); }
+  .principles h2 {
+    font-family: var(--font-display);
+    font-size: clamp(40px, 5vw, 64px);
+    letter-spacing: -0.025em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 0 0 48px;
+    max-width: 18ch;
+  }
+  .principles h2 em { font-style: italic; }
+  .principles-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 32px;
+  }
+  @media (max-width: 900px) { .principles-grid { grid-template-columns: 1fr; } }
+  .principle { padding-top: 24px; border-top: 1px solid var(--ink); }
+  .principle .num {
+    font-family: var(--font-display);
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+  }
+  .principle h3 {
+    font-family: var(--font-display);
+    font-size: 28px;
+    letter-spacing: -0.015em;
+    color: var(--ink);
+    margin: 16px 0 12px;
+    font-weight: 400;
+    line-height: 1.15;
+  }
+  .principle h3 em { font-style: italic; }
+  .principle p {
+    font-size: 15px;
+    line-height: 1.65;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .team { padding: 80px 0; border-bottom: 1px solid var(--hairline); }
+  .team-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+    margin-bottom: 40px;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .team-head h2 {
+    font-family: var(--font-display);
+    font-size: clamp(40px, 5vw, 64px);
+    letter-spacing: -0.025em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 0;
+  }
+  .team-head h2 em { font-style: italic; }
+  .team-head p {
+    font-size: 14px;
+    color: var(--muted);
+    max-width: 30ch;
+    margin: 0;
+  }
+  .team-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  @media (max-width: 900px) { .team-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 600px) { .team-grid { grid-template-columns: 1fr; } }
+  .member {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 24px;
+    border: 1px solid var(--hairline);
+    border-radius: 16px;
+    background: var(--surface);
+    text-decoration: none;
+    color: inherit;
+    transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+  }
+  .member:hover {
+    border-color: var(--hairline-strong);
+    box-shadow: var(--shadow-md);
+    color: inherit;
+  }
+  .member .avatar {
+    width: 56px;
+    height: 56px;
+    border-radius: 999px;
+    background: var(--ink);
+    color: var(--paper);
+    display: grid;
+    place-items: center;
+    font-family: var(--font-display);
+    font-size: 20px;
+    margin-bottom: 8px;
+  }
+  .member h4 {
+    font-family: var(--font-display);
+    font-size: 22px;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin: 0;
+    font-weight: 400;
+  }
+  .member .role {
+    font-size: 12px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-weight: 700;
+  }
+  .member p {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+    margin: 4px 0 0;
+  }
+
+  .stats-band {
+    padding: 96px 0;
+    text-align: center;
+    background: var(--surface-2);
+    border-top: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .stats-band h2 {
+    font-family: var(--font-display);
+    font-size: clamp(40px, 5vw, 72px);
+    letter-spacing: -0.03em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 24px auto 56px;
+    max-width: 22ch;
+    line-height: 1;
+  }
+  .stats-band h2 em { font-style: italic; }
+  .stats-band .row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    max-width: 920px;
+    margin: 0 auto;
+  }
+  @media (max-width: 700px) { .stats-band .row { grid-template-columns: repeat(2, 1fr); } }
+  .stats-band .num {
+    font-family: var(--font-display);
+    font-size: 64px;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: var(--ink);
+  }
+  .stats-band .num em { font-style: italic; color: var(--accent); }
+  .stats-band .lbl {
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-weight: 700;
+    margin-top: 8px;
+  }
+</style>

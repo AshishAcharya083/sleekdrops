@@ -1,0 +1,81 @@
+---
+import type { GetStaticPaths, Page } from 'astro';
+import BaseLayout from '@layouts/BaseLayout.astro';
+import Breadcrumbs from '@components/seo/Breadcrumbs.astro';
+import ListingHero from '@components/blog/ListingHero.astro';
+import PostGrid from '@components/blog/PostGrid.astro';
+import Pagination from '@components/blog/Pagination.astro';
+import { categories } from '@data/categories';
+import { getPostsByCategory, type BlogPost } from '@lib/posts';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
+
+export const getStaticPaths = (async ({ paginate }) => {
+  const all = await Promise.all(
+    categories.map(async (cat) => {
+      const posts = await getPostsByCategory(cat.name);
+      return paginate(posts, {
+        params: { slug: cat.slug },
+        pageSize: 9,
+        props: { category: cat },
+      });
+    }),
+  );
+  return all.flat();
+}) satisfies GetStaticPaths;
+
+type Category = (typeof categories)[number];
+interface Props { page: Page<BlogPost>; category: Category; }
+const { page, category } = Astro.props;
+
+const path = page.url.current;
+const meta = buildMeta({
+  title:
+    page.currentPage === 1
+      ? `${category.name} — category`
+      : `${category.name} — page ${page.currentPage}`,
+  description: category.intro,
+  pathname: path,
+  prevUrl: page.url.prev ?? undefined,
+  nextUrl: page.url.next ?? undefined,
+});
+---
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema(category.name, `/category/${category.slug}`, category.intro)}
+  active="categories"
+>
+  <div class="container">
+    <Breadcrumbs
+      items={[
+        { name: 'Home', href: '/' },
+        { name: 'Categories', href: '/categories' },
+        { name: category.name, href: `/category/${category.slug}` },
+      ]}
+    />
+  </div>
+
+  <ListingHero
+    eyebrow="Category"
+    titleHtml={`The <em>${category.name.toLowerCase()}</em> desk.`}
+    dek={category.intro}
+    stats={[
+      { num: String(page.total), lbl: 'Posts' },
+      { num: String(page.lastPage), lbl: 'Pages' },
+    ]}
+  />
+
+  <div class="container">
+    <div class="listing-grid">
+      <PostGrid posts={page.data} columns={3} />
+    </div>
+    <Pagination
+      currentPage={page.currentPage}
+      lastPage={page.lastPage}
+      basePath={`/category/${category.slug}`}
+    />
+  </div>
+</BaseLayout>
+
+<style>
+  .listing-grid { padding: 48px 0 16px; }
+</style>

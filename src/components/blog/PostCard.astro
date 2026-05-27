@@ -1,29 +1,95 @@
 ---
-import { Image } from 'astro:assets';
-import Badge from '../ui/Badge.astro';
-import type { Post } from '../../types';
+import Badge from '@components/ui/Badge.astro';
+import { getAuthor } from '@data/authors';
+import { formatShort } from '@lib/format';
+import type { BlogPost } from '@lib/posts';
 
-interface Props {
-  post: Post;
+/**
+ * PostCard — the standard tile used in 3-column grids. Accepts a blog
+ * content-collection entry; resolves the author internally.
+ */
+export interface Props {
+  post: BlogPost;
 }
 
 const { post } = Astro.props;
-const imageSrc = post.featuredImage ?? '/og-default.png';
+const author = getAuthor(post.data.author);
 ---
-
-<article class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-card">
-  <a href={`/blog/${post.slug}`} class="block">
-    <Image src={imageSrc} alt={post.title} width={1200} height={630} class="h-56 w-full object-cover" />
-  </a>
-  <div class="p-6">
-    <Badge label={post.category} />
-    <h2 class="mt-4 font-display text-2xl font-bold tracking-tight text-ink">
-      <a href={`/blog/${post.slug}`} class="hover:text-summit">{post.title}</a>
-    </h2>
-    <p class="mt-3 text-sm leading-7 text-slate-600">{post.description}</p>
-    <div class="mt-5 flex items-center justify-between text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-      <span>{post.author}</span>
-      <span>{post.readingTime} min read</span>
+<a href={`/blog/${post.slug}`} class="post-card">
+  <div class="img">
+    <div class:list={['fill', post.data.cover]} />
+  </div>
+  <div class="body">
+    <div class="meta">
+      <Badge variant="cat">{post.data.category}</Badge>
+      <span class="time">{post.data.readTime} min read</span>
+    </div>
+    <h3>{post.data.title}</h3>
+    <p class="dek">{post.data.dek}</p>
+    <div class="foot">
+      <span class="author">{author.name}</span>
+      <span>{formatShort(post.data.pubDate)}</span>
     </div>
   </div>
-</article>
+</a>
+
+<style>
+  .post-card {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 16px;
+    overflow: hidden;
+    transition: all var(--dur-base) var(--ease-out);
+    display: block;
+    text-decoration: none;
+    color: inherit;
+  }
+  .post-card:hover {
+    border-color: var(--hairline-strong);
+    box-shadow: var(--shadow-md);
+    color: inherit;
+  }
+  .img {
+    aspect-ratio: 16 / 9;
+    background: var(--surface-2);
+    position: relative;
+    overflow: hidden;
+  }
+  .img > div {
+    position: absolute;
+    inset: 0;
+  }
+  .body { padding: 22px 24px 24px; }
+  .meta {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .meta .time { font-size: 12px; color: var(--muted); }
+  h3 {
+    font-family: var(--font-display);
+    font-size: 24px;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 0 0 8px;
+  }
+  h3 :global(em) { font-style: italic; }
+  .dek {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 0;
+  }
+  .foot {
+    margin-top: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .author { color: var(--ink); font-weight: 600; }
+</style>

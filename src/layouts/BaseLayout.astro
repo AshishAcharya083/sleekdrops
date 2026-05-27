@@ -1,37 +1,46 @@
 ---
-import Header from '../components/layout/Header.astro';
-import Footer from '../components/layout/Footer.astro';
-import SEOHead from '../components/seo/SEOHead.astro';
-import '../styles/global.css';
+import SEOHead from '@components/seo/SEOHead.astro';
+import Header from '@components/layout/Header.astro';
+import Footer from '@components/layout/Footer.astro';
+import '@styles/tokens.css';
+import '@styles/global.css';
 import type { Thing, WithContext } from 'schema-dts';
+import type { MetaPayload } from '@lib/seo';
+import type { ComponentProps } from 'astro/types';
 
-interface Props {
-  title: string;
-  description: string;
-  canonicalUrl: string;
-  image?: string;
-  type?: 'website' | 'article';
-  noindex?: boolean;
+/**
+ * BaseLayout — wraps every page with head, sticky header, footer, and
+ * (optionally) the reading-progress bar / theme-toggle island.
+ *
+ * Pass the MetaPayload from buildMeta() and an optional `active` nav id.
+ * `progress` defaults to true on article pages — keep it off for
+ * listings, where the bar implies more content than there is.
+ */
+type HeaderActive = ComponentProps<typeof Header>['active'];
+
+export interface Props extends MetaPayload {
   schema?: WithContext<Thing>;
-  prevUrl?: string;
-  nextUrl?: string;
+  active?: HeaderActive;
+  /** Show the 2px reading progress bar. */
+  progress?: boolean;
 }
 
-const props = Astro.props;
+const { schema, active, progress = false, ...meta } = Astro.props;
 ---
-
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <SEOHead {...props} />
+    <SEOHead {...meta} schema={schema} />
   </head>
-  <body>
-    <Header />
+  <body class="page">
+    {progress && <div class="progress-bar" aria-hidden="true" />}
+    <Header active={active} />
     <main>
       <slot />
     </main>
     <Footer />
+    <script>
+      import '../scripts/chrome';
+    </script>
   </body>
 </html>

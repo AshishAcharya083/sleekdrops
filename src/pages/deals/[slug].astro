@@ -1,30 +1,169 @@
 ---
-export const prerender = false;
+import type { GetStaticPaths } from 'astro';
+import BaseLayout from '@layouts/BaseLayout.astro';
+import Breadcrumbs from '@components/seo/Breadcrumbs.astro';
+import Eyebrow from '@components/ui/Eyebrow.astro';
+import Button from '@components/ui/Button.astro';
+import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro';
+import { dailyDeals, type Deal } from '@data/deals';
+import { getCategoryBySlug } from '@data/categories';
+import { buildMeta, buildOfferSchema } from '@lib/seo';
 
-import BaseLayout from '../../layouts/BaseLayout.astro';
-import Breadcrumbs from '../../components/seo/Breadcrumbs.astro';
-import AffiliateDisclosure from '../../components/affiliate/AffiliateDisclosure.astro';
-import DealCard from '../../components/affiliate/DealCard.astro';
-import { buildMeta, buildOfferSchema } from '../../lib/seo';
-import { getDealBySlug } from '../../lib/api';
+export const getStaticPaths = (async () => {
+  return dailyDeals.map((deal) => ({
+    params: { slug: deal.slug },
+    props: { deal },
+  }));
+}) satisfies GetStaticPaths;
 
-const slug = Astro.params.slug ?? '';
-const deal = await getDealBySlug(slug);
-if (!deal) return Astro.redirect('/deals');
+interface Props { deal: Deal; }
+const { deal } = Astro.props;
+const category = getCategoryBySlug(deal.category);
 
 const meta = buildMeta({
-  title: deal.dealTitle,
+  title: `${deal.title.replace(/\.$/, '')} (${deal.brand})`,
   description: deal.description,
   pathname: `/deals/${deal.slug}`,
 });
+const schema = buildOfferSchema(deal, `/deals/${deal.slug}`, deal.title);
 ---
+<BaseLayout {...meta} schema={schema} active="deals">
+  <div class="container">
+    <Breadcrumbs
+      items={[
+        { name: 'Home', href: '/' },
+        { name: 'Deals', href: '/deals' },
+        { name: deal.brand, href: `/deals/${deal.slug}` },
+      ]}
+    />
+  </div>
 
-<BaseLayout {...meta} schema={buildOfferSchema(deal, `/deals/${deal.slug}`, deal.dealTitle)}>
-  <section class="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-    <Breadcrumbs items={[{ name: 'Home', href: '/' }, { name: 'Deals', href: '/deals' }, { name: deal.brandName, href: `/deals/${deal.slug}` }]} />
-    <div class="mt-6 space-y-6">
-      <AffiliateDisclosure />
-      <DealCard deal={deal} />
-    </div>
-  </section>
+  <article class="container deal-page">
+    <header class="head">
+      <div class="logo" aria-hidden="true">{deal.brandMark}</div>
+      <Eyebrow accent dot>{deal.brand} · {category?.name ?? deal.category}</Eyebrow>
+      <h1>{deal.title}</h1>
+      <p class="dek">{deal.description}</p>
+    </header>
+
+    <section class="card">
+      <div class="prices">
+        <span class="now">{deal.priceNow}</span>
+        <span class="was">{deal.priceWas}</span>
+        <span class="save">{deal.discountLabel}</span>
+      </div>
+      {deal.code && (
+        <div class="code-row">
+          <span class="code-label">Use code at checkout</span>
+          <code>{deal.code}</code>
+        </div>
+      )}
+      <Button href={deal.href} variant="accent" arrow rel="sponsored nofollow">
+        View deal at {deal.brand}
+      </Button>
+      <p class="ends">{deal.ends}</p>
+    </section>
+
+    <AffiliateDisclosure />
+  </article>
 </BaseLayout>
+
+<style>
+  .deal-page { padding: 48px 0 96px; max-width: 720px; }
+  .head { margin-bottom: 40px; }
+  .logo {
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #0F0F0E, #2A2A28);
+    color: var(--paper);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-display);
+    font-size: 32px;
+    margin-bottom: 20px;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-size: clamp(40px, 5vw, 60px);
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 12px 0 16px;
+    max-width: 22ch;
+  }
+  .dek {
+    font-size: 18px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: 60ch;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--hairline-strong);
+    border-radius: 20px;
+    padding: 32px;
+    margin: 32px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .prices {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+  .now {
+    font-family: var(--font-display);
+    font-size: 56px;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: var(--ink);
+  }
+  .was {
+    font-size: 18px;
+    color: var(--muted);
+    text-decoration: line-through;
+  }
+  .save {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    background: var(--accent);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 999px;
+  }
+  .code-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 14px 18px;
+    background: var(--surface-2);
+    border-radius: var(--r-md);
+  }
+  .code-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  code {
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 600;
+    background: transparent;
+    padding: 0;
+    color: var(--ink);
+  }
+  .ends {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0;
+    letter-spacing: 0.04em;
+  }
+</style>

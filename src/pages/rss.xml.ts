@@ -1,19 +1,23 @@
-import type { APIContext } from 'astro';
 import rss from '@astrojs/rss';
-import { getPosts } from '../lib/api';
+import type { APIContext } from 'astro';
+import { getAllPosts } from '@lib/posts';
+import { getAuthor } from '@data/authors';
 
-export async function GET(context: APIContext) {
-  const posts = await getPosts({ page: 1, limit: 1000 });
+export async function GET(context: APIContext): Promise<Response> {
+  const posts = await getAllPosts();
   return rss({
-    title: 'SleekDrops RSS Feed',
-    description: 'Product reviews, deals, promo codes, and buying guides.',
+    title: 'SleekDrops',
+    description:
+      "Exclusive deals dropping daily. Honest product reviews, side-by-side comparisons, and one daily deal worth your inbox.",
     site: context.site ?? 'https://sleekdrops.com',
-    items: posts.data.map((post) => ({
-      title: post.title,
-      description: post.description,
+    items: posts.map((post) => ({
+      title: post.data.title,
+      description: post.data.dek,
+      pubDate: post.data.pubDate,
       link: `/blog/${post.slug}`,
-      pubDate: new Date(post.publishedAt),
-      content: post.content,
+      categories: [post.data.category, ...post.data.tags],
+      author: getAuthor(post.data.author).name,
     })),
+    customData: '<language>en-us</language>',
   });
 }
