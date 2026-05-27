@@ -1,14 +1,31 @@
 ---
 import PostCard from './PostCard.astro';
-import type { Post } from '../../types';
+import type { BlogPost } from '@lib/posts';
 
-interface Props {
-  posts: Post[];
+/**
+ * Grid wrapper. Default 3-column at desktop, collapses to 1 on mobile.
+ * Pass `columns={2}` for the two-up sidebar layout used on category pages.
+ */
+export interface Props {
+  posts: BlogPost[];
+  columns?: 2 | 3;
 }
-
-const { posts } = Astro.props;
+const { posts, columns = 3 } = Astro.props;
 ---
-
-<div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+<div class:list={['post-grid', `post-grid--${columns}`]}>
   {posts.map((post) => <PostCard post={post} />)}
 </div>
+
+<style>
+  .post-grid {
+    display: grid;
+    gap: 28px 24px;
+  }
+  .post-grid--3 { grid-template-columns: repeat(3, 1fr); }
+  .post-grid--2 { grid-template-columns: repeat(2, 1fr); }
+
+  @media (max-width: 1000px) { .post-grid--3 { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 700px)  {
+    .post-grid--3, .post-grid--2 { grid-template-columns: 1fr; }
+  }
+</style>

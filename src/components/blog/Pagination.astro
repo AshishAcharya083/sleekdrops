@@ -1,37 +1,76 @@
 ---
-interface Props {
+/**
+ * Pagination — pill row with prev/next "nav" buttons, numeric pages, and
+ * a … gap when there are more than six pages. Renders nothing when there
+ * is only one page.
+ */
+export interface Props {
   currentPage: number;
-  totalPages: number;
+  lastPage: number;
+  /** Path for page 1 (no /2 suffix); e.g. "/blog". */
   basePath: string;
 }
-
-const { currentPage, totalPages, basePath } = Astro.props;
+const { currentPage, lastPage, basePath } = Astro.props;
 
 function pageHref(page: number): string {
-  return page === 1 ? basePath : `${basePath}/${page}`;
+  if (page <= 1) return basePath;
+  return `${basePath.replace(/\/$/, '')}/${page}`;
 }
----
 
-{totalPages > 1 && (
-  <nav class="mt-10 flex items-center justify-between rounded-3xl border border-slate-200 bg-white p-5 shadow-card" aria-label="Pagination">
-    <a
-      class:list={[
-        'text-sm font-semibold',
-        currentPage === 1 ? 'pointer-events-none text-slate-300' : 'text-summit hover:text-ember',
-      ]}
-      href={pageHref(currentPage - 1)}
-    >
-      Previous
-    </a>
-    <p class="text-sm text-slate-600">Page {currentPage} of {totalPages}</p>
-    <a
-      class:list={[
-        'text-sm font-semibold',
-        currentPage === totalPages ? 'pointer-events-none text-slate-300' : 'text-summit hover:text-ember',
-      ]}
-      href={pageHref(currentPage + 1)}
-    >
-      Next
-    </a>
+function pageList(): (number | 'gap')[] {
+  if (lastPage <= 6) {
+    return Array.from({ length: lastPage }, (_, i) => i + 1);
+  }
+  const out: (number | 'gap')[] = [1, 2, 3];
+  if (currentPage > 4 && currentPage < lastPage - 2) {
+    out.push('gap', currentPage, 'gap');
+  } else {
+    out.push('gap');
+  }
+  out.push(lastPage);
+  return out;
+}
+
+const pages = pageList();
+const prev = currentPage > 1 ? pageHref(currentPage - 1) : null;
+const next = currentPage < lastPage ? pageHref(currentPage + 1) : null;
+---
+{lastPage > 1 && (
+  <nav class="pagination" aria-label="Pagination">
+    {prev && <a href={prev} class="nav" rel="prev">← Newer</a>}
+    {pages.map((page) => page === 'gap'
+      ? <span class="dots">…</span>
+      : <a href={pageHref(page)} class:list={[{ active: page === currentPage }]}>{page}</a>
+    )}
+    {next && <a href={next} class="nav" rel="next">Older →</a>}
   </nav>
 )}
+
+<style>
+  .pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 4px;
+    padding: 48px 0 80px;
+    flex-wrap: wrap;
+  }
+  .pagination a {
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    text-decoration: none;
+    transition: all var(--dur-fast) var(--ease-out);
+  }
+  .pagination a:hover { background: var(--surface-2); }
+  .pagination a.active { background: var(--ink); color: var(--paper); }
+  .pagination .dots { color: var(--muted); }
+  .pagination .nav { width: auto; padding: 0 18px; border: 1px solid var(--hairline-strong); }
+</style>

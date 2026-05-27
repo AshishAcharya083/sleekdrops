@@ -1,0 +1,349 @@
+/* ============================================================
+   SleekDrops — Colors & Type
+   Premium editorial blog. Warm paper, deep ink, single accent.
+   ============================================================ */
+
+/* ---------- Webfonts ---------- */
+/* We pair an editorial serif (Instrument Serif) with a refined
+   geometric sans (Manrope). Loaded via Google Fonts for now —
+   if you ship to production, self-host the .woff2 files.       */
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ============================================================
+   LIGHT MODE (default)
+   ============================================================ */
+:root {
+  /* ----- Brand neutrals (warm paper) ----- */
+  --paper:        #FAFAF7;  /* page background — warm off-white */
+  --surface:      #FFFFFF;  /* cards, modals, elevated panels  */
+  --surface-2:   #F4F3EE;  /* subtle alternate (callouts, code) */
+  --hairline:     #E8E7E1;  /* default 1px borders             */
+  --hairline-strong: #D5D3CB;
+
+  /* ----- Brand inks ----- */
+  --ink:          #0F0F0E;  /* primary text, mark fill         */
+  --ink-2:        #2A2A28;  /* secondary headings               */
+  --muted:        #6B6B66;  /* body secondary, captions         */
+  --muted-2:      #9A9A93;  /* deep mute, placeholders          */
+
+  /* ----- Accent (the "Drop") ----- */
+  --accent:       #C44F2A;  /* refined ember — used sparingly  */
+  --accent-hover: #A23E1F;
+  --accent-soft:  #F7EBE3;  /* tinted background for accent area */
+
+  /* ----- Semantic ----- */
+  --success:      #2F6B47;
+  --success-soft: #E8F1EB;
+  --warning:      #B08820;
+  --warning-soft: #FBF3DA;
+  --danger:       #B23A2A;
+  --danger-soft:  #F6E4E0;
+  --info:         #2A5A8C;
+  --info-soft:    #E5EDF5;
+
+  /* ----- Shadows (very restrained) ----- */
+  --shadow-xs: 0 1px 0 rgba(15, 15, 14, 0.04);
+  --shadow-sm: 0 1px 2px rgba(15, 15, 14, 0.04), 0 1px 1px rgba(15, 15, 14, 0.03);
+  --shadow-md: 0 4px 16px -8px rgba(15, 15, 14, 0.10), 0 1px 2px rgba(15, 15, 14, 0.04);
+  --shadow-lg: 0 24px 48px -28px rgba(15, 15, 14, 0.18), 0 2px 4px rgba(15, 15, 14, 0.04);
+
+  /* ----- Radii ----- */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+  --r-2xl: 32px;
+  --r-full: 999px;
+
+  /* ----- Spacing scale (4px grid) ----- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+  --s-20: 80px;
+  --s-24: 96px;
+  --s-32: 128px;
+
+  /* ----- Layout ----- */
+  --max-content: 1240px;
+  --max-reading: 68ch;
+  --header-h: 72px;
+
+  /* ----- Type families ----- */
+  --font-display: 'Instrument Serif', 'Iowan Old Style', 'Apple Garamond', Georgia, serif;
+  --font-body:    'Manrope', 'Helvetica Neue', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* ----- Type scale (fluid-ish) ----- */
+  --t-eyebrow:  12px;   /* uppercase labels                 */
+  --t-caption:  13px;   /* meta, captions                   */
+  --t-body-sm:  14px;
+  --t-body:     16px;   /* default UI                       */
+  --t-body-lg:  18px;
+  --t-lede:     20px;   /* article subtitle                 */
+  --t-h6:       18px;
+  --t-h5:       22px;
+  --t-h4:       28px;
+  --t-h3:       36px;
+  --t-h2:       48px;
+  --t-h1:       64px;
+  --t-display:  88px;   /* hero, magazine-style headlines   */
+
+  /* ----- Line-heights ----- */
+  --lh-tight: 1.05;
+  --lh-snug:  1.2;
+  --lh-base:  1.55;
+  --lh-prose: 1.7;
+
+  /* ----- Easing & motion ----- */
+  --ease-out: cubic-bezier(0.2, 0.6, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.5, 0, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+}
+
+/* ============================================================
+   DARK MODE
+   ============================================================ */
+:root[data-theme="dark"],
+.dark {
+  --paper:        #0E0E0C;
+  --surface:      #18181A;
+  --surface-2:   #1F1F20;
+  --hairline:     #2A2A28;
+  --hairline-strong: #3A3A38;
+
+  --ink:          #F5F4EE;
+  --ink-2:        #E0DFD8;
+  --muted:        #9A9A93;
+  --muted-2:      #6B6B66;
+
+  --accent:       #E97757;   /* slightly warmer in dark         */
+  --accent-hover: #F2906E;
+  --accent-soft:  #2A1812;
+
+  --success:      #7CC597;
+  --success-soft: #1A2620;
+  --warning:      #E3C46A;
+  --warning-soft: #2A2418;
+  --danger:       #E58571;
+  --danger-soft:  #2A1A18;
+  --info:         #7FB1E5;
+  --info-soft:    #18222E;
+
+  --shadow-xs: 0 1px 0 rgba(0,0,0,0.4);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md: 0 4px 16px -8px rgba(0,0,0,0.6), 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-lg: 0 24px 48px -28px rgba(0,0,0,0.8), 0 2px 4px rgba(0,0,0,0.4);
+}
+
+/* ============================================================
+   SEMANTIC ELEMENT STYLES
+   Apply ONCE to <body> on a real page; for kit demos, components
+   compose these vars directly.
+   ============================================================ */
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--t-body);
+  line-height: var(--lh-base);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ----- Headings ----- */
+.h-display, h1.display {
+  font-family: var(--font-display);
+  font-size: clamp(56px, 8vw, var(--t-display));
+  line-height: var(--lh-tight);
+  letter-spacing: -0.02em;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+h1, .h1 {
+  font-family: var(--font-display);
+  font-size: var(--t-h1);
+  line-height: var(--lh-tight);
+  letter-spacing: -0.02em;
+  font-weight: 400;
+  color: var(--ink);
+}
+h2, .h2 {
+  font-family: var(--font-display);
+  font-size: var(--t-h2);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+  color: var(--ink);
+}
+h3, .h3 {
+  font-family: var(--font-display);
+  font-size: var(--t-h3);
+  line-height: var(--lh-snug);
+  letter-spacing: -0.015em;
+  font-weight: 400;
+  color: var(--ink);
+}
+h4, .h4 {
+  font-family: var(--font-body);
+  font-size: var(--t-h4);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  font-weight: 700;
+  color: var(--ink);
+}
+h5, .h5 {
+  font-family: var(--font-body);
+  font-size: var(--t-h5);
+  line-height: 1.3;
+  font-weight: 700;
+  color: var(--ink);
+}
+h6, .h6 {
+  font-family: var(--font-body);
+  font-size: var(--t-h6);
+  line-height: 1.4;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* ----- Eyebrow / overline ----- */
+.eyebrow {
+  font-family: var(--font-body);
+  font-size: var(--t-eyebrow);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+/* ----- Body ----- */
+p, .p {
+  font-size: var(--t-body);
+  line-height: var(--lh-prose);
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.lede {
+  font-family: var(--font-body);
+  font-size: var(--t-lede);
+  line-height: 1.55;
+  color: var(--muted);
+  font-weight: 400;
+}
+.caption {
+  font-size: var(--t-caption);
+  color: var(--muted);
+}
+
+/* ----- Inline ----- */
+a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--hairline-strong);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  transition: color var(--dur-fast) var(--ease-out),
+              text-decoration-color var(--dur-fast) var(--ease-out);
+}
+a:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+}
+
+strong, b { font-weight: 700; color: var(--ink); }
+em, i { font-style: italic; }
+
+/* Editorial italic — Instrument Serif italic is gorgeous; use it
+   inside display headings for accent. */
+.h1 em, h1 em, h2 em, .h2 em, .h-display em {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* ----- Code ----- */
+code, kbd, samp {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--surface-2);
+  padding: 0.12em 0.4em;
+  border-radius: var(--r-xs);
+  color: var(--ink);
+}
+pre {
+  font-family: var(--font-mono);
+  background: var(--surface-2);
+  padding: var(--s-5);
+  border-radius: var(--r-md);
+  overflow-x: auto;
+  font-size: var(--t-body-sm);
+  line-height: 1.6;
+}
+pre code { background: transparent; padding: 0; }
+
+/* ----- Blockquote (editorial) ----- */
+blockquote {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: var(--t-h4);
+  line-height: 1.35;
+  color: var(--ink);
+  border-left: 2px solid var(--ink);
+  padding-left: var(--s-6);
+  margin: var(--s-8) 0;
+  max-width: var(--max-reading);
+}
+
+/* ----- HR ----- */
+hr {
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  margin: var(--s-8) 0;
+}
+
+/* ----- Lists ----- */
+ul, ol { padding-left: 1.25em; }
+li { margin: 0.4em 0; color: var(--ink-2); line-height: var(--lh-prose); }
+
+/* ----- Selection ----- */
+::selection { background: var(--accent); color: var(--paper); }
+
+/* ----- Focus ----- */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ============================================================
+   PROSE BLOCK (article body)
+   Wrap article markdown output with .prose
+   ============================================================ */
+.prose {
+  max-width: var(--max-reading);
+  font-size: var(--t-body-lg);
+  line-height: var(--lh-prose);
+  color: var(--ink-2);
+}
+.prose > * + * { margin-top: 1.2em; }
+.prose h2 { margin-top: 2em; margin-bottom: 0.4em; font-size: var(--t-h3); }
+.prose h3 { margin-top: 1.6em; margin-bottom: 0.3em; font-size: var(--t-h5); font-family: var(--font-body); font-weight: 700; }
+.prose p  { font-size: var(--t-body-lg); }
+.prose ul, .prose ol { margin: 1.2em 0; }
+.prose img { border-radius: var(--r-lg); margin: 1.5em 0; }
+.prose a { color: var(--ink); text-decoration-color: var(--accent); text-decoration-thickness: 1.5px; }
+.prose a:hover { color: var(--accent); }

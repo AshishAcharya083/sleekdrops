@@ -1,0 +1,58 @@
+---
+import type { GetStaticPaths, Page } from 'astro';
+import BaseLayout from '@layouts/BaseLayout.astro';
+import ListingHero from '@components/blog/ListingHero.astro';
+import PostGrid from '@components/blog/PostGrid.astro';
+import Pagination from '@components/blog/Pagination.astro';
+import { getPostsByType, type BlogPost } from '@lib/posts';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
+
+export const getStaticPaths = (async ({ paginate }) => {
+  const guides = await getPostsByType('guide');
+  return paginate(guides, { pageSize: 9 });
+}) satisfies GetStaticPaths;
+
+interface Props { page: Page<BlogPost>; }
+const { page } = Astro.props;
+
+const desc =
+  'Buying guides — side-by-side testing across at least three contenders, with a clear winner and a clear runner-up.';
+
+const meta = buildMeta({
+  title: page.currentPage === 1 ? 'Buying guides' : `Guides — page ${page.currentPage}`,
+  description: desc,
+  pathname: page.url.current,
+  prevUrl: page.url.prev ?? undefined,
+  nextUrl: page.url.next ?? undefined,
+});
+---
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema('Buying guides', '/guides', desc)}
+  active="blog"
+>
+  <ListingHero
+    eyebrow="Tested across at least three contenders"
+    titleHtml="The <em>guides</em>."
+    dek={desc}
+  />
+  <div class="container">
+    <div class="listing-grid">
+      {page.data.length === 0 ? (
+        <p class="empty">No guides yet.</p>
+      ) : (
+        <PostGrid posts={page.data} columns={3} />
+      )}
+    </div>
+    <Pagination
+      currentPage={page.currentPage}
+      lastPage={page.lastPage}
+      basePath="/guides"
+    />
+  </div>
+</BaseLayout>
+
+<style>
+  .listing-grid { padding: 48px 0 16px; }
+  .empty { padding: 96px 0; text-align: center; color: var(--muted); }
+</style>

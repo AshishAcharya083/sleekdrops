@@ -1,0 +1,84 @@
+---
+import Eyebrow from '@components/ui/Eyebrow.astro';
+
+/**
+ * ListingHero — the consistent intro block reused by the blog index,
+ * category pages, tag pages, and author archives. Big serif headline,
+ * eyebrow, dek.
+ *
+ * Pass `titleHtml` if you want italicised emphasis (the design system
+ * expects exactly one italic word per headline).
+ */
+export interface Props {
+  eyebrow: string;
+  titleHtml: string;
+  dek?: string;
+  /** Optional stat row, e.g. `[{ num: 147, lbl: 'Reviews' }, …]`. */
+  stats?: { num: string; lbl: string }[];
+  accent?: boolean;
+}
+const { eyebrow, titleHtml, dek, stats, accent = false } = Astro.props;
+---
+<section class="listing-head">
+  <div class="container">
+    <Eyebrow accent={accent}>{eyebrow}</Eyebrow>
+    <h1 set:html={titleHtml} />
+    {dek && <p>{dek}</p>}
+    {stats && (
+      <div class="stats">
+        {stats.map((s) => (
+          <div class="stat">
+            <span class="num" set:html={s.num} />
+            <span class="lbl">{s.lbl}</span>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+</section>
+
+<style>
+  .listing-head {
+    padding: 64px 0 40px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-size: clamp(56px, 7vw, 88px);
+    line-height: 0.98;
+    letter-spacing: -0.03em;
+    font-weight: 400;
+    margin: 14px 0 24px;
+    color: var(--ink);
+  }
+  h1 :global(em) { font-style: italic; }
+  p {
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: 56ch;
+    margin: 0;
+  }
+  .stats {
+    display: flex;
+    gap: 32px;
+    margin-top: 24px;
+    flex-wrap: wrap;
+  }
+  .stat { display: flex; flex-direction: column; gap: 4px; }
+  .stat .num {
+    font-family: var(--font-display);
+    font-size: 40px;
+    line-height: 1;
+    color: var(--ink);
+    letter-spacing: -0.025em;
+  }
+  .stat .num :global(em) { font-style: italic; color: var(--accent); }
+  .stat .lbl {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-weight: 700;
+  }
+</style>

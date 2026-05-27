@@ -1,0 +1,94 @@
+---
+import Eyebrow from '@components/ui/Eyebrow.astro';
+
+/**
+ * Newsletter sign-up band. Shown near the page foot on the home, blog
+ * listing, and about pages. Tone (per the design system) is calm and
+ * declarative — no urgency hype.
+ */
+export interface Props {
+  eyebrow?: string;
+  headline?: string;
+  desc?: string;
+}
+const {
+  eyebrow = 'The Daily Drop',
+  headline = 'One <em>honest</em> deal, every morning.',
+  desc = 'No "exclusive offers." No "limited time only." Just one product we\'d actually buy, with the real price and the real catch.',
+} = Astro.props;
+---
+<section class="newsletter-band">
+  <div class="container container--narrow">
+    <Eyebrow accent>{eyebrow}</Eyebrow>
+    <h2 set:html={headline} />
+    <p>{desc}</p>
+    <form class="newsletter-form" data-mock-form data-mock-label="✓ Subscribed">
+      <input type="email" placeholder="you@inbox.com" required aria-label="Email address" />
+      <button type="submit">Subscribe</button>
+    </form>
+    <div class="newsletter-meta">Free · Unsubscribe in one click · ~38,000 readers</div>
+  </div>
+</section>
+
+<style>
+  .newsletter-band {
+    padding: 80px 0;
+    background: var(--surface-2);
+    border-top: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+    text-align: center;
+  }
+  h2 {
+    font-family: var(--font-display);
+    font-size: clamp(40px, 5vw, 64px);
+    line-height: 1;
+    letter-spacing: -0.025em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 8px auto 16px;
+    max-width: 18ch;
+  }
+  h2 :global(em) { font-style: italic; }
+  p {
+    font-size: 17px;
+    color: var(--muted);
+    max-width: 50ch;
+    margin: 0 auto 32px;
+  }
+  .newsletter-form {
+    max-width: 480px;
+    margin: 0 auto;
+    display: flex;
+    background: var(--surface);
+    border: 1px solid var(--hairline-strong);
+    border-radius: 999px;
+    overflow: hidden;
+    padding: 5px 5px 5px 22px;
+  }
+  .newsletter-form input {
+    flex: 1;
+    border: 0;
+    outline: none;
+    background: transparent;
+    font-family: var(--font-body);
+    font-size: 15px;
+    color: var(--ink);
+  }
+  .newsletter-form button {
+    background: var(--ink);
+    color: var(--paper);
+    border: 0;
+    padding: 12px 24px;
+    border-radius: 999px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .newsletter-meta {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 16px;
+    letter-spacing: 0.04em;
+  }
+</style>

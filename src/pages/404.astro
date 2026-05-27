@@ -1,0 +1,55 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import Eyebrow from '@components/ui/Eyebrow.astro';
+import Button from '@components/ui/Button.astro';
+import { buildMeta } from '@lib/seo';
+
+const meta = buildMeta({
+  title: 'Page not found',
+  description: 'The page you were looking for has moved, expired, or never existed.',
+  pathname: '/404',
+  noindex: true,
+});
+---
+<BaseLayout {...meta}>
+  <section class="four-oh-four">
+    <div class="container">
+      <Eyebrow accent>404</Eyebrow>
+      <h1>The page <em>moved</em>.</h1>
+      <p>Or it never existed. Either way, here are a few places you might be looking for.</p>
+      <div class="actions">
+        <Button href="/" variant="primary" arrow>Back to the home page</Button>
+        <Button href="/blog" variant="outline">Browse the blog</Button>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .four-oh-four {
+    padding: 128px 0;
+    text-align: center;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-size: clamp(64px, 9vw, 128px);
+    line-height: 0.95;
+    letter-spacing: -0.035em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 16px 0 24px;
+  }
+  h1 em { font-style: italic; color: var(--accent); }
+  p {
+    font-size: 19px;
+    color: var(--muted);
+    max-width: 50ch;
+    margin: 0 auto 32px;
+  }
+  .actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+</style>

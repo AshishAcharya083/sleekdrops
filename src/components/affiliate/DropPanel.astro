@@ -1,0 +1,109 @@
+---
+import Eyebrow from '@components/ui/Eyebrow.astro';
+import Button from '@components/ui/Button.astro';
+import { todaysDrop } from '@data/deals';
+
+/**
+ * DropPanel — the dark featured-deal card in the hero. Data lives in
+ * src/data/deals.ts so editorial and merchandising stay out of layout.
+ */
+const d = todaysDrop;
+---
+<aside class="drop-panel" id="today">
+  <div>
+    <Eyebrow dot>Today's drop · {d.brand}</Eyebrow>
+    <h3>{d.title.replace(/\.$/, '')}</h3>
+    <p class="desc">{d.description}</p>
+    <div class="price-row">
+      <span class="price-now">{d.priceNow}</span>
+      <span class="price-was">{d.priceWas}</span>
+      <span class="save">{d.discountLabel.toUpperCase()}</span>
+    </div>
+  </div>
+  <div class="drop-cta">
+    <span class="ends">{d.ends}</span>
+    <Button href={`/deals/${d.slug}`} variant="accent" arrow>View deal</Button>
+  </div>
+</aside>
+
+<style>
+  .drop-panel {
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 24px;
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    overflow: hidden;
+  }
+  .drop-panel::after {
+    content: "";
+    position: absolute;
+    inset: auto -60px -60px auto;
+    width: 220px;
+    height: 220px;
+    background: radial-gradient(circle, rgba(228, 119, 87, 0.25), transparent 70%);
+  }
+  .drop-panel :global(.eyebrow) {
+    color: rgba(245, 244, 238, 0.6);
+    letter-spacing: 0.2em;
+  }
+  h3 {
+    font-family: var(--font-display);
+    font-size: 32px;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin: 16px 0 12px;
+    font-weight: 400;
+    color: var(--paper);
+  }
+  .desc {
+    font-size: 14px;
+    line-height: 1.55;
+    opacity: 0.7;
+    max-width: 32ch;
+  }
+  .price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin: 16px 0 0;
+  }
+  .price-now {
+    font-family: var(--font-display);
+    font-size: 56px;
+    line-height: 1;
+    letter-spacing: -0.03em;
+  }
+  .price-was {
+    font-size: 16px;
+    text-decoration: line-through;
+    opacity: 0.5;
+  }
+  .save {
+    font-size: 11px;
+    font-weight: 700;
+    background: var(--accent);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 999px;
+    letter-spacing: 0.1em;
+  }
+  .drop-cta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 24px;
+    position: relative;
+    z-index: 1;
+  }
+  .ends {
+    font-size: 11px;
+    opacity: 0.6;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+</style>

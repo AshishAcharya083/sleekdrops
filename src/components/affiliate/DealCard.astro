@@ -1,33 +1,106 @@
 ---
-import { Image } from 'astro:assets';
-import BuyButton from './BuyButton.astro';
-import type { Deal } from '../../types';
+import type { Deal } from '@data/deals';
 
-interface Props {
-  deal: Deal;
-}
-
+/**
+ * DealCard — small affiliate-deal tile used in the "this week's drops"
+ * grid on the homepage and the deals index. Links to the deal detail
+ * page, not the external retailer (so we can show the disclosure + terms
+ * before the click-out).
+ */
+export interface Props { deal: Deal; }
 const { deal } = Astro.props;
-const logo = deal.logoUrl ?? '/og-default.png';
 ---
-
-<article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
-  <div class="flex items-start gap-4">
-    <Image src={logo} alt={deal.brandName} width={96} height={96} class="h-16 w-16 rounded-2xl object-cover" />
-    <div class="flex-1">
-      <h2 class="font-display text-2xl font-bold text-ink">
-        <a href={`/deals/${deal.slug}`} class="hover:text-summit">{deal.dealTitle}</a>
-      </h2>
-      <p class="mt-2 text-sm leading-7 text-slate-600">{deal.description}</p>
-      <div class="mt-4 flex flex-wrap gap-4 text-sm font-medium text-slate-700">
-        {deal.originalPrice && <span>Was ${deal.originalPrice}</span>}
-        {deal.dealPrice && <span>Now ${deal.dealPrice}</span>}
-        {deal.discountPct && <span>Save {deal.discountPct}%</span>}
-      </div>
+<a class="deal-mini" href={`/deals/${deal.slug}`}>
+  <div class="deal-mini-head">
+    <div class="logo" aria-hidden="true">{deal.brandMark}</div>
+    <div class="brand-row">
+      <span class="brand-name">{deal.brand}</span>
+      <span class="disc">{deal.discountLabel}</span>
     </div>
   </div>
-  <div class="mt-5 flex items-center justify-between gap-4">
-    <span class="text-xs uppercase tracking-[0.2em] text-slate-500">{deal.expiresAt ? `Ends ${new Date(deal.expiresAt).toLocaleDateString('en-AU')}` : 'Limited time'}</span>
-    <BuyButton href={deal.affiliateUrl} label="View deal" />
+  <div class="title">{deal.title}</div>
+  <div class="prices">
+    <span class="now">{deal.priceNow}</span>
+    <span class="was">{deal.priceWas}</span>
   </div>
-</article>
+  <span class="ends">{deal.ends}</span>
+</a>
+
+<style>
+  .deal-mini {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    text-decoration: none;
+    color: inherit;
+    transition: all var(--dur-base) var(--ease-out);
+  }
+  .deal-mini:hover {
+    border-color: var(--hairline-strong);
+    box-shadow: var(--shadow-md);
+    color: inherit;
+  }
+  .deal-mini-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .logo {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #0F0F0E, #2A2A28);
+    color: var(--paper);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-display);
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .brand-row { display: flex; flex-direction: column; }
+  .brand-name {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-weight: 700;
+  }
+  .disc {
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .title {
+    font-family: var(--font-display);
+    font-size: 19px;
+    line-height: 1.2;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+  }
+  .prices {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-top: auto;
+  }
+  .now {
+    font-family: var(--font-display);
+    font-size: 24px;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  .was {
+    font-size: 12px;
+    color: var(--muted);
+    text-decoration: line-through;
+  }
+  .ends {
+    font-size: 11px;
+    color: var(--muted);
+  }
+</style>

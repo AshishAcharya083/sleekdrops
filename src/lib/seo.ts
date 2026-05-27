@@ -1,4 +1,11 @@
+/**
+ * SEO helpers — meta payload construction, absolute URL resolution, and
+ * JSON-LD schema builders for each page type. Imported by SEOHead and
+ * the page front-matter.
+ */
+
 import type {
+  Article,
   BreadcrumbList,
   CollectionPage,
   Offer,
@@ -11,12 +18,42 @@ import type {
   WebSite,
   WithContext,
 } from 'schema-dts';
-import type { Author, BreadcrumbItem, Deal, MetaPayload, Post, Product, Promo } from '../types';
+import type { Author } from '@data/authors';
+import type { Deal } from '@data/deals';
+import type { Promo } from '@data/promos';
+import type { Product } from '@data/products';
+import type { BlogPost } from './posts';
 
-const siteUrl = (import.meta.env.SITE_URL ?? 'https://sleekdrops.com').replace(/\/$/, '');
+const siteUrl = (
+  import.meta.env.SITE_URL ?? 'https://sleekdrops.com'
+).replace(/\/$/, '');
+
 const defaultImage = `${siteUrl}/og-default.png`;
 
-function normalizeDescription(description: string): string {
+const PUBLISHER: Organization = {
+  '@type': 'Organization',
+  name: 'SleekDrops',
+  url: siteUrl,
+  logo: defaultImage,
+};
+
+export interface BreadcrumbItem {
+  name: string;
+  href: string;
+}
+
+export interface MetaPayload {
+  title: string;
+  description: string;
+  canonicalUrl: string;
+  image: string;
+  type: 'website' | 'article';
+  noindex?: boolean;
+  prevUrl?: string;
+  nextUrl?: string;
+}
+
+function clampDescription(description: string): string {
   const collapsed = description.replace(/\s+/g, ' ').trim();
   if (collapsed.length <= 160) return collapsed;
   return `${collapsed.slice(0, 157).trimEnd()}...`;
@@ -39,7 +76,7 @@ export function buildMeta(input: {
 }): MetaPayload {
   return {
     title: input.title,
-    description: normalizeDescription(input.description),
+    description: clampDescription(input.description),
     canonicalUrl: absoluteUrl(input.pathname),
     image: input.image ? absoluteUrl(input.image) : defaultImage,
     type: input.type ?? 'website',
@@ -49,7 +86,9 @@ export function buildMeta(input: {
   };
 }
 
-export function buildBreadcrumbSchema(items: BreadcrumbItem[]): WithContext<BreadcrumbList> {
+export function buildBreadcrumbSchema(
+  items: BreadcrumbItem[],
+): WithContext<BreadcrumbList> {
   return {
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
@@ -68,102 +107,106 @@ export function buildHomeSchema(): WithContext<WebSite> {
     '@type': 'WebSite',
     name: 'SleekDrops',
     url: siteUrl,
+    publisher: PUBLISHER,
     potentialAction: {
       '@type': 'SearchAction',
       target: `${siteUrl}/blog?query={search_term_string}`,
       'query-input': 'required name=search_term_string',
     } as never,
-    publisher: {
-      '@type': 'Organization',
-      name: 'SleekDrops',
-      url: siteUrl,
-      logo: defaultImage,
-    } as Organization,
   };
 }
 
-export function buildArticleSchema(post: Post): WithContext<Thing> {
+export function buildArticleSchema(
+  post: BlogPost,
+  author: Author,
+): WithContext<Article> {
   return {
     '@context': 'https://schema.org',
-    '@type': post.schemaType,
-    headline: post.seoTitle ?? post.title,
-    description: post.seoDescription ?? post.description,
-    datePublished: post.publishedAt,
-    dateModified: post.updatedAt ?? post.publishedAt,
-    author: { '@type': 'Person', name: post.author },
-    articleSection: post.category,
-    keywords: post.tags.join(', '),
-    image: post.featuredImage ? [absoluteUrl(post.featuredImage)] : [defaultImage],
-    mainEntityOfPage: absoluteUrl(post.postType === 'review' ? `/reviews/${post.slug}` : `/blog/${post.slug}`),
-    publisher: {
-      '@type': 'Organization',
-      name: 'SleekDrops',
-      url: siteUrl,
-      logo: defaultImage,
-    } as Organization,
+    '@type': 'Article',
+    headline: post.data.title,
+    description: post.data.dek,
+    datePublished: post.data.pubDate.toISOString(),
+    dateModified: (post.data.updatedDate ?? post.data.pubDate).toISOString(),
+    author: { '@type': 'Person', name: author.name },
+    articleSection: post.data.category,
+    keywords: post.data.tags.join(', '),
+    image: [defaultImage],
+    mainEntityOfPage: absoluteUrl(`/blog/${post.slug}`),
+    publisher: PUBLISHER,
   };
 }
 
-export const buildPostSchema = buildArticleSchema;
+export function buildReviewSchema(
+  post: BlogPost,
+  author: Author,
+  product: Product,
+): WithContext<Thing> {
+  const reviewedProduct: ProductSchema = {
+    '@type': 'Product',
+    name: product.name,
+    brand: { '@type': 'Brand', name: product.brand },
+    description: product.tagline,
+    offers: {
+      '@type': 'Offer',
+      priceCurrency: 'USD',
+      price: product.offer.price.replace(/[^0-9.]/g, ''),
+      availability: 'https://schema.org/InStock',
+      url: product.offer.href,
+    },
+    aggregateRating: {
+      '@type': 'AggregateRating',
+      ratingValue: product.rating,
+      reviewCount: 1,
+      bestRating: 5,
+      worstRating: 1,
+    },
+  };
 
-export function buildReviewSchema(post: Post, product?: Product | null): WithContext<Thing> {
-  if (!product) return buildArticleSchema(post);
+  const review: Review = {
+    '@type': 'Review',
+    name: post.data.title,
+    reviewBody: post.data.dek,
+    author: { '@type': 'Person', name: author.name },
+    itemReviewed: reviewedProduct,
+    reviewRating: {
+      '@type': 'Rating',
+      ratingValue: product.rating,
+      bestRating: 5,
+      worstRating: 1,
+    },
+    publisher: PUBLISHER,
+  };
+
   return {
     '@context': 'https://schema.org',
-    '@graph': [
-      {
-        '@type': 'Product',
-        name: product.name,
-        description: product.description,
-        image: product.imageUrl ? absoluteUrl(product.imageUrl) : defaultImage,
-        brand: product.brand,
-        offers: {
-          '@type': 'Offer',
-          priceCurrency: product.currency,
-          price: product.salePrice ?? product.originalPrice ?? 0,
-          availability: product.inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
-          url: product.affiliateUrl,
-        },
-        aggregateRating: product.rating
-          ? {
-              '@type': 'AggregateRating',
-              ratingValue: product.rating,
-              reviewCount: 1,
-            }
-          : undefined,
-      } as ProductSchema,
-      {
-        '@type': 'Review',
-        name: post.title,
-        reviewBody: post.description,
-        author: { '@type': 'Person', name: post.author },
-        itemReviewed: { '@type': 'Product', name: product.name },
-        reviewRating: product.rating
-          ? {
-              '@type': 'Rating',
-              ratingValue: product.rating,
-              bestRating: 5,
-              worstRating: 1,
-            }
-          : undefined,
-      } as Review,
-    ],
+    '@graph': [reviewedProduct, review],
   } as unknown as WithContext<Thing>;
 }
 
-export function buildOfferSchema(item: Deal | Promo, pathname: string, title: string): WithContext<Offer> {
+export function buildOfferSchema(
+  item: Deal | Promo,
+  pathname: string,
+  title: string,
+): WithContext<Offer> {
   return {
     '@context': 'https://schema.org',
     '@type': 'Offer',
     name: title,
     description: item.description,
     url: absoluteUrl(pathname),
-    availability: item.isActive ? 'https://schema.org/InStock' : 'https://schema.org/SoldOut',
+    availability:
+      new Date(item.expiresAt).getTime() >= Date.now()
+        ? 'https://schema.org/InStock'
+        : 'https://schema.org/SoldOut',
     validThrough: item.expiresAt,
   };
 }
 
-export function buildCategorySchema(name: string, pathname: string, description: string): WithContext<CollectionPage> {
+export function buildCategorySchema(
+  name: string,
+  pathname: string,
+  description: string,
+): WithContext<CollectionPage> {
   return {
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
@@ -178,14 +221,13 @@ export function buildAuthorSchema(author: Author): WithContext<ProfilePage> {
     '@context': 'https://schema.org',
     '@type': 'ProfilePage',
     name: author.name,
+    url: absoluteUrl(`/author/${author.id}`),
     mainEntity: {
       '@type': 'Person',
       name: author.name,
       description: author.bio,
-      image: author.avatarUrl,
-      sameAs: author.twitterUrl ? [author.twitterUrl] : [],
       jobTitle: author.role,
+      sameAs: author.url ? [author.url] : [],
     } as Person,
-    url: absoluteUrl(`/author/${author.slug}`),
   };
 }

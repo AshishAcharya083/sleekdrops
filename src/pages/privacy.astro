@@ -1,20 +1,69 @@
 ---
-export const prerender = true;
-
-import BaseLayout from '../layouts/BaseLayout.astro';
-import { buildCategorySchema, buildMeta } from '../lib/seo';
+import BaseLayout from '@layouts/BaseLayout.astro';
+import LegalLayout from '@components/article/LegalLayout.astro';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
 
 const meta = buildMeta({
   title: 'Privacy policy',
   description:
-    'Review how SleekDrops handles analytics, affiliate attribution, and user privacy across its Astro-powered editorial frontend.',
+    "How SleekDrops handles your data: privacy-friendly analytics, two first-party cookies, and zero data sold to advertisers.",
   pathname: '/privacy',
 });
 ---
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema('Privacy policy', '/privacy', meta.description)}
+>
+  <LegalLayout
+    eyebrow="Legal"
+    titleHtml="Privacy <em>policy</em>."
+    updated="November 1, 2025"
+    toc={[
+      { href: '#summary',    label: 'Plain summary' },
+      { href: '#data',       label: 'What we collect' },
+      { href: '#cookies',    label: 'Cookies & analytics' },
+      { href: '#affiliate',  label: 'Affiliate attribution' },
+      { href: '#newsletter', label: 'Newsletter' },
+      { href: '#rights',     label: 'Your rights' },
+      { href: '#contact',    label: 'Contact us' },
+    ]}
+  >
+    <div class="summary" id="summary">
+      <strong>Plain summary</strong>
+      We host on Cloudflare, we use privacy-friendly analytics, we don't sell anything to advertisers, and we use cookies only for affiliate attribution and your dark-mode preference. If you signed up for the newsletter you can leave any time with one click.
+    </div>
 
-<BaseLayout {...meta} schema={buildCategorySchema('Privacy policy', '/privacy', meta.description)}>
-  <section class="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
-    <h1 class="font-display text-4xl font-bold text-ink">Privacy policy</h1>
-    <p class="mt-6 text-lg leading-8 text-slate-600">This frontend stores no direct user data. Analytics, attribution, and server logs should be governed by the deployment provider and linked affiliate partners as the stack evolves.</p>
-  </section>
+    <h2 id="data">What we <em>collect</em></h2>
+    <p>SleekDrops is a static publication. The site itself stores no data about you directly. The following limited data is collected by services we rely on:</p>
+    <ul>
+      <li><strong>Server logs.</strong> Our host (Cloudflare) logs IP addresses, user agent strings, and request paths for security and performance — typical for any website. We do not access or analyse these logs.</li>
+      <li><strong>Analytics.</strong> We use a privacy-friendly analytics service that records aggregate page views, referrers, and country-level location. No cookies, no fingerprinting, no cross-site tracking.</li>
+      <li><strong>Newsletter.</strong> If you subscribe, we store your email address with our mail provider for the sole purpose of sending the newsletter.</li>
+    </ul>
+
+    <h2 id="cookies">Cookies &amp; <em>analytics</em></h2>
+    <p>We set two first-party cookies, and only these:</p>
+    <ul>
+      <li><code>sd-theme</code> — remembers your dark-mode preference.</li>
+      <li><code>sd-bookmarks</code> — stores the article slugs you've saved (kept in your browser only; never sent to us).</li>
+    </ul>
+    <p>Affiliate networks (Amazon, etc.) may set their own cookies on the destination domain once you click an outbound link. SleekDrops itself does not set advertising cookies, and we don't embed third-party ad scripts.</p>
+
+    <h2 id="affiliate">Affiliate <em>attribution</em></h2>
+    <p>Most outbound product links on SleekDrops are affiliate links. When you click one, the destination retailer may attribute the eventual purchase to us via their own tracking cookie. This earns us a small commission — at no extra cost to you. The price is the same whether you click our link or not. We never see who you are or what you bought; only that an order from "SleekDrops" was attributed.</p>
+
+    <h2 id="newsletter">Newsletter</h2>
+    <p>If you subscribe to The Daily Drop, your email is stored with our mail provider for delivery purposes. We use it for the daily newsletter and nothing else. Every email contains a one-click unsubscribe link. You can request deletion of your address at any time by emailing <a href="mailto:hello@sleekdrops.com">hello@sleekdrops.com</a>.</p>
+
+    <h2 id="rights">Your <em>rights</em></h2>
+    <p>Under GDPR and similar regimes you have the right to:</p>
+    <ul>
+      <li>Request a copy of any personal data we hold about you (in practice: just your email, if subscribed).</li>
+      <li>Ask us to correct or delete that data.</li>
+      <li>Object to processing and unsubscribe at any time.</li>
+    </ul>
+
+    <h2 id="contact">Contact <em>us</em></h2>
+    <p>Questions about this policy, or want your data removed? Email <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a> or use the form on our <a href="/contact">contact page</a>. We aim to respond within five working days.</p>
+  </LegalLayout>
 </BaseLayout>

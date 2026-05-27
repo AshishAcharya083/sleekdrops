@@ -1,16 +1,115 @@
 ---
-import Nav from './Nav.astro';
----
+import BrandMark from '@components/ui/BrandMark.astro';
+import IconButton from '@components/ui/IconButton.astro';
 
-<header class="sticky top-0 z-20 border-b border-slate-200/70 bg-white/85 backdrop-blur">
-  <div class="mx-auto flex max-w-7xl items-center justify-between gap-6 px-4 py-4 sm:px-6 lg:px-8">
-    <a href="/" class="flex items-center gap-3">
-      <span class="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-summit font-display text-lg font-bold text-white">SO</span>
-      <span>
-        <span class="block font-display text-xl font-bold text-ink">SleekDrops</span>
-        <span class="block text-xs uppercase tracking-[0.3em] text-slate-500">Reviews deals promos</span>
-      </span>
-    </a>
-    <Nav />
+/**
+ * Sticky translucent header with brand, primary nav, and the search /
+ * theme-toggle icon buttons. Pass `active` to underline the current page.
+ */
+export interface Props {
+  active?: 'home' | 'blog' | 'categories' | 'deals' | 'about' | 'contact';
+}
+const { active } = Astro.props;
+
+const navItems = [
+  { id: 'home', label: 'Home', href: '/' },
+  { id: 'blog', label: 'Blog', href: '/blog' },
+  { id: 'categories', label: 'Categories', href: '/categories' },
+  { id: 'deals', label: 'Deals', href: '/deals' },
+  { id: 'about', label: 'About', href: '/about' },
+  { id: 'contact', label: 'Contact', href: '/contact' },
+] as const;
+---
+<header class="site-header">
+  <div class="header-inner">
+    <BrandMark />
+    <nav class="site-nav" aria-label="Primary">
+      {navItems.map((item) => (
+        <a href={item.href} class:list={[{ active: active === item.id }]}>{item.label}</a>
+      ))}
+    </nav>
+    <div class="header-actions">
+      <IconButton title="Search">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+      </IconButton>
+      <IconButton title="Toggle theme" data={{ 'theme-toggle': 'true' }}>
+        <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="5" />
+          <line x1="12" y1="1"  x2="12" y2="3" />
+          <line x1="12" y1="21" x2="12" y2="23" />
+          <line x1="4.22"  y1="4.22"  x2="5.64"  y2="5.64" />
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+          <line x1="1"  y1="12" x2="3"  y2="12" />
+          <line x1="21" y1="12" x2="23" y2="12" />
+          <line x1="4.22"  y1="19.78" x2="5.64"  y2="18.36" />
+          <line x1="18.36" y1="5.64"  x2="19.78" y2="4.22" />
+        </svg>
+      </IconButton>
+    </div>
   </div>
 </header>
+
+<style>
+  .site-header {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: rgba(250, 250, 247, 0.78);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--hairline);
+    z-index: 50;
+    transition: background var(--dur-base) var(--ease-out);
+  }
+  :global(:root[data-theme="dark"]) .site-header {
+    background: rgba(14, 14, 12, 0.78);
+  }
+  .header-inner {
+    max-width: var(--max-content);
+    margin: 0 auto;
+    padding: 14px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 32px;
+  }
+  .site-nav {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .site-nav a {
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ink-2);
+    text-decoration: none;
+    transition: color var(--dur-fast) var(--ease-out);
+    position: relative;
+  }
+  .site-nav a:hover { color: var(--accent); }
+  .site-nav a.active { color: var(--ink); font-weight: 700; }
+  .site-nav a.active::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; bottom: -22px;
+    height: 2px;
+    background: var(--ink);
+  }
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  :global(.icon-btn) .sun { display: none; }
+  :global(:root[data-theme="dark"] .icon-btn) .moon { display: none; }
+  :global(:root[data-theme="dark"] .icon-btn) .sun { display: block; }
+
+  @media (max-width: 900px) {
+    .site-nav { display: none; }
+    .header-inner { padding: 14px 20px; }
+  }
+</style>

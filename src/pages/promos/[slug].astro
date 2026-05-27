@@ -1,37 +1,141 @@
 ---
-export const prerender = false;
+import type { GetStaticPaths } from 'astro';
+import BaseLayout from '@layouts/BaseLayout.astro';
+import Breadcrumbs from '@components/seo/Breadcrumbs.astro';
+import Eyebrow from '@components/ui/Eyebrow.astro';
+import Button from '@components/ui/Button.astro';
+import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro';
+import { promos, type Promo } from '@data/promos';
+import { getCategoryBySlug } from '@data/categories';
+import { buildMeta, buildOfferSchema } from '@lib/seo';
 
-import BaseLayout from '../../layouts/BaseLayout.astro';
-import Breadcrumbs from '../../components/seo/Breadcrumbs.astro';
-import AffiliateDisclosure from '../../components/affiliate/AffiliateDisclosure.astro';
-import PromoCard from '../../components/affiliate/PromoCard.astro';
-import { buildMeta, buildOfferSchema } from '../../lib/seo';
-import { getPromoBySlug } from '../../lib/api';
+export const getStaticPaths = (async () => {
+  return promos.map((promo) => ({
+    params: { slug: promo.slug },
+    props: { promo },
+  }));
+}) satisfies GetStaticPaths;
 
-const slug = Astro.params.slug ?? '';
-const promo = await getPromoBySlug(slug);
-
-if (!promo) {
-  return Astro.redirect('/promos');
-}
+interface Props { promo: Promo; }
+const { promo } = Astro.props;
+const category = getCategoryBySlug(promo.category);
 
 const meta = buildMeta({
-  title: promo.promoTitle,
+  title: `${promo.brand} promo code — ${promo.discountLabel}`,
   description: promo.description,
   pathname: `/promos/${promo.slug}`,
 });
+const schema = buildOfferSchema(promo, `/promos/${promo.slug}`, promo.title);
 ---
+<BaseLayout {...meta} schema={schema} active="deals">
+  <div class="container">
+    <Breadcrumbs
+      items={[
+        { name: 'Home', href: '/' },
+        { name: 'Promo codes', href: '/promos' },
+        { name: promo.brand, href: `/promos/${promo.slug}` },
+      ]}
+    />
+  </div>
 
-<BaseLayout {...meta} schema={buildOfferSchema(promo, `/promos/${promo.slug}`, promo.promoTitle)}>
-  <section class="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-    <Breadcrumbs items={[{ name: 'Home', href: '/' }, { name: 'Promos', href: '/promos' }, { name: promo.operatorName, href: `/promos/${promo.slug}` }]} />
-    <div class="mt-6 space-y-6">
-      <AffiliateDisclosure />
-      <PromoCard promo={promo} />
-      <div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
-        <h2 class="font-display text-2xl font-bold text-ink">Offer details</h2>
-        <p class="mt-4 text-sm leading-7 text-slate-600">{promo.terms ?? 'Terms are supplied via the upstream API and should be kept current for compliance.'}</p>
+  <article class="container promo-page">
+    <header class="head">
+      <div class="logo" aria-hidden="true">{promo.brandMark}</div>
+      <Eyebrow accent>{promo.brand} · {category?.name ?? promo.category}</Eyebrow>
+      <h1>{promo.title}</h1>
+      <p class="dek">{promo.description}</p>
+    </header>
+
+    <section class="card">
+      <div class="code-row">
+        <span class="code-label">Copy code at checkout</span>
+        <code>{promo.code}</code>
       </div>
-    </div>
-  </section>
+      <p class="disc-label">{promo.discountLabel}</p>
+      <Button href={promo.href} variant="accent" arrow rel="sponsored nofollow">
+        Apply code at {promo.brand}
+      </Button>
+      <p class="terms"><strong>Terms.</strong> {promo.terms}</p>
+      <p class="ends">{promo.ends}</p>
+    </section>
+
+    <AffiliateDisclosure />
+  </article>
 </BaseLayout>
+
+<style>
+  .promo-page { padding: 48px 0 96px; max-width: 720px; }
+  .head { margin-bottom: 40px; }
+  .logo {
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-display);
+    font-size: 32px;
+    margin-bottom: 20px;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-size: clamp(40px, 5vw, 60px);
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 12px 0 16px;
+    max-width: 22ch;
+  }
+  .dek {
+    font-size: 18px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: 60ch;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--hairline-strong);
+    border-radius: 20px;
+    padding: 32px;
+    margin: 32px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .code-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 18px 22px;
+    background: var(--surface-2);
+    border-radius: var(--r-md);
+  }
+  .code-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  code {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 600;
+    background: transparent;
+    padding: 0;
+    color: var(--ink);
+  }
+  .disc-label {
+    font-family: var(--font-display);
+    font-size: 32px;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    margin: 0;
+  }
+  .terms { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.55; }
+  .terms strong { color: var(--ink); }
+  .ends { font-size: 13px; color: var(--muted); margin: 0; }
+</style>

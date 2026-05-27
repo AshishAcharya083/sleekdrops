@@ -1,23 +1,71 @@
 ---
-interface Props {
+/**
+ * ProsConsList — paired success / danger panels. The agents.md rule says
+ * reviews must always carry 3–5 pros and 2–4 cons; this enforces the
+ * shape visually.
+ *
+ * Uses plain `+` / `−` glyphs (no emoji), per the design system.
+ */
+export interface Props {
   pros: string[];
   cons: string[];
 }
-
 const { pros, cons } = Astro.props;
 ---
-
-<div class="grid gap-6 md:grid-cols-2">
-  <section class="rounded-3xl border border-emerald-200 bg-emerald-50 p-6">
-    <h2 class="font-display text-xl font-bold text-emerald-900">Pros</h2>
-    <ul class="mt-4 space-y-3 text-sm text-emerald-900">
-      {pros.map((pro) => <li>+ {pro}</li>)}
+<div class="proscons">
+  <section class="pc pros">
+    <h4>What we loved</h4>
+    <ul>
+      {pros.map((item) => <li>{item}</li>)}
     </ul>
   </section>
-  <section class="rounded-3xl border border-rose-200 bg-rose-50 p-6">
-    <h2 class="font-display text-xl font-bold text-rose-900">Cons</h2>
-    <ul class="mt-4 space-y-3 text-sm text-rose-900">
-      {cons.map((con) => <li>- {con}</li>)}
+  <section class="pc cons">
+    <h4>Where it falls short</h4>
+    <ul>
+      {cons.map((item) => <li>{item}</li>)}
     </ul>
   </section>
 </div>
+
+<style>
+  .proscons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 32px 0;
+  }
+  .pc {
+    padding: 22px 24px;
+    border-radius: 14px;
+  }
+  .pc.pros { background: var(--success-soft); border: 1px solid #C7DCCE; }
+  .pc.cons { background: var(--danger-soft);  border: 1px solid #E5C0B8; }
+  .pc h4 {
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    margin: 0 0 14px;
+  }
+  .pc.pros h4 { color: var(--success); }
+  .pc.cons h4 { color: var(--danger); }
+  .pc ul { list-style: none; padding: 0; margin: 0; }
+  .pc li {
+    display: flex;
+    gap: 12px;
+    font-size: 15px;
+    line-height: 1.5;
+    margin: 8px 0;
+  }
+  .pc.pros li::before { content: "+"; color: var(--success); font-weight: 700; flex-shrink: 0; }
+  .pc.cons li::before { content: "−"; color: var(--danger);  font-weight: 700; flex-shrink: 0; }
+  .pc.pros li { color: #1A3A28; }
+  .pc.cons li { color: #5C2418; }
+  :global(:root[data-theme="dark"]) .pc.pros li { color: #C7DCCE; }
+  :global(:root[data-theme="dark"]) .pc.cons li { color: #E5C0B8; }
+
+  @media (max-width: 700px) {
+    .proscons { grid-template-columns: 1fr; }
+  }
+</style>

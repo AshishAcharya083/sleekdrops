@@ -1,39 +1,57 @@
 ---
-export const prerender = true;
+import type { GetStaticPaths, Page } from 'astro';
+import BaseLayout from '@layouts/BaseLayout.astro';
+import ListingHero from '@components/blog/ListingHero.astro';
+import PostGrid from '@components/blog/PostGrid.astro';
+import Pagination from '@components/blog/Pagination.astro';
+import { getAllPosts, type BlogPost } from '@lib/posts';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
 
-import BaseLayout from '../../layouts/BaseLayout.astro';
-import CategoryLayout from '../../layouts/CategoryLayout.astro';
-import { buildCategorySchema, buildMeta } from '../../lib/seo';
-import { getPosts } from '../../lib/api';
+/**
+ * Paginated blog index. `[...page]` matches `/blog` (page 1) and
+ * `/blog/2`, `/blog/3`, … etc.
+ */
+export const getStaticPaths = (async ({ paginate }) => {
+  const posts = await getAllPosts();
+  return paginate(posts, { pageSize: 9 });
+}) satisfies GetStaticPaths;
 
-export async function getStaticPaths() {
-  const response = await getPosts({ page: 1, limit: 12 });
-  return Array.from({ length: Math.max(0, response.totalPages - 1) }, (_, index) => ({
-    params: { page: String(index + 2) },
-  }));
-}
+interface Props { page: Page<BlogPost>; }
+const { page } = Astro.props;
 
-const currentPage = Number(Astro.params.page ?? 1);
-const posts = await getPosts({ page: currentPage, limit: 12 });
-const siteUrl = import.meta.env.SITE_URL ?? 'https://sleekdrops.com';
+const baseDescription =
+  'Reviews, buying guides, and side-by-side comparisons. Every post is independent — we make our money from affiliate links, never from sponsorships or paid placements.';
+
 const meta = buildMeta({
-  title: `Blog archive page ${currentPage}`,
-  description:
-    'Paginated SleekDrops archive pages remain self-canonical, crawlable, and lightweight even as article volume grows beyond one thousand posts.',
-  pathname: `/blog/${currentPage}`,
-  noindex: currentPage > 3,
-  prevUrl: currentPage > 2 ? `${siteUrl}/blog/${currentPage - 1}` : `${siteUrl}/blog`,
-  nextUrl: currentPage < posts.totalPages ? `${siteUrl}/blog/${currentPage + 1}` : undefined,
+  title: page.currentPage === 1 ? 'The blog' : `The blog — page ${page.currentPage}`,
+  description: baseDescription,
+  pathname: page.url.current,
+  prevUrl: page.url.prev ?? undefined,
+  nextUrl: page.url.next ?? undefined,
 });
 ---
-
-<BaseLayout {...meta} schema={buildCategorySchema('SleekDrops Blog', `/blog/${currentPage}`, meta.description)}>
-  <CategoryLayout
-    title="SleekDrops Blog"
-    description="Paginated archive pages for SleekDrops editorial coverage."
-    posts={posts.data}
-    currentPage={currentPage}
-    totalPages={posts.totalPages}
-    basePath="/blog"
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema('SleekDrops Blog', '/blog', baseDescription)}
+  active="blog"
+>
+  <ListingHero
+    eyebrow="Editorial · Refreshed daily"
+    titleHtml="The <em>blog</em>."
+    dek={baseDescription}
   />
+  <div class="container">
+    <div class="listing-grid">
+      <PostGrid posts={page.data} columns={3} />
+    </div>
+    <Pagination
+      currentPage={page.currentPage}
+      lastPage={page.lastPage}
+      basePath="/blog"
+    />
+  </div>
 </BaseLayout>
+
+<style>
+  .listing-grid { padding: 48px 0 16px; }
+</style>

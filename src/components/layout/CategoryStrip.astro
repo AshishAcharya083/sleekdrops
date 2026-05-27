@@ -1,0 +1,57 @@
+---
+import { categories } from '@data/categories';
+
+/**
+ * Pill-row of category links, with the "Browse by category" italic label.
+ * Shown beneath the hero on the home page and below filter bars elsewhere.
+ */
+---
+<div class="container">
+  <div class="cat-strip">
+    <span class="label">Browse by category</span>
+    <div class="cats">
+      {categories.map((c) => (
+        <a href={`/category/${c.slug}`}>{c.name}</a>
+      ))}
+    </div>
+  </div>
+</div>
+
+<style>
+  .cat-strip {
+    padding: 32px 0;
+    border-bottom: 1px solid var(--hairline);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .label {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 22px;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .cats {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .cats a {
+    padding: 8px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--hairline-strong);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    text-decoration: none;
+    transition: all var(--dur-fast) var(--ease-out);
+  }
+  .cats a:hover {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
+  }
+</style>

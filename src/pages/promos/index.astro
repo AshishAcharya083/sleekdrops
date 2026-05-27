@@ -1,30 +1,62 @@
 ---
-export const prerender = false;
+import BaseLayout from '@layouts/BaseLayout.astro';
+import Breadcrumbs from '@components/seo/Breadcrumbs.astro';
+import ListingHero from '@components/blog/ListingHero.astro';
+import PromoCard from '@components/affiliate/PromoCard.astro';
+import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro';
+import { getActivePromos } from '@data/promos';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
 
-import BaseLayout from '../../layouts/BaseLayout.astro';
-import Breadcrumbs from '../../components/seo/Breadcrumbs.astro';
-import PromoCard from '../../components/affiliate/PromoCard.astro';
-import { buildCategorySchema, buildMeta } from '../../lib/seo';
-import { getPromos } from '../../lib/api';
+const promos = getActivePromos();
 
-const promos = await getPromos();
+const desc =
+  'Promo codes worth typing — checked monthly, dropped when they stop working. No "exclusive" theatre; just the codes that move the price.';
+
 const meta = buildMeta({
-  title: 'Live promo codes',
-  description:
-    'SleekDrops keeps promo pages server-rendered so brand offers, expiry dates, and code availability stay fresh for both users and crawlers.',
+  title: 'Promo codes',
+  description: desc,
   pathname: '/promos',
 });
 ---
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema('Promo codes', '/promos', desc)}
+  active="deals"
+>
+  <div class="container">
+    <Breadcrumbs
+      items={[
+        { name: 'Home', href: '/' },
+        { name: 'Deals', href: '/deals' },
+        { name: 'Promo codes', href: '/promos' },
+      ]}
+    />
+  </div>
 
-<BaseLayout {...meta} schema={buildCategorySchema('Promos', '/promos', meta.description)}>
-  <section class="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-    <Breadcrumbs items={[{ name: 'Home', href: '/' }, { name: 'Promos', href: '/promos' }]} />
-    <div class="mt-6 rounded-[2rem] border border-slate-200 bg-white p-8 shadow-card">
-      <h1 class="font-display text-4xl font-bold text-ink">Live promo inventory</h1>
-      <p class="mt-4 max-w-reading text-lg leading-8 text-slate-600">This route stays SSR to preserve freshness for promo codes, operator status, and expiry windows.</p>
-    </div>
-    <div class="mt-8 grid gap-6">
+  <ListingHero
+    eyebrow="Codes · Verified monthly"
+    titleHtml="Promo <em>codes</em>."
+    dek={desc}
+  />
+
+  <div class="container">
+    <div class="promo-grid">
       {promos.map((promo) => <PromoCard promo={promo} />)}
     </div>
-  </section>
+
+    <div class="disclosure-wrap">
+      <AffiliateDisclosure />
+    </div>
+  </div>
 </BaseLayout>
+
+<style>
+  .promo-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    padding: 48px 0;
+  }
+  @media (max-width: 900px) { .promo-grid { grid-template-columns: 1fr; } }
+  .disclosure-wrap { padding-bottom: 96px; max-width: 68ch; }
+</style>

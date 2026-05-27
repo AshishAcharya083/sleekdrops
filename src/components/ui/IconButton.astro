@@ -1,0 +1,66 @@
+---
+/**
+ * IconButton — circular 38px button with a 1px hairline border. Used in
+ * the header (search, theme toggle) and the article aside (share, copy,
+ * bookmark). Inherits text colour; pass an SVG via the default slot.
+ */
+export interface Props {
+  title: string;
+  ariaLabel?: string;
+  href?: string;
+  type?: 'button' | 'submit';
+  data?: Record<string, string>;
+  class?: string;
+}
+const {
+  title,
+  ariaLabel,
+  href,
+  type = 'button',
+  data = {},
+  class: className,
+} = Astro.props;
+
+const classes = ['icon-btn', className].filter(Boolean).join(' ');
+const dataAttrs = Object.fromEntries(
+  Object.entries(data).map(([k, v]) => [`data-${k}`, v]),
+);
+const Tag = href ? 'a' : 'button';
+---
+<Tag
+  class={classes}
+  aria-label={ariaLabel ?? title}
+  title={title}
+  {...href ? { href } : { type }}
+  {...dataAttrs}
+>
+  <slot />
+</Tag>
+
+<style>
+  .icon-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 999px;
+    border: 1px solid var(--hairline);
+    background: var(--surface);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color var(--dur-fast) var(--ease-out),
+      background var(--dur-fast) var(--ease-out);
+  }
+  .icon-btn:hover { border-color: var(--hairline-strong); color: var(--ink); }
+  .icon-btn :global(svg) {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+</style>

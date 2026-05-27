@@ -1,0 +1,97 @@
+---
+import Badge from '@components/ui/Badge.astro';
+import Eyebrow from '@components/ui/Eyebrow.astro';
+import Button from '@components/ui/Button.astro';
+import { getAuthor } from '@data/authors';
+import { emphasiseLastWord, formatMedium } from '@lib/format';
+import type { BlogPost } from '@lib/posts';
+
+/**
+ * FeaturedPost — large editor's-pick treatment with side-by-side
+ * cover + copy. Sits at the top of the homepage and any landing page.
+ */
+export interface Props { post: BlogPost; }
+const { post } = Astro.props;
+
+const author = getAuthor(post.data.author);
+const headlineHtml = emphasiseLastWord(post.data.title);
+const catLabel = post.data.kind
+  ? `${post.data.category} · ${post.data.kind}`
+  : post.data.category;
+---
+<section class="block">
+  <div class="container">
+    <Eyebrow>Editor's pick</Eyebrow>
+    <article class="featured-post">
+      <a
+        href={`/blog/${post.slug}`}
+        class:list={['img', 'fill', post.data.cover]}
+        aria-label={post.data.title}
+      >
+        <span class="markstamp">SleekDrops studio · 2025</span>
+      </a>
+      <div>
+        <Badge variant="cat">{catLabel}</Badge>
+        <h2 set:html={headlineHtml} />
+        <p>{post.data.dek}</p>
+        <div class="meta">
+          <span class="author">{author.name}</span>
+          <span>{formatMedium(post.data.pubDate)}</span>
+          <span>{post.data.readTime} min read</span>
+        </div>
+        <Button href={`/blog/${post.slug}`} variant="primary" arrow>Read the verdict</Button>
+      </div>
+    </article>
+  </div>
+</section>
+
+<style>
+  .block {
+    padding: 80px 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .featured-post {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 48px;
+    align-items: center;
+    padding: 32px 0 0;
+  }
+  .img {
+    aspect-ratio: 4 / 5;
+    border-radius: 24px;
+    overflow: hidden;
+    position: relative;
+    display: block;
+  }
+  h2 {
+    font-family: var(--font-display);
+    font-size: clamp(40px, 5vw, 64px);
+    line-height: 1;
+    letter-spacing: -0.025em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 18px 0 20px;
+  }
+  h2 :global(em) { font-style: italic; }
+  p {
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--muted);
+    max-width: 50ch;
+    margin: 0 0 24px;
+  }
+  .meta {
+    display: flex;
+    gap: 16px;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .meta .author { color: var(--ink); font-weight: 600; }
+
+  @media (max-width: 900px) {
+    .featured-post { grid-template-columns: 1fr; }
+  }
+</style>

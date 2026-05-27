@@ -1,0 +1,104 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import ListingHero from '@components/blog/ListingHero.astro';
+import { categories } from '@data/categories';
+import { getAllPosts } from '@lib/posts';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
+
+const posts = await getAllPosts();
+const counts = new Map<string, number>();
+for (const post of posts) {
+  const key = post.data.category;
+  counts.set(key, (counts.get(key) ?? 0) + 1);
+}
+
+const meta = buildMeta({
+  title: 'All categories',
+  description: 'Browse SleekDrops by category — tech, home, fashion, health, finance, and travel.',
+  pathname: '/categories',
+});
+---
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema('All categories', '/categories', meta.description)}
+  active="categories"
+>
+  <ListingHero
+    eyebrow="Browse"
+    titleHtml="All <em>categories</em>."
+    dek="Six desks. One editorial team. Each category covered deeply by people who use this stuff for a living."
+  />
+
+  <div class="container">
+    <div class="cat-grid">
+      {categories.map((c) => (
+        <a class="cat-card" href={`/category/${c.slug}`}>
+          <span class="num">{counts.get(c.name) ?? 0} posts</span>
+          <h2>{c.name}</h2>
+          <p>{c.blurb}</p>
+          <span class="arrow">View category →</span>
+        </a>
+      ))}
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .cat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    padding: 48px 0 96px;
+  }
+  @media (max-width: 1000px) { .cat-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 700px)  { .cat-grid { grid-template-columns: 1fr; } }
+  .cat-card {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-decoration: none;
+    color: inherit;
+    transition: all var(--dur-base) var(--ease-out);
+  }
+  .cat-card:hover {
+    border-color: var(--hairline-strong);
+    box-shadow: var(--shadow-md);
+    color: inherit;
+  }
+  .num {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+  }
+  h2 {
+    font-family: var(--font-display);
+    font-size: 36px;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    margin: 4px 0 8px;
+    font-weight: 400;
+  }
+  p {
+    font-size: 14px;
+    color: var(--muted);
+    margin: 0;
+    flex: 1;
+  }
+  .arrow {
+    margin-top: 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    padding-bottom: 4px;
+    border-bottom: 1.5px solid var(--accent);
+    align-self: flex-start;
+  }
+</style>

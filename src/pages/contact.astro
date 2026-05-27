@@ -1,0 +1,198 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import Eyebrow from '@components/ui/Eyebrow.astro';
+import Button from '@components/ui/Button.astro';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
+
+const meta = buildMeta({
+  title: 'Contact SleekDrops',
+  description:
+    "Tip about a deal? Pitch for a review? Spotted an error? The SleekDrops desk reads everything and tries to reply within two working days.",
+  pathname: '/contact',
+});
+---
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema('Contact', '/contact', meta.description)}
+  active="contact"
+>
+  <section class="contact-hero">
+    <div class="container">
+      <Eyebrow>Get in touch</Eyebrow>
+      <h1>Say <em>hello</em>.</h1>
+      <p>Tip about a deal? Pitch for a review? Spotted an error? We read everything. We try to reply within two working days.</p>
+    </div>
+  </section>
+
+  <div class="container">
+    <div class="contact-layout">
+      <form class="contact-form" data-mock-form data-mock-label="✓ Message sent">
+        <div class="row2">
+          <div class="field">
+            <label for="name">Name</label>
+            <input id="name" type="text" placeholder="Your name" required />
+          </div>
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" type="email" placeholder="you@inbox.com" required />
+          </div>
+        </div>
+        <div class="field">
+          <label for="subject">Subject</label>
+          <select id="subject">
+            <option>General feedback</option>
+            <option>Deal tip</option>
+            <option>Review pitch</option>
+            <option>Press</option>
+            <option>Correction</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="message">Message</label>
+          <textarea id="message" placeholder="Tell us what's on your mind." required />
+        </div>
+        <Button type="submit" variant="primary" arrow>Send message</Button>
+      </form>
+
+      <aside class="contact-aside">
+        <h3>Other <em>ways</em>.</h3>
+        <div class="contact-card">
+          <h6>Tip a deal</h6>
+          <div class="what">deals@sleekdrops.com</div>
+          <p class="note">Spotted something worth a feature? Include the link, the catch, and how long it lasts.</p>
+        </div>
+        <div class="contact-card">
+          <h6>Pitch a review</h6>
+          <div class="what">pitch@sleekdrops.com</div>
+          <p class="note">Brands and PR welcome — we'll always disclose loaner units in the published review.</p>
+        </div>
+        <div class="contact-card">
+          <h6>Editorial</h6>
+          <div class="what">desk@sleekdrops.com</div>
+          <p class="note">Corrections, comments, questions about our methodology, or anything else.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .contact-hero { padding: 64px 0 32px; }
+  .contact-hero h1 {
+    font-family: var(--font-display);
+    font-size: clamp(56px, 8vw, 96px);
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 16px 0;
+  }
+  .contact-hero h1 em { font-style: italic; }
+  .contact-hero p {
+    font-size: 19px;
+    color: var(--muted);
+    max-width: 56ch;
+    margin: 0;
+    line-height: 1.55;
+  }
+
+  .contact-layout {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 64px;
+    padding: 48px 0 96px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { .contact-layout { grid-template-columns: 1fr; } }
+
+  .contact-form {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 24px;
+    padding: 40px;
+  }
+  .contact-form label {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .contact-form .field { margin-bottom: 22px; }
+  .contact-form input,
+  .contact-form select,
+  .contact-form textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: var(--font-body);
+    font-size: 15px;
+    color: var(--ink);
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--hairline-strong);
+    border-radius: 0;
+    padding: 12px 0;
+    outline: none;
+    transition: border-color var(--dur-fast);
+  }
+  .contact-form input:focus,
+  .contact-form select:focus,
+  .contact-form textarea:focus {
+    border-bottom-color: var(--ink);
+  }
+  .contact-form textarea {
+    resize: vertical;
+    min-height: 120px;
+    line-height: 1.55;
+  }
+  .contact-form .row2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .contact-form :global(.btn) {
+    width: 100%;
+    justify-content: center;
+    margin-top: 8px;
+  }
+
+  .contact-aside h3 {
+    font-family: var(--font-display);
+    font-size: 32px;
+    letter-spacing: -0.015em;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 0 0 24px;
+  }
+  .contact-aside h3 em { font-style: italic; }
+  .contact-card {
+    padding: 24px 0;
+    border-top: 1px solid var(--hairline);
+  }
+  .contact-card:last-child { border-bottom: 1px solid var(--hairline); }
+  .contact-card h6 {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+    margin: 0 0 8px;
+  }
+  .contact-card .what {
+    font-family: var(--font-display);
+    font-size: 22px;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin: 0 0 4px;
+  }
+  .contact-card .note {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 8px 0 0;
+    line-height: 1.5;
+  }
+</style>

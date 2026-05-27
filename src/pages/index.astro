@@ -1,51 +1,158 @@
 ---
-export const prerender = true;
+import BaseLayout from '@layouts/BaseLayout.astro';
+import Eyebrow from '@components/ui/Eyebrow.astro';
+import Button from '@components/ui/Button.astro';
+import DropPanel from '@components/affiliate/DropPanel.astro';
+import DealCard from '@components/affiliate/DealCard.astro';
+import CategoryStrip from '@components/layout/CategoryStrip.astro';
+import FeaturedPost from '@components/blog/FeaturedPost.astro';
+import PostGrid from '@components/blog/PostGrid.astro';
+import Newsletter from '@components/layout/Newsletter.astro';
+import { getAllPosts, getFeaturedPost } from '@lib/posts';
+import { getActiveDeals } from '@data/deals';
+import { buildHomeSchema, buildMeta } from '@lib/seo';
+import { formatMedium } from '@lib/format';
 
-import BaseLayout from '../layouts/BaseLayout.astro';
-import CategoryNav from '../components/layout/CategoryNav.astro';
-import PostGrid from '../components/blog/PostGrid.astro';
-import DealCard from '../components/affiliate/DealCard.astro';
-import { buildHomeSchema, buildMeta } from '../lib/seo';
-import { getDeals, getPosts } from '../lib/api';
-
-const [posts, deals] = await Promise.all([
-  getPosts({ page: 1, limit: 6 }),
-  getDeals(),
+const [posts, featured, deals] = await Promise.all([
+  getAllPosts(),
+  getFeaturedPost(),
+  Promise.resolve(getActiveDeals().slice(0, 3)),
 ]);
 
+const latest = posts.filter((p) => p.slug !== featured?.slug).slice(0, 6);
+const today = formatMedium(new Date());
+
 const meta = buildMeta({
-  title: 'Product reviews, deals and promo codes',
-  description: 'SleekDrops publishes scalable product reviews, buying guides, deals, and promo pages with SEO-first Astro architecture and affiliate-safe UX.',
+  title: 'Exclusive deals dropping daily',
+  description:
+    'SleekDrops publishes honest product reviews, side-by-side comparisons, and one daily deal worth your inbox. Independent, ad-free, quietly opinionated.',
   pathname: '/',
 });
 ---
-
-<BaseLayout {...meta} schema={buildHomeSchema()}>
-  <section class="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-    <div class="grid gap-8 lg:grid-cols-[1.3fr_0.7fr]">
-      <div class="rounded-[2rem] bg-ink p-8 text-white shadow-card sm:p-12">
-        <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-300">SEO-first affiliate frontend</p>
-        <h1 class="mt-4 max-w-3xl font-display text-5xl font-bold tracking-tight sm:text-6xl">
-          SleekDrops turns evergreen buying content into fast, structured revenue pages.
-        </h1>
-        <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-200">
-          Reviews, deals, promos, and guides are fetched from a shared API and rendered for crawlability, freshness, and rich-result eligibility.
-        </p>
-        <div class="mt-8">
-          <CategoryNav />
+<BaseLayout {...meta} schema={buildHomeSchema()} active="home">
+  <section class="hero">
+    <div class="container">
+      <div class="hero-grid">
+        <div>
+          <Eyebrow accent dot>Daily drop · {today}</Eyebrow>
+          <h1>Exclusive deals,<br />dropping <em>daily</em>.</h1>
+          <p class="lede">
+            Honest reviews, side-by-side comparisons, and the quiet luxury of a buying guide that doesn't try to sell you anything. We test, we score, you decide.
+          </p>
+          <div class="hero-actions">
+            <Button href="/blog" variant="primary" arrow>Read the latest</Button>
+            <Button href="#today" variant="outline">See today's drop</Button>
+          </div>
         </div>
-      </div>
-      <div class="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-card">
-        <p class="text-xs font-semibold uppercase tracking-[0.25em] text-summit">Featured deal</p>
-        {deals[0] ? <div class="mt-4"><DealCard deal={deals[0]} /></div> : <p class="mt-4 text-sm leading-7 text-slate-600">Deals will appear here once the backend API is connected.</p>}
+        <DropPanel />
       </div>
     </div>
-    <section class="mt-16">
-      <div class="mb-6 flex items-center justify-between">
-        <h2 class="font-display text-3xl font-bold text-ink">Latest articles</h2>
-        <a class="text-sm font-semibold text-summit hover:text-ember" href="/blog">Browse all posts</a>
-      </div>
-      <PostGrid posts={posts.data} />
-    </section>
   </section>
+
+  <CategoryStrip />
+
+  {featured && <FeaturedPost post={featured} />}
+
+  <section class="block">
+    <div class="container">
+      <header class="section-head">
+        <div>
+          <Eyebrow>Fresh this week</Eyebrow>
+          <h2>Latest <em>articles</em></h2>
+        </div>
+        <a class="more" href="/blog">Browse all posts →</a>
+      </header>
+      <PostGrid posts={latest} />
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="container">
+      <header class="section-head">
+        <div>
+          <Eyebrow accent dot>Live now</Eyebrow>
+          <h2>This week's <em>drops</em></h2>
+        </div>
+        <a class="more" href="/deals">See all deals →</a>
+      </header>
+      <div class="deals-row">
+        {deals.map((deal) => <DealCard deal={deal} />)}
+      </div>
+    </div>
+  </section>
+
+  <Newsletter />
 </BaseLayout>
+
+<style>
+  .hero {
+    padding: 64px 0 56px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 48px;
+    align-items: stretch;
+  }
+  @media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; } }
+  .hero h1 {
+    font-family: var(--font-display);
+    font-size: clamp(56px, 7vw, 96px);
+    line-height: 0.98;
+    letter-spacing: -0.03em;
+    margin: 18px 0 28px;
+    font-weight: 400;
+    max-width: 18ch;
+    color: var(--ink);
+    text-wrap: balance;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); }
+  .hero .lede {
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: 52ch;
+    margin: 0 0 32px;
+  }
+  .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  section.block {
+    padding: 80px 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  section.block:last-of-type { border-bottom: 0; }
+  .section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 40px;
+    gap: 32px;
+  }
+  .section-head h2 {
+    font-family: var(--font-display);
+    font-size: 56px;
+    line-height: 0.98;
+    letter-spacing: -0.025em;
+    margin: 8px 0 0;
+    font-weight: 400;
+    color: var(--ink);
+  }
+  .section-head h2 em { font-style: italic; }
+  .section-head .more {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    text-decoration: none;
+    padding-bottom: 4px;
+    border-bottom: 1.5px solid var(--accent);
+    flex-shrink: 0;
+  }
+
+  .deals-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 900px) { .deals-row { grid-template-columns: 1fr; } }
+</style>

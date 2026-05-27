@@ -1,11 +1,33 @@
 ---
-interface Props {
-  label: string;
-}
-
-const { label } = Astro.props;
+/**
+ * Badge — small categorical chip.
+ *
+ * Variants:
+ *   - "cat"    transparent + hairline border (used for category tags)
+ *   - "accent" soft orange fill
+ *   - "ink"    solid dark
+ */
+type Variant = 'cat' | 'accent' | 'ink';
+export interface Props { variant?: Variant; class?: string; }
+const { variant = 'cat', class: className } = Astro.props;
+const classes = ['badge', `badge--${variant}`, className].filter(Boolean).join(' ');
 ---
+<span class={classes}><slot /></span>
 
-<span class="inline-flex rounded-full bg-alpine px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-summit">
-  {label}
-</span>
+<style>
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border-radius: 999px;
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+  .badge--cat    { background: transparent; color: var(--ink); border: 1px solid var(--hairline-strong); }
+  .badge--accent { background: var(--accent-soft); color: var(--accent); }
+  .badge--ink    { background: var(--ink); color: var(--paper); }
+</style>
