@@ -8,8 +8,8 @@ tags: ["harman kardon", "bluetooth speakers", "portable audio", "auracast"]
 pubDate: "2026-05-30"
 readTime: 8
 cover: "fill-5"
-heroImage: "https://pub-fcb1f09112ed40ba9542a135e3f6618d.r2.dev/posts/2026/05/harman-kardon-luna-2/hero.jpg"
-heroAlt: "A compact portable Bluetooth speaker with a textured grille on a tabletop"
+heroImage: "https://pub-fcb1f09112ed40ba9542a135e3f6618d.r2.dev/posts/2026/05/harman-kardon-luna-2/hero-luna2.jpg"
+heroAlt: "Harman Kardon Luna 2 portable Bluetooth speaker"
 featured: false
 draft: false
 ---
