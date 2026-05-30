@@ -12,12 +12,10 @@
     "start": "astro dev",
     "prebuild": "node scripts/generate-redirects.mjs",
     "build": "astro check && astro build",
-    "postbuild": "node scripts/copy-sitemap.mjs",
     "preview": "astro preview",
     "astro": "astro",
     "check": "astro check",
-    "generate:redirects": "node scripts/generate-redirects.mjs",
-    "copy:sitemap": "node scripts/copy-sitemap.mjs"
+    "generate:redirects": "node scripts/generate-redirects.mjs"
   },
   "dependencies": {
     "@astrojs/check": "^0.9.9",
