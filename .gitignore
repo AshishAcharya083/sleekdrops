@@ -22,6 +22,11 @@ pnpm-debug.log*
 # environment variables
 .env
 .env.production
+.env.local
+
+# local credential scratchpad — NEVER commit
+keys.md
+secrets.md
 
 # macOS-specific files
 .DS_Store
