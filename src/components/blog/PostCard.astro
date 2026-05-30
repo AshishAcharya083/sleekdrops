@@ -17,7 +17,9 @@ const author = getAuthor(post.data.author);
 ---
 <a href={`/blog/${post.slug}`} class="post-card">
   <div class="img">
-    <div class:list={['fill', post.data.cover]} />
+    {post.data.heroImage
+      ? <img src={post.data.heroImage} alt={post.data.heroAlt ?? post.data.title} loading="lazy" />
+      : <div class:list={['fill', post.data.cover]} />}
   </div>
   <div class="body">
     <div class="meta">
@@ -58,6 +60,13 @@ const author = getAuthor(post.data.author);
   .img > div {
     position: absolute;
     inset: 0;
+  }
+  .img img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
   .body { padding: 22px 24px 24px; }
   .meta {

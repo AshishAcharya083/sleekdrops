@@ -1,5 +1,22 @@
 {
   "$schema": "./affiliate-links.schema.json",
-  "$comment": "Map of /go/[slug] → destination merchant URL. Edit this file (or have the publishing pipeline append to it); the build will regenerate public/_redirects so every link routes correctly at the edge. Each entry MUST have either a region map or a `default` URL. See docs/future_planning.md for the v2 region-routing plan.",
-  "links": {}
+  "$comment": "SINGLE SOURCE OF TRUTH for every /go/[slug] redirect. The build (prebuild -> scripts/generate-redirects.mjs) reads this and writes public/_redirects, so each /go/<slug> 302s to its destination at the Cloudflare edge. NEVER put raw merchant URLs in posts, products.ts, deals.ts, or promos.ts — always reference /go/<slug> and add the destination here. For Amazon, the destination is the product page + your single tag appended: https://www.amazon.com/dp/{ASIN}?tag={YOUR_TAG}. The tag below is the LIVE Amazon Associates tag sleekdrops-22. The example ASINs below are still placeholders — replace each with the real product ASIN.",
+  "links": {
+    "sonos-era-300": {
+      "default": "https://www.amazon.com/dp/B0BVMQQVTH?tag=sleekdrops-22",
+      "note": "Example product offer (products.ts). Placeholder ASIN + placeholder tag — replace both."
+    },
+    "sonos-era-100": {
+      "default": "https://www.amazon.com/dp/B0BVMRXZD5?tag=sleekdrops-22",
+      "note": "Inline comparison link in sonos-era-300-vs-100.md. Placeholder ASIN + placeholder tag."
+    },
+    "bose-qc-ultra-headphones": {
+      "default": "https://www.amazon.com/dp/B0CCZ26B5V?tag=sleekdrops-22",
+      "note": "Example deal (deals.ts). Placeholder ASIN + placeholder tag."
+    },
+    "bose-headphones-bundle": {
+      "default": "https://www.amazon.com/dp/B0CCZ1HW4Z?tag=sleekdrops-22",
+      "note": "Example promo (promos.ts). Placeholder ASIN + placeholder tag."
+    }
+  }
 }

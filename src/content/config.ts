@@ -39,7 +39,8 @@ const blog = defineCollection({
     updatedDate: z.coerce.date().optional(),
     /** Reading time in minutes. */
     readTime: z.number().int().positive(),
-    /** Placeholder gradient class, fill-1 … fill-8. */
+    /** Placeholder gradient class, fill-1 … fill-8. Used as the fallback
+     * cover whenever `heroImage` is not set. */
     cover: z.enum([
       'fill-1',
       'fill-2',
@@ -50,6 +51,12 @@ const blog = defineCollection({
       'fill-7',
       'fill-8',
     ]),
+    /** Optional absolute hero image URL (e.g. a Cloudflare R2 URL written by
+     * the publishing pipeline). When present it renders instead of the `cover`
+     * gradient and is used as the Open Graph / article image. */
+    heroImage: z.string().url().optional(),
+    /** Alt text for `heroImage`. Falls back to the post title. */
+    heroAlt: z.string().optional(),
     /** Optional product id — required for `postType: review`. */
     product: z.string().optional(),
     /** Editor's-pick / hero slot on the homepage. */

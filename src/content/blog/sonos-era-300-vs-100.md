@@ -2,18 +2,18 @@
 title: "Sonos Era 300 vs Era 100 — which is the smarter buy?"
 dek: "Spatial audio is nice. Saving $250 might be nicer. The head-to-head you've been waiting for."
 category: "Tech"
-postType: "review"
+postType: "article"
 kind: "Comparison"
 author: "theo"
 tags: ["sonos", "speakers", "spatial audio"]
 pubDate: "2025-11-12"
 readTime: 12
 cover: "fill-2"
-product: "sonos-era-300"
+featured: true
 ---
 ## The short answer
 
-If you already own one Sonos speaker, the Era 100 stereo pair is the better upgrade. If you're starting from scratch in a 4×4 m room or larger, the Era 300 earns its premium — barely.
+If you already own one Sonos speaker, the [Era 100](/go/sonos-era-100) stereo pair is the better upgrade. If you're starting from scratch in a 4×4 m room or larger, the [Era 300](/go/sonos-era-300) earns its premium — barely.
 
 ## Soundstage
 
@@ -25,4 +25,4 @@ The 100 hits harder than its size suggests. The 300 reaches lower but with less 
 
 ## Verdict
 
-Two 100s beat one 300 for the same money. It's not close.
+Two [Era 100s](/go/sonos-era-100) beat one [Era 300](/go/sonos-era-300) for the same money. It's not close.

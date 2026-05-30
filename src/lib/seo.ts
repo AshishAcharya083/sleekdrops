@@ -130,7 +130,7 @@ export function buildArticleSchema(
     author: { '@type': 'Person', name: author.name },
     articleSection: post.data.category,
     keywords: post.data.tags.join(', '),
-    image: [defaultImage],
+    image: [post.data.heroImage ?? defaultImage],
     mainEntityOfPage: absoluteUrl(`/blog/${post.slug}`),
     publisher: PUBLISHER,
   };

@@ -41,6 +41,7 @@ const meta = buildMeta({
   title: post.data.title,
   description: post.data.dek,
   pathname: `/blog/${post.slug}`,
+  image: post.data.heroImage,
   type: 'article',
 });
 const schema = product
@@ -94,8 +95,10 @@ const schema = product
         </div>
       </div>
 
-      <div class:list={['hero-image', 'fill', post.data.cover]}>
-        <span class="markstamp">SleekDrops studio · 2025</span>
+      <div class:list={['hero-image', !post.data.heroImage && 'fill', !post.data.heroImage && post.data.cover]}>
+        {post.data.heroImage
+          ? <img src={post.data.heroImage} alt={post.data.heroAlt ?? post.data.title} loading="eager" />
+          : <span class="markstamp">SleekDrops studio · 2025</span>}
       </div>
     </header>
 
@@ -208,6 +211,12 @@ const schema = product
     overflow: hidden;
     margin: 40px 0 0;
     position: relative;
+  }
+  .hero-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
   .article-grid {

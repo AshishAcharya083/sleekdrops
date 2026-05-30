@@ -45,8 +45,6 @@ const header = [
 ];
 
 // Reserved for future system-level rewrites (e.g., legacy URL → new URL).
-// Sitemap aliasing is handled by scripts/copy-sitemap.mjs (postbuild), which
-// copies sitemap-index.xml to sitemap.xml as a real file in dist/.
 const systemRewrites = [];
 
 const rules = [];
