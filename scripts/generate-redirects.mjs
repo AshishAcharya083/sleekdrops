@@ -44,16 +44,10 @@ const header = [
   '',
 ];
 
-// Rewrites that are NOT affiliate redirects but still belong in _redirects.
-// 200-status rewrites serve the target content under the source URL without
-// changing what the browser (or Googlebot) sees in the address bar — so we
-// can expose the sitemap as /sitemap.xml while @astrojs/sitemap continues to
-// output /sitemap-index.xml + /sitemap-0.xml.
-const systemRewrites = [
-  '# Serve the sitemap at the conventional /sitemap.xml path.',
-  '/sitemap.xml\t/sitemap-index.xml\t200',
-  '',
-];
+// Reserved for future system-level rewrites (e.g., legacy URL → new URL).
+// Sitemap aliasing is handled by scripts/copy-sitemap.mjs (postbuild), which
+// copies sitemap-index.xml to sitemap.xml as a real file in dist/.
+const systemRewrites = [];
 
 const rules = [];
 for (const [slug, entry] of entries) {
