@@ -43,7 +43,26 @@ Every speaker at this price makes trade-offs, and the Luna 2's are clear. Twelve
 
 ## Luna 2 vs JBL Charge 6
 
-The most common cross-shop at this price is JBL's Charge 6 — fittingly, since JBL and Harman Kardon are both Harman brands. The two speakers answer different questions. The Charge 6 is the louder, more rugged, more bass-forward choice, and it adds a USB power-bank output that makes it a better travel companion when an outlet is scarce. The Luna 2 is the better-looking, better-balanced, more living-room speaker, with the ambient light and the cleaner midrange.
+The most common cross-shop at this price is JBL's Charge 6 — fittingly, since JBL and Harman Kardon are both Harman brands. They launch at the same $199.95 MSRP, so the spec sheet, not the price tag, decides the call.
+
+| Spec                | Harman Kardon Luna 2          | JBL Charge 6                              |
+|---------------------|-------------------------------|-------------------------------------------|
+| Launch price (USD)  | $199.95                       | $199.95                                   |
+| Drivers             | 62 × 82 mm woofer + 20 mm tweeter | 53 × 93 mm woofer + 20 mm tweeter     |
+| Rated power (RMS)   | 40 W (25 W + 15 W)            | 45 W (30 W + 15 W)                        |
+| Frequency response  | 58 Hz – 20 kHz (−6 dB)        | 56 Hz – 20 kHz (−6 dB)                    |
+| Bluetooth           | 5.4 (dual-source)             | 5.4                                       |
+| Multi-speaker       | Auracast + AirTouch stereo    | Auracast + stereo pair                    |
+| Lossless over USB-C | No                            | Yes (via JBL Portable app update)         |
+| Battery             | 23.76 Wh, up to 12 h          | 34 Wh, up to 24 h (+ 4 h Playtime Boost)  |
+| Power-bank output   | No                            | Yes (phone charging via USB-C)            |
+| Durability          | IP67                          | IP68 + drop-proof from 1 m onto concrete  |
+| Ambient light       | 6 themes, app-tunable         | None                                      |
+| Carry handle        | None (contoured grip)         | Removable strap                           |
+| Dimensions (W×H×D)  | 216 × 84 × 81 mm              | 228.8 × 98.5 × 94.0 mm                    |
+| Weight              | 0.735 kg                      | 0.99 kg (with strap)                      |
+
+The two speakers answer different questions. The Charge 6 is the louder, more rugged, more bass-forward choice, and it adds a USB power-bank output that makes it a better travel companion when an outlet is scarce. The Luna 2 is the better-looking, better-balanced, more living-room speaker, with the ambient light and the cleaner midrange.
 
 The winner depends on you, but for most buyers picking between them, the **JBL Charge 6 is the safer all-rounder** — it does more in more situations. Choose the Luna 2 specifically when sound quality at moderate volume, looks, and the ambient glow matter more to you than outright loudness, battery, or ruggedness. That's a real group of people; just make sure you're in it.
 
