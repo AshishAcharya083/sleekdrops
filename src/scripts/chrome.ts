@@ -93,6 +93,122 @@ if (!window.__sdChromeInit) {
       }
     });
   });
+
+  /* ---- Share button (Web Share API w/ clipboard fallback) ---- */
+  const flashLabel = (el: HTMLElement, label: string, ms = 1500): void => {
+    const prev = el.getAttribute('title') ?? '';
+    el.setAttribute('title', label);
+    el.classList.add('is-flashed');
+    window.setTimeout(() => {
+      el.setAttribute('title', prev);
+      el.classList.remove('is-flashed');
+    }, ms);
+  };
+
+  document.querySelectorAll<HTMLElement>('[data-share]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const url = window.location.href;
+      const title = btn.dataset.shareTitle ?? document.title;
+      const text = btn.dataset.shareText ?? '';
+      const nav = navigator as Navigator & {
+        share?: (data: { title?: string; text?: string; url?: string }) => Promise<void>;
+      };
+      if (nav.share) {
+        try {
+          await nav.share({ title, text, url });
+          return;
+        } catch {
+          /* user cancelled — fall through to copy */
+        }
+      }
+      try {
+        await navigator.clipboard.writeText(url);
+        flashLabel(btn, 'Link copied');
+      } catch {
+        window.prompt('Copy this link:', url);
+      }
+    });
+  });
+
+  /* ---- Copy-link button ---- */
+  document.querySelectorAll<HTMLElement>('[data-copy-link]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const url = window.location.href;
+      try {
+        await navigator.clipboard.writeText(url);
+        flashLabel(btn, 'Link copied');
+      } catch {
+        window.prompt('Copy this link:', url);
+      }
+    });
+  });
+
+  /* ---- Affiliate links in markdown content: open in new tab ---- */
+  document
+    .querySelectorAll<HTMLAnchorElement>('.article-body a[href^="http"]')
+    .forEach((a) => {
+      const sameOrigin = a.host === window.location.host;
+      if (sameOrigin) return;
+      if (!a.target) a.target = '_blank';
+      const rels = new Set((a.rel || '').split(/\s+/).filter(Boolean));
+      rels.add('noopener');
+      rels.add('noreferrer');
+      a.rel = Array.from(rels).join(' ');
+    });
+
+  /* ---- Hero image lightbox ---- */
+  const lightboxTrigger = document.querySelector<HTMLElement>('[data-lightbox]');
+  if (lightboxTrigger) {
+    const img = lightboxTrigger.querySelector<HTMLImageElement>('img');
+    if (img) {
+      lightboxTrigger.setAttribute('tabindex', '0');
+      lightboxTrigger.setAttribute('role', 'button');
+      lightboxTrigger.setAttribute('aria-label', 'Open full-size image');
+
+      const open = (): void => {
+        const overlay = document.createElement('div');
+        overlay.className = 'sd-lightbox';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', img.alt || 'Image preview');
+        const big = document.createElement('img');
+        big.src = img.currentSrc || img.src;
+        big.alt = img.alt;
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'sd-lightbox-close';
+        close.setAttribute('aria-label', 'Close image');
+        close.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+        overlay.appendChild(big);
+        overlay.appendChild(close);
+        document.body.appendChild(overlay);
+        document.body.style.overflow = 'hidden';
+        const closeFn = (): void => {
+          overlay.remove();
+          document.body.style.overflow = '';
+          document.removeEventListener('keydown', onKey);
+        };
+        const onKey = (ev: KeyboardEvent): void => {
+          if (ev.key === 'Escape') closeFn();
+        };
+        overlay.addEventListener('click', (ev) => {
+          if (ev.target === overlay || ev.target === close || (ev.target as HTMLElement).closest('.sd-lightbox-close')) closeFn();
+        });
+        document.addEventListener('keydown', onKey);
+        requestAnimationFrame(() => overlay.classList.add('is-open'));
+      };
+
+      lightboxTrigger.addEventListener('click', open);
+      lightboxTrigger.addEventListener('keydown', (ev) => {
+        if ((ev as KeyboardEvent).key === 'Enter' || (ev as KeyboardEvent).key === ' ') {
+          ev.preventDefault();
+          open();
+        }
+      });
+    }
+  }
 }
 
 export {};

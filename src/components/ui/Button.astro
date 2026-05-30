@@ -13,6 +13,7 @@ export interface Props {
   arrow?: boolean;
   type?: 'button' | 'submit';
   rel?: string;
+  target?: '_blank' | '_self' | '_parent' | '_top';
   class?: string;
 }
 
@@ -22,15 +23,24 @@ const {
   arrow = false,
   type = 'button',
   rel,
+  target,
   class: className,
 } = Astro.props;
 
 const classes = ['btn', `btn-${variant}`, className].filter(Boolean).join(' ');
 const Tag = href ? 'a' : 'button';
+
+/* Affiliate links (rel contains "sponsored") default to opening in a new tab
+   with safe rel attributes, unless the caller overrides target. */
+const isSponsored = !!rel && /\bsponsored\b/.test(rel);
+const finalTarget = target ?? (isSponsored ? '_blank' : undefined);
+const finalRel = isSponsored
+  ? Array.from(new Set([...(rel ?? '').split(/\s+/).filter(Boolean), 'noopener', 'noreferrer'])).join(' ')
+  : rel;
 ---
 <Tag
   class={classes}
-  {...href ? { href, rel } : { type }}
+  {...href ? { href, rel: finalRel, target: finalTarget } : { type }}
 >
   <slot />
   {arrow && <span class="arrow" aria-hidden="true">→</span>}

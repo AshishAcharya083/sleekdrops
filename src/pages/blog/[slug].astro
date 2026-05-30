@@ -86,16 +86,19 @@ const schema = product
           {post.data.readTime} min read
         </span>
         <div class="actions">
-          <IconButton title="Share">
+          <IconButton title="Share" data={{ share: 'true', 'share-title': post.data.title, 'share-text': post.data.dek }}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
           </IconButton>
-          <IconButton title="Copy link">
+          <IconButton title="Copy link" data={{ 'copy-link': 'true' }}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
           </IconButton>
         </div>
       </div>
 
-      <div class:list={['hero-image', !post.data.heroImage && 'fill', !post.data.heroImage && post.data.cover]}>
+      <div
+        class:list={['hero-image', !post.data.heroImage && 'fill', !post.data.heroImage && post.data.cover, post.data.heroImage && 'is-zoomable']}
+        {...post.data.heroImage ? { 'data-lightbox': 'true' } : {}}
+      >
         {post.data.heroImage
           ? <img src={post.data.heroImage} alt={post.data.heroAlt ?? post.data.title} loading="eager" />
           : <span class="markstamp">SleekDrops studio · 2025</span>}
@@ -104,11 +107,11 @@ const schema = product
 
     <div class="article-grid">
       <ArticleBody>
-        <AffiliateDisclosure />
         {product && <Verdict product={product} />}
         <Content />
         {product && <ProductCallout product={product} />}
         {product && <ProsConsList pros={product.pros} cons={product.cons} />}
+        <AffiliateDisclosure />
       </ArticleBody>
 
       <aside class="article-aside">
@@ -134,12 +137,12 @@ const schema = product
   }
   .article-head h1 {
     font-family: var(--font-display);
-    font-size: clamp(48px, 6vw, 80px);
-    line-height: 0.98;
-    letter-spacing: -0.03em;
-    font-weight: 400;
+    font-size: clamp(40px, 5.2vw, 72px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    font-weight: 500;
     color: var(--ink);
-    max-width: 22ch;
+    max-width: none;
     margin: 0 0 24px;
     text-wrap: balance;
   }
@@ -217,6 +220,17 @@ const schema = product
     height: 100%;
     object-fit: cover;
     display: block;
+    transition: transform var(--dur-slow) var(--ease-out);
+  }
+  .hero-image.is-zoomable {
+    cursor: zoom-in;
+  }
+  .hero-image.is-zoomable:hover img {
+    transform: scale(1.02);
+  }
+  .hero-image.is-zoomable:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
   }
 
   .article-grid {
