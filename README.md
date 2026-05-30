@@ -56,7 +56,9 @@ Categories: **Tech · Home · Fashion · Health · Finance · Travel.**
 
 ### Content publishing flow
 
-Content is published daily by a LangGraph multi-agent pipeline. The pipeline POSTs to the shared Python backend API (header `x-site-id: sleekdrops`); the backend stores the content; a Cloudflare Pages deploy webhook rebuilds the site. The current frontend renders from local content collections — when the API is wired in, `src/lib/posts.ts` is the single switch.
+Content lands as committed markdown in `src/content/blog/` (one file per post). A push to `main` triggers a Cloudflare Pages build; a push to `develop` deploys to the staging URL. The frontend renders from the local content collection — swapping in a remote source later is a single-file change in `src/lib/posts.ts`.
+
+Affiliate destinations are managed in `src/data/affiliate-links.json`. The `prebuild` step regenerates `public/_redirects` so every `/go/[slug]` resolves at the Cloudflare edge with no runtime work.
 
 ---
 

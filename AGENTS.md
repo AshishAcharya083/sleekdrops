@@ -12,7 +12,7 @@ The technical handbook for SleekDrops.com. Read this before editing the codebase
 - **Data:** Static TypeScript modules under [src/data/](src/data/) for authors, categories, deals, promos, and products. These are the single source of truth — no backend fetch at build time.
 - **TypeScript:** Strict mode. Path aliases: `@components/*`, `@layouts/*`, `@data/*`, `@lib/*`, `@styles/*`.
 
-The original `BLOG_API_URL` is still in [.env.example](.env.example) for the LangGraph publish pipeline; the frontend doesn't read it yet — wire it into `src/lib/posts.ts` when the API is ready.
+The `PUBLISH_API_URL` placeholder in [.env.example](.env.example) is reserved for the publishing pipeline; the frontend doesn't read it yet — wire it into `src/lib/posts.ts` when the API is ready.
 
 ---
 
@@ -42,7 +42,9 @@ sleekdrops/
 │   │   ├── categories-types.ts     # Shared CategorySlug / CategoryName unions
 │   │   ├── deals.ts                # Daily affiliate deals (the "drops")
 │   │   ├── promos.ts               # Promo codes
-│   │   └── products.ts             # Products linked from review posts
+│   │   ├── products.ts             # Products linked from review posts
+│   │   ├── affiliate-links.json    # /go/[slug] → merchant URL map (drives public/_redirects)
+│   │   └── affiliate-links.schema.json
 │   ├── layouts/
 │   │   └── BaseLayout.astro        # Head + sticky header + footer + chrome script
 │   ├── lib/
@@ -74,7 +76,11 @@ sleekdrops/
 │   └── styles/
 │       ├── tokens.css              # Design tokens — single source of truth
 │       └── global.css              # Element resets + layout utilities + `.fill-*` cover gradients
-├── astro.config.mjs                # Astro + Cloudflare + sitemap config
+├── scripts/
+│   └── generate-redirects.mjs      # Generates public/_redirects from affiliate-links.json
+├── docs/                           # Engineering notes (associate networks, future planning)
+├── .github/workflows/              # CI/CD: main → production, develop → staging
+├── astro.config.mjs                # Astro + sitemap config
 ├── package.json
 ├── tsconfig.json
 ├── AGENTS.md                       # You are here
@@ -89,6 +95,7 @@ sleekdrops/
 | Adding an author | `src/data/authors.ts` |
 | Adding a deal or promo | `src/data/deals.ts` or `src/data/promos.ts` |
 | Adding a product (for a review) | `src/data/products.ts`, then set `product: <id>` in the post frontmatter |
+| Adding an affiliate redirect | Append an entry to `src/data/affiliate-links.json`. Reference it in markdown as `/go/<slug>`. |
 | Adjusting brand colour, font, spacing | `src/styles/tokens.css` |
 | Adding a new page | `src/pages/<route>.astro` — wrap with `<BaseLayout>` and call `buildMeta()` |
 | Adding a new reusable component | `src/components/<namespace>/<Name>.astro` — colocate styles in a `<style>` block |
@@ -110,12 +117,9 @@ If you change a token, run `pnpm build` and skim the affected pages — colour a
 
 ---
 
-## Content rules (from the publishing pipeline)
+## Content rules
 
-These rules come from the LangGraph publish pipeline. The frontmatter schema in `src/content/config.ts` enforces what it can; the rest is editorial discipline.
-
-### Site identifier
-When calling the backend API, always include the header `x-site-id: sleekdrops`.
+The frontmatter schema in `src/content/config.ts` enforces what it can; the rest is editorial discipline.
 
 ### Categories
 `Tech` · `Home` · `Fashion` · `Health` · `Finance` · `Travel`. Defined as both an enum in the content schema and a registry in `src/data/categories.ts` — keep them in sync.
@@ -170,6 +174,15 @@ If the author is new, add them to `src/data/authors.ts` first — otherwise the 
 
 ## Deployment
 
-Cloudflare Pages, via the `@astrojs/cloudflare` adapter. The build command is `pnpm build`; the output directory is `dist/`. `SITE_URL` is read from the environment and falls back to `https://sleekdrops.com`.
+Cloudflare Pages, plain static output (no SSR adapter). The build command is `pnpm build`; the output directory is `dist/`. `SITE_URL` is read from the environment and falls back to `https://sleekdrops.com`.
 
-The LangGraph publish pipeline triggers a Cloudflare deploy webhook after content lands in the backend; the frontend currently rebuilds against its local content collection, but is wired so that swapping `getAllPosts()` in `src/lib/posts.ts` for an API call is a single-file change.
+Two environments, driven by GitHub Actions in `.github/workflows/`:
+
+- **Production:** push to `main` → deploys to `sleekdrops.com`.
+- **Develop:** push to `develop` → deploys to `develop.sleekdrops.com` (or the Cloudflare Pages preview URL).
+
+Secrets are stored in GitHub: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_PROJECT_NAME`.
+
+### Affiliate redirects
+
+`/go/[slug]` URLs are resolved at the Cloudflare edge via `public/_redirects`, which is regenerated from [src/data/affiliate-links.json](src/data/affiliate-links.json) by `scripts/generate-redirects.mjs` on every build (wired as the `prebuild` npm script). Local `astro dev` does not honor `_redirects` — test in production preview if you need to confirm an outbound URL.

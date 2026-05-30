@@ -6,7 +6,7 @@ import { buildCategorySchema, buildMeta } from '@lib/seo';
 const meta = buildMeta({
   title: 'Privacy policy',
   description:
-    "How SleekDrops handles your data: privacy-friendly analytics, two first-party cookies, and zero data sold to advertisers.",
+    "How SleekDrops handles your data: privacy-friendly analytics, two first-party cookies, an FTC-compliant affiliate disclosure, and zero data sold to advertisers.",
   pathname: '/privacy',
 });
 ---
@@ -17,53 +17,143 @@ const meta = buildMeta({
   <LegalLayout
     eyebrow="Legal"
     titleHtml="Privacy <em>policy</em>."
-    updated="November 1, 2025"
+    updated="May 1, 2026"
     toc={[
-      { href: '#summary',    label: 'Plain summary' },
-      { href: '#data',       label: 'What we collect' },
-      { href: '#cookies',    label: 'Cookies & analytics' },
-      { href: '#affiliate',  label: 'Affiliate attribution' },
-      { href: '#newsletter', label: 'Newsletter' },
-      { href: '#rights',     label: 'Your rights' },
-      { href: '#contact',    label: 'Contact us' },
+      { href: '#summary',      label: 'Plain summary' },
+      { href: '#scope',        label: 'Scope of this policy' },
+      { href: '#data',         label: 'What we collect' },
+      { href: '#how-we-use',   label: 'How we use it' },
+      { href: '#cookies',      label: 'Cookies & tracking' },
+      { href: '#affiliate',    label: 'Affiliate disclosure' },
+      { href: '#ads',          label: 'Advertising partners' },
+      { href: '#third-parties', label: 'Third-party services' },
+      { href: '#newsletter',   label: 'Newsletter' },
+      { href: '#retention',    label: 'Data retention' },
+      { href: '#security',     label: 'Security' },
+      { href: '#children',     label: "Children's privacy" },
+      { href: '#rights-gdpr',  label: 'EU/UK rights (GDPR)' },
+      { href: '#rights-ca',    label: 'California rights (CCPA)' },
+      { href: '#do-not-sell',  label: 'Do Not Sell or Share' },
+      { href: '#changes',      label: 'Changes to this policy' },
+      { href: '#contact',      label: 'Contact us' },
     ]}
   >
     <div class="summary" id="summary">
       <strong>Plain summary</strong>
-      We host on Cloudflare, we use privacy-friendly analytics, we don't sell anything to advertisers, and we use cookies only for affiliate attribution and your dark-mode preference. If you signed up for the newsletter you can leave any time with one click.
+      We host on Cloudflare, we use privacy-friendly analytics, we don't sell anything to advertisers, and we use cookies only for affiliate attribution and your dark-mode preference. Most outbound product links are affiliate links — we earn a small commission at no extra cost to you. If you signed up for the newsletter you can leave any time with one click.
     </div>
 
-    <h2 id="data">What we <em>collect</em></h2>
-    <p>SleekDrops is a static publication. The site itself stores no data about you directly. The following limited data is collected by services we rely on:</p>
-    <ul>
-      <li><strong>Server logs.</strong> Our host (Cloudflare) logs IP addresses, user agent strings, and request paths for security and performance — typical for any website. We do not access or analyse these logs.</li>
-      <li><strong>Analytics.</strong> We use a privacy-friendly analytics service that records aggregate page views, referrers, and country-level location. No cookies, no fingerprinting, no cross-site tracking.</li>
-      <li><strong>Newsletter.</strong> If you subscribe, we store your email address with our mail provider for the sole purpose of sending the newsletter.</li>
-    </ul>
+    <h2 id="scope">Scope of this <em>policy</em></h2>
+    <p>This policy explains how SleekDrops ("we," "us," "our") collects, uses, discloses, and protects information when you visit <strong>sleekdrops.com</strong> or any subdomain we operate, subscribe to The Daily Drop newsletter, or contact us. It does not cover third-party websites we link to — once you click an outbound link, the destination's privacy policy governs your interaction with them.</p>
+    <p>By using SleekDrops you agree to the collection and use of information in accordance with this policy.</p>
 
-    <h2 id="cookies">Cookies &amp; <em>analytics</em></h2>
+    <h2 id="data">What we <em>collect</em></h2>
+    <p>SleekDrops is a static publication. The site itself stores no personal data about you directly. The following limited information is collected by services we rely on:</p>
+    <ul>
+      <li><strong>Server logs.</strong> Our host (Cloudflare) automatically logs IP addresses, user-agent strings, and request paths for security, abuse prevention, and performance — standard for any website. We do not access or analyse these logs.</li>
+      <li><strong>Analytics.</strong> We use a privacy-friendly analytics service that records aggregate page views, referrers, and country-level location only. No cookies are set, no fingerprinting takes place, and no cross-site tracking happens.</li>
+      <li><strong>Newsletter.</strong> If you subscribe, we store your email address and (optionally) your first name with our mail provider, solely to deliver the newsletter.</li>
+      <li><strong>Contact form.</strong> If you write to us, we receive whatever information you choose to put in the message — typically a name, email, and the content of your question.</li>
+    </ul>
+    <p>We do not collect special-category personal data (health, biometric, political opinions, etc.), and we never knowingly collect data from children — see <a href="#children">Children's privacy</a>.</p>
+
+    <h2 id="how-we-use">How we <em>use it</em></h2>
+    <p>We use the limited information described above to:</p>
+    <ul>
+      <li>Operate the site, fix bugs, and keep things working;</li>
+      <li>Understand which posts are useful (aggregate analytics only);</li>
+      <li>Send the newsletter to subscribers who asked to receive it;</li>
+      <li>Respond to questions submitted through the contact form;</li>
+      <li>Comply with legal obligations and prevent fraud or abuse.</li>
+    </ul>
+    <p>We do not use your data for automated decision-making, behavioural advertising, profiling, or sale to data brokers. We do not train AI models on your data.</p>
+
+    <h2 id="cookies">Cookies &amp; <em>tracking</em></h2>
     <p>We set two first-party cookies, and only these:</p>
     <ul>
-      <li><code>sd-theme</code> — remembers your dark-mode preference.</li>
-      <li><code>sd-bookmarks</code> — stores the article slugs you've saved (kept in your browser only; never sent to us).</li>
+      <li><code>sd-theme</code> — remembers your dark-mode preference (12 months).</li>
+      <li><code>sd-bookmarks</code> — stores the article slugs you've saved (kept in your browser only; never sent to us; 12 months).</li>
     </ul>
-    <p>Affiliate networks (Amazon, etc.) may set their own cookies on the destination domain once you click an outbound link. SleekDrops itself does not set advertising cookies, and we don't embed third-party ad scripts.</p>
+    <p>Affiliate networks (Amazon, Awin, CJ Affiliate, Impact, and similar) may set their own cookies on <strong>the destination retailer's domain</strong> once you click an outbound link. SleekDrops itself does not set advertising cookies, and we do not embed third-party ad scripts on this site by default.</p>
+    <p>If we add display advertising in the future (see <a href="#ads">Advertising partners</a>), this section will be updated and — where required by law — a consent banner will be presented.</p>
 
-    <h2 id="affiliate">Affiliate <em>attribution</em></h2>
-    <p>Most outbound product links on SleekDrops are affiliate links. When you click one, the destination retailer may attribute the eventual purchase to us via their own tracking cookie. This earns us a small commission — at no extra cost to you. The price is the same whether you click our link or not. We never see who you are or what you bought; only that an order from "SleekDrops" was attributed.</p>
+    <h2 id="affiliate">Affiliate <em>disclosure</em></h2>
+    <p>In accordance with the United States Federal Trade Commission's 16 CFR Part 255 ("Guides Concerning the Use of Endorsements and Testimonials in Advertising"), we disclose the following:</p>
+    <blockquote>
+      <p>SleekDrops is a participant in the Amazon Services LLC Associates Program and other affiliate programs (including Awin, CJ Affiliate, Impact, Sovrn Commerce, and Skimlinks). These programs are designed to provide a means for sites to earn advertising fees by advertising and linking to participating merchants. As an Amazon Associate, we earn from qualifying purchases.</p>
+    </blockquote>
+    <p>When you click a product link on SleekDrops and complete a qualifying purchase within the retailer's cookie window, the retailer attributes the sale to us and pays us a small commission. <strong>The price you pay is the same whether you click our link or not</strong> — the retailer absorbs the commission out of their margin. We never see who you are, what you purchased, or your payment details. We only see that an order was attributed to SleekDrops.</p>
+    <p>For full details on how we choose what to link to, our testing standards, and how affiliate links are labelled, see the <a href="/disclaimer">Affiliate disclaimer</a>.</p>
+
+    <h2 id="ads">Advertising <em>partners</em></h2>
+    <p>SleekDrops does not currently display third-party display advertising. If we begin running ads in the future, they will be served by one of the following partners and this policy will be updated to reflect the specific services in use:</p>
+    <ul>
+      <li><strong>Google AdSense</strong> — uses cookies and similar technologies to serve ads based on prior visits to this and other websites. Google's use of advertising cookies enables it and its partners to serve ads to users based on their visit to our site and/or other sites on the Internet. Users may opt out of personalised advertising by visiting <a href="https://www.google.com/settings/ads" rel="noopener nofollow" target="_blank">Google Ads Settings</a>.</li>
+      <li><strong>Ezoic</strong>, <strong>Mediavine</strong>, or <strong>Raptive</strong> — managed display advertising networks. Each maintains its own privacy practices, available at their respective websites.</li>
+    </ul>
+    <p>If display advertising is enabled, EU/UK visitors will see a cookie-consent banner before any non-essential cookies are placed, in compliance with the ePrivacy Directive and GDPR.</p>
+
+    <h2 id="third-parties">Third-party <em>services</em></h2>
+    <p>The following services may process limited data on our behalf:</p>
+    <ul>
+      <li><strong>Cloudflare</strong> (USA / global) — hosting, CDN, security. Privacy policy: <a href="https://www.cloudflare.com/privacypolicy/" rel="noopener nofollow" target="_blank">cloudflare.com/privacypolicy</a>.</li>
+      <li><strong>Analytics provider</strong> — privacy-friendly, no cookies, aggregate metrics only. Provider name disclosed on request.</li>
+      <li><strong>Email service provider</strong> — used to deliver The Daily Drop newsletter. Stores subscriber email addresses with appropriate Standard Contractual Clauses for international transfers where applicable.</li>
+      <li><strong>Affiliate networks</strong> — Amazon Associates, Awin, CJ Affiliate, Impact, Sovrn, Skimlinks. These are not processors of your personal data on our behalf; they are independent controllers that may receive limited information (such as a referring URL and a cookie ID) when you click an outbound affiliate link.</li>
+    </ul>
 
     <h2 id="newsletter">Newsletter</h2>
-    <p>If you subscribe to The Daily Drop, your email is stored with our mail provider for delivery purposes. We use it for the daily newsletter and nothing else. Every email contains a one-click unsubscribe link. You can request deletion of your address at any time by emailing <a href="mailto:hello@sleekdrops.com">hello@sleekdrops.com</a>.</p>
+    <p>If you subscribe to The Daily Drop, your email address is stored with our mail provider for the sole purpose of sending the newsletter. We use it for the daily newsletter and nothing else. Every email contains a one-click unsubscribe link. You can request deletion of your address at any time by emailing <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a>.</p>
+    <p>We do not share your email with affiliate partners, advertisers, or any third party other than the mail provider that delivers the newsletter.</p>
 
-    <h2 id="rights">Your <em>rights</em></h2>
-    <p>Under GDPR and similar regimes you have the right to:</p>
+    <h2 id="retention">Data <em>retention</em></h2>
     <ul>
-      <li>Request a copy of any personal data we hold about you (in practice: just your email, if subscribed).</li>
-      <li>Ask us to correct or delete that data.</li>
-      <li>Object to processing and unsubscribe at any time.</li>
+      <li><strong>Newsletter subscribers:</strong> for as long as you remain subscribed, plus 30 days after unsubscribe (to honour deletion requests and prevent re-subscription errors).</li>
+      <li><strong>Contact form messages:</strong> up to 24 months, then deleted.</li>
+      <li><strong>Server logs:</strong> retained by Cloudflare per their default retention (typically 7–30 days).</li>
+      <li><strong>Analytics:</strong> aggregate-only data; retained up to 36 months.</li>
     </ul>
 
+    <h2 id="security">Security</h2>
+    <p>We use reasonable technical and organisational measures to protect the limited personal data we hold — HTTPS in transit, encrypted storage at rest with our providers, and access controls on administrative tools. No method of transmission over the Internet is 100% secure; while we strive to use commercially acceptable means, we cannot guarantee absolute security.</p>
+
+    <h2 id="children">Children's <em>privacy</em></h2>
+    <p>SleekDrops is not directed at children under 13 (or under 16 in the EU/UK). We do not knowingly collect personal information from children. If you believe a child has provided us with personal data, contact <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a> and we will delete it. This commitment is in line with the Children's Online Privacy Protection Act (COPPA) and the UK's Age-Appropriate Design Code.</p>
+
+    <h2 id="rights-gdpr">EU/UK rights <em>(GDPR)</em></h2>
+    <p>If you are in the European Economic Area, the United Kingdom, or Switzerland, you have the following rights with respect to your personal data:</p>
+    <ul>
+      <li><strong>Access</strong> — request a copy of any personal data we hold about you (in practice: just your email, if subscribed).</li>
+      <li><strong>Rectification</strong> — ask us to correct inaccurate data.</li>
+      <li><strong>Erasure</strong> — ask us to delete your data ("right to be forgotten").</li>
+      <li><strong>Restriction</strong> — ask us to limit processing in certain circumstances.</li>
+      <li><strong>Portability</strong> — receive your data in a structured, machine-readable format.</li>
+      <li><strong>Objection</strong> — object to processing based on legitimate interests, including direct marketing.</li>
+      <li><strong>Withdraw consent</strong> at any time where processing is based on consent (e.g., unsubscribe from the newsletter).</li>
+      <li><strong>Lodge a complaint</strong> with your local supervisory authority.</li>
+    </ul>
+    <p>Our legal bases for processing are: <strong>consent</strong> (newsletter subscription, optional cookies), <strong>legitimate interests</strong> (operating the site, fraud prevention, aggregate analytics), and <strong>legal obligation</strong> (responding to lawful requests).</p>
+
+    <h2 id="rights-ca">California rights <em>(CCPA / CPRA)</em></h2>
+    <p>If you are a California resident, the California Consumer Privacy Act ("CCPA") and California Privacy Rights Act ("CPRA") give you specific rights:</p>
+    <ul>
+      <li>The right to know what personal information we collect, use, disclose, and (if applicable) sell or share.</li>
+      <li>The right to delete personal information we have collected from you.</li>
+      <li>The right to correct inaccurate personal information.</li>
+      <li>The right to opt out of the sale or sharing of personal information.</li>
+      <li>The right to limit use and disclosure of sensitive personal information.</li>
+      <li>The right to non-discrimination for exercising any of these rights.</li>
+    </ul>
+    <p>We do not sell personal information in the traditional sense. See <a href="#do-not-sell">Do Not Sell or Share</a> below for details on what constitutes a "sale" under the CPRA and how to opt out.</p>
+
+    <h2 id="do-not-sell">Do Not Sell or Share My <em>Personal Information</em></h2>
+    <p>SleekDrops does not sell your personal information for monetary consideration. However, under the broader definitions of "sale" and "sharing" in the CPRA and similar U.S. state laws, the use of certain analytics or advertising cookies (if and when we enable display advertising) may be considered a "share" for cross-context behavioural advertising.</p>
+    <p>To opt out of any such sharing, or to exercise any other privacy right, email <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a> with the subject line "Privacy Request." We honour the Global Privacy Control (GPC) signal where technically feasible.</p>
+
+    <h2 id="changes">Changes to this <em>policy</em></h2>
+    <p>We may update this policy from time to time to reflect changes in our practices or applicable law. When we do, we will update the "Last updated" date at the top of this page. Material changes will be announced in the newsletter and on the homepage for at least 14 days.</p>
+
     <h2 id="contact">Contact <em>us</em></h2>
-    <p>Questions about this policy, or want your data removed? Email <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a> or use the form on our <a href="/contact">contact page</a>. We aim to respond within five working days.</p>
+    <p>Questions about this policy, or want your data removed? Email <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a> or use the form on our <a href="/contact">contact page</a>. We aim to respond within five working days, and within 30 days for any formal access or deletion request under GDPR or CCPA.</p>
   </LegalLayout>
 </BaseLayout>

@@ -1,0 +1,5 @@
+{
+  "$schema": "./affiliate-links.schema.json",
+  "$comment": "Map of /go/[slug] → destination merchant URL. Edit this file (or have the publishing pipeline append to it); the build will regenerate public/_redirects so every link routes correctly at the edge. Each entry MUST have either a region map or a `default` URL. See docs/future_planning.md for the v2 region-routing plan.",
+  "links": {}
+}
