@@ -2,7 +2,7 @@
 
 This file is the operating manual for the scheduled Claude task that researches a trending product, writes an article, finds a license-free image, uploads it to Cloudflare R2, and publishes the post to **`main`** (which auto-deploys to sleekdrops.com).
 
-`automation.md` (in `docs/`) explains the _architecture_. **This file is what the scheduled run executes** — copy-paste system prompts per agent, the exact file/commit mechanics, and a log of known issues so future runs don't rediscover them.
+`automation.md` (in `docs/`) explains the *architecture*. **This file is what the scheduled run executes** — copy-paste system prompts per agent, the exact file/commit mechanics, and a log of known issues so future runs don't rediscover them.
 
 > The trigger prompt you paste into Claude's scheduler is at the very bottom (["The scheduler instruction"](#the-scheduler-instruction)). It just tells Claude to read this file and follow it.
 
@@ -29,7 +29,7 @@ One post per run. Quality over volume — see guardrails.
 ## Setup the run reads first
 
 - **Secrets:** read `./keys.md` (repo root, git-ignored — never commit it). It contains the Amazon tag and Cloudflare R2 credentials. Expected keys:
-  - `AMAZON_TAG` (e.g. `sleekdrops-22`)
+  - `AMAZON_TAG` (e.g. `sleekdrops-20`)
   - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL`
 - **Editorial rules:** `README.md` (voice, honesty, post types) and `docs/automation.md` (full agent design).
 - **Existing content:** check `src/content/blog/` to avoid duplicate angles, and `src/data/affiliate-links.json` to reuse existing slugs.
@@ -128,7 +128,7 @@ Same structure, voice, and honesty rules as the Comparison Writer. Link products
 Output JSON: { title, dek, bodyMarkdown, tags[], productSlugs[] }.
 ```
 
-### 4) Image Agent _(search no-watermark image → R2)_
+### 4) Image Agent  *(search no-watermark image → R2)*
 
 ```
 You source the hero image for the post and host it on Cloudflare R2. Input: the draft (title,
@@ -214,7 +214,7 @@ Rules:
 Then write the updated src/data/affiliate-links.json. Output the two file paths.
 ```
 
-### 7) QA gate (run before publishing — see "Checks" below)
+### 7) QA gate  (run before publishing — see "Checks" below)
 
 ```
 You are the quality gate that keeps SleekDrops out of Google's scaled-content-abuse penalty.
@@ -224,7 +224,7 @@ no emoji, no raw merchant URLs, heroImage is non-watermarked (or gradient fallba
 angle is not a duplicate of an existing post.
 ```
 
-### 8) Publisher (commit + push to main)
+### 8) Publisher  (commit + push to main)
 
 ```
 You ship the post. The site is static; publishing = a git push to main (auto-deploys to
@@ -261,7 +261,7 @@ name the file and field). Do not push until it is green.
 
 ---
 
-## Known issues & fixes (READ THIS — saves tokens; do not rediscover)
+## Known issues & fixes  (READ THIS — saves tokens; do not rediscover)
 
 These were hit and resolved while setting up the repo. Honor them:
 
@@ -306,6 +306,32 @@ These were hit and resolved while setting up the repo. Honor them:
    adds only the post `.md` and `affiliate-links.json` (plus `package.json`/`pnpm-lock.yaml` if deps
    changed). Self-identify as `SleekDropsBot/1.0` when hitting Amazon (their Nov 2025 Agent Terms).
 
-_(Append new gotchas here as you hit them, with the fix, so the next run doesn't pay to relearn it.)_
+*(Append new gotchas here as you hit them, with the fix, so the next run doesn't pay to relearn it.)*
 
 ---
+
+## The scheduler instruction
+
+Paste this as the prompt for the Claude scheduled task (it just points Claude at this file):
+
+```
+You are the SleekDrops daily auto-publisher. The repository is the connected SleekDrops folder.
+
+1. Read scheduler.md in the repo root and follow it exactly, top to bottom.
+2. Read keys.md (repo root) for the Amazon tag and Cloudflare R2 credentials. If it's missing or
+   incomplete, stop and report — do not fabricate secrets or publish without them.
+3. Determine today's category from the rotation in scheduler.md.
+4. Run the pipeline: Trend Scout -> Router -> Writer -> Image Agent (find a license-free,
+   no-watermark image and upload it to Cloudflare R2) -> Affiliate Resolver -> Assembler -> QA.
+5. Pass the QA "Pre-push checks". Fix anything that fails before continuing.
+6. Publish: commit and push the new post + affiliate-links.json to `main`.
+7. If you discover and fix a new issue, append it to the "Known issues & fixes" section of
+   scheduler.md and include that change in your commit.
+8. Report back: the post title, URL (https://sleekdrops.com/blog/<slug>), category, affiliate
+   slugs added, and the R2 image URL (or note the gradient fallback).
+
+Honor every guardrail in scheduler.md: people-first quality over volume, never an auto-published
+review, never a raw merchant URL, never a watermarked image, never commit secrets.
+```
+
+Schedule suggestion: once daily, e.g. **06:00** local (`0 6 * * *`).
