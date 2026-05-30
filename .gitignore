@@ -8,6 +8,10 @@ public/_redirects
 # dependencies
 node_modules/
 
+# pnpm local content-addressable store (created by pnpm install in the repo
+# directory — should never be committed; CI installs into its own store)
+.pnpm-store/
+
 # npm lockfile — pnpm is the workspace package manager
 package-lock.json
 
