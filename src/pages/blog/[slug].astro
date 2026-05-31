@@ -15,7 +15,6 @@ import RelatedPosts from '@components/blog/RelatedPosts.astro';
 import { getAllPosts, getRelatedPosts, type BlogPost } from '@lib/posts';
 import { getAuthor } from '@data/authors';
 import { getCategory } from '@data/categories';
-import { getProduct } from '@data/products';
 import { buildArticleSchema, buildMeta, buildReviewSchema } from '@lib/seo';
 import { emphasiseLastWord, formatLong } from '@lib/format';
 
@@ -33,7 +32,7 @@ const { post } = Astro.props;
 const { Content, headings } = await post.render();
 const author = getAuthor(post.data.author);
 const category = getCategory(post.data.category);
-const product = post.data.product ? getProduct(post.data.product) : undefined;
+const product = post.data.product;
 const related = await getRelatedPosts(post, 3);
 const headlineHtml = emphasiseLastWord(post.data.title);
 
@@ -45,7 +44,7 @@ const meta = buildMeta({
   type: 'article',
 });
 const schema = product
-  ? buildReviewSchema(post, author, product)
+  ? buildReviewSchema(post, author)
   : buildArticleSchema(post, author);
 ---
 <BaseLayout {...meta} schema={schema} active="blog" progress>
@@ -107,9 +106,9 @@ const schema = product
 
     <div class="article-grid">
       <ArticleBody>
-        {product && <Verdict product={product} />}
+        {product && <Verdict product={product} postSlug={post.slug} />}
         <Content />
-        {product && <ProductCallout product={product} />}
+        {product && <ProductCallout product={product} postSlug={post.slug} />}
         {product && <ProsConsList pros={product.pros} cons={product.cons} />}
         <AffiliateDisclosure />
       </ArticleBody>

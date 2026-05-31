@@ -9,25 +9,25 @@ SleekDrops.com is a quietly opinionated publication. Picture a senior product re
 
 ## What this project is
 
-The Astro frontend that renders SleekDrops.com. It pairs a small, editorial design system with a content pipeline so the writing — not the chrome — does the work.
+The Astro frontend that renders SleekDrops.com. Editorial content lives in a separate repo, [sleekdrops-cms](https://github.com/DevMahisaur/sleekdrops-cms), which is cloned at build time. This repo holds the framework, components, layouts, and structural data (authors, categories, deals, promos).
 
-Two audiences read this repo:
+Two audiences read this codebase:
 
-- **Editorial and operations.** People who add posts, deals, promo codes, and authors. Most of that work happens in `src/content/blog/` and `src/data/`. See "Business rules" below.
-- **Engineering.** People who change layouts, add components, or wire new data sources. See **[AGENTS.md](./AGENTS.md)** for the full technical handbook — stack, folder structure, tokens, schemas, commands, and the post-publishing checklist.
+- **Editorial / content agents.** You don't work here — you work in [sleekdrops-cms](https://github.com/DevMahisaur/sleekdrops-cms). Start with its `AGENTS.md`.
+- **Engineering.** Layouts, components, build pipeline, design tokens. Start with **[AGENTS.md](./AGENTS.md)**.
 
 ---
 
 ## Business rules & context
 
-These are the rules behind the product. They predate the code and survive any rewrite of it.
+These rules survive any rewrite of the code.
 
 ### What we publish
 
 | Type | Use for | Rules |
 |---|---|---|
 | **Article** | News, trends, educational pieces | No length minimum. |
-| **Review** | Single product, in-depth | ≥ 1,200 words. Honest decimal rating (1.0–5.0). 3–5 genuine pros, 2–4 genuine cons. Quick Verdict block at the top. |
+| **Review** | Single product, in-depth | ≥ 1,200 words. Honest decimal rating (1.0–5.0). 3–5 pros, 2–4 cons. Quick Verdict block at the top. Structured product data embedded in frontmatter. |
 | **Guide** | "Best X for Y" buying guides | ≥ 1,500 words. Side-by-side test across ≥ 3 contenders. |
 | **Roundup** | Top-N listicles | Scored against a published rubric. |
 
@@ -35,41 +35,39 @@ Categories: **Tech · Home · Fashion · Health · Finance · Travel.**
 
 ### Editorial principles (the three we don't break)
 
-1. **No paid placements. Ever.** No sponsorships, no "promoted" posts. Every product is either bought with our own money or borrowed for testing.
-2. **If we couldn't test it, we don't review it.** Reviews require at least two weeks of real-world use against the nearest competitor.
+1. **No paid placements. Ever.** No sponsorships, no "promoted" posts.
+2. **If we couldn't test it, we don't review it.** Reviews require ≥2 weeks of real-world use. The autonomous pipeline writes articles, guides, and roundups only — true reviews stay human-driven.
 3. **The cons column is always full.** Every product has flaws. If we can't think of any, we haven't tested long enough.
 
 ### Voice
 
-- **Editorial, not promotional.** Even though every post drives an affiliate click, copy never reads like a sales pitch.
-- **Honest by rule.** Decimal ratings (4.3, not 4.5★). Genuine pros and cons.
-- **Plain and direct.** Short clauses. Concrete nouns. No "leverage," "unleash," or "revolutionize."
-- **Calm urgency for deals.** Deals have real `expiresAt` timestamps — copy says "Ends Friday" not "HURRY!!"
-- **No emoji** in editorial copy. The unicode `★` in star ratings is the single exception.
+- **Editorial, not promotional.** Copy never reads like a sales pitch.
+- **Honest by rule.** Decimal ratings (4.3, not 4.5★).
+- **Plain and direct.** Short clauses. Concrete nouns.
+- **Calm urgency for deals.** "Ends Friday," not "HURRY!!"
+- **No emoji** in editorial copy (★ in star ratings is the single exception).
 
 ### Deals & affiliate rules
 
-- **Always disclose.** Every page with an affiliate link shows the calm `AffiliateDisclosure` block. Outbound product CTAs carry `rel="sponsored nofollow"`.
-- **Never fabricate prices.** Deal data must reflect the merchant's current price; refresh `updatedAt` when prices change.
+- **Always disclose.** Every page with an affiliate link shows `AffiliateDisclosure`. Outbound CTAs carry `rel="sponsored nofollow"`.
+- **Never fabricate prices.** Refresh `updatedAt` when prices change.
 - **Always set `expiresAt`.** Stale deals fall out of the live list automatically.
-- **Code in plain text.** When a promo requires a code, show it as a copyable string — not a hidden reveal.
+- **All affiliate destinations** go through `/go/<slug>` — the slug-to-URL map lives in [sleekdrops-cms/data/affiliate-links.json](https://github.com/DevMahisaur/sleekdrops-cms/blob/main/data/affiliate-links.json).
 
 ### Content publishing flow
 
-Content lands as committed markdown in `src/content/blog/` (one file per post). A push to `main` triggers a Cloudflare Pages build; a push to `develop` deploys to the staging URL. The frontend renders from the local content collection — swapping in a remote source later is a single-file change in `src/lib/posts.ts`.
-
-Affiliate destinations are managed in `src/data/affiliate-links.json`. The `prebuild` step regenerates `public/_redirects` so every `/go/[slug]` resolves at the Cloudflare edge with no runtime work.
+Editorial content lives in **sleekdrops-cms**. A push to its `main` branch dispatches a `content-updated` event to this repo, which triggers a Cloudflare Pages rebuild. The build clones sleekdrops-cms, copies posts into `src/content/blog/`, regenerates `public/_redirects` from the affiliate JSON, and ships. End-to-end: ~90 seconds.
 
 ---
 
 ## For developers
 
-All technical detail — stack, folder structure, token system, content schema, commands, and the "how do I add a post / component / page" checklists — lives in **[AGENTS.md](./AGENTS.md)**. Start there.
+All technical detail — stack, folder structure, content fetch pipeline, token system, schemas, commands — lives in **[AGENTS.md](./AGENTS.md)**.
 
 Quickstart:
 
 ```bash
 pnpm install
-pnpm dev          # http://localhost:4321
-pnpm build        # astro check + production build
+pnpm dev          # fetches content from sleekdrops-cms, then http://localhost:4321
+pnpm build        # full production build
 ```

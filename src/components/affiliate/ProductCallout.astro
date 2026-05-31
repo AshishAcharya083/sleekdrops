@@ -1,32 +1,38 @@
 ---
 import Button from '@components/ui/Button.astro';
 import Eyebrow from '@components/ui/Eyebrow.astro';
-import type { Product } from '@data/products';
+import type { ProductData } from '../../content/config';
 
 /**
  * ProductCallout — dark "editor's choice" panel inserted into the
  * article body. Carries an affiliate link with sponsored nofollow rel.
+ *
+ * The affiliate href is built from the post slug: every review post's
+ * filename must match a key in sleekdrops-cms/data/affiliate-links.json.
  */
 export interface Props {
-  product: Product;
+  product: ProductData;
+  postSlug: string;
   eyebrow?: string;
 }
-const { product, eyebrow = "Editor's choice" } = Astro.props;
+const { product, postSlug, eyebrow } = Astro.props;
+const href = `/go/${postSlug}`;
+const eyebrowText = eyebrow ?? product.badge ?? "Editor's choice";
 ---
 <aside class="product-callout">
   <div class="logo" aria-hidden="true">{product.brandMark}</div>
   <div>
-    <Eyebrow dot accent>{eyebrow}</Eyebrow>
+    <Eyebrow dot accent>{eyebrowText}</Eyebrow>
     <h4>{product.name}</h4>
     <p class="desc">{product.tagline}</p>
   </div>
   <div class="cta">
     <div class="price">
-      {product.offer.price}
-      {product.offer.priceWas && <span class="price-was">{product.offer.priceWas}</span>}
+      {product.price}
+      {product.priceWas && <span class="price-was">{product.priceWas}</span>}
     </div>
-    <Button href={product.offer.href} variant="accent" arrow rel="sponsored nofollow">
-      View at {product.offer.retailer}
+    <Button href={href} variant="accent" arrow rel="sponsored nofollow">
+      View at {product.retailer}
     </Button>
   </div>
 </aside>

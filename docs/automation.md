@@ -1,8 +1,10 @@
 # Automation — the agentic publishing pipeline
 
-How SleekDrops goes from "what's trending right now" to a published, affiliate-monetized article with zero manual writing. This document is the contract every agent follows. Build it once here as a spec; implement it in the Gemini Agent Development Kit (ADK) later.
+How SleekDrops goes from "what's trending right now" to a published, affiliate-monetized article with zero manual writing. This document is the engineering spec for the pipeline; implement it in the Google Agent Development Kit (GEAP/ADK).
 
-The site is fully static (Astro → Cloudflare Pages). **Publishing = writing a schema-valid markdown file + appending an affiliate-link entry + a `git push`.** No backend, no database. That single fact shapes the whole pipeline: the final agent's job is a commit, not an API call.
+**The agent never touches this Astro repo.** Content lives in a separate repository — **[sleekdrops-cms](https://github.com/DevMahisaur/sleekdrops-cms)** — whose `AGENTS.md` is the operating manual the writer agents read. Posts and affiliate-link JSON are committed there; the main site clones that repo at build time.
+
+The site is fully static (Astro → Cloudflare Pages). **Publishing = writing a schema-valid markdown file in sleekdrops-cms + appending an affiliate-link entry + a `git push` to sleekdrops-cms.** A push to sleekdrops-cms's `main` dispatches a `content-updated` event to this main repo, which rebuilds and redeploys in ~90s. No backend, no database. The final agent's job is a commit to sleekdrops-cms, not this repo.
 
 ---
 
@@ -31,7 +33,7 @@ https://www.amazon.com/dp/{ASIN}?tag=sleekdrops-22
 **The agent never writes a raw merchant URL into a post.** It uses the `/go/<slug>` indirection:
 
 - In the markdown body: `[Sony WH-1000XM6](/go/sony-wh-1000xm6)`
-- In `src/data/affiliate-links.json` it appends the real destination:
+- In sleekdrops-cms's `data/affiliate-links.json` it appends the real destination:
 
 ```json
 "sony-wh-1000xm6": {
@@ -101,7 +103,7 @@ Every agent reads and writes one evolving JSON object. This is the contract betw
   "affiliate": [                         // filled by agent 4
     { "slug": "anker-prime-27650", "asin": "B0CX1W2Y3Z", "url": "https://www.amazon.com/dp/B0CX1W2Y3Z?tag=sleekdrops-22" }
   ],
-  "file": { "slug": "anker-vs-ugreen-power-bank", "path": "src/content/blog/anker-vs-ugreen-power-bank.md" }
+  "file": { "slug": "anker-vs-ugreen-power-bank", "path": "sleekdrops-cms/posts/anker-vs-ugreen-power-bank.md" }
 }
 ```
 
@@ -188,7 +190,7 @@ For each linked product:
 1. Resolve the **ASIN** (Amazon product ID) — from the trend data or a lookup.
 2. Build the destination URL: `https://www.amazon.com/dp/{ASIN}?tag=sleekdrops-22` (substitute the live tag from config/secret — never hard-code; keep the tag in one place).
 3. Choose a stable, human-readable **slug** (kebab-case, product-identifying, e.g. `anker-prime-27650`). Reuse an existing slug if the product is already in `affiliate-links.json` (don't duplicate).
-4. Stage an append to `src/data/affiliate-links.json`:
+4. Stage an append to sleekdrops-cms's `data/affiliate-links.json`:
 
 ```json
 "anker-prime-27650": {
@@ -197,7 +199,7 @@ For each linked product:
 }
 ```
 
-**Validation:** the destination must be a valid absolute URL with the tag present, and the JSON must still pass `src/data/affiliate-links.schema.json` (each entry requires `default`). Slugs in the body must exactly match keys in the JSON, or the link 404s.
+**Validation:** the destination must be a valid absolute URL with the tag present, and the JSON must still pass sleekdrops-cms's `data/affiliate-links.schema.json` (each entry requires `default`). Slugs in the body must exactly match keys in the JSON, or the link 404s. sleekdrops-cms's `scripts/validate.ts` (run in its CI) catches mismatches before merge.
 
 **Multi-program future:** when you add CJ/Awin/Impact, this agent picks the right program per merchant and may write region keys (`us`, `gb`, `de`) instead of just `default`.
 
@@ -218,7 +220,7 @@ dek: "..."                   # required, one-sentence subhead
 category: "Tech"             # required, one of the 6 exactly
 postType: "guide"            # article | guide | roundup  (NOT review)
 kind: "Comparison"           # optional human label badge
-author: "theo"               # required, MUST exist in src/data/authors.ts
+author: "theo"               # required, MUST be an id from the fixed roster (main repo authors.ts)
 tags: ["anker", "power bank"]
 pubDate: "2026-05-30"        # required
 readTime: 9                  # required, integer minutes
@@ -229,12 +231,12 @@ draft: false                 # optional
 ```
 
 **Rules the assembler enforces:**
-- `author` must be an existing id in `src/data/authors.ts`. The pipeline uses a fixed roster of bylines; pick the author whose beat matches the category. (Do **not** invent authors — unknown id fails the build. If you want a dedicated automation byline, add it to `authors.ts` once, manually.)
+- `author` must be an existing id in the main repo's `src/data/authors.ts` (the roster is fixed: `mira`, `theo`, `aiko`, `lina`, `sam`, `beatriz`). Pick the author whose beat matches the category. Do **not** invent authors — unknown id fails the build.
 - `cover` is one of `fill-1`…`fill-8` (placeholder gradient; v1 has no per-post hero image — see `docs/future_planning.md` for the R2 image plan when you add real images).
 - `slug` = filename (kebab-case, unique). If a file with that slug exists, append a disambiguator or skip (idempotency via `runId`).
 - Body `/go/<slug>` links must all have matching keys in `affiliate-links.json`.
 
-**Writes:** `src/content/blog/<slug>.md` and the updated `src/data/affiliate-links.json`.
+**Writes:** sleekdrops-cms's `posts/<slug>.md` and the updated `data/affiliate-links.json`.
 
 **Output:** `brief.file`.
 
@@ -245,8 +247,8 @@ draft: false                 # optional
 **Job:** the quality bar that keeps you out of scaled-content-abuse territory. Runs before anything is committed.
 
 **Automated checks:**
-- `pnpm check` (astro type-check + frontmatter schema validation) passes.
-- `node scripts/generate-redirects.mjs` runs clean (every `/go/` slug resolves).
+- sleekdrops-cms `pnpm validate` passes (mirror of the main repo's content schema + raw-URL ban + slug presence in affiliate JSON).
+- Main repo CI (after the content-updated dispatch fires) runs `pnpm build` cleanly — `astro check` + redirects generation + astro build.
 - Word-count minimums met for the post type.
 - Cons/trade-offs section is non-empty; a winner is named; price claims have a source.
 - No banned hype words; no emoji; no paid-placement phrasing; affiliate disclosure present (the layout injects `AffiliateDisclosure` automatically, so this is just a sanity check).
@@ -258,20 +260,22 @@ draft: false                 # optional
 
 ## Agent 7 — Publisher
 
-**Job:** ship it the only way a static site can — via git.
+**Job:** ship it the only way a static site can — via git. All writes go to the **sleekdrops-cms** repo, not the main Astro repo.
 
 ```bash
+cd sleekdrops-cms
 git checkout -b post/<slug>
-git add src/content/blog/<slug>.md src/data/affiliate-links.json
+git add posts/<slug>.md data/affiliate-links.json
 git commit -m "Add <postType>: <title>"
 git push -u origin post/<slug>
-# open PR into develop  → GitHub Actions builds + deploys to develop.sleekdrops.com
-# human reviews staging → merge develop → main → deploys to sleekdrops.com
+# open PR against main         → sleekdrops-cms CI runs `pnpm validate`
+# human reviewer / autonomous gate approves → merge to main
+# notify-main.yml fires        → repository_dispatch to DevMahisaur/sleekdrops
+# main repo CI runs `pnpm build` → Cloudflare Pages deploys
 ```
 
-- Push to `develop` deploys to staging; merge `develop → main` goes live (see `docs/deployment.md`).
-- The CI runs `pnpm prebuild` (regenerates `_redirects` from the JSON) → `astro check` → `astro build`. If the assembler did its job, this is green.
-- For full autonomy later: commit straight to `main`. Keep the Editor gate either way.
+- The main repo's CI runs `pnpm prebuild` (clones sleekdrops-cms via `fetch-content.mjs` → regenerates `_redirects` from the JSON) → `astro check` → `astro build`. If the assembler did its job, this is green.
+- For full autonomy later: agent merges PRs directly in sleekdrops-cms after CI passes. Keep the Editor gate either way.
 
 **Amazon agent compliance:** Amazon's Nov 2025 Agent Terms require automated systems that hit Amazon to self-identify in their user-agent (e.g. `SleekDropsBot/1.0`). Set this on any agent that scrapes Amazon for ASIN/price.
 
@@ -317,6 +321,6 @@ One post per category per day, deep and people-first — not a farm.
 - [ ] Never auto-publish a single-product `review` (needs real hands-on testing).
 - [ ] Cons column always full; name a winner; cite real signals (E-E-A-T).
 - [ ] One excellent post/day over volume (avoid scaled-content-abuse penalties).
-- [ ] `pnpm check` + `generate-redirects.mjs` must pass before commit.
-- [ ] Human approves `develop → main` until output is proven.
+- [ ] sleekdrops-cms `pnpm validate` must pass before merge.
+- [ ] Human approves PRs in sleekdrops-cms until output is proven.
 - [ ] Self-identify the bot's user-agent when accessing Amazon.

@@ -6,9 +6,13 @@ import { todaysDrop } from '@data/deals';
 /**
  * DropPanel — the dark featured-deal card in the hero. Data lives in
  * src/data/deals.ts so editorial and merchandising stay out of layout.
+ *
+ * Renders nothing when there's no active drop (empty deals array), so it's
+ * safe to drop into a layout unconditionally.
  */
 const d = todaysDrop;
 ---
+{d && (
 <aside class="drop-panel" id="today">
   <div>
     <Eyebrow dot>Today's drop · {d.brand}</Eyebrow>
@@ -25,6 +29,7 @@ const d = todaysDrop;
     <Button href={`/deals/${d.slug}`} variant="accent" arrow>View deal</Button>
   </div>
 </aside>
+)}
 
 <style>
   .drop-panel {

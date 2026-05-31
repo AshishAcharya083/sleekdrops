@@ -8,9 +8,10 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "astro dev",
-    "start": "astro dev",
-    "prebuild": "node scripts/generate-redirects.mjs",
+    "fetch-content": "node scripts/fetch-content.mjs",
+    "dev": "node scripts/fetch-content.mjs && astro dev",
+    "start": "node scripts/fetch-content.mjs && astro dev",
+    "prebuild": "node scripts/fetch-content.mjs && node scripts/generate-redirects.mjs",
     "build": "astro check && astro build",
     "preview": "astro preview",
     "astro": "astro",

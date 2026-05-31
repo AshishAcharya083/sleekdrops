@@ -49,6 +49,10 @@ jobs:
         env:
           SITE_URL: https://develop.sleekdrops.com
           NODE_ENV: production
+          # Same content source as production — develop is a code-only preview
+          # of the site rendered against live editorial content.
+          CMS_REPO_URL: https://x-access-token:${{ secrets.CMS_CONTENT_PAT }}@github.com/DevMahisaur/sleekdrops-cms.git
+          CMS_REPO_REF: main
         run: pnpm build
 
       - name: Deploy to Cloudflare Pages (develop)

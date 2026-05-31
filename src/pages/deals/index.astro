@@ -8,7 +8,7 @@ import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro
 import { getActiveDeals, todaysDrop } from '@data/deals';
 import { buildCategorySchema, buildMeta } from '@lib/seo';
 
-const deals = getActiveDeals().filter((d) => d.id !== todaysDrop.id);
+const deals = getActiveDeals().filter((d) => d.id !== todaysDrop?.id);
 
 const desc =
   "Live affiliate deals worth your attention — curated daily, dropped when the price actually drops. We list every code in plain text and every expiry up front.";

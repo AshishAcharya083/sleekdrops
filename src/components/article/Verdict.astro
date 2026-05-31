@@ -1,22 +1,29 @@
 ---
 import Button from '@components/ui/Button.astro';
 import StarRating from '@components/affiliate/StarRating.astro';
-import type { Product } from '@data/products';
+import type { ProductData } from '../../content/config';
 
 /**
  * Verdict — the "Quick Verdict" box that opens every review. Pairs the
  * product tagline with a numeric score, star row, and primary affiliate
- * CTA. Required by the agents.md review-quality rules.
+ * CTA. Required by the review-quality rules in sleekdrops-cms/schema/.
+ *
+ * The affiliate href is built from the post slug: every review post's
+ * filename must match a key in sleekdrops-cms/data/affiliate-links.json.
  */
-export interface Props { product: Product; }
-const { product } = Astro.props;
+export interface Props {
+  product: ProductData;
+  postSlug: string;
+}
+const { product, postSlug } = Astro.props;
+const href = `/go/${postSlug}`;
 ---
 <aside class="verdict">
   <div>
     <h3>Quick verdict</h3>
     <p class="title">{product.tagline}</p>
     <p class="desc">{product.brand} {product.name} — full breakdown below.</p>
-    <Button href={product.offer.href} variant="accent" arrow rel="sponsored nofollow">
+    <Button href={href} variant="accent" arrow rel="sponsored nofollow">
       See current price
     </Button>
   </div>

@@ -1,10 +1,15 @@
 /**
  * Daily deals — the "drops" surface.
  *
- * These are short-lived merchant promos, not editorial posts, so they
- * live as static data (not a content collection). When the merchant feed
- * is wired up, swap this for a fetch in a server endpoint and preserve
- * the same shape.
+ * Real deal data is added by humans/agents to this file. The shape is fixed;
+ * the array starts empty (the bose example shipped with v1 was removed when
+ * editorial content moved into the sleekdrops-cms repo). Deals are intentionally
+ * still TypeScript code-as-data here because the layout queries them at build
+ * time and we want the type system to catch malformed entries before deploy.
+ *
+ * If you need to move deals to the CMS repo later, add a `data/deals.json`
+ * there and have scripts/fetch-content.mjs copy it into .cms-cache/data/, then
+ * re-export from this module.
  */
 
 import type { CategorySlug } from './categories-types';
@@ -34,30 +39,9 @@ export interface Deal {
   featured?: boolean;
 }
 
-// EXAMPLE DEAL — one kept as a template. `href` is a /go/<slug> path so the
-// affiliate destination lives in src/data/affiliate-links.json. Always set a
-// real future `expiresAt`; stale deals drop out of the live list automatically.
-export const dailyDeals: Deal[] = [
-  {
-    id: 'bose-qc-ultra',
-    slug: 'bose-qc-ultra-headphones',
-    brand: 'Bose',
-    brandMark: 'B',
-    title: 'Bose QC Ultra Headphones — lowest price this quarter.',
-    description:
-      'Bose drops the QC Ultra Headphones to $329 — the lowest price we’ve tracked this quarter. No code required at checkout.',
-    priceNow: '$329',
-    priceWas: '$429',
-    discountLabel: 'Save 23%',
-    ends: 'Ends Friday',
-    expiresAt: '2026-12-31',
-    href: '/go/bose-qc-ultra-headphones',
-    category: 'tech',
-    featured: true,
-  },
-];
+export const dailyDeals: Deal[] = [];
 
-export const todaysDrop: Deal =
+export const todaysDrop: Deal | undefined =
   dailyDeals.find((deal) => deal.featured) ?? dailyDeals[0];
 
 export function getDealBySlug(slug: string): Deal | undefined {

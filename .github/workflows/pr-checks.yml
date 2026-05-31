@@ -35,4 +35,7 @@ jobs:
       - name: Build
         env:
           SITE_URL: https://sleekdrops.com
+          # PR builds need to fetch sleekdrops-cms too so astro check sees the posts.
+          CMS_REPO_URL: https://x-access-token:${{ secrets.CMS_CONTENT_PAT }}@github.com/DevMahisaur/sleekdrops-cms.git
+          CMS_REPO_REF: main
         run: pnpm build

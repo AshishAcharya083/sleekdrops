@@ -21,7 +21,6 @@ import type {
 import type { Author } from '@data/authors';
 import type { Deal } from '@data/deals';
 import type { Promo } from '@data/promos';
-import type { Product } from '@data/products';
 import type { BlogPost } from './posts';
 
 const siteUrl = (
@@ -136,11 +135,29 @@ export function buildArticleSchema(
   };
 }
 
+/**
+ * Build Product + Review JSON-LD from a review post's embedded product data.
+ *
+ * Pre-condition: post.data.postType === 'review' AND post.data.product is set.
+ * Enforced by the content-collection refine() in src/content/config.ts.
+ *
+ * The Offer URL points to /go/<post.slug>; the redirect target lives in
+ * the sleekdrops-cms repo's data/affiliate-links.json keyed by the same slug.
+ */
 export function buildReviewSchema(
   post: BlogPost,
   author: Author,
-  product: Product,
 ): WithContext<Thing> {
+  const product = post.data.product;
+  if (!product) {
+    // Should never happen — the content schema enforces this. Throw loudly so
+    // we catch any drift between schema and runtime.
+    throw new Error(
+      `buildReviewSchema called on post "${post.slug}" but post.data.product is undefined. ` +
+        'Set postType: review and add a product object in frontmatter, or call buildArticleSchema instead.',
+    );
+  }
+
   const reviewedProduct: ProductSchema = {
     '@type': 'Product',
     name: product.name,
@@ -149,9 +166,9 @@ export function buildReviewSchema(
     offers: {
       '@type': 'Offer',
       priceCurrency: 'USD',
-      price: product.offer.price.replace(/[^0-9.]/g, ''),
+      price: product.price.replace(/[^0-9.]/g, ''),
       availability: 'https://schema.org/InStock',
-      url: product.offer.href,
+      url: absoluteUrl(`/go/${post.slug}`),
     },
     aggregateRating: {
       '@type': 'AggregateRating',
