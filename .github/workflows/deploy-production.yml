@@ -58,7 +58,7 @@ jobs:
           # Used by scripts/fetch-content.mjs to clone sleekdrops-cms during
           # the prebuild step. The PAT in CMS_CONTENT_PAT only needs
           # `contents: read` on sleekdrops-cms.
-          CMS_REPO_URL: https://x-access-token:${{ secrets.CMS_CONTENT_PAT }}@github.com/DevMahisaur/sleekdrops-cms.git
+          CMS_REPO_URL: https://x-access-token:${{ secrets.CMS_CONTENT_PAT }}@github.com/AshishAcharya083/sleekdrops-cms.git
           CMS_REPO_REF: main
         run: pnpm build
 

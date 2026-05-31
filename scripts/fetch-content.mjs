@@ -5,8 +5,8 @@
 // Run by prebuild and dev scripts; idempotent and safe to re-run.
 //
 // Env vars:
-//   CMS_REPO_URL   — e.g. https://x-access-token:${PAT}@github.com/DevMahisaur/sleekdrops-cms.git
-//                    or git@github.com:DevMahisaur/sleekdrops-cms.git
+//   CMS_REPO_URL   — e.g. https://x-access-token:${PAT}@github.com/AshishAcharya083/sleekdrops-cms.git
+//                    or git@github.com:AshishAcharya083/sleekdrops-cms.git
 //   CMS_REPO_REF   — branch or tag to fetch (default: main)
 //
 // Both have sensible defaults for local dev (uses your existing git auth).
@@ -29,7 +29,7 @@ const BLOG_TARGET = resolve(ROOT, 'src/content/blog');
 
 const REPO =
   process.env.CMS_REPO_URL ??
-  'https://github.com/DevMahisaur/sleekdrops-cms.git';
+  'https://github.com/AshishAcharya083/sleekdrops-cms.git';
 const REF = process.env.CMS_REPO_REF ?? 'main';
 
 function log(msg) {
