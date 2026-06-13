@@ -48,9 +48,16 @@ https://www.amazon.com/dp/{ASIN}?tag=sleekdrops-22
 }
 ```
 
-On build, `scripts/generate-redirects.mjs` reads that JSON and writes `public/_redirects`, so `/go/sony-wh-1000xm6` 302s to the tagged URL at Cloudflare's edge, with `rel="sponsored nofollow"` already on the link. **`affiliate-links.json` is the single source of truth for every destination** — change your tag once there and every link on the site updates. `products.ts`, `deals.ts`, and `promos.ts` all reference `/go/<slug>` too, never raw URLs.
+On build, `scripts/generate-redirects.mjs` reads that JSON and emits `functions/_data/affiliate-links.mjs`. The Cloudflare Pages Function `functions/go/[slug].js` then resolves `/go/sony-wh-1000xm6` **at request time** — it reads the visitor's `request.cf.country`, picks the right region + network, and 302s to the tagged URL, with `rel="sponsored nofollow"` already on the link. (A Function is required because a static `_redirects` file can't branch on country; Functions take precedence over `_redirects` for matching routes, so they own `/go/*`.) **The D1 `affiliate_links` table is the single source of truth for every destination.** `products.ts`, `deals.ts`, and `promos.ts` all reference `/go/<slug>` too, never raw URLs.
 
-> When you swap programs (e.g. add Awin/CJ/Impact later), only the `default` value in the JSON changes — the post, the slug, and the redirect stay put.
+> **Regional + multi-network routing** lives in `functions/_lib/affiliates.mjs`. Credentials are derived, never hand-typed: per-marketplace Amazon tags live in `AMAZON` (e.g. `sleekdrops-20` for amazon.com, `sleekdrops-22` for amazon.com.au), and Awin/Commission Factory publisher IDs live in `AWIN_AFFID` / `CF_PUBLISHER_ID`. A link row only carries product-specific data:
+>
+> - **Amazon (geo):** `{ "network": "amazon", "asin": "B0...", "asins": { "us": "B0...", "au": "B0..." }, "default": "https://..." }` — storefront + tag derived from the visitor's region; `asins` overrides ASIN per marketplace, `asin` is the shared fallback.
+> - **Awin:** `{ "network": "awin", "merchant": 1234, "url": "https://merchant.com/p", "default": "https://..." }`
+> - **Commission Factory:** `{ "network": "commissionfactory", "merchant": 1027, "url": "https://...", "default": "https://..." }`
+> - **Legacy / direct** (no `network`): `{ "default": "https://...", "au": "https://..." }` — existing rows keep working; geo-picks a region key if present, else `default`.
+>
+> Adding a region = one line in `COUNTRY_TO_REGION` + one entry per network map. Adding a network = one builder in `NETWORKS`. `default` is always required — it's the fallback when a builder can't produce a URL (missing region ASIN, unset credentials).
 
 ---
 
@@ -280,7 +287,7 @@ git push -u origin post/<slug>
 # main repo CI runs `pnpm build` → Cloudflare Pages deploys
 ```
 
-- The main repo's CI runs `pnpm prebuild` (clones sleekdrops-cms via `fetch-content.mjs` → regenerates `_redirects` from the JSON) → `astro check` → `astro build`. If the assembler did its job, this is green.
+- The main repo's CI runs `pnpm prebuild` (`fetch-content.mjs` pulls posts + links from D1 → `generate-redirects.mjs` emits `functions/_data/affiliate-links.mjs` and the system-only `_redirects`) → `astro check` → `astro build`. Cloudflare then bundles `functions/` into the deploy. If the assembler did its job, this is green.
 - For full autonomy later: agent merges PRs directly in sleekdrops-cms after CI passes. Keep the Editor gate either way.
 
 **Amazon agent compliance:** Amazon's Nov 2025 Agent Terms require automated systems that hit Amazon to self-identify in their user-agent (e.g. `SleekDropsBot/1.0`). Set this on any agent that scrapes Amazon for ASIN/price.

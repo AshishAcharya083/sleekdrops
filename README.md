@@ -56,7 +56,7 @@ Categories: **Tech · Home · Fashion · Health · Finance · Travel.**
 
 ### Content publishing flow
 
-Editorial content lives in **Cloudflare D1** (database `sleekdrops-content`). Publishing = flipping a post's `status` to `published`, then firing a `content-updated` repository dispatch (or pushing to main / running the workflow manually). The build reads published posts and affiliate links from D1, writes posts into `src/content/blog/`, regenerates `public/_redirects`, and ships. End-to-end: ~90 seconds.
+Editorial content lives in **Cloudflare D1** (database `sleekdrops-content`). Publishing = flipping a post's `status` to `published`, then firing a `content-updated` repository dispatch (or pushing to main / running the workflow manually). The build reads published posts and affiliate links from D1, writes posts into `src/content/blog/`, generates the affiliate redirect data for the `/go/*` Pages Function (`functions/go/[slug].js`, which is geo- and network-aware — see `docs/automation.md`), and ships. End-to-end: ~90 seconds.
 
 ---
 
