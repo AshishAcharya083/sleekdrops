@@ -1,3 +1,9 @@
+> **OUTDATED (2026-06-13): content storage moved from the sleekdrops-cms git repo to
+> Cloudflare D1 (database `sleekdrops-content`, tables `posts` + `affiliate_links`).**
+> Everywhere this doc says "commit/push to sleekdrops-cms", read: INSERT/UPDATE rows in
+> D1, then fire a `content-updated` repository dispatch at this repo. The current
+> pipeline design lives in the workspace root: `../AGENT-DESIGN.md`.
+
 # Automation — the agentic publishing pipeline
 
 How SleekDrops goes from "what's trending right now" to a published, affiliate-monetized article with zero manual writing. This document is the engineering spec for the pipeline; implement it in the Google Agent Development Kit (GEAP/ADK).

@@ -3,9 +3,12 @@ name: Deploy to production
 on:
   push:
     branches: [main]
-  # Fired by sleekdrops-cms's notify-main.yml whenever editorial content
-  # changes there (new post, updated affiliate-links.json). Triggers a full
-  # rebuild against the latest content commit — no code change in this repo.
+  # Fired whenever editorial content changes in the D1 database (a post's
+  # status flips to 'published', or affiliate_links rows change). Anything
+  # with a GitHub token can trigger it:
+  #   POST /repos/AshishAcharya083/sleekdrops/dispatches
+  #   {"event_type": "content-updated"}
+  # The future sleekdrops-agent publisher calls this after its D1 writes.
   repository_dispatch:
     types: [content-updated]
   workflow_dispatch:
@@ -55,11 +58,15 @@ jobs:
         env:
           SITE_URL: https://sleekdrops.com
           NODE_ENV: production
-          # Used by scripts/fetch-content.mjs to clone sleekdrops-cms during
-          # the prebuild step. The PAT in CMS_CONTENT_PAT only needs
-          # `contents: read` on sleekdrops-cms.
-          CMS_REPO_URL: https://x-access-token:${{ secrets.CMS_CONTENT_PAT }}@github.com/AshishAcharya083/sleekdrops-cms.git
-          CMS_REPO_REF: main
+          # Used by scripts/fetch-content.mjs to read posts + affiliate links
+          # from Cloudflare D1 during the prebuild step. The database id is
+          # not a secret; CLOUDFLARE_D1_TOKEN needs "Account → D1 → Read".
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: b98d83ac-a2a5-42cb-a367-0cb71b902670
+          CLOUDFLARE_D1_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
+          # Fallback while CLOUDFLARE_D1_TOKEN isn't set — works only if the
+          # Pages deploy token also has D1 read permission.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm build
 
       - name: Deploy to Cloudflare Pages (production)
