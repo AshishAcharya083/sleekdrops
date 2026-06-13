@@ -55,7 +55,8 @@ if (existsSync(envFile)) {
 
 const ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
 const DATABASE_ID = process.env.D1_DATABASE_ID;
-const TOKEN = process.env.CLOUDFLARE_D1_TOKEN ?? process.env.CLOUDFLARE_API_TOKEN;
+// `||` not `??`: CI sets unset secrets to empty strings, which must fall back.
+const TOKEN = process.env.CLOUDFLARE_D1_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
 
 if (!ACCOUNT_ID || !DATABASE_ID || !TOKEN) {
   fail(
