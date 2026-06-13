@@ -67,9 +67,6 @@ jobs:
           # Fallback while CLOUDFLARE_D1_TOKEN isn't set — works only if the
           # Pages deploy token also has D1 read permission.
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          # Google Analytics 4 Measurement ID (public — safe as a secret or
-          # plain env var). Omit to disable analytics in this environment.
-          PUBLIC_GA4_ID: ${{ secrets.PUBLIC_GA4_ID }}
         run: pnpm build
 
       - name: Deploy to Cloudflare Pages (production)
