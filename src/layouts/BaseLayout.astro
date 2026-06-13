@@ -26,11 +26,26 @@ export interface Props extends MetaPayload {
 }
 
 const { schema, active, progress = false, ...meta } = Astro.props;
+
+// GA4 Measurement ID — set PUBLIC_GA4_ID in .env (local) and as a GitHub
+// Actions secret (CI). Omitting it disables analytics silently.
+const ga4Id = import.meta.env.PUBLIC_GA4_ID;
 ---
 <!doctype html>
 <html lang="en">
   <head>
     <SEOHead {...meta} schema={schema} />
+    {ga4Id && (
+      <Fragment>
+        <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${ga4Id}`}></script>
+        <script is:inline define:vars={{ ga4Id }}>
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){ dataLayer.push(arguments); }
+          gtag('js', new Date());
+          gtag('config', ga4Id);
+        </script>
+      </Fragment>
+    )}
   </head>
   <body class="page">
     {progress && <div class="progress-bar" aria-hidden="true" />}
