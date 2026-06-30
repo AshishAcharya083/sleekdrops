@@ -16,6 +16,7 @@
     "preview": "astro preview",
     "astro": "astro",
     "check": "astro check",
+    "test": "node --experimental-strip-types --test 'src/**/*.test.ts'",
     "generate:redirects": "node scripts/generate-redirects.mjs"
   },
   "dependencies": {

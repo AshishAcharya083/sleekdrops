@@ -8,6 +8,7 @@ import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro
 import { promos, type Promo } from '@data/promos';
 import { getCategoryBySlug } from '@data/categories';
 import { buildMeta, buildOfferSchema } from '@lib/seo';
+import { EVENTS } from '@lib/analytics';
 
 export const getStaticPaths = (async () => {
   return promos.map((promo) => ({
@@ -52,7 +53,13 @@ const schema = buildOfferSchema(promo, `/promos/${promo.slug}`, promo.title);
         <code>{promo.code}</code>
       </div>
       <p class="disc-label">{promo.discountLabel}</p>
-      <Button href={promo.href} variant="accent" arrow rel="sponsored nofollow">
+      <Button
+        href={promo.href}
+        variant="accent"
+        arrow
+        rel="sponsored nofollow"
+        data={{ track: EVENTS.affiliateClick, 'track-props': JSON.stringify({ slug: promo.slug, brand: promo.brand, placement: 'promo-detail' }) }}
+      >
         Apply code at {promo.brand}
       </Button>
       <p class="terms"><strong>Terms.</strong> {promo.terms}</p>
