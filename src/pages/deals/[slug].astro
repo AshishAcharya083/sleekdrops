@@ -8,6 +8,7 @@ import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro
 import { dailyDeals, type Deal } from '@data/deals';
 import { getCategoryBySlug } from '@data/categories';
 import { buildMeta, buildOfferSchema } from '@lib/seo';
+import { EVENTS } from '@lib/analytics';
 
 export const getStaticPaths = (async () => {
   return dailyDeals.map((deal) => ({
@@ -27,7 +28,13 @@ const meta = buildMeta({
 });
 const schema = buildOfferSchema(deal, `/deals/${deal.slug}`, deal.title);
 ---
-<BaseLayout {...meta} schema={schema} active="deals">
+<BaseLayout
+  {...meta}
+  schema={schema}
+  active="deals"
+  screen="deal-detail"
+  pageProps={{ category: deal.category, slug: deal.slug, brand: deal.brand }}
+>
   <div class="container">
     <Breadcrumbs
       items={[
@@ -58,7 +65,13 @@ const schema = buildOfferSchema(deal, `/deals/${deal.slug}`, deal.title);
           <code>{deal.code}</code>
         </div>
       )}
-      <Button href={deal.href} variant="accent" arrow rel="sponsored nofollow">
+      <Button
+        href={deal.href}
+        variant="accent"
+        arrow
+        rel="sponsored nofollow"
+        data={{ track: EVENTS.affiliateClick, 'track-props': JSON.stringify({ slug: deal.slug, brand: deal.brand, placement: 'deal-detail' }) }}
+      >
         View deal at {deal.brand}
       </Button>
       <p class="ends">{deal.ends}</p>

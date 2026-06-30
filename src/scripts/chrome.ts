@@ -1,7 +1,7 @@
 /**
  * Chrome behaviour — runs once per page load.
  *
- * Handles four things, all set up declaratively from the DOM so we never
+ * Handles five things, all set up declaratively from the DOM so we never
  * need to import this from a component:
  *
  *  1. Dark-mode toggle (persisted to localStorage `sd-theme`).
@@ -9,10 +9,15 @@
  *     the page — i.e. inside a BaseLayout with `progress`).
  *  3. TOC active-link highlighting on scroll (uses any `[data-toc]` nav).
  *  4. Smooth-scroll for in-page anchor links.
+ *  5. Product-analytics dispatch (page view + funnel clicks) from `data-*`
+ *     hooks, via the analytics wrapper (see docs/analytics-events.md).
  *
- * Analytics is bootstrapped separately by the ConsentBanner island, which
- * gates Mixpanel/GA4 behind the visitor's consent choice.
+ * The analytics SDKs themselves are bootstrapped separately by the
+ * ConsentBanner island, which gates Mixpanel/GA4 behind the visitor's consent
+ * choice; track() here simply buffers until that choice is made.
  */
+
+import { track, EVENTS, type EventProps } from '@lib/analytics';
 
 declare global {
   interface Window {
@@ -23,6 +28,43 @@ declare global {
 if (!window.__sdChromeInit) {
   window.__sdChromeInit = true;
   const root = document.documentElement;
+
+  /* ---- Product analytics ----------------------------------------------
+   * All tracking is wired declaratively from the DOM (matching the rest of
+   * this file): pages tag the <body> with the page-view payload, and funnel
+   * elements carry `data-track` + an optional JSON `data-track-props`. See
+   * docs/analytics-events.md for the taxonomy. Analytics is initialised behind
+   * the consent gate by the ConsentBanner island; track() buffers until the
+   * visitor chooses and drops everything on a decline, so none of this needs
+   * guarding. */
+  const parseProps = (raw: string | undefined): EventProps | undefined => {
+    if (!raw) return undefined;
+    try {
+      return JSON.parse(raw) as EventProps;
+    } catch {
+      return undefined;
+    }
+  };
+
+  /* Page view: every page reports a 'Page Viewed', enriched with the screen
+     context BaseLayout declares on <body data-page-view>. path/referrer are
+     always included so a page that declares no screen is still counted. */
+  const pageView = parseProps(document.body.dataset.pageView);
+  const screenName = typeof pageView?.screen === 'string' ? pageView.screen : undefined;
+  track(EVENTS.pageView, {
+    path: location.pathname,
+    referrer: document.referrer,
+    ...pageView,
+  });
+
+  /* Funnel-step clicks: hero CTAs, deal cards, affiliate "View deal" buttons.
+     The event fires synchronously here, before the browser follows the link. */
+  document.querySelectorAll<HTMLElement>('[data-track]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const event = el.dataset.track;
+      if (event) track(event, parseProps(el.dataset.trackProps));
+    });
+  });
 
   function toggleTheme(): void {
     const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
@@ -80,6 +122,9 @@ if (!window.__sdChromeInit) {
     .forEach((form) => {
       form.addEventListener('submit', (e) => {
         e.preventDefault();
+        if (form.dataset.signup !== undefined) {
+          track(EVENTS.newsletterSignup, screenName ? { screen: screenName } : undefined);
+        }
         const label = form.dataset.mockLabel ?? '✓ Done';
         const button = form.querySelector('button');
         if (button) button.textContent = label;

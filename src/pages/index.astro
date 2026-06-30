@@ -12,6 +12,7 @@ import { getAllPosts, getFeaturedPost } from '@lib/posts';
 import { getActiveDeals } from '@data/deals';
 import { buildHomeSchema, buildMeta } from '@lib/seo';
 import { formatMedium } from '@lib/format';
+import { EVENTS } from '@lib/analytics';
 
 const [posts, featured, deals] = await Promise.all([
   getAllPosts(),
@@ -29,7 +30,7 @@ const meta = buildMeta({
   pathname: '/',
 });
 ---
-<BaseLayout {...meta} schema={buildHomeSchema()} active="home">
+<BaseLayout {...meta} schema={buildHomeSchema()} active="home" screen="home">
   <section class="hero">
     <div class="container">
       <div class="hero-grid">
@@ -40,8 +41,17 @@ const meta = buildMeta({
             Honest reviews, side-by-side comparisons, and the quiet luxury of a buying guide that doesn't try to sell you anything. We test, we score, you decide.
           </p>
           <div class="hero-actions">
-            <Button href="/blog" variant="primary" arrow>Read the latest</Button>
-            <Button href="#today" variant="outline">See today's drop</Button>
+            <Button
+              href="/blog"
+              variant="primary"
+              arrow
+              data={{ track: EVENTS.heroCtaClick, 'track-props': JSON.stringify({ cta: 'Read the latest', href: '/blog' }) }}
+            >Read the latest</Button>
+            <Button
+              href="#today"
+              variant="outline"
+              data={{ track: EVENTS.heroCtaClick, 'track-props': JSON.stringify({ cta: "See today's drop", href: '#today' }) }}
+            >See today's drop</Button>
           </div>
         </div>
         <DropPanel />

@@ -30,6 +30,21 @@ export type { EventProps, ConsentPrompt };
 
 const GA4_ID = 'G-8B65NZ3BD4';
 
+/**
+ * The product event taxonomy. Every track call uses one of these names so the
+ * vocabulary stays consistent between code and docs/analytics-events.md - the
+ * doc is the canonical reference for properties and owning screens.
+ */
+export const EVENTS = {
+  pageView: 'Page Viewed',
+  heroCtaClick: 'Hero CTA Clicked',
+  dealCardClick: 'Deal Card Clicked',
+  affiliateClick: 'Affiliate Link Clicked',
+  newsletterSignup: 'Newsletter Signup',
+} as const;
+
+export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
+
 const token = import.meta.env.PUBLIC_Mixpanel__ProjectToken;
 
 type Decision = ConsentStatus | 'unknown';
@@ -77,8 +92,16 @@ function writeConsent(status: ConsentStatus): void {
 function ensureMixpanel(): void {
   if (mixpanelReady || !token) return;
   mixpanel.init(token, {
+    // Page views are emitted explicitly (see EVENTS.pageView) with screen
+    // context, so the SDK's contextless auto-pageview is turned off.
     track_pageview: false,
     persistence: 'localStorage',
+    // Funnel-step events fire from click handlers immediately before the
+    // browser navigates (deal cards, affiliate "View deal" buttons). Batching
+    // would queue those events and lose them on unload, so it's disabled and
+    // requests go out via sendBeacon, which survives the page transition.
+    batch_requests: false,
+    api_transport: 'sendBeacon',
     // The SDK auto-attaches URL/referrer defaults that carry raw query
     // strings; we send our own path-reduced values instead.
     property_blacklist: [
@@ -147,12 +170,6 @@ export function track(event: string, props?: EventProps): void {
   buffer.push({ event, props });
 }
 
-/** Record the current page view through the consent-gated, scrubbed pipeline. */
-export function trackPageview(): void {
-  if (typeof location === 'undefined') return;
-  track('Page View', { path: location.pathname, referrer: document.referrer });
-}
-
 /** Persist an explicit opt-in and start sending. */
 export function grantConsent(): void {
   writeConsent('granted');
@@ -167,12 +184,12 @@ export function denyConsent(): void {
 
 /**
  * Resolve the consent state on page load and report which surface (if any) the
- * UI should show. Queues a page view first so it flushes on a silent grant and
- * is dropped on any denial.
+ * UI should show. The page-view event and any funnel events are dispatched by
+ * chrome.ts through the same buffered, consent-gated track() pipeline, so they
+ * flush on a silent grant and are dropped on any denial regardless of which
+ * script ran first.
  */
 export function boot(): ConsentPrompt {
-  trackPageview();
-
   const { prompt, effect } = resolveConsent(readConsent(), hasPrivacySignal());
   if (effect === 'grant') applyGrant();
   else if (effect === 'deny') applyDeny();

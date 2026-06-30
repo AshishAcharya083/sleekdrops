@@ -22,10 +22,15 @@ export type EventProps = Record<string, unknown>;
 const ALLOWED_PROPS = new Set<string>([
   'path',
   'url',
+  'href',
   'referrer',
   'title',
+  'screen',
   'category',
   'slug',
+  'brand',
+  'retailer',
+  'placement',
   'post_type',
   'postType',
   'section',
@@ -44,7 +49,7 @@ const ALLOWED_PROPS = new Set<string>([
 ]);
 
 /** Allowed fields that may carry a URL and must be reduced to path only. */
-const URL_PROPS = new Set<string>(['url', 'referrer', 'path']);
+const URL_PROPS = new Set<string>(['url', 'href', 'referrer', 'path']);
 
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 

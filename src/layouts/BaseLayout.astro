@@ -24,16 +24,35 @@ export interface Props extends MetaPayload {
   active?: HeaderActive;
   /** Show the 2px reading progress bar. */
   progress?: boolean;
+  /**
+   * Canonical screen name. When set, chrome.ts fires the `Page Viewed`
+   * event for this page (see docs/analytics-events.md).
+   */
+  screen?: string;
+  /**
+   * Extra page-view properties (category, deal slug/brand, …). Keep these
+   * non-PII; values that are undefined are dropped.
+   */
+  pageProps?: Record<string, string | undefined>;
 }
 
-const { schema, active, progress = false, ...meta } = Astro.props;
+const { schema, active, progress = false, screen, pageProps, ...meta } = Astro.props;
+
+const pageView = screen
+  ? {
+      screen,
+      ...Object.fromEntries(
+        Object.entries(pageProps ?? {}).filter(([, v]) => v != null),
+      ),
+    }
+  : undefined;
 ---
 <!doctype html>
 <html lang="en">
   <head>
     <SEOHead {...meta} schema={schema} />
   </head>
-  <body class="page">
+  <body class="page" data-page-view={pageView ? JSON.stringify(pageView) : undefined}>
     {progress && <div class="progress-bar" aria-hidden="true" />}
     <Header active={active} />
     <main>
