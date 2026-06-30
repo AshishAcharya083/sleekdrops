@@ -6,7 +6,7 @@ import { buildCategorySchema, buildMeta } from '@lib/seo';
 const meta = buildMeta({
   title: 'Privacy policy',
   description:
-    "How SleekDrops handles your data: privacy-friendly analytics, two first-party cookies, an FTC-compliant affiliate disclosure, and zero data sold to advertisers.",
+    "How SleekDrops handles your data: consent-gated, privacy-friendly analytics, minimal first-party cookies, an FTC-compliant affiliate disclosure, and zero data sold to advertisers.",
   pathname: '/privacy',
 });
 ---
@@ -17,7 +17,7 @@ const meta = buildMeta({
   <LegalLayout
     eyebrow="Legal"
     titleHtml="Privacy <em>policy</em>."
-    updated="May 1, 2026"
+    updated="June 30, 2026"
     toc={[
       { href: '#summary',      label: 'Plain summary' },
       { href: '#scope',        label: 'Scope of this policy' },
@@ -40,7 +40,7 @@ const meta = buildMeta({
   >
     <div class="summary" id="summary">
       <strong>Plain summary</strong>
-      We host on Cloudflare, we use privacy-friendly analytics, we don't sell anything to advertisers, and we use cookies only for affiliate attribution and your dark-mode preference. Most outbound product links are affiliate links — we earn a small commission at no extra cost to you. If you signed up for the newsletter you can leave any time with one click.
+      We host on Cloudflare, we use privacy-friendly analytics only with your consent, we don't sell anything to advertisers, and we keep cookies to a minimum: essential ones for your dark-mode preference and saved articles, plus analytics cookies only if you opt in. Most outbound product links are affiliate links — we earn a small commission at no extra cost to you. If you signed up for the newsletter you can leave any time with one click.
     </div>
 
     <h2 id="scope">Scope of this <em>policy</em></h2>
@@ -51,7 +51,7 @@ const meta = buildMeta({
     <p>SleekDrops is a static publication. The site itself stores no personal data about you directly. The following limited information is collected by services we rely on:</p>
     <ul>
       <li><strong>Server logs.</strong> Our host (Cloudflare) automatically logs IP addresses, user-agent strings, and request paths for security, abuse prevention, and performance — standard for any website. We do not access or analyse these logs.</li>
-      <li><strong>Analytics.</strong> We use a privacy-friendly analytics service that records aggregate page views, referrers, and country-level location only. No cookies are set, no fingerprinting takes place, and no cross-site tracking happens.</li>
+      <li><strong>Analytics.</strong> With your consent, we use <strong>Mixpanel</strong> (and Google Analytics 4) for privacy-friendly product analytics, to understand which pages and deals are useful. We record anonymous, aggregate events (page views plus a small set of funnel interactions such as hero call-to-action clicks, deal-card clicks, outbound "View deal" clicks, and newsletter sign-ups) together with non-identifying context only: the screen name, page path, deal or post slug, brand, retailer, call-to-action label, and placement. Personal data is stripped in your browser before any event is sent, so no email addresses, names, full search or query strings, or anything you type is ever collected; Mixpanel and Google may derive approximate location (country/region) from your IP address. Nothing runs until you opt in, and we honour Global Privacy Control / Do-Not-Track signals automatically; see <a href="#cookies">Cookies &amp; tracking</a>.</li>
       <li><strong>Newsletter.</strong> If you subscribe, we store your email address and (optionally) your first name with our mail provider, solely to deliver the newsletter.</li>
       <li><strong>Contact form.</strong> If you write to us, we receive whatever information you choose to put in the message — typically a name, email, and the content of your question.</li>
     </ul>
@@ -69,11 +69,12 @@ const meta = buildMeta({
     <p>We do not use your data for automated decision-making, behavioural advertising, profiling, or sale to data brokers. We do not train AI models on your data.</p>
 
     <h2 id="cookies">Cookies &amp; <em>tracking</em></h2>
-    <p>We set two first-party cookies, and only these:</p>
+    <p>Without analytics consent we set only two first-party cookies:</p>
     <ul>
       <li><code>sd-theme</code> — remembers your dark-mode preference (12 months).</li>
       <li><code>sd-bookmarks</code> — stores the article slugs you've saved (kept in your browser only; never sent to us; 12 months).</li>
     </ul>
+    <p>We store your privacy choice (<code>sd-consent</code>) in your browser's local storage as an essential setting that never leaves your browser. If you opt in to analytics, two more storage items are written: an anonymous Mixpanel device identifier in local storage (Mixpanel does not use cookies), and Google Analytics' own first-party measurement cookies (such as <code>_ga</code>) used to count visits. Both exist only to de-duplicate the anonymous events you consented to. No analytics load, and no analytics cookie or storage is written, until you accept. If your browser sends a Global Privacy Control or Do-Not-Track signal we treat it as a decline and never start. You can change your choice at any time from the footer.</p>
     <p>Affiliate networks (Amazon, Awin, CJ Affiliate, Impact, and similar) may set their own cookies on <strong>the destination retailer's domain</strong> once you click an outbound link. SleekDrops itself does not set advertising cookies, and we do not embed third-party ad scripts on this site by default.</p>
     <p>If we add display advertising in the future (see <a href="#ads">Advertising partners</a>), this section will be updated and — where required by law — a consent banner will be presented.</p>
 
@@ -97,7 +98,8 @@ const meta = buildMeta({
     <p>The following services may process limited data on our behalf:</p>
     <ul>
       <li><strong>Cloudflare</strong> (USA / global) — hosting, CDN, security. Privacy policy: <a href="https://www.cloudflare.com/privacypolicy/" rel="noopener nofollow" target="_blank">cloudflare.com/privacypolicy</a>.</li>
-      <li><strong>Analytics provider</strong> — privacy-friendly, no cookies, aggregate metrics only. Provider name disclosed on request.</li>
+      <li><strong>Mixpanel</strong> (USA) - privacy-friendly product analytics, used only with your consent to measure anonymous, aggregate usage. We strip personal data in your browser before sending and configure Mixpanel not to collect raw page URLs or referrers. Privacy policy: <a href="https://mixpanel.com/legal/privacy-policy/" rel="noopener nofollow" target="_blank">mixpanel.com/legal/privacy-policy</a>.</li>
+      <li><strong>Google Analytics 4</strong> (USA / global) - aggregate traffic measurement, loaded only with your consent and alongside Mixpanel. We send page paths rather than full URLs so query strings never reach Google. Privacy policy: <a href="https://policies.google.com/privacy" rel="noopener nofollow" target="_blank">policies.google.com/privacy</a>.</li>
       <li><strong>Email service provider</strong> — used to deliver The Daily Drop newsletter. Stores subscriber email addresses with appropriate Standard Contractual Clauses for international transfers where applicable.</li>
       <li><strong>Affiliate networks</strong> — Amazon Associates, Awin, CJ Affiliate, Impact, Sovrn, Skimlinks. These are not processors of your personal data on our behalf; they are independent controllers that may receive limited information (such as a referring URL and a cookie ID) when you click an outbound affiliate link.</li>
     </ul>
