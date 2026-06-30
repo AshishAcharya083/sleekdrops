@@ -14,7 +14,7 @@
  * in try/catch so a failed analytics load never breaks the page.
  */
 
-import { init as initAnalytics } from '@lib/analytics';
+import { init as initAnalytics, initErrorCapture } from '@lib/analytics';
 
 declare global {
   interface Window {
@@ -28,6 +28,7 @@ if (!window.__sdChromeInit) {
 
   try {
     initAnalytics();
+    initErrorCapture();
   } catch {
     /* analytics is best-effort - never let it break the page */
   }
