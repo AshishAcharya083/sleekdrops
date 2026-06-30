@@ -17,7 +17,7 @@
  * choice; track() here simply buffers until that choice is made.
  */
 
-import { track, EVENTS, type EventProps } from '@lib/analytics';
+import { track, EVENTS, initErrorCapture, type EventProps } from '@lib/analytics';
 
 declare global {
   interface Window {
@@ -28,6 +28,15 @@ declare global {
 if (!window.__sdChromeInit) {
   window.__sdChromeInit = true;
   const root = document.documentElement;
+
+  /* Forward uncaught errors and unhandled rejections to analytics. Routes
+     through the same consent-gated track() pipeline as everything else, and is
+     wrapped so a reporting failure can never break page rendering. */
+  try {
+    initErrorCapture();
+  } catch {
+    /* error capture is best-effort - never let it break the page */
+  }
 
   /* ---- Product analytics ----------------------------------------------
    * All tracking is wired declaratively from the DOM (matching the rest of

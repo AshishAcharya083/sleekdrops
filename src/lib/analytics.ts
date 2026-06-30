@@ -24,7 +24,14 @@ import {
   type ConsentPrompt,
   type ConsentStatus,
 } from './consent';
-import { scrub, urlToPath, type EventProps } from './pii';
+import { scrub, urlToPath, CLIENT_ERROR_EVENT, type EventProps } from './pii';
+import {
+  ErrorDeduper,
+  errorEventToProps,
+  errorSignature,
+  rejectionToProps,
+  type ErrorProps,
+} from './error-capture';
 
 export type { EventProps, ConsentPrompt };
 
@@ -138,7 +145,7 @@ function ensureGa(): void {
 
 function send(item: QueuedEvent): void {
   if (!mixpanelReady) return;
-  mixpanel.track(item.event, scrub(item.props));
+  mixpanel.track(item.event, scrub(item.props, item.event));
 }
 
 /** Load the analytics SDKs and flush anything queued while consent was pending. */
@@ -194,4 +201,44 @@ export function boot(): ConsentPrompt {
   if (effect === 'grant') applyGrant();
   else if (effect === 'deny') applyDeny();
   return prompt;
+}
+
+const deduper = new ErrorDeduper();
+
+/**
+ * Forward one shaped error payload through the consent-gated track() pipeline,
+ * dropping it if an identical error was already reported inside the dedupe
+ * window. Wrapped so a reporting failure can never surface to the user.
+ */
+function reportError(props: ErrorProps): void {
+  try {
+    if (!deduper.shouldReport(errorSignature(props), Date.now())) return;
+    track(CLIENT_ERROR_EVENT, props);
+  } catch {
+    /* error reporting is best-effort - never let it surface to the user */
+  }
+}
+
+let errorCaptureReady = false;
+
+/**
+ * Register global listeners that forward uncaught errors and unhandled promise
+ * rejections to Mixpanel as a structured `$client_error` event. Everything is
+ * wrapped so a reporting failure can never break page rendering, identical
+ * errors are de-duplicated within a short window to avoid event floods, and the
+ * payload's PII is stripped at the central scrub() chokepoint. Routes through
+ * track(), so a missing token / disabled analytics is still a silent no-op
+ * (consent gate respected).
+ */
+export function initErrorCapture(): void {
+  if (errorCaptureReady || typeof window === 'undefined') return;
+  errorCaptureReady = true;
+
+  window.addEventListener('error', (event: ErrorEvent) => {
+    reportError(errorEventToProps(event));
+  });
+
+  window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
+    reportError(rejectionToProps(event));
+  });
 }
