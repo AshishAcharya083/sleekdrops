@@ -9,7 +9,12 @@
  *     the page — i.e. inside a BaseLayout with `progress`).
  *  3. TOC active-link highlighting on scroll (uses any `[data-toc]` nav).
  *  4. Smooth-scroll for in-page anchor links.
+ *
+ * Also boots Mixpanel here (alongside the GA4 snippet in BaseLayout), wrapped
+ * in try/catch so a failed analytics load never breaks the page.
  */
+
+import { init as initAnalytics } from '@lib/analytics';
 
 declare global {
   interface Window {
@@ -20,6 +25,12 @@ declare global {
 if (!window.__sdChromeInit) {
   window.__sdChromeInit = true;
   const root = document.documentElement;
+
+  try {
+    initAnalytics();
+  } catch {
+    /* analytics is best-effort - never let it break the page */
+  }
 
   function toggleTheme(): void {
     const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
