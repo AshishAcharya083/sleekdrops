@@ -1,4 +1,5 @@
 ---
+import { EVENTS } from '@lib/analytics';
 import type { Deal } from '@data/deals';
 
 /**
@@ -10,7 +11,12 @@ import type { Deal } from '@data/deals';
 export interface Props { deal: Deal; }
 const { deal } = Astro.props;
 ---
-<a class="deal-mini" href={`/deals/${deal.slug}`}>
+<a
+  class="deal-mini"
+  href={`/deals/${deal.slug}`}
+  data-track={EVENTS.dealCardClick}
+  data-track-props={JSON.stringify({ slug: deal.slug, brand: deal.brand })}
+>
   <div class="deal-mini-head">
     <div class="logo" aria-hidden="true">{deal.brandMark}</div>
     <div class="brand-row">

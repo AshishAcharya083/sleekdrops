@@ -47,7 +47,14 @@ const schema = product
   ? buildReviewSchema(post, author)
   : buildArticleSchema(post, author);
 ---
-<BaseLayout {...meta} schema={schema} active="blog" progress>
+<BaseLayout
+  {...meta}
+  schema={schema}
+  active="blog"
+  progress
+  screen="blog-post"
+  pageProps={{ category: post.data.category, slug: post.slug }}
+>
   <div class="container">
     <Breadcrumbs
       items={[

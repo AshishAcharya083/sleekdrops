@@ -2,6 +2,7 @@
 import Eyebrow from '@components/ui/Eyebrow.astro';
 import Button from '@components/ui/Button.astro';
 import { todaysDrop } from '@data/deals';
+import { EVENTS } from '@lib/analytics';
 
 /**
  * DropPanel — the dark featured-deal card in the hero. Data lives in
@@ -26,7 +27,12 @@ const d = todaysDrop;
   </div>
   <div class="drop-cta">
     <span class="ends">{d.ends}</span>
-    <Button href={`/deals/${d.slug}`} variant="accent" arrow>View deal</Button>
+    <Button
+      href={`/deals/${d.slug}`}
+      variant="accent"
+      arrow
+      data={{ track: EVENTS.dealCardClick, 'track-props': JSON.stringify({ slug: d.slug, brand: d.brand, placement: 'drop-panel' }) }}
+    >View deal</Button>
   </div>
 </aside>
 )}

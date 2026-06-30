@@ -14,6 +14,8 @@ export interface Props {
   type?: 'button' | 'submit';
   rel?: string;
   target?: '_blank' | '_self' | '_parent' | '_top';
+  /** Passthrough data-* attributes, e.g. analytics `data-track` hooks. */
+  data?: Record<string, string>;
   class?: string;
 }
 
@@ -24,10 +26,14 @@ const {
   type = 'button',
   rel,
   target,
+  data = {},
   class: className,
 } = Astro.props;
 
 const classes = ['btn', `btn-${variant}`, className].filter(Boolean).join(' ');
+const dataAttrs = Object.fromEntries(
+  Object.entries(data).map(([k, v]) => [`data-${k}`, v]),
+);
 const Tag = href ? 'a' : 'button';
 
 /* Affiliate links (rel contains "sponsored") default to opening in a new tab
@@ -41,6 +47,7 @@ const finalRel = isSponsored
 <Tag
   class={classes}
   {...href ? { href, rel: finalRel, target: finalTarget } : { type }}
+  {...dataAttrs}
 >
   <slot />
   {arrow && <span class="arrow" aria-hidden="true">→</span>}

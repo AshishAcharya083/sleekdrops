@@ -1,6 +1,7 @@
 ---
 import Button from '@components/ui/Button.astro';
 import StarRating from '@components/affiliate/StarRating.astro';
+import { EVENTS } from '@lib/analytics';
 import type { ProductData } from '../../content/config';
 
 /**
@@ -23,7 +24,13 @@ const href = `/go/${postSlug}`;
     <h3>Quick verdict</h3>
     <p class="title">{product.tagline}</p>
     <p class="desc">{product.brand} {product.name} — full breakdown below.</p>
-    <Button href={href} variant="accent" arrow rel="sponsored nofollow">
+    <Button
+      href={href}
+      variant="accent"
+      arrow
+      rel="sponsored nofollow"
+      data={{ track: EVENTS.affiliateClick, 'track-props': JSON.stringify({ slug: postSlug, brand: product.brand, placement: 'verdict' }) }}
+    >
       See current price
     </Button>
   </div>

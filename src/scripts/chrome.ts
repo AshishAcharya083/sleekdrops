@@ -14,7 +14,12 @@
  * in try/catch so a failed analytics load never breaks the page.
  */
 
-import { init as initAnalytics } from '@lib/analytics';
+import {
+  init as initAnalytics,
+  track,
+  EVENTS,
+  type EventProps,
+} from '@lib/analytics';
 
 declare global {
   interface Window {
@@ -31,6 +36,34 @@ if (!window.__sdChromeInit) {
   } catch {
     /* analytics is best-effort - never let it break the page */
   }
+
+  /* ---- Product analytics ----------------------------------------------
+   * All tracking is wired declaratively from the DOM (matching the rest of
+   * this file): pages tag the <body> with the page-view payload, and funnel
+   * elements carry `data-track` + an optional JSON `data-track-props`. See
+   * docs/analytics-events.md for the taxonomy. track() is a safe no-op until
+   * analytics has initialised, so none of this needs guarding. */
+  const parseProps = (raw: string | undefined): EventProps | undefined => {
+    if (!raw) return undefined;
+    try {
+      return JSON.parse(raw) as EventProps;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const pageView = parseProps(document.body.dataset.pageView);
+  const screenName = typeof pageView?.screen === 'string' ? pageView.screen : undefined;
+  if (pageView) track(EVENTS.pageView, pageView);
+
+  /* Funnel-step clicks: hero CTAs, deal cards, affiliate "View deal" buttons.
+     The event fires synchronously here, before the browser follows the link. */
+  document.querySelectorAll<HTMLElement>('[data-track]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const event = el.dataset.track;
+      if (event) track(event, parseProps(el.dataset.trackProps));
+    });
+  });
 
   function toggleTheme(): void {
     const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
@@ -88,6 +121,9 @@ if (!window.__sdChromeInit) {
     .forEach((form) => {
       form.addEventListener('submit', (e) => {
         e.preventDefault();
+        if (form.dataset.signup !== undefined) {
+          track(EVENTS.newsletterSignup, screenName ? { screen: screenName } : undefined);
+        }
         const label = form.dataset.mockLabel ?? '✓ Done';
         const button = form.querySelector('button');
         if (button) button.textContent = label;
