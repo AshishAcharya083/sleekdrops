@@ -1,0 +1,497 @@
+---
+/**
+ * ConsentBanner — the opt-in consent surface, rendered once per page from
+ * BaseLayout and pinned to the bottom of the viewport above the footer.
+ *
+ * One root holds three surfaces (banner, GPC info card, preferences dialog);
+ * the consent state machine in `@lib/analytics` decides which — if any — to
+ * reveal on load. Everything is hidden until the client script runs, so the
+ * static HTML never flashes a prompt at a visitor who has already chosen.
+ */
+const policyDate = '28 June 2026';
+---
+
+<div class="sd-consent-root" data-consent-root hidden>
+  {/* Default / policy-update banner */}
+  <section
+    class="sd-consent"
+    role="region"
+    aria-label="Privacy consent"
+    data-surface="banner"
+    hidden
+  >
+    <span class="pill pill--policy" data-policy-pill hidden>Policy updated</span>
+    <p class="eyebrow">Your privacy</p>
+    <h2 class="sd-consent__title">A quick word before we count anything</h2>
+    <p class="sd-consent__body" data-policy-note hidden>
+      Our privacy policy changed on {policyDate} — please confirm your choice.
+    </p>
+    <p class="sd-consent__body">
+      We'd like to measure anonymous, aggregate page views — which guides get
+      read, nothing more. No analytics run until you say yes, and we never
+      collect your email address, your searches, or anything you type.
+      <a href="/privacy">Read our Privacy Policy</a>.
+    </p>
+    <div class="sd-consent__actions">
+      <button type="button" class="sd-link" data-action="customize">Customize</button>
+      <button type="button" class="btn btn-outline" data-action="decline">Decline</button>
+      <button type="button" class="btn btn-primary" data-action="accept">Accept analytics</button>
+    </div>
+  </section>
+
+  {/* GPC / DNT respected */}
+  <section
+    class="sd-consent sd-consent--info"
+    role="region"
+    aria-label="Privacy signal detected"
+    data-surface="gpc"
+    hidden
+  >
+    <div class="gpc-head">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" />
+      </svg>
+      <p class="eyebrow">Privacy signal detected</p>
+    </div>
+    <p class="sd-consent__body">
+      We saw a Global Privacy Control / Do-Not-Track signal from your browser, so
+      analytics stay off automatically — nothing to do.
+    </p>
+    <div class="sd-consent__actions">
+      <button type="button" class="sd-link" data-action="customize">Manage anyway</button>
+    </div>
+  </section>
+
+  {/* Preferences dialog */}
+  <section
+    class="sd-consent sd-prefs"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="sd-prefs-title"
+    data-surface="prefs"
+    hidden
+  >
+    <div class="sd-prefs__head">
+      <h2 id="sd-prefs-title">Privacy preferences</h2>
+      <button type="button" class="icon-btn" aria-label="Close preferences" title="Close" data-action="close-prefs">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+      </button>
+    </div>
+    <p class="sd-prefs__sub">Choose what Sleekdrops may measure. You can change this any time from the footer.</p>
+
+    <div class="pref-row">
+      <div class="pref-row__text">
+        <span class="pref-row__title">Essential <span class="tag">Always on</span></span>
+        <p class="pref-row__help">Keeps the site working — your theme choice and this consent setting. Never used for tracking and never leaves your browser.</p>
+      </div>
+      <label class="sd-switch" title="Always on">
+        <input type="checkbox" checked disabled aria-label="Essential — always on" />
+        <span class="sd-switch__track"><span class="sd-switch__thumb"></span></span>
+      </label>
+    </div>
+
+    <div class="pref-row">
+      <div class="pref-row__text">
+        <span class="pref-row__title">Anonymous analytics</span>
+        <p class="pref-row__help">Aggregate, anonymized page views via Mixpanel. Personal data is stripped in your browser before anything is sent — see below.</p>
+      </div>
+      <label class="sd-switch">
+        <input type="checkbox" data-analytics-switch aria-label="Anonymous analytics" />
+        <span class="sd-switch__track"><span class="sd-switch__thumb"></span></span>
+      </label>
+    </div>
+
+    <div class="reassure">
+      <p class="reassure__label">What never leaves your browser</p>
+      <ul>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg><span>Your email address</span></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg><span>Full search &amp; query strings from the address bar</span></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg><span>Anything you type — search boxes, forms, comments</span></li>
+      </ul>
+    </div>
+
+    <div class="sd-prefs__actions">
+      <button type="button" class="btn btn-outline" data-action="decline-all">Decline all</button>
+      <button type="button" class="btn btn-primary" data-action="save">Save preferences</button>
+    </div>
+  </section>
+</div>
+
+<style>
+  .sd-consent-root {
+    position: fixed;
+    left: var(--s-4);
+    right: var(--s-4);
+    bottom: var(--s-4);
+    margin-inline: auto;
+    max-width: 560px;
+    z-index: 1000;
+  }
+  .sd-consent-root[hidden] { display: none; }
+
+  .sd-consent {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-lg);
+    padding: var(--s-6);
+  }
+  .sd-consent[hidden] { display: none; }
+
+  .sd-consent__title {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.015em;
+    font-size: 24px;
+    line-height: var(--lh-snug);
+    color: var(--ink);
+    margin: 0 0 var(--s-2);
+  }
+  .sd-consent__body {
+    font-size: var(--t-body-sm);
+    line-height: var(--lh-base);
+    color: var(--ink-2);
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: break-word;
+  }
+  .sd-consent__body[data-policy-note] { margin-bottom: var(--s-2); color: var(--muted); }
+  .sd-consent__body[hidden] { display: none; }
+
+  .sd-consent__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s-2);
+    margin-top: var(--s-6);
+  }
+
+  .pill {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 3px 10px;
+    border-radius: var(--r-full);
+    margin: 0 0 var(--s-3);
+  }
+  .pill--policy { background: var(--warning-soft); color: var(--warning); }
+  .pill[hidden] { display: none; }
+
+  /* Buttons — the consent surface composes the .btn tokens directly so it does
+     not depend on the scoped styles of the Button component. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-family: var(--font-body);
+    font-weight: 600;
+    border: 0;
+    cursor: pointer;
+    text-decoration: none;
+    padding: 12px 22px;
+    border-radius: var(--r-full);
+    font-size: 14px;
+    transition: all var(--dur-base) var(--ease-out);
+  }
+  .btn-primary { background: var(--ink); color: var(--paper); }
+  .btn-primary:hover { background: var(--ink-2); transform: translateY(-1px); }
+  .btn-outline {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--hairline-strong);
+    padding: 11px 21px;
+  }
+  .btn-outline:hover { border-color: var(--ink); transform: translateY(-1px); }
+
+  .sd-link {
+    background: none;
+    border: 0;
+    cursor: pointer;
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--muted);
+    padding: 8px 4px;
+    margin-right: auto;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 3px;
+    transition: color var(--dur-fast) var(--ease-out),
+      text-decoration-color var(--dur-fast) var(--ease-out);
+  }
+  .sd-link:hover { color: var(--ink); text-decoration-color: var(--hairline-strong); }
+
+  /* Preferences dialog */
+  .sd-prefs__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--s-4);
+    margin-bottom: var(--s-2);
+  }
+  .sd-prefs__head h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.015em;
+    font-size: 24px;
+    line-height: var(--lh-snug);
+    margin: 0;
+    color: var(--ink);
+    min-width: 0;
+  }
+  .sd-prefs__sub {
+    font-size: var(--t-body-sm);
+    color: var(--muted);
+    margin: 0 0 var(--s-5);
+    line-height: var(--lh-base);
+  }
+  .icon-btn {
+    flex: none;
+    width: 38px;
+    height: 38px;
+    border-radius: var(--r-full);
+    border: 1px solid var(--hairline);
+    background: var(--surface);
+    color: var(--ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+  .icon-btn:hover { border-color: var(--hairline-strong); }
+  .icon-btn svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2; fill: none; }
+
+  .pref-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s-4);
+    padding: var(--s-4) 0;
+    border-top: 1px solid var(--hairline);
+  }
+  .pref-row__text { min-width: 0; flex: 1; }
+  .pref-row__title {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    font-size: var(--t-body);
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .tag {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--hairline);
+    padding: 1px 7px;
+    border-radius: var(--r-full);
+  }
+  .pref-row__help {
+    margin: var(--s-1) 0 0;
+    font-size: var(--t-caption);
+    color: var(--muted);
+    line-height: var(--lh-base);
+    overflow-wrap: break-word;
+  }
+
+  /* Switch (.sd-switch — new shared control) */
+  .sd-switch { display: inline-flex; flex: none; cursor: pointer; margin-top: 2px; }
+  .sd-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .sd-switch__track {
+    width: 44px;
+    height: 26px;
+    border-radius: var(--r-full);
+    background: var(--hairline-strong);
+    position: relative;
+    transition: background var(--dur-base) var(--ease-out);
+  }
+  .sd-switch__thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--r-full);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--dur-base) var(--ease-out);
+  }
+  .sd-switch input:checked + .sd-switch__track { background: var(--accent); }
+  .sd-switch input:checked + .sd-switch__track .sd-switch__thumb { transform: translateX(18px); }
+  .sd-switch input:focus-visible + .sd-switch__track { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sd-switch input:disabled + .sd-switch__track { opacity: 0.55; cursor: not-allowed; }
+
+  .reassure {
+    margin-top: var(--s-5);
+    background: var(--surface-2);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    padding: var(--s-4);
+  }
+  .reassure__label {
+    font-size: var(--t-eyebrow);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    margin: 0 0 var(--s-3);
+  }
+  .reassure ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+  .reassure li {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s-2);
+    font-size: var(--t-body-sm);
+    color: var(--ink-2);
+    line-height: var(--lh-base);
+  }
+  .reassure svg { flex: none; width: 16px; height: 16px; margin-top: 2px; stroke: var(--success); stroke-width: 2; fill: none; }
+
+  .sd-prefs__actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-6); }
+
+  /* GPC info card */
+  .sd-consent--info { border-left: 3px solid var(--info); }
+  .gpc-head { display: flex; align-items: center; gap: var(--s-2); margin-bottom: var(--s-2); }
+  .gpc-head svg { flex: none; width: 18px; height: 18px; stroke: var(--info); stroke-width: 2; fill: none; }
+  .gpc-head .eyebrow { margin: 0; color: var(--info); }
+
+  /* Mobile: action rows wrap to full-width stacked, Accept stays prominent. */
+  @media (max-width: 480px) {
+    .sd-consent__actions { gap: var(--s-3); }
+    .sd-consent__actions .btn { flex: 1 1 100%; }
+    .sd-consent__actions .sd-link { order: -1; flex: 1 1 100%; text-align: left; }
+    .sd-prefs__actions .btn { flex: 1 1 100%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sd-switch__track, .sd-switch__thumb, .btn { transition: none; }
+  }
+</style>
+
+<script>
+  import { boot, grantConsent, denyConsent } from '@lib/analytics';
+
+  type SurfaceName = 'banner' | 'gpc' | 'prefs';
+
+  const root = document.querySelector<HTMLElement>('[data-consent-root]');
+  if (root) {
+    const surfaces: Record<SurfaceName, HTMLElement | null> = {
+      banner: root.querySelector('[data-surface="banner"]'),
+      gpc: root.querySelector('[data-surface="gpc"]'),
+      prefs: root.querySelector('[data-surface="prefs"]'),
+    };
+    const analyticsSwitch = root.querySelector<HTMLInputElement>('[data-analytics-switch]');
+    const policyPill = root.querySelector<HTMLElement>('[data-policy-pill]');
+    const policyNote = root.querySelector<HTMLElement>('[data-policy-note]');
+
+    let previousSurface: 'banner' | 'gpc' | null = null;
+    let returnFocusTo: HTMLElement | null = null;
+
+    const show = (name: SurfaceName): void => {
+      root.hidden = false;
+      (Object.keys(surfaces) as SurfaceName[]).forEach((key) => {
+        const el = surfaces[key];
+        if (el) el.hidden = key !== name;
+      });
+    };
+
+    const dismiss = (): void => {
+      root.hidden = true;
+      document.removeEventListener('keydown', onPrefsKey);
+    };
+
+    const focusable = (el: HTMLElement): HTMLElement[] =>
+      [...el.querySelectorAll<HTMLElement>('button, [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter(
+        (n) => !n.hasAttribute('disabled') && n.offsetParent !== null,
+      );
+
+    function onPrefsKey(ev: KeyboardEvent): void {
+      const panel = surfaces.prefs;
+      if (!panel || panel.hidden) return;
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        closePrefs();
+        return;
+      }
+      if (ev.key !== 'Tab') return;
+      const items = focusable(panel);
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (ev.shiftKey && document.activeElement === first) {
+        ev.preventDefault();
+        last.focus();
+      } else if (!ev.shiftKey && document.activeElement === last) {
+        ev.preventDefault();
+        first.focus();
+      }
+    }
+
+    const openPrefs = (): void => {
+      returnFocusTo = document.activeElement as HTMLElement | null;
+      show('prefs');
+      document.addEventListener('keydown', onPrefsKey);
+      focusable(surfaces.prefs as HTMLElement)[0]?.focus();
+    };
+
+    const closePrefs = (): void => {
+      document.removeEventListener('keydown', onPrefsKey);
+      if (previousSurface) {
+        show(previousSurface);
+        returnFocusTo?.focus();
+      } else {
+        dismiss();
+      }
+    };
+
+    root.addEventListener('click', (ev) => {
+      const action = (ev.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
+      if (!action) return;
+      switch (action) {
+        case 'accept':
+          grantConsent();
+          dismiss();
+          break;
+        case 'decline':
+          denyConsent();
+          dismiss();
+          break;
+        case 'customize':
+          openPrefs();
+          break;
+        case 'close-prefs':
+          closePrefs();
+          break;
+        case 'save':
+          if (analyticsSwitch?.checked) grantConsent();
+          else denyConsent();
+          dismiss();
+          break;
+        case 'decline-all':
+          denyConsent();
+          dismiss();
+          break;
+      }
+    });
+
+    const prompt = boot();
+    if (prompt === 'banner' || prompt === 'policy-update') {
+      previousSurface = 'banner';
+      if (prompt === 'policy-update') {
+        policyPill?.removeAttribute('hidden');
+        policyNote?.removeAttribute('hidden');
+      }
+      show('banner');
+    } else if (prompt === 'gpc') {
+      previousSurface = 'gpc';
+      show('gpc');
+    }
+  }
+</script>

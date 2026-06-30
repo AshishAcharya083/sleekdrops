@@ -2,6 +2,7 @@
 import SEOHead from '@components/seo/SEOHead.astro';
 import Header from '@components/layout/Header.astro';
 import Footer from '@components/layout/Footer.astro';
+import ConsentBanner from '@components/layout/ConsentBanner.astro';
 import '@styles/tokens.css';
 import '@styles/global.css';
 import type { Thing, WithContext } from 'schema-dts';
@@ -31,14 +32,6 @@ const { schema, active, progress = false, ...meta } = Astro.props;
 <html lang="en">
   <head>
     <SEOHead {...meta} schema={schema} />
-    <!-- Google Analytics 4 -->
-    <script is:inline async src="https://www.googletagmanager.com/gtag/js?id=G-8B65NZ3BD4"></script>
-    <script is:inline>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){ dataLayer.push(arguments); }
-      gtag('js', new Date());
-      gtag('config', 'G-8B65NZ3BD4');
-    </script>
   </head>
   <body class="page">
     {progress && <div class="progress-bar" aria-hidden="true" />}
@@ -47,6 +40,7 @@ const { schema, active, progress = false, ...meta } = Astro.props;
       <slot />
     </main>
     <Footer />
+    <ConsentBanner />
     <script>
       import '../scripts/chrome';
     </script>
