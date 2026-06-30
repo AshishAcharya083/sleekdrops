@@ -24,7 +24,14 @@ import {
   type ConsentPrompt,
   type ConsentStatus,
 } from './consent';
-import { scrub, urlToPath, type EventProps } from './pii';
+import { scrub, urlToPath, CLIENT_ERROR_EVENT, type EventProps } from './pii';
+import {
+  ErrorDeduper,
+  errorEventToProps,
+  errorSignature,
+  rejectionToProps,
+  type ErrorProps,
+} from './error-capture';
 
 export type { EventProps, ConsentPrompt };
 
@@ -138,7 +145,7 @@ function ensureGa(): void {
 
 function send(item: QueuedEvent): void {
   if (!mixpanelReady) return;
-  mixpanel.track(item.event, scrub(item.props));
+  mixpanel.track(item.event, scrub(item.props, item.event));
 }
 
 /** Load the analytics SDKs and flush anything queued while consent was pending. */
@@ -196,48 +203,17 @@ export function boot(): ConsentPrompt {
   return prompt;
 }
 
-/** Max characters kept from a stack trace before truncation. */
-const STACK_LIMIT = 2000;
-
-/** Window during which an identical error signature is reported at most once. */
-const DEDUPE_WINDOW_MS = 10_000;
-
-/** Cap on distinct signatures tracked, so the dedupe map can't grow unbounded. */
-const DEDUPE_MAX_KEYS = 100;
-
-const lastReported = new Map<string, number>();
+const deduper = new ErrorDeduper();
 
 /**
- * Drop query strings and fragments from any URL so we never ship PII (search
- * terms, tokens, ids) that callers may have tacked onto a link.
+ * Forward one shaped error payload through the consent-gated track() pipeline,
+ * dropping it if an identical error was already reported inside the dedupe
+ * window. Wrapped so a reporting failure can never surface to the user.
  */
-function stripPii(text: string): string {
-  return text.replace(/(https?:\/\/[^\s?#'")]+)[^\s'")]*/gi, '$1');
-}
-
-/**
- * Has this exact error been reported within the dedupe window? Records the
- * signature when it hasn't, so the next identical error inside the window is
- * suppressed. Keeps the page from flooding Mixpanel when an error fires in a
- * tight loop (e.g. an animation frame or scroll handler).
- */
-function shouldReport(signature: string, now: number): boolean {
-  const previous = lastReported.get(signature);
-  if (previous !== undefined && now - previous < DEDUPE_WINDOW_MS) return false;
-
-  if (!lastReported.has(signature) && lastReported.size >= DEDUPE_MAX_KEYS) {
-    lastReported.clear();
-  }
-  lastReported.set(signature, now);
-  return true;
-}
-
-function reportError(props: EventProps & { message: string }): void {
+function reportError(props: ErrorProps): void {
   try {
-    const now = Date.now();
-    const signature = `${props.message}|${props.source ?? ''}|${props.lineno ?? ''}`;
-    if (!shouldReport(signature, now)) return;
-    track('$client_error', props);
+    if (!deduper.shouldReport(errorSignature(props), Date.now())) return;
+    track(CLIENT_ERROR_EVENT, props);
   } catch {
     /* error reporting is best-effort - never let it surface to the user */
   }
@@ -248,39 +224,21 @@ let errorCaptureReady = false;
 /**
  * Register global listeners that forward uncaught errors and unhandled promise
  * rejections to Mixpanel as a structured `$client_error` event. Everything is
- * wrapped so a reporting failure can never break page rendering, payloads are
- * stripped of query-string PII, and identical errors are de-duplicated within a
- * short window to avoid event floods. Routes through track(), so a missing
- * token / disabled analytics is still a silent no-op (consent gate respected).
+ * wrapped so a reporting failure can never break page rendering, identical
+ * errors are de-duplicated within a short window to avoid event floods, and the
+ * payload's PII is stripped at the central scrub() chokepoint. Routes through
+ * track(), so a missing token / disabled analytics is still a silent no-op
+ * (consent gate respected).
  */
 export function initErrorCapture(): void {
   if (errorCaptureReady || typeof window === 'undefined') return;
   errorCaptureReady = true;
 
   window.addEventListener('error', (event: ErrorEvent) => {
-    const stack = event.error instanceof Error ? event.error.stack : undefined;
-    reportError({
-      message: stripPii(event.message || 'Unknown error'),
-      source: event.filename ? stripPii(event.filename) : undefined,
-      lineno: event.lineno || undefined,
-      colno: event.colno || undefined,
-      stack: stack ? stripPii(stack).slice(0, STACK_LIMIT) : undefined,
-    });
+    reportError(errorEventToProps(event));
   });
 
   window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
-    const reason = event.reason;
-    const message =
-      reason instanceof Error
-        ? reason.message
-        : typeof reason === 'string'
-          ? reason
-          : 'Unhandled promise rejection';
-    const stack = reason instanceof Error ? reason.stack : undefined;
-    reportError({
-      message: stripPii(message || 'Unhandled promise rejection'),
-      handled: false,
-      stack: stack ? stripPii(stack).slice(0, STACK_LIMIT) : undefined,
-    });
+    reportError(rejectionToProps(event));
   });
 }

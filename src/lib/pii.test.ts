@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { scrub, redactEmails, urlToPath } from './pii.ts';
+import {
+  scrub,
+  redactEmails,
+  urlToPath,
+  stripUrlQueries,
+  CLIENT_ERROR_EVENT,
+} from './pii.ts';
 
 test('drops free-text fields not on the allowlist', () => {
   const out = scrub({
@@ -77,4 +83,77 @@ test('urlToPath strips query and fragment from absolute and relative inputs', ()
   assert.equal(urlToPath('https://x.com/a/b?c=d#e'), '/a/b');
   assert.equal(urlToPath('/a/b?c=d'), '/a/b');
   assert.equal(urlToPath('/clean'), '/clean');
+});
+
+test('stripUrlQueries drops the query and fragment from an embedded URL', () => {
+  assert.equal(
+    stripUrlQueries('failed at https://sleekdrops.com/app.js?token=secret#x line 3'),
+    'failed at https://sleekdrops.com/app.js line 3',
+  );
+  assert.equal(stripUrlQueries('no url here'), 'no url here');
+});
+
+test('drops the error-only diagnostic fields for a non-error event', () => {
+  // `source` is a real structural dimension (utm source) so it survives, but
+  // the error-specific fields are dropped outside CLIENT_ERROR_EVENT.
+  const out = scrub({
+    message: 'TypeError: x is not a function',
+    source: 'newsletter',
+    lineno: 12,
+    colno: 8,
+    stack: 'Error\n  at f (app.js:12:8)',
+    handled: false,
+  });
+  assert.deepEqual(out, { source: 'newsletter' });
+});
+
+test('keeps the full diagnostic payload for $client_error', () => {
+  const out = scrub(
+    {
+      message: 'TypeError: x is not a function',
+      source: 'https://sleekdrops.com/assets/app.js',
+      lineno: 12,
+      colno: 8,
+      stack: 'Error\n  at f (https://sleekdrops.com/assets/app.js:12:8)',
+      handled: false,
+    },
+    CLIENT_ERROR_EVENT,
+  );
+  assert.deepEqual(out, {
+    message: 'TypeError: x is not a function',
+    source: 'https://sleekdrops.com/assets/app.js',
+    lineno: 12,
+    colno: 8,
+    stack: 'Error\n  at f (https://sleekdrops.com/assets/app.js:12:8)',
+    handled: false,
+  });
+});
+
+test('scrubs PII out of the surviving $client_error free-text fields', () => {
+  const out = scrub(
+    {
+      message: 'Bad request for jordan@example.com at https://sleekdrops.com/api?token=secret&q=hi',
+      source: 'https://sleekdrops.com/app.js?v=deadbeef',
+      stack: 'Error: jordan@example.com\n  at https://sleekdrops.com/app.js?token=secret line 1',
+    },
+    CLIENT_ERROR_EVENT,
+  );
+  assert.deepEqual(out, {
+    message: 'Bad request for [redacted] at https://sleekdrops.com/api',
+    source: 'https://sleekdrops.com/app.js',
+    stack: 'Error: [redacted]\n  at https://sleekdrops.com/app.js line 1',
+  });
+});
+
+test('rejects mistyped $client_error fields without crashing', () => {
+  const out = scrub(
+    {
+      message: 'boom',
+      lineno: 'not-a-number',
+      handled: 'nope',
+      stack: 42,
+    },
+    CLIENT_ERROR_EVENT,
+  );
+  assert.deepEqual(out, { message: 'boom' });
 });
