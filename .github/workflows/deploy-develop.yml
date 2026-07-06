@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: develop
-      url: https://develop.sleekdrops.com
+      url: https://sleekdrops.pages.dev
 
     steps:
       - name: Checkout
@@ -47,12 +47,19 @@ jobs:
 
       - name: Build (develop)
         env:
-          SITE_URL: https://develop.sleekdrops.com
+          SITE_URL: https://sleekdrops.pages.dev
           NODE_ENV: production
-          # Same content source as production — develop is a code-only preview
-          # of the site rendered against live editorial content.
-          CMS_REPO_URL: https://x-access-token:${{ secrets.CMS_CONTENT_PAT }}@github.com/AshishAcharya083/sleekdrops-cms.git
-          CMS_REPO_REF: main
+          # Develop is a code-only preview rendered against the SAME live
+          # editorial content as production. Content now lives in Cloudflare
+          # D1 (the old sleekdrops-cms git-clone flow was decommissioned
+          # 2026-06-13), so the build needs the same D1 env vars as prod.
+          # Reused prod secrets on purpose — this is a test deploy target.
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: b98d83ac-a2a5-42cb-a367-0cb71b902670
+          CLOUDFLARE_D1_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
+          # Fallback while CLOUDFLARE_D1_TOKEN isn't set — works only if the
+          # Pages deploy token also has D1 read permission.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm build
 
       - name: Deploy to Cloudflare Pages (develop)
