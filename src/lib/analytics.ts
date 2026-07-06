@@ -127,7 +127,7 @@ function ensureGa(): void {
 function ensureDevteam(): void {
   if (devteam) return;
   if (!devteamKey) {
-    console.warn('[analytics] DevTeam analytics NOT configured - PUBLIC_Devteam__IngestKey is empty');
+    serverLog('warn', 'DevTeam analytics NOT configured - PUBLIC_Devteam__IngestKey is empty');
     return;
   }
   devteam = createAnalytics({
@@ -141,7 +141,7 @@ function ensureDevteam(): void {
     autoCaptureErrors: false,
     onError: (error) => console.error('[analytics] DevTeam SDK error:', error),
   });
-  console.info('[analytics] DevTeam analytics initialized -> %s', devteamHost);
+  serverLog('info', 'DevTeam analytics initialized -> ' + devteamHost);
 }
 
 function send(item: QueuedEvent): void {
@@ -151,12 +151,26 @@ function send(item: QueuedEvent): void {
   console.info('[analytics] event sent:', item.event, props);
 }
 
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+/**
+ * Log to the browser console (prefixed [analytics]) and, once the DevTeam client
+ * exists, forward the same line to the analytics platform as a server-side log so
+ * it lands in the platform's Logs view. Consent-gated: the client is only created
+ * after the visitor opts in, so nothing reaches the server before consent. Exported
+ * so any script can emit a server-visible log.
+ */
+export function serverLog(level: LogLevel, message: string, attributes?: EventProps): void {
+  (level === 'debug' ? console.debug : console[level])('[analytics] ' + message, attributes ?? '');
+  devteam?.log[level](message, attributes);
+}
+
 /** Load the analytics SDKs and flush anything queued while consent was pending. */
 function applyGrant(): void {
   decision = 'granted';
-  console.info('[analytics] consent granted - analytics active');
   ensureGa();
   ensureDevteam();
+  serverLog('info', 'consent granted - analytics active');
   const queued = buffer;
   buffer = [];
   queued.forEach(send);
@@ -165,7 +179,7 @@ function applyGrant(): void {
 function applyDeny(): void {
   decision = 'denied';
   buffer = [];
-  console.info('[analytics] consent denied - no events will be sent');
+  serverLog('info', 'consent denied - no events will be sent');
 }
 
 /**
