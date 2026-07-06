@@ -23,6 +23,7 @@
     "@astrojs/check": "^0.9.9",
     "@astrojs/rss": "^4.0.18",
     "@astrojs/sitemap": "3.2.1",
+    "@getdevteam/analytics-web": "^0.1.0",
     "astro": "^4.16.19",
     "mixpanel-browser": "^2.80.0",
     "remark-gfm": "^4.0.1",
