@@ -17,6 +17,9 @@ importers:
       '@astrojs/sitemap':
         specifier: 3.2.1
         version: 3.2.1
+      '@getdevteam/analytics-web':
+        specifier: ^0.1.0
+        version: 0.1.0
       astro:
         specifier: ^4.16.19
         version: 4.16.19(@types/node@25.9.1)(rollup@4.60.4)(typescript@5.9.3)
@@ -334,6 +337,12 @@ packages:
     engines: {node: '>=12'}
     cpu: [x64]
     os: [win32]
+
+  '@getdevteam/analytics-core@0.1.0':
+    resolution: {integrity: sha512-jd8e0xdLWrITBCWGCoQSh9X4m75k2gFOATidG3L/B1SQ5L1v8lCViEcocswf/rk812feCvQJdu4OyB0vYwYktQ==}
+
+  '@getdevteam/analytics-web@0.1.0':
+    resolution: {integrity: sha512-IacgsFK0nTuuuiwK6dGagh2E+LW+xKCYdP3vcnHb3JUdy34EycIi/aGSvHcmKRNiEHhxiG+zbWgFkmiOM1gWCQ==}
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -2502,6 +2511,12 @@ snapshots:
 
   '@esbuild/win32-x64@0.21.5':
     optional: true
+
+  '@getdevteam/analytics-core@0.1.0': {}
+
+  '@getdevteam/analytics-web@0.1.0':
+    dependencies:
+      '@getdevteam/analytics-core': 0.1.0
 
   '@img/colour@1.1.0': {}
 
