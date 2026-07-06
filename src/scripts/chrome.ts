@@ -13,7 +13,7 @@
  *     hooks, via the analytics wrapper (see docs/analytics-events.md).
  *
  * The analytics SDKs themselves are bootstrapped separately by the
- * ConsentBanner island, which gates Mixpanel/GA4 behind the visitor's consent
+ * ConsentBanner island, which gates the DevTeam + GA4 analytics sinks behind the visitor's consent
  * choice; track() here simply buffers until that choice is made.
  */
 

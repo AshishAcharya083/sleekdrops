@@ -25,7 +25,6 @@
     "@astrojs/sitemap": "3.2.1",
     "@getdevteam/analytics-web": "^0.1.0",
     "astro": "^4.16.19",
-    "mixpanel-browser": "^2.80.0",
     "remark-gfm": "^4.0.1",
     "schema-dts": "^2.0.0",
     "sharp": "^0.34.5",

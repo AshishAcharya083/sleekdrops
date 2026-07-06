@@ -1,7 +1,7 @@
 /**
  * Consent decision logic — the pure, side-effect-free core of the gate.
  *
- * Kept separate from analytics.ts (which owns Mixpanel, GA4, localStorage and
+ * Kept separate from analytics.ts (which owns the DevTeam + GA4 sinks, localStorage and
  * the in-memory buffer) so the decision table can be unit-tested in isolation,
  * without a browser or any SDK. analytics.ts feeds it the parsed record and the
  * privacy-signal boolean and acts on the result.
