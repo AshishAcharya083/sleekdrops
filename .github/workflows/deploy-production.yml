@@ -58,6 +58,11 @@ jobs:
         env:
           SITE_URL: https://sleekdrops.com
           NODE_ENV: production
+          # DevTeam Analytics — public ingest key (dtp_) + prod ingest host.
+          # The key is ingest-only and safe to commit; PUBLIC_ exposes it to
+          # the Astro build so the DevTeam analytics + logging sink is active.
+          PUBLIC_Devteam__IngestKey: dtp_9YapTQMaVMIKD5vLxcIiBl8ByAtwbHILHjrSUi2bshg
+          PUBLIC_Devteam__Host: https://ingest.getdevteam.ai
           # Used by scripts/fetch-content.mjs to read posts + affiliate links
           # from Cloudflare D1 during the prebuild step. The database id is
           # not a secret; CLOUDFLARE_D1_TOKEN needs "Account → D1 → Read".
