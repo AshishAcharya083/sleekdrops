@@ -58,6 +58,12 @@ jobs:
         env:
           SITE_URL: https://sleekdrops.com
           NODE_ENV: production
+          # DevTeam Analytics - public ingest key (dtp_...) and prod ingest host.
+          # The key is ingest-only and PUBLIC_-prefixed (safe to commit, like the
+          # GA4 id baked into analytics.ts and the D1_DATABASE_ID below); it must
+          # be present at build time or the DevTeam sink silently disables itself.
+          PUBLIC_Devteam__IngestKey: dtp_mQmqM5NxU9LK1aS5SeQYyw783BMWJvT3OrFTBkEfJto
+          PUBLIC_Devteam__Host: https://ingest.getdevteam.ai
           # Used by scripts/fetch-content.mjs to read posts + affiliate links
           # from Cloudflare D1 during the prebuild step. The database id is
           # not a secret; CLOUDFLARE_D1_TOKEN needs "Account → D1 → Read".

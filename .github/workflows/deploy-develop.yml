@@ -49,6 +49,12 @@ jobs:
         env:
           SITE_URL: https://sleekdrops.pages.dev
           NODE_ENV: production
+          # DevTeam Analytics - preview deploy reports to the same prod ingest as
+          # production so events can be verified end-to-end before a main release.
+          # The ingest key is public/ingest-only (safe to commit); an empty key
+          # would silently disable the sink, so it is set explicitly here.
+          PUBLIC_Devteam__IngestKey: dtp_mQmqM5NxU9LK1aS5SeQYyw783BMWJvT3OrFTBkEfJto
+          PUBLIC_Devteam__Host: https://ingest.getdevteam.ai
           # Develop is a code-only preview rendered against the SAME live
           # editorial content as production. Content now lives in Cloudflare
           # D1 (the old sleekdrops-cms git-clone flow was decommissioned

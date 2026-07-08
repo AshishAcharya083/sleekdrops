@@ -130,6 +130,13 @@ function ensureDevteam(): void {
     serverLog('warn', 'DevTeam analytics NOT configured - PUBLIC_Devteam__IngestKey is empty');
     return;
   }
+  // The SDK's onboarding snippet suggests `trackPageviews: true` and an
+  // `analytics.identify("user_123")` call. Both are deliberately NOT adopted:
+  // this is an anonymous editorial blog with no user accounts, so there is no
+  // real identity to attach (we rely on the SDK's anonymous device id), and we
+  // already emit page views explicitly via EVENTS.pageView (see below), so the
+  // SDK's auto-pageview would double-count. Do not "fix" either back to the
+  // snippet without a real authenticated user to identify.
   devteam = createAnalytics({
     key: devteamKey,
     host: devteamHost,

@@ -1,6 +1,6 @@
 # Analytics event taxonomy
 
-This is the canonical reference for the Mixpanel events SleekDrops emits.
+This is the canonical reference for the DevTeam Analytics events SleekDrops emits.
 It defines every event name, its properties, and the screen that owns it.
 
 Keep this doc and the code in sync.
@@ -8,7 +8,7 @@ Event names live as constants in [`src/lib/analytics.ts`](../src/lib/analytics.t
 
 ## How tracking is wired
 
-All tracking goes through the single wrapper in [`src/lib/analytics.ts`](../src/lib/analytics.ts) - no component calls the Mixpanel SDK directly.
+All tracking goes through the single wrapper in [`src/lib/analytics.ts`](../src/lib/analytics.ts) - no component calls the DevTeam Analytics SDK directly.
 Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../src/scripts/chrome.ts), matching the rest of that file's declarative style:
 
 - **Page views** - a page sets `screen` (and optional `pageProps`) on `BaseLayout`, which serialises them onto `<body data-page-view="...">`.
@@ -17,7 +17,7 @@ Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../sr
   `chrome.ts` fires the event synchronously on click, before the browser follows the link.
 - **Newsletter signups** - a newsletter form carries `data-signup`; the mock-form submit handler fires `Newsletter Signup`.
 
-Mixpanel is initialised with batching off and `sendBeacon` transport so a click event still reaches the server when the click immediately navigates the page away.
+The DevTeam Analytics SDK is initialised through the wrapper (`@getdevteam/analytics-web`); funnel events fire synchronously on click, before the browser follows the link, so a click event is dispatched even when the click immediately navigates the page away. The SDK's own auto-pageview and built-in error capture are left off - page views are emitted explicitly as `Page Viewed` and uncaught errors already route through `track()` - to avoid double-counting.
 
 ## No PII
 
@@ -96,11 +96,11 @@ Last verified: 2026-06-30 (epic close-out).
 
 - `npm run check` (`astro check`) - 0 errors across 72 files, so the full event-wiring graph type-checks (the `EVENTS` map, every `data-track` call site, and the consent banner that boots the gate).
 - `npm test` - 30/30 pass. This covers the consent decision table end to end: a GPC/DNT signal denies and never sends, an explicit decline denies, a stored grant flushes, and an unknown/stale state keeps buffering (`src/lib/consent.test.ts`); plus the PII allowlist that scrubs every outgoing payload (`src/lib/pii.test.ts`).
-- `npx astro dev` + `GET /privacy` - the updated privacy page renders and serves the new Mixpanel / Google Analytics disclosures.
+- `npx astro dev` + `GET /privacy` - the updated privacy page renders and serves the new DevTeam Analytics / Google Analytics disclosures.
 
 ### Event-flow trace (code path confirmed for each taxonomy event)
 
-Each funnel event was traced from its real call site through the dispatcher (`chrome.ts`), the consent-gated `track()` buffer, the `scrub()` chokepoint, and out via Mixpanel's `sendBeacon` transport:
+Each funnel event was traced from its real call site through the dispatcher (`chrome.ts`), the consent-gated `track()` buffer, the `scrub()` chokepoint, and out via the DevTeam Analytics SDK:
 
 | Event | Real call site | Properties sent (post-scrub) |
 |---|---|---|
@@ -110,14 +110,14 @@ Each funnel event was traced from its real call site through the dispatcher (`ch
 | `Affiliate Link Clicked` | `deals/[slug].astro`, `promos/[slug].astro`, `Verdict.astro`, `ProductCallout.astro` | `slug`, `brand`, `retailer`, `placement` |
 | `Newsletter Signup` | `Newsletter.astro`, `Footer.astro` (`data-signup`) | `screen` (when known) |
 
-Suppression is enforced in one place (`track()` in `analytics.ts`): events are buffered while consent is unknown, flushed on grant, dropped on deny, and `boot()` denies outright on a GPC/DNT signal - so nothing reaches Mixpanel before consent or after a decline/GPC/DNT.
+Suppression is enforced in one place (`track()` in `analytics.ts`): events are buffered while consent is unknown, flushed on grant, dropped on deny, and `boot()` denies outright on a GPC/DNT signal - so nothing reaches DevTeam Analytics before consent or after a decline/GPC/DNT.
 
 ### Live View walk-through (operational - run on the preview deploy)
 
-This step needs a deployed/preview build with `PUBLIC_Mixpanel__ProjectToken` set and access to the Mixpanel project's Live View; it cannot be exercised in the build sandbox (no deployed build, browser, or Mixpanel project access here). To close it out, deploy the preview, open Mixpanel Live View, and:
+This step needs a deployed/preview build with `PUBLIC_Devteam__IngestKey` and `PUBLIC_Devteam__Host` (`https://ingest.getdevteam.ai`) set and access to the DevTeam platform's live events and Logs views; it cannot be exercised in the build sandbox (no deployed build, browser, or DevTeam platform access here). To close it out, deploy the preview, open the DevTeam platform's live events view, and:
 
 1. Before accepting consent, browse a few pages - confirm **no** events appear (buffered, not sent).
 2. Accept analytics, then walk the funnel: home (hero CTA), deal card click, deal-detail view, affiliate "View deal" click, newsletter signup - confirm each event above lands with the listed properties and **no** PII (no emails, names, or query strings).
 3. Reset consent, decline (or enable GPC/DNT), repeat the walk - confirm **no** events appear.
 
-Record the operator, date, and Live View screenshots here once complete.
+Record the operator, date, and DevTeam platform screenshots here once complete.
