@@ -52,11 +52,10 @@ jobs:
           # DevTeam Analytics — public ingest key (dtp_) + prod ingest host.
           # The key is ingest-only and safe to commit; PUBLIC_ exposes it to
           # the Astro build so the DevTeam analytics + logging sink is active.
-          PUBLIC_Devteam__IngestKey: dtp_9YapTQMaVMIKD5vLxcIiBl8ByAtwbHILHjrSUi2bshg
+          PUBLIC_Devteam__IngestKey: dtp_DRw4qtfSLhfa1jPCO1Q_edy_hW2-c95rProH99ApjA4
           PUBLIC_Devteam__Host: https://ingest.getdevteam.ai
           # Develop is a code-only preview rendered against the SAME live
           # editorial content as production. Content now lives in Cloudflare
-          # D1 (the old sleekdrops-cms git-clone flow was decommissioned
           # 2026-06-13), so the build needs the same D1 env vars as prod.
           # Reused prod secrets on purpose — this is a test deploy target.
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
