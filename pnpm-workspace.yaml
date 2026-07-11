@@ -1,7 +1,14 @@
+packages:
+  - apps/*
+
 allowBuilds:
   esbuild: true
   sharp: true
   workerd: true
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - workerd
 minimumReleaseAgeExclude:
   - astro@6.3.7
   - '@astrojs/cloudflare@13.5.4'

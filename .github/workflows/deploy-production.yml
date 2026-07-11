@@ -3,12 +3,20 @@ name: Deploy to production
 on:
   push:
     branches: [main]
+    # Only the website deploys to Cloudflare Pages — agent-platform-only
+    # commits (apps/agent, apps/admin) don't need a site rebuild.
+    paths:
+      - 'apps/web/**'
+      - '.github/workflows/deploy-production.yml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
   # Fired whenever editorial content changes in the D1 database (a post's
   # status flips to 'published', or affiliate_links rows change). Anything
   # with a GitHub token can trigger it:
   #   POST /repos/AshishAcharya083/sleekdrops/dispatches
   #   {"event_type": "content-updated"}
-  # The future sleekdrops-agent publisher calls this after its D1 writes.
+  # The apps/agent publisher calls this after its D1 writes.
   repository_dispatch:
     types: [content-updated]
   workflow_dispatch:
@@ -52,7 +60,7 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Type-check
-        run: pnpm check
+        run: pnpm --filter @sleekdrops/web check
 
       - name: Build (production)
         env:
@@ -63,20 +71,23 @@ jobs:
           # the Astro build so the DevTeam analytics + logging sink is active.
           PUBLIC_Devteam__IngestKey: dtp_9YapTQMaVMIKD5vLxcIiBl8ByAtwbHILHjrSUi2bshg
           PUBLIC_Devteam__Host: https://ingest.getdevteam.ai
-          # Used by scripts/fetch-content.mjs to read posts + affiliate links
-          # from Cloudflare D1 during the prebuild step. The database id is
-          # not a secret; CLOUDFLARE_D1_TOKEN needs "Account → D1 → Read".
+          # Used by apps/web/scripts/fetch-content.mjs to read posts +
+          # affiliate links from Cloudflare D1 during the prebuild step. The
+          # database id is not a secret; CLOUDFLARE_D1_TOKEN needs
+          # "Account → D1 → Read".
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE_ID: b98d83ac-a2a5-42cb-a367-0cb71b902670
           CLOUDFLARE_D1_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
           # Fallback while CLOUDFLARE_D1_TOKEN isn't set — works only if the
           # Pages deploy token also has D1 read permission.
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: pnpm build
+        run: pnpm --filter @sleekdrops/web build
 
       - name: Deploy to Cloudflare Pages (production)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Run from apps/web so wrangler picks up the functions/ directory.
+          workingDirectory: apps/web
           command: pages deploy dist --project-name=${{ secrets.CLOUDFLARE_PROJECT_NAME }} --branch=main

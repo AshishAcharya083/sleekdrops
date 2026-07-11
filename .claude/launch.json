@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "agent-platform",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "pnpm@10", "--filter", "@sleekdrops/agent", "start"],
+      "port": 8787
+    }
+  ]
+}

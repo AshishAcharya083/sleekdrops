@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   build:
-    name: Build & type-check
+    name: Build & type-check (all apps)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,13 +29,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Type-check
-        run: pnpm check
+      - name: Type-check website
+        run: pnpm --filter @sleekdrops/web check
 
-      - name: Build
+      - name: Build website
         env:
           SITE_URL: https://sleekdrops.com
-          # PR builds need to fetch sleekdrops-cms too so astro check sees the posts.
-          CMS_REPO_URL: https://x-access-token:${{ secrets.CMS_CONTENT_PAT }}@github.com/AshishAcharya083/sleekdrops-cms.git
-          CMS_REPO_REF: main
-        run: pnpm build
+          # PR builds fetch live editorial content from D1 so astro check
+          # sees real posts (same read-only credentials as deploys).
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: b98d83ac-a2a5-42cb-a367-0cb71b902670
+          CLOUDFLARE_D1_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm --filter @sleekdrops/web build
+
+      - name: Type-check agent platform
+        run: pnpm --filter @sleekdrops/agent check
+
+      - name: Build admin panel
+        run: pnpm --filter @sleekdrops/admin build

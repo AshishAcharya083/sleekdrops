@@ -1,0 +1,25 @@
+# Local infrastructure for the SleekDrops agent platform (apps/agent).
+# PostgreSQL holds pipeline state: topics, articles, agent sessions, usage.
+# Published content still lives in Cloudflare D1 — Postgres is operational
+# state only, D1 is the publish target the website builds from.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sleekdrops-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sleekdrops
+      POSTGRES_PASSWORD: sleekdrops
+      POSTGRES_DB: sleekdrops_agent
+    ports:
+      - '5544:5432'
+    volumes:
+      - sleekdrops-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U sleekdrops -d sleekdrops_agent']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  sleekdrops-pgdata:
