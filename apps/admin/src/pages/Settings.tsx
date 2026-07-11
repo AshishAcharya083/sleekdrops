@@ -47,27 +47,55 @@ export function SettingsPage() {
       <div className="section" style={{ marginTop: 0 }}>
         <h2>AI provider</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Point the whole pipeline at OpenRouter or any OpenAI-compatible endpoint.
-          Empty fields fall back to apps/agent/.env. The key is stored in the
+          The whole pipeline speaks the OpenAI-compatible chat API — pick who serves
+          it. Empty fields fall back to apps/agent/.env. Keys are stored in the
           platform database — set ADMIN_TOKEN if the API is reachable by others.
         </p>
         <div className="settings-grid">
-          <label>Base URL</label>
-          <input
-            placeholder="https://openrouter.ai/api/v1 (default)"
-            value={llm.base_url ?? ''}
-            onChange={(e) => setSettings({ ...settings, llm: { ...llm, base_url: e.target.value } })}
-          />
+          <label>Provider</label>
+          <select
+            value={llm.provider ?? 'openrouter'}
+            onChange={(e) =>
+              setSettings({
+                ...settings,
+                llm: { ...llm, provider: e.target.value as 'openrouter' | 'gemini' | 'custom' },
+              })
+            }
+          >
+            <option value="openrouter">OpenRouter — one key, any model (Gemini/Claude/GPT…)</option>
+            <option value="gemini">Google Gemini — AI Studio key, uses your Google Cloud credits</option>
+            <option value="custom">Custom — any OpenAI-compatible endpoint</option>
+          </select>
+          {(llm.provider ?? 'openrouter') === 'custom' && (
+            <>
+              <label>Base URL</label>
+              <input
+                placeholder="https://my-endpoint.example.com/v1"
+                value={llm.base_url ?? ''}
+                onChange={(e) =>
+                  setSettings({ ...settings, llm: { ...llm, base_url: e.target.value } })
+                }
+              />
+            </>
+          )}
           <label>API key</label>
           <input
             type="password"
-            placeholder="(from .env)"
+            placeholder={
+              (llm.provider ?? 'openrouter') === 'gemini'
+                ? '(from .env: GEMINI_API_KEY)'
+                : '(from .env: OPENROUTER_API_KEY)'
+            }
             value={llm.api_key ?? ''}
             onChange={(e) => setSettings({ ...settings, llm: { ...llm, api_key: e.target.value } })}
           />
           <label>Default model</label>
           <input
-            placeholder="google/gemini-2.5-flash (from .env)"
+            placeholder={
+              (llm.provider ?? 'openrouter') === 'gemini'
+                ? 'gemini-2.5-flash (default)'
+                : 'google/gemini-2.5-flash (default)'
+            }
             value={llm.default_model ?? ''}
             onChange={(e) =>
               setSettings({ ...settings, llm: { ...llm, default_model: e.target.value } })

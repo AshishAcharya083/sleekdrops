@@ -2,9 +2,8 @@
 // records an agent_session (model, tokens, cost, duration), and routes the
 // article to its next stage. Verdict-driven, bounded revision loop —
 // a light version of devteam-platform's card lane pattern.
-import { config } from '../config.js';
 import { getSetting, q } from '../db/pool.js';
-import { llmSettings, UsageTracker } from '../llm/openrouter.js';
+import { resolveProvider, UsageTracker } from '../llm/openrouter.js';
 import { runAssembler } from '../agents/assembler.js';
 import { runEditor } from '../agents/editor.js';
 import { runOutliner } from '../agents/outliner.js';
@@ -27,8 +26,7 @@ const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
 export async function modelFor(agent: string): Promise<string> {
   const overrides = await getSetting<Record<string, string>>('models', {});
   if (overrides[agent]) return overrides[agent];
-  const provider = await llmSettings();
-  return provider.default_model || config.modelDefault;
+  return (await resolveProvider()).defaultModel;
 }
 
 async function updateArticle(id: string, fields: Record<string, unknown>): Promise<void> {

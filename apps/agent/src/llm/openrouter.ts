@@ -1,15 +1,56 @@
-// OpenRouter chat client. One key, any provider — model ids like
-// google/gemini-2.5-flash, anthropic/claude-sonnet-4.5, openai/gpt-4o.
-// The base URL can point at any OpenAI-compatible endpoint, so the pipeline
-// is not tied to OpenRouter itself either. Provider config is resolved at
-// call time: admin-panel settings ('llm' key) win, .env is the fallback.
+// LLM abstraction layer. Every agent talks to an OpenAI-compatible chat API;
+// which one is decided at call time from admin settings ('llm' key), with
+// .env as fallback. Built-in providers:
+//   openrouter — one key, any model (google/*, anthropic/*, openai/*, ...)
+//   gemini     — Google AI Studio's OpenAI-compatible endpoint; bills the
+//                key's GCP project, so Google Cloud credits apply
+//   custom     — any other OpenAI-compatible endpoint (vLLM, LiteLLM, ...)
 import { config } from '../config.js';
 import { getSetting } from '../db/pool.js';
 
 export interface LlmProviderSettings {
+  provider?: 'openrouter' | 'gemini' | 'custom';
   base_url?: string;
   api_key?: string;
   default_model?: string;
+}
+
+interface ProviderPreset {
+  baseUrl: string;
+  envApiKey: () => string;
+  defaultModel: () => string;
+  /** Map cross-provider model ids to what this provider expects. */
+  normalizeModel: (model: string) => string;
+}
+
+export const PROVIDERS: Record<string, ProviderPreset> = {
+  openrouter: {
+    baseUrl: 'https://openrouter.ai/api/v1',
+    envApiKey: () => config.openrouter.apiKey,
+    defaultModel: () => config.modelDefault,
+    normalizeModel: (m) => m,
+  },
+  gemini: {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    envApiKey: () => config.geminiApiKey,
+    // OpenRouter-style "google/gemini-2.5-flash" → "gemini-2.5-flash".
+    defaultModel: () => config.modelDefault.replace(/^google\//, ''),
+    normalizeModel: (m) => m.replace(/^google\//, ''),
+  },
+  custom: {
+    baseUrl: config.openrouter.baseUrl,
+    envApiKey: () => config.openrouter.apiKey,
+    defaultModel: () => config.modelDefault,
+    normalizeModel: (m) => m,
+  },
+};
+
+export interface ResolvedProvider {
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  defaultModel: string;
+  normalizeModel: (model: string) => string;
 }
 
 let llmCache: { value: LlmProviderSettings; at: number } | null = null;
@@ -20,6 +61,20 @@ export async function llmSettings(): Promise<LlmProviderSettings> {
   const value = await getSetting<LlmProviderSettings>('llm', {});
   llmCache = { value, at: Date.now() };
   return value;
+}
+
+/** Settings win field-by-field; the preset fills the gaps. */
+export async function resolveProvider(): Promise<ResolvedProvider> {
+  const s = await llmSettings();
+  const name = s.provider && PROVIDERS[s.provider] ? s.provider : 'openrouter';
+  const preset = PROVIDERS[name];
+  return {
+    name,
+    baseUrl: (s.base_url || preset.baseUrl).replace(/\/+$/, ''),
+    apiKey: s.api_key || preset.envApiKey(),
+    defaultModel: s.default_model || preset.defaultModel(),
+    normalizeModel: preset.normalizeModel,
+  };
 }
 
 export interface LlmUsage {
@@ -64,12 +119,11 @@ export class UsageTracker {
 const RETRYABLE = new Set([408, 429, 500, 502, 503, 504]);
 
 export async function chat(opts: ChatOptions): Promise<LlmResult> {
-  const provider = await llmSettings();
-  const apiKey = provider.api_key || config.openrouter.apiKey;
-  const baseUrl = (provider.base_url || config.openrouter.baseUrl).replace(/\/+$/, '');
-  if (!apiKey) {
+  const provider = await resolveProvider();
+  if (!provider.apiKey) {
     throw new Error(
-      'No LLM API key configured — set it in admin Settings or OPENROUTER_API_KEY in apps/agent/.env',
+      `No LLM API key configured for provider "${provider.name}" — set it in admin Settings, ` +
+        'or OPENROUTER_API_KEY / GEMINI_API_KEY in apps/agent/.env',
     );
   }
   const messages: Array<{ role: string; content: string }> = [];
@@ -77,23 +131,25 @@ export async function chat(opts: ChatOptions): Promise<LlmResult> {
   messages.push({ role: 'user', content: opts.prompt });
 
   const body: Record<string, unknown> = {
-    model: opts.model,
+    model: provider.normalizeModel(opts.model),
     messages,
     temperature: opts.temperature ?? 0.7,
-    // Ask OpenRouter to include the billed cost in the usage block.
-    usage: { include: true },
   };
-  if (opts.maxTokens) body.max_tokens = opts.maxTokens;
+  // OpenRouter-only extension: include the billed USD cost in the usage block.
+  if (provider.name === 'openrouter') body.usage = { include: true };
+  // Always cap output: uncapped requests make OpenRouter reserve the model's
+  // full completion window up front, which 402s on small credit balances.
+  body.max_tokens = opts.maxTokens ?? 8192;
   if (opts.jsonMode) body.response_format = { type: 'json_object' };
 
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * attempt));
     try {
-      const res = await fetch(`${baseUrl}/chat/completions`, {
+      const res = await fetch(`${provider.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': config.openrouter.siteUrl,
           'X-Title': config.openrouter.appName,
@@ -102,7 +158,7 @@ export async function chat(opts: ChatOptions): Promise<LlmResult> {
       });
       if (!res.ok) {
         const text = await res.text();
-        lastError = new Error(`OpenRouter HTTP ${res.status}: ${text.slice(0, 500)}`);
+        lastError = new Error(`LLM provider HTTP ${res.status}: ${text.slice(0, 500)}`);
         if (RETRYABLE.has(res.status)) continue;
         throw lastError;
       }
@@ -112,12 +168,12 @@ export async function chat(opts: ChatOptions): Promise<LlmResult> {
         model?: string;
         error?: { message?: string };
       };
-      if (json.error) throw new Error(`OpenRouter error: ${json.error.message}`);
+      if (json.error) throw new Error(`LLM provider error: ${json.error.message}`);
       const text = json.choices?.[0]?.message?.content ?? '';
-      if (!text) throw new Error('OpenRouter returned an empty completion');
+      if (!text) throw new Error('LLM provider returned an empty completion');
       return {
         text,
-        model: json.model ?? opts.model,
+        model: json.model ?? provider.normalizeModel(opts.model),
         usage: {
           tokensInput: json.usage?.prompt_tokens ?? 0,
           tokensOutput: json.usage?.completion_tokens ?? 0,
@@ -127,7 +183,7 @@ export async function chat(opts: ChatOptions): Promise<LlmResult> {
     } catch (err) {
       lastError = err;
       // Network errors are retryable; anything thrown above already decided.
-      if (err instanceof Error && err.message.startsWith('OpenRouter')) throw err;
+      if (err instanceof Error && err.message.startsWith('LLM provider')) throw err;
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));

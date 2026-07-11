@@ -75,7 +75,12 @@ export interface Settings {
   publish_mode: string;
   max_revision_rounds: number;
   worker_enabled: boolean;
-  llm: { base_url?: string; api_key?: string; default_model?: string };
+  llm: {
+    provider?: 'openrouter' | 'gemini' | 'custom';
+    base_url?: string;
+    api_key?: string;
+    default_model?: string;
+  };
   scout_interval_hours: number;
 }
 

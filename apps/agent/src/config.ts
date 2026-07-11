@@ -18,6 +18,9 @@ export const config = {
     siteUrl: env('OPENROUTER_SITE_URL', 'https://sleekdrops.com'),
     appName: env('OPENROUTER_APP_NAME', 'sleekdrops-agent'),
   },
+  // Google AI Studio key — bills the GCP project it belongs to, so Google
+  // Cloud credits apply. Used when the admin selects the "gemini" provider.
+  geminiApiKey: env('GEMINI_API_KEY'),
   modelDefault: env('MODEL_DEFAULT', 'google/gemini-2.5-flash'),
 
   tavilyApiKey: env('TAVILY_API_KEY'),
