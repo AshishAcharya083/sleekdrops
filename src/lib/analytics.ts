@@ -234,6 +234,10 @@ function reportError(props: ErrorProps): void {
   try {
     if (!deduper.shouldReport(errorSignature(props), Date.now())) return;
     track(CLIENT_ERROR_EVENT, props);
+    // Also forward to the platform's log pipeline so errors land in the Logs view,
+    // not only as $client_error events. The client only exists after consent, so
+    // this stays consent-gated like track().
+    devteam?.log.error(String(props.message ?? 'client error'), scrub(props, CLIENT_ERROR_EVENT));
   } catch {
     /* error reporting is best-effort - never let it surface to the user */
   }
