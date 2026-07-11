@@ -52,7 +52,7 @@ jobs:
           # DevTeam Analytics — public ingest key (dtp_) + prod ingest host.
           # The key is ingest-only and safe to commit; PUBLIC_ exposes it to
           # the Astro build so the DevTeam analytics + logging sink is active.
-          PUBLIC_Devteam__IngestKey: dtp_pDqZz_CspH53lGTsDMWGB7S9pzbweVp7GOqow0S74Hw
+          PUBLIC_Devteam__IngestKey: dtp_-IApS0klc1JtsB7kOI84IqD09M1NcO8wrKmK0tbfuLQ
           PUBLIC_Devteam__Host: https://ingest.analytics.internal.getdevteam.ai
           # Develop is a code-only preview rendered against the SAME live
           # editorial content as production. Content now lives in Cloudflare
