@@ -1,8 +1,26 @@
 // OpenRouter chat client. One key, any provider — model ids like
 // google/gemini-2.5-flash, anthropic/claude-sonnet-4.5, openai/gpt-4o.
-// OPENROUTER_BASE_URL can point at any OpenAI-compatible endpoint, so the
-// pipeline is not tied to OpenRouter itself either.
+// The base URL can point at any OpenAI-compatible endpoint, so the pipeline
+// is not tied to OpenRouter itself either. Provider config is resolved at
+// call time: admin-panel settings ('llm' key) win, .env is the fallback.
 import { config } from '../config.js';
+import { getSetting } from '../db/pool.js';
+
+export interface LlmProviderSettings {
+  base_url?: string;
+  api_key?: string;
+  default_model?: string;
+}
+
+let llmCache: { value: LlmProviderSettings; at: number } | null = null;
+
+/** Admin-settable provider config, cached for 30s to spare the DB. */
+export async function llmSettings(): Promise<LlmProviderSettings> {
+  if (llmCache && Date.now() - llmCache.at < 30_000) return llmCache.value;
+  const value = await getSetting<LlmProviderSettings>('llm', {});
+  llmCache = { value, at: Date.now() };
+  return value;
+}
 
 export interface LlmUsage {
   tokensInput: number;
@@ -46,8 +64,13 @@ export class UsageTracker {
 const RETRYABLE = new Set([408, 429, 500, 502, 503, 504]);
 
 export async function chat(opts: ChatOptions): Promise<LlmResult> {
-  if (!config.openrouter.apiKey) {
-    throw new Error('OPENROUTER_API_KEY is not set — add it to apps/agent/.env');
+  const provider = await llmSettings();
+  const apiKey = provider.api_key || config.openrouter.apiKey;
+  const baseUrl = (provider.base_url || config.openrouter.baseUrl).replace(/\/+$/, '');
+  if (!apiKey) {
+    throw new Error(
+      'No LLM API key configured — set it in admin Settings or OPENROUTER_API_KEY in apps/agent/.env',
+    );
   }
   const messages: Array<{ role: string; content: string }> = [];
   if (opts.system) messages.push({ role: 'system', content: opts.system });
@@ -67,10 +90,10 @@ export async function chat(opts: ChatOptions): Promise<LlmResult> {
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * attempt));
     try {
-      const res = await fetch(`${config.openrouter.baseUrl}/chat/completions`, {
+      const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${config.openrouter.apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': config.openrouter.siteUrl,
           'X-Title': config.openrouter.appName,

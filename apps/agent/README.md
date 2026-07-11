@@ -24,16 +24,27 @@ With `publish_mode = approval` (default) the article parks at
 
 ## Any AI provider via OpenRouter
 
-Every LLM call goes through OpenRouter's OpenAI-compatible API:
+Every LLM call goes through an OpenAI-compatible chat API, resolved at call
+time in this order:
 
-- `MODEL_DEFAULT` in `.env` sets the default (e.g. `google/gemini-2.5-flash`).
-- Per-agent overrides in the admin **Settings** tab — e.g. run the writer on
-  `anthropic/claude-sonnet-4.5` and the reviewer on `openai/gpt-4o`.
-- `OPENROUTER_BASE_URL` can point at any OpenAI-compatible endpoint, so you're
-  not locked to OpenRouter either.
+1. Admin **Settings → AI provider** (base URL, API key, default model) —
+   switch providers live, no restart.
+2. `.env` fallbacks: `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY`, `MODEL_DEFAULT`.
 
-Usage (tokens + billed USD) is recorded per agent session and aggregated in
-the admin panel.
+Per-agent model overrides sit on top — e.g. writer on
+`anthropic/claude-sonnet-4.5`, reviewer on `openai/gpt-4o`, everything else on
+`google/gemini-2.5-flash`. Usage (tokens + billed USD) is recorded per agent
+session and aggregated in the admin panel.
+
+## Autonomy: what runs by itself
+
+- **Topic scout**: runs on a schedule (Settings → *Autonomous topic scout*,
+  default daily; in-process scheduler, no external cron needed). It skips a
+  sweep while 30+ suggestions sit untriaged.
+- **Article pipeline**: fully autonomous once you approve topics — the worker
+  polls Postgres (the light pub/sub) and drives every stage to completion.
+- **Publishing**: gated on your approval by default (`publish_mode=approval`);
+  flip to `auto` for hands-off publishing or `draft` to stage in D1 only.
 
 ## State model (PostgreSQL)
 

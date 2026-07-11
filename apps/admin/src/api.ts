@@ -75,6 +75,8 @@ export interface Settings {
   publish_mode: string;
   max_revision_rounds: number;
   worker_enabled: boolean;
+  llm: { base_url?: string; api_key?: string; default_model?: string };
+  scout_interval_hours: number;
 }
 
 export function getToken(): string {
@@ -85,11 +87,24 @@ export function setToken(token: string): void {
   localStorage.setItem('sleekdrops_admin_token', token);
 }
 
+/**
+ * Where the agent API lives. Empty = same origin (the agent server serves
+ * this SPA locally). The Cloudflare Pages deployment of this panel sets it
+ * to wherever the agent platform runs, e.g. http://localhost:8787.
+ */
+export function getApiBase(): string {
+  return (localStorage.getItem('sleekdrops_api_base') ?? '').replace(/\/+$/, '');
+}
+
+export function setApiBase(base: string): void {
+  localStorage.setItem('sleekdrops_api_base', base.trim());
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(path, { ...init, headers });
+  const res = await fetch(`${getApiBase()}${path}`, { ...init, headers });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `HTTP ${res.status}`);

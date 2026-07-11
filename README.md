@@ -40,21 +40,33 @@ The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archive
 ## Quickstart
 
 ```bash
-corepack enable pnpm   # or: npm i -g pnpm
-pnpm install
-
-# Website
-pnpm dev:web           # needs apps/web/.env (D1 read credentials)
-
-# Agent platform
-pnpm db:up             # starts dockerized Postgres on :5544
-cp apps/agent/.env.example apps/agent/.env   # fill in OPENROUTER_API_KEY etc.
-pnpm dev:agent         # API + worker + admin panel on http://localhost:8787
-pnpm dev:admin         # (optional) admin panel dev server on :5173
+./up.sh          # Postgres + agent platform (API + worker + admin panel on :8787)
+./up.sh --web    # ... plus the website dev server on :4321
+./down.sh        # stop everything (--wipe also deletes the database)
 ```
 
-Build everything: `pnpm build`. Deploys run from GitHub Actions
-(`develop` → sleekdrops.pages.dev, `main`/content-dispatch → sleekdrops.com).
+First run creates `apps/agent/.env` from the example — add your
+`OPENROUTER_API_KEY` there, or set the provider straight from the admin
+panel's Settings tab. Logs live in `.run/`.
+
+Piecemeal alternatives: `pnpm db:up`, `pnpm dev:agent`, `pnpm dev:admin`,
+`pnpm dev:web`, `pnpm build`.
+
+## Environments
+
+There is **one** agent platform environment (one Postgres, one admin panel,
+one D1 content database). Only the website has develop/production splits:
+
+| What | Where | Trigger |
+| --- | --- | --- |
+| Website (develop) | sleekdrops.pages.dev | push to `develop` touching `apps/web` |
+| Website (production) | sleekdrops.com | push to `main` or `content-updated` dispatch |
+| Admin panel | sleekdrops-admin.pages.dev (single env) | push to `develop` touching `apps/admin` |
+| Agent platform | wherever you run it (laptop/server) | `./up.sh` |
+
+The Pages-hosted admin panel is a static SPA: set its **API base** field
+(header, stored in your browser) to the agent API you want it to talk to —
+`http://localhost:8787` while the platform runs on your machine.
 
 See [`apps/agent/README.md`](apps/agent/README.md) for the pipeline design and
 [`apps/web/README.md`](apps/web/README.md) for the editorial rules.

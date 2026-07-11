@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getToken, setToken } from './api';
+import { getApiBase, getToken, setApiBase, setToken } from './api';
 import { Overview } from './pages/Overview';
 import { Topics } from './pages/Topics';
 import { Pipeline } from './pages/Pipeline';
@@ -12,6 +12,7 @@ type Tab = (typeof TABS)[number];
 export function App() {
   const [tab, setTab] = useState<Tab>('Overview');
   const [token, setTokenState] = useState(getToken());
+  const [apiBase, setApiBaseState] = useState(getApiBase());
 
   return (
     <div className="shell">
@@ -28,7 +29,17 @@ export function App() {
         </nav>
         <div className="spacer" />
         <input
+          style={{ width: 190 }}
+          placeholder="API base (empty = this host)"
+          value={apiBase}
+          onChange={(e) => {
+            setApiBaseState(e.target.value);
+            setApiBase(e.target.value);
+          }}
+        />
+        <input
           type="password"
+          style={{ width: 170 }}
           placeholder="admin token (if set)"
           value={token}
           onChange={(e) => {

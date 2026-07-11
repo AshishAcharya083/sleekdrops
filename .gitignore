@@ -35,6 +35,9 @@ secrets.md
 # postgres data volume (docker compose bind mount fallback)
 .pgdata/
 
+# up.sh / down.sh runtime state (logs + pids)
+.run/
+
 # macOS
 .DS_Store
 

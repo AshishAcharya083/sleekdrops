@@ -40,9 +40,60 @@ export function SettingsPage() {
     }
   };
 
+  const llm = settings.llm ?? {};
+
   return (
     <div className="card">
+      <div className="section" style={{ marginTop: 0 }}>
+        <h2>AI provider</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Point the whole pipeline at OpenRouter or any OpenAI-compatible endpoint.
+          Empty fields fall back to apps/agent/.env. The key is stored in the
+          platform database — set ADMIN_TOKEN if the API is reachable by others.
+        </p>
+        <div className="settings-grid">
+          <label>Base URL</label>
+          <input
+            placeholder="https://openrouter.ai/api/v1 (default)"
+            value={llm.base_url ?? ''}
+            onChange={(e) => setSettings({ ...settings, llm: { ...llm, base_url: e.target.value } })}
+          />
+          <label>API key</label>
+          <input
+            type="password"
+            placeholder="(from .env)"
+            value={llm.api_key ?? ''}
+            onChange={(e) => setSettings({ ...settings, llm: { ...llm, api_key: e.target.value } })}
+          />
+          <label>Default model</label>
+          <input
+            placeholder="google/gemini-2.5-flash (from .env)"
+            value={llm.default_model ?? ''}
+            onChange={(e) =>
+              setSettings({ ...settings, llm: { ...llm, default_model: e.target.value } })
+            }
+          />
+        </div>
+      </div>
+
+      <div className="section">
+        <h2>Pipeline</h2>
       <div className="settings-grid">
+        <label>Autonomous topic scout</label>
+        <select
+          value={String(settings.scout_interval_hours ?? 24)}
+          onChange={(e) =>
+            setSettings({ ...settings, scout_interval_hours: Number(e.target.value) })
+          }
+        >
+          <option value="0">off — only run manually from the Topics tab</option>
+          <option value="6">every 6 hours</option>
+          <option value="12">every 12 hours</option>
+          <option value="24">daily</option>
+          <option value="72">every 3 days</option>
+          <option value="168">weekly</option>
+        </select>
+
         <label>Publish mode</label>
         <select
           value={settings.publish_mode}
@@ -71,11 +122,12 @@ export function SettingsPage() {
           <option value="false">no — pause all article stages</option>
         </select>
       </div>
+      </div>
 
       <div className="section">
         <h2>Model per agent (OpenRouter model ids)</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Empty = the MODEL_DEFAULT from apps/agent/.env. Any OpenRouter id works:
+          Empty = the default model above. Any model id your provider offers:
           google/gemini-2.5-flash, anthropic/claude-sonnet-4.5, openai/gpt-4o…
         </p>
         <div className="settings-grid">

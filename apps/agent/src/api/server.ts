@@ -15,6 +15,14 @@ const ADMIN_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../../ad
 
 export function createApp(): Hono {
   const app = new Hono();
+  // Chrome's Local Network Access: the Pages-hosted admin (https) calling a
+  // localhost agent API needs this header on the CORS preflight response.
+  app.use('*', async (c, next) => {
+    await next();
+    if (c.req.header('Access-Control-Request-Private-Network')) {
+      c.res.headers.set('Access-Control-Allow-Private-Network', 'true');
+    }
+  });
   app.use('*', cors());
 
   // Optional bearer auth on the API (set ADMIN_TOKEN to enable).
@@ -218,7 +226,14 @@ export function createApp(): Hono {
 
   app.put('/api/settings', async (c) => {
     const body = (await c.req.json()) as Record<string, unknown>;
-    const allowed = ['models', 'publish_mode', 'max_revision_rounds', 'worker_enabled'];
+    const allowed = [
+      'models',
+      'publish_mode',
+      'max_revision_rounds',
+      'worker_enabled',
+      'llm',
+      'scout_interval_hours',
+    ];
     for (const key of allowed) {
       if (!(key in body)) continue;
       if (key === 'publish_mode' && !['approval', 'auto', 'draft'].includes(String(body[key]))) {
