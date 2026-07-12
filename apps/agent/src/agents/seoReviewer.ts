@@ -2,7 +2,7 @@
 // returning a structured verdict the runner uses to route (pass → assemble,
 // fail → edit, bounded by max_revision_rounds).
 import { chatJson, UsageTracker } from '../llm/index.js';
-import { SEO_RULES, SITE_CONTEXT } from './context.js';
+import { LINK_PLACEMENT_RULES, SEO_RULES, siteContext } from './context.js';
 import type { ArticleRow, SeoReview } from '../pipeline/types.js';
 
 export async function runSeoReviewer(
@@ -13,7 +13,7 @@ export async function runSeoReviewer(
   const review = await chatJson<SeoReview>(
     {
       model,
-      system: `${SITE_CONTEXT}\n\n${SEO_RULES}`,
+      system: `${siteContext()}\n\n${LINK_PLACEMENT_RULES}\n\n${SEO_RULES}`,
       temperature: 0.2,
       maxTokens: 4000,
       prompt: `You are a strict SEO + editorial reviewer. Score this draft against the brief.
@@ -29,6 +29,9 @@ Check specifically:
 2. Word count vs target (${article.outline?.wordCountTarget ?? 'n/a'}) — substance, not padding.
 3. Heading hierarchy answers the search intent; FAQ present and long-tail.
 4. Every product link uses /go/<slug> form; no raw merchant URLs anywhere.
+   Link placement follows the placement rules: first mention per section,
+   a link column in comparison tables, per-product CTA lines, linked
+   conclusion picks — flag missed spots as issues.
 5. Honesty: cons/trade-offs present, disclaimer present, no invented facts
    (cross-check claims against the products' notes in the brief).
 6. Scanability: short paragraphs, tables where a table beats prose.

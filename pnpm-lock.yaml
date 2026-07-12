@@ -41,9 +41,15 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.3.207
         version: 0.3.207(@anthropic-ai/sdk@0.111.0(zod@3.25.76))(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))(zod@3.25.76)
+      '@google-cloud/storage':
+        specifier: ^7.21.0
+        version: 7.21.0(encoding@0.1.13)
       '@google/adk':
         specifier: ^1.3.0
         version: 1.3.0(@grpc/grpc-js@1.14.4)(@mikro-orm/mariadb@6.6.15(@mikro-orm/core@6.6.15)(pg@8.22.0))(@mikro-orm/mssql@6.6.15(@mikro-orm/core@6.6.15)(mariadb@3.4.5)(pg@8.22.0))(@mikro-orm/mysql@6.6.15(@mikro-orm/core@6.6.15)(@types/node@25.9.5)(mariadb@3.4.5)(pg@8.22.0))(@mikro-orm/postgresql@6.6.15(@mikro-orm/core@6.6.15)(mariadb@3.4.5))(@mikro-orm/sqlite@6.6.15(@mikro-orm/core@6.6.15)(mariadb@3.4.5)(pg@8.22.0))(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.0))(encoding@0.1.13)
+      '@google/genai':
+        specifier: ^1.52.0
+        version: 1.52.0(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
       '@hono/node-server':
         specifier: ^1.19.0
         version: 1.19.14(hono@4.12.29)

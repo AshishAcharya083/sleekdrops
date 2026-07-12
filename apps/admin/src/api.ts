@@ -70,6 +70,17 @@ export interface ArticleDetail {
   sessions: Session[];
 }
 
+export interface PublishedPost {
+  slug: string;
+  status: string;
+  title: string;
+  category: string;
+  post_type: string;
+  author: string;
+  pub_date: string;
+  updated_at: string;
+}
+
 export interface Settings {
   models: Record<string, string>;
   publish_mode: string;

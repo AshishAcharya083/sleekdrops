@@ -15,6 +15,7 @@ const { post } = Astro.props;
 
 const author = getAuthor(post.data.author);
 const headlineHtml = emphasiseLastWord(post.data.title);
+const stampYear = new Date(post.data.pubDate).getFullYear();
 const catLabel = post.data.kind
   ? `${post.data.category} · ${post.data.kind}`
   : post.data.category;
@@ -30,7 +31,7 @@ const catLabel = post.data.kind
       >
         {post.data.heroImage
           ? <img src={post.data.heroImage} alt={post.data.heroAlt ?? post.data.title} loading="lazy" />
-          : <span class="markstamp">SleekDrops studio · 2025</span>}
+          : <span class="markstamp">SleekDrops studio · {stampYear}</span>}
       </a>
       <div>
         <Badge variant="cat">{catLabel}</Badge>

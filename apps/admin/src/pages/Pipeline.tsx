@@ -7,7 +7,7 @@ import { usePoll } from '../hooks';
 const LANES: Array<{ title: string; stages: string[] }> = [
   { title: 'Research & Brief', stages: ['research', 'outline'] },
   { title: 'Write & Optimize', stages: ['write', 'seo_review', 'edit'] },
-  { title: 'Assemble & Publish', stages: ['assemble', 'publish'] },
+  { title: 'Assemble & Publish', stages: ['assemble', 'image', 'publish'] },
   { title: 'Done', stages: ['done'] },
 ];
 
@@ -56,6 +56,8 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
   const [detail, setDetail] = useState<ArticleDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showDraft, setShowDraft] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  const [feedbackSent, setFeedbackSent] = useState(false);
 
   const load = () => {
     api<ArticleDetail>(`/api/articles/${id}`).then(setDetail).catch((e: Error) => setErr(e.message));
@@ -65,6 +67,23 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
   const action = async (path: string) => {
     try {
       await api(`/api/articles/${id}/${path}`, { method: 'POST' });
+      load();
+      onChanged();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+
+  const sendFeedback = async () => {
+    if (!feedback.trim()) return;
+    try {
+      await api(`/api/articles/${id}/feedback`, {
+        method: 'POST',
+        body: JSON.stringify({ feedback: feedback.trim() }),
+      });
+      setFeedback('');
+      setFeedbackSent(true);
+      setTimeout(() => setFeedbackSent(false), 4000);
       load();
       onChanged();
     } catch (e) {
@@ -112,6 +131,30 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
             {detail.article.error && (
               <div className="error-banner" style={{ marginTop: 12 }}>
                 {detail.article.error}
+              </div>
+            )}
+
+            {detail.article.draft_md && detail.article.status !== 'running' && (
+              <div className="section">
+                <h2>Feedback to the writer</h2>
+                <div className="card">
+                  <textarea
+                    rows={3}
+                    style={{ width: '100%', resize: 'vertical' }}
+                    placeholder='e.g. "Lead with the Dyson, drop the price table, add a section on battery life"'
+                    value={feedback}
+                    onChange={(e) => setFeedback(e.target.value)}
+                  />
+                  <div className="row" style={{ marginTop: 8, alignItems: 'center' }}>
+                    <button className="btn" disabled={!feedback.trim()} onClick={sendFeedback}>
+                      Send to editor
+                    </button>
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      re-runs edit → SEO review → assemble → publish with your notes applied
+                    </span>
+                    {feedbackSent && <span style={{ fontSize: 12 }}>✓ queued</span>}
+                  </div>
+                </div>
               </div>
             )}
 

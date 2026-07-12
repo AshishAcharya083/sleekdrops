@@ -2,10 +2,32 @@
 // equivalent of devteam-platform's global agent instructions.
 import { AUTHORS, CATEGORIES, POST_TYPES } from '../content/contract.js';
 
-export const SITE_CONTEXT = `
+/** Today in the audience's timezone (Australia/Sydney), e.g. "2026-07-13". */
+export function todayInSydney(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Sydney',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+// A function, not a const: the current date must be evaluated per run, and
+// every agent needs it — model training data lags reality by a year or more,
+// and a wrong year in a title or watermark reads as instantly stale.
+export function siteContext(): string {
+  const today = todayInSydney();
+  return `
 SleekDrops (sleekdrops.com) is an editorial affiliate blog: "exclusive deals
 dropping daily". Primary audience: Australian shoppers (prices in AUD, Amazon
 Australia availability matters); write in plain international English.
+
+GROUNDING — non-negotiable:
+- Today's date is ${today}. Whenever you mention "this year", a year in a
+  title, or how recent something is, derive it from THIS date — never from
+  your training data, which is out of date.
+- Facts come from the research dossier / live search evidence you are given,
+  never from memory. If the evidence doesn't say it, you don't know it.
 
 Categories: ${CATEGORIES.join(', ')}.
 Post types the pipeline may produce: ${POST_TYPES.join(', ')}.
@@ -17,6 +39,7 @@ Post types the pipeline may produce: ${POST_TYPES.join(', ')}.
 Authors (pick whoever fits the beat):
 ${AUTHORS.map((a) => `- ${a.id}: ${a.name} — ${a.beat}`).join('\n')}
 `.trim();
+}
 
 export const EDITORIAL_RULES = `
 Editorial rules (non-negotiable):
@@ -32,6 +55,20 @@ Editorial rules (non-negotiable):
   editorial synthesis of specs, owner reviews, and expert coverage.
 - Structure for scanability: short paragraphs, descriptive H2/H3 headings,
   comparison tables for multi-product pieces, a "how we picked" section.
+`.trim();
+
+export const LINK_PLACEMENT_RULES = `
+Affiliate link placement (the article earns nothing without these — but never
+link a product that has no /go/ slug in the provided list):
+1. First mention of a product inside each major section links its /go/ slug.
+2. Comparison tables get a final column ("Price" or "Where to buy") whose cells
+   are links, e.g. [Check price](/go/<slug>).
+3. Every recommended product's own section/subsection ends with a one-line CTA
+   on its own paragraph, e.g. [See today's price on Amazon](/go/<slug>).
+4. The verdict/conclusion links each named pick once more.
+5. Vary anchor text naturally: the product name, "check the current price",
+   "see it on Amazon" — never the bare URL, never "click here".
+6. Beyond those spots, don't spam: one link per product per section is plenty.
 `.trim();
 
 export const SEO_RULES = `

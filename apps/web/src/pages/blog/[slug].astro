@@ -35,6 +35,7 @@ const category = getCategory(post.data.category);
 const product = post.data.product;
 const related = await getRelatedPosts(post, 3);
 const headlineHtml = emphasiseLastWord(post.data.title);
+const stampYear = new Date(post.data.pubDate).getFullYear();
 
 const meta = buildMeta({
   title: post.data.title,
@@ -107,7 +108,7 @@ const schema = product
       >
         {post.data.heroImage
           ? <img src={post.data.heroImage} alt={post.data.heroAlt ?? post.data.title} loading="eager" />
-          : <span class="markstamp">SleekDrops studio · 2025</span>}
+          : <span class="markstamp">SleekDrops studio · {stampYear}</span>}
       </div>
     </header>
 

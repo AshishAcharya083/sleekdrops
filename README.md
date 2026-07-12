@@ -19,7 +19,7 @@ The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archive
                                     │ REST (/api/*, ADMIN_TOKEN bearer)
 ┌─ apps/agent (Cloud Run, min-instances 1) ─▼─────────────────────────────┐
 │ topic scout → [you approve topics] → research → outline → write         │
-│    → SEO review ⇄ edit (bounded loop) → assemble → publish              │
+│    → SEO review ⇄ edit (bounded loop) → assemble → image → publish      │
 │                                                                          │
 │ State:  Cloud SQL PostgreSQL (topics, articles, agent_sessions, settings)│
 │ LLM:    two engines, routed by model id —                                │

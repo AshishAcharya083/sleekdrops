@@ -2,7 +2,7 @@
 // dek, slug, keyword plan, section-by-section outline, FAQ.
 import { chatJson, UsageTracker } from '../llm/index.js';
 import { AUTHORS, slugify } from '../content/contract.js';
-import { SEO_RULES, SITE_CONTEXT } from './context.js';
+import { SEO_RULES, siteContext } from './context.js';
 import type { ArticleRow, ContentBrief } from '../pipeline/types.js';
 
 export async function runOutliner(
@@ -13,7 +13,7 @@ export async function runOutliner(
   const brief = await chatJson<ContentBrief>(
     {
       model,
-      system: `${SITE_CONTEXT}\n\n${SEO_RULES}`,
+      system: `${siteContext()}\n\n${SEO_RULES}`,
       temperature: 0.5,
       maxTokens: 6000,
       prompt: `Create the SEO content brief for this piece.

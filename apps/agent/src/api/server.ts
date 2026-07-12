@@ -10,6 +10,8 @@ import { cors } from 'hono/cors';
 import { config } from '../config.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
 import { isScoutRunning, startScoutRun } from '../pipeline/scout.js';
+import { deleteD1Post, listD1Posts } from '../tools/d1.js';
+import { dispatchContentUpdated } from '../tools/github.js';
 
 const ADMIN_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../../admin/dist');
 
@@ -181,6 +183,46 @@ export function createApp(): Hono {
       [c.req.param('id')],
     );
     return rows.length > 0 ? c.json({ ok: true }) : c.json({ error: 'not cancellable' }, 409);
+  });
+
+  // Admin feedback → one editor pass. Requires a draft to edit; works on done
+  // (published) articles too — the piece re-runs edit → seo_review → assemble
+  // → image → publish, upserting the same D1 slug.
+  app.post('/api/articles/:id/feedback', async (c) => {
+    const { feedback } = (await c.req.json()) as { feedback?: string };
+    if (!feedback?.trim()) return c.json({ error: 'feedback required' }, 400);
+    const rows = await q(
+      `UPDATE articles
+       SET feedback = $2, stage = 'edit', status = 'queued', error = NULL, updated_at = now()
+       WHERE id = $1 AND status <> 'running' AND draft_md IS NOT NULL
+       RETURNING id`,
+      [c.req.param('id'), feedback.trim()],
+    );
+    return rows.length > 0
+      ? c.json({ ok: true })
+      : c.json({ error: 'article has no draft yet or is currently running' }, 409);
+  });
+
+  // ── Published site content (Cloudflare D1 — what the website builds from) ─
+  app.get('/api/published', async (c) => {
+    const posts = await listD1Posts();
+    return c.json({ posts });
+  });
+
+  app.delete('/api/published/:slug', async (c) => {
+    const result = await deleteD1Post(c.req.param('slug'));
+    if (!result) return c.json({ error: 'not found' }, 404);
+    // Rebuild so the site actually drops the page; deletion already succeeded,
+    // so a dispatch failure is reported, not thrown.
+    let dispatched = false;
+    let dispatchError: string | null = null;
+    try {
+      await dispatchContentUpdated();
+      dispatched = true;
+    } catch (err) {
+      dispatchError = err instanceof Error ? err.message : String(err);
+    }
+    return c.json({ ok: true, removedLinks: result.removedLinks, dispatched, dispatchError });
   });
 
   // ── Sessions & usage ─────────────────────────────────────────────────────

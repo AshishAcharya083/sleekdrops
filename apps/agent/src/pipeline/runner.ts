@@ -13,6 +13,7 @@ import {
 } from '../llm/index.js';
 import { runAssembler } from '../agents/assembler.js';
 import { runEditor } from '../agents/editor.js';
+import { runImageAgent } from '../agents/imageAgent.js';
 import { runOutliner } from '../agents/outliner.js';
 import { runPublisher } from '../agents/publisher.js';
 import { runResearcher } from '../agents/researcher.js';
@@ -27,8 +28,12 @@ const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
   seo_review: 'seo_reviewer',
   edit: 'editor',
   assemble: 'assembler',
+  image: 'image_agent',
   publish: 'publisher',
 };
+
+/** Stages that run deterministic code — no LLM chat, no model to pick. */
+const NO_LLM_AGENTS = new Set(['assembler', 'publisher']);
 
 /** Writer + editor follow the admin "prose engine" toggle; the rest is Gemini. */
 const PROSE_AGENTS = new Set(['writer', 'editor']);
@@ -78,7 +83,7 @@ export async function runStage(article: ArticleRow): Promise<void> {
   const stage = article.stage;
   if (stage === 'done') return;
   const agent = STAGE_AGENT[stage];
-  const model = agent === 'publisher' ? null : await modelFor(agent);
+  const model = NO_LLM_AGENTS.has(agent) ? null : await modelFor(agent);
   const tracker = new UsageTracker();
 
   const [session] = await q<{ id: string }>(
@@ -159,24 +164,46 @@ export async function runStage(article: ArticleRow): Promise<void> {
         await updateArticle(article.id, {
           draft_md: revised,
           revision_round: article.revision_round + 1,
+          // Admin feedback is consumed by exactly one edit pass.
+          feedback: null,
         });
-        summary = `revision round ${article.revision_round + 1} applied`;
+        summary = `revision round ${article.revision_round + 1} applied${article.feedback ? ' (incl. admin feedback)' : ''}`;
         next = { stage: 'seo_review', status: 'queued' };
         break;
       }
       case 'assemble': {
-        const assembled = await runAssembler(article, model!, tracker);
+        const assembled = await runAssembler(article);
         await updateArticle(article.id, {
           draft_md: assembled.body,
           frontmatter: JSON.stringify(assembled.frontmatter),
           affiliate_links: JSON.stringify(assembled.affiliateLinks),
         });
-        const publishMode = await getSetting<string>('publish_mode', 'approval');
         summary = `frontmatter + ${assembled.affiliateLinks.length} affiliate link(s) validated${
           assembled.droppedSlugs.length > 0
             ? `; stripped unlinkable: ${assembled.droppedSlugs.join(', ')}`
             : ''
         }`;
+        next = { stage: 'image', status: 'queued' };
+        break;
+      }
+      case 'image': {
+        const existing = article.frontmatter ?? {};
+        if (existing.heroImage) {
+          summary = 'hero image already set — keeping it';
+        } else {
+          const image = await runImageAgent(article, model!);
+          if (image.heroImage) {
+            await updateArticle(article.id, {
+              frontmatter: JSON.stringify({
+                ...existing,
+                heroImage: image.heroImage,
+                heroAlt: image.heroAlt ?? undefined,
+              }),
+            });
+          }
+          summary = image.summary;
+        }
+        const publishMode = await getSetting<string>('publish_mode', 'approval');
         next =
           publishMode === 'approval'
             ? { stage: 'publish', status: 'waiting_approval' }

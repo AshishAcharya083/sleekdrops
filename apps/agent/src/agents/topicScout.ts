@@ -6,7 +6,7 @@ import { chatJson, UsageTracker } from '../llm/index.js';
 import { fetchPublishedPosts } from '../tools/d1.js';
 import { formatSearches, tavilySearchMany } from '../tools/tavily.js';
 import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
-import { SITE_CONTEXT } from './context.js';
+import { siteContext } from './context.js';
 import type { TopicSuggestion } from '../pipeline/types.js';
 
 const SCOUT_QUERIES = [
@@ -44,7 +44,7 @@ export async function runTopicScout(
   const suggestions = await chatJson<{ topics: TopicSuggestion[] }>(
     {
       model,
-      system: SITE_CONTEXT,
+      system: siteContext(),
       temperature: 0.8,
       prompt: `You are the Topic Scout. From the live search evidence below, propose 6-10 NEW
 content topics for SleekDrops that are trending RIGHT NOW.

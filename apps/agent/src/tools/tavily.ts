@@ -32,6 +32,36 @@ export async function tavilySearch(query: string, maxResults = 6): Promise<Searc
   }));
 }
 
+export interface ImageHit {
+  url: string;
+  description: string;
+}
+
+/** Image results for a query — candidate hero images for the image agent. */
+export async function tavilyImageSearch(query: string, maxResults = 8): Promise<ImageHit[]> {
+  if (!config.tavilyApiKey) {
+    throw new Error('TAVILY_API_KEY is not set — add it to apps/agent/.env');
+  }
+  const res = await fetch('https://api.tavily.com/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      api_key: config.tavilyApiKey,
+      query,
+      max_results: maxResults,
+      include_images: true,
+      include_image_descriptions: true,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Tavily HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  }
+  const json = (await res.json()) as { images?: Array<string | { url: string; description?: string }> };
+  return (json.images ?? []).map((img) =>
+    typeof img === 'string' ? { url: img, description: '' } : { url: img.url, description: img.description ?? '' },
+  );
+}
+
 /** Run several searches, tolerating individual failures. */
 export async function tavilySearchMany(
   queries: string[],

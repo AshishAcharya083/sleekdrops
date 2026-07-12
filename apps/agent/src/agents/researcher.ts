@@ -3,8 +3,8 @@
 // keywords, and competitor notes. Everything downstream cites this dossier.
 import { chatJson, UsageTracker } from '../llm/index.js';
 import { formatSearches, tavilySearchMany } from '../tools/tavily.js';
-import { slugify } from '../content/contract.js';
-import { SITE_CONTEXT } from './context.js';
+import { parseAmazonUrl, slugify } from '../content/contract.js';
+import { siteContext } from './context.js';
 import type { ArticleRow, ResearchDossier, TopicRow } from '../pipeline/types.js';
 
 export async function runResearcher(
@@ -19,7 +19,7 @@ export async function runResearcher(
   const plan = await chatJson<{ queries: string[] }>(
     {
       model,
-      system: SITE_CONTEXT,
+      system: siteContext(),
       temperature: 0.4,
       prompt: `Plan web research for this piece:
 Title: ${article.title}
@@ -43,14 +43,17 @@ opinions, Amazon Australia availability, and what competing articles cover.`,
   const dossier = await chatJson<ResearchDossier>(
     {
       model,
-      system: SITE_CONTEXT,
+      system: siteContext(),
       temperature: 0.3,
       maxTokens: 8000,
       prompt: `Synthesize a research dossier for "${article.title}" (${article.post_type}, ${article.category}).
 
 STRICT RULES:
 - Use ONLY the evidence below. Never invent specs, prices, or URLs.
-- amazonUrl must be a URL that literally appears in the evidence, else null.
+- amazonUrl: an Amazon PRODUCT page URL (amazon.com.au or amazon.com, containing
+  /dp/ or /gp/product/) that literally appears in the evidence — else null.
+  A retailer or news site URL is NEVER an amazonUrl. Products without one are
+  still fine: the pipeline links them via an Amazon search fallback.
 - goSlug is the kebab-case affiliate slug for the product (e.g. "sony-wh-1000xm6").
 - 3-6 products for guides/roundups; for articles include products only if relevant.
 
@@ -70,8 +73,16 @@ Return JSON:
   );
 
   // Normalize goSlugs defensively — downstream link integrity depends on them.
+  // And never trust the model's idea of "an Amazon URL": anything that doesn't
+  // parse as a real Amazon product page (marketplace host + /dp/ ASIN) is
+  // dropped here, deterministically. This is the gate that keeps news-site and
+  // retailer URLs out of the affiliate table.
   for (const product of dossier.products ?? []) {
     product.goSlug = slugify(product.goSlug || product.name);
+    if (product.amazonUrl && !parseAmazonUrl(product.amazonUrl)) {
+      product.notes = `${product.notes ?? ''} [non-Amazon URL dropped: ${product.amazonUrl}]`.trim();
+      product.amazonUrl = null;
+    }
   }
   return dossier;
 }

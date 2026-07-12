@@ -31,6 +31,16 @@ export const config = {
 
   tavilyApiKey: env('TAVILY_API_KEY'),
 
+  // Hero-image storage. The bucket must allow public reads (allUsers →
+  // Storage Object Viewer); uploaded objects are served from
+  // https://storage.googleapis.com/<bucket>/<object>. Empty = image stage
+  // skips itself and articles keep the generated cover fills.
+  gcs: {
+    imagesBucket: env('GCS_IMAGES_BUCKET'),
+    // Override when serving through a CDN / custom domain instead.
+    publicBase: env('GCS_PUBLIC_BASE', 'https://storage.googleapis.com'),
+  },
+
   d1: {
     accountId: env('CLOUDFLARE_ACCOUNT_ID'),
     databaseId: env('D1_DATABASE_ID'),

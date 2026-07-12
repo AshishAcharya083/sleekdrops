@@ -3,10 +3,11 @@ import { getApiBase, getToken, setApiBase, setToken } from './api';
 import { Overview } from './pages/Overview';
 import { Topics } from './pages/Topics';
 import { Pipeline } from './pages/Pipeline';
+import { Published } from './pages/Published';
 import { Sessions } from './pages/Sessions';
 import { SettingsPage } from './pages/Settings';
 
-const TABS = ['Overview', 'Topics', 'Pipeline', 'Sessions', 'Settings'] as const;
+const TABS = ['Overview', 'Topics', 'Pipeline', 'Published', 'Sessions', 'Settings'] as const;
 type Tab = (typeof TABS)[number];
 
 export function App() {
@@ -52,6 +53,7 @@ export function App() {
       {tab === 'Overview' && <Overview />}
       {tab === 'Topics' && <Topics />}
       {tab === 'Pipeline' && <Pipeline />}
+      {tab === 'Published' && <Published />}
       {tab === 'Sessions' && <Sessions />}
       {tab === 'Settings' && <SettingsPage />}
     </div>

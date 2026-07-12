@@ -10,17 +10,26 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 | # | Agent | Stage | What it does |
 | - | ----- | ----- | ------------ |
 | 1 | `topic_scout` | (out of band) | Sweeps the live web (Tavily) for trending products/topics **not covered before** (checks D1 posts + every prior suggestion), writes suggestions for the admin |
-| 2 | `researcher` | research | Plans targeted searches, builds an evidence dossier: facts + source URLs, real Amazon links, keywords, competitor gap |
+| 2 | `researcher` | research | Plans targeted searches, builds an evidence dossier: facts + source URLs, real Amazon links (non-Amazon "amazonUrl"s are dropped deterministically), keywords, competitor gap |
 | 3 | `outliner` | outline | SEO content brief: ≤60-char title, dek, slug, keyword plan, H2/H3 outline, FAQ |
-| 4 | `writer` | write | Full markdown draft in the site voice; products linked only as `/go/<slug>` |
+| 4 | `writer` | write | Full markdown draft in the site voice; products linked only as `/go/<slug>`, with mandated placements (tables, per-product CTAs, conclusion) |
 | 5 | `seo_reviewer` | seo_review | Strict scored review (0–100) against the brief + SEO checklist → pass/fail verdict |
-| 6 | `editor` | edit | Surgical revision resolving the reviewer's issues (loops with #5, bounded by `max_revision_rounds`) |
-| 7 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows; deterministic guardrail checks |
-| 8 | `publisher` | publish | Upserts D1 `posts` + `affiliate_links`, fires the `content-updated` dispatch → site rebuilds |
+| 6 | `editor` | edit | Surgical revision resolving the reviewer's issues and any admin feedback (loops with #5, bounded by `max_revision_rounds`) |
+| 7 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
+| 8 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter (skips itself when `GCS_IMAGES_BUCKET` is unset) |
+| 9 | `publisher` | publish | Upserts D1 `posts` + `affiliate_links`, fires the `content-updated` dispatch → site rebuilds |
 
-Flow: `research → outline → write → seo_review ⇄ edit → assemble → publish`.
+Flow: `research → outline → write → seo_review ⇄ edit → assemble → image → publish`.
 With `publish_mode = approval` (default) the article parks at
 `waiting_approval` until you hit **Approve & publish** in the admin panel.
+Every agent prompt is grounded with today's date (Australia/Sydney) so years
+in titles/copy come from the calendar, not stale training data.
+
+Admin extras: the **Published** tab lists everything in D1 and can delete a
+post (plus its orphaned pipeline-authored affiliate links) with an automatic
+site rebuild; the article panel has a **feedback box** that requeues the piece
+through `edit → seo_review → assemble → image → publish` with your notes
+applied (original pubDate is kept, `updatedDate` is stamped).
 
 ## Two engines, routed by model id
 

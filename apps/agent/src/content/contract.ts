@@ -39,10 +39,23 @@ export const frontmatterSchema = z.object({
 
 export type Frontmatter = z.infer<typeof frontmatterSchema>;
 
+export const ASIN_RE = /^[A-Z0-9]{10}$/;
+
+// regions_json rides through D1 → fetch-content.mjs → the /go/ resolver, which
+// spreads it into the link entry. Structured keys (network/search/asins) drive
+// the region-aware Amazon builder; any other key is a per-region literal URL.
+export const affiliateRegionsSchema = z
+  .object({
+    network: z.literal('amazon').optional(),
+    search: z.string().min(1).optional(),
+    asins: z.record(z.string().regex(ASIN_RE)).optional(),
+  })
+  .catchall(z.string().url());
+
 export const affiliateLinkSchema = z.object({
   slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   default_url: z.string().url(),
-  regions_json: z.record(z.string().url()).nullable().optional(),
+  regions_json: affiliateRegionsSchema.nullable().optional(),
   note: z.string().optional(),
 });
 
@@ -51,6 +64,58 @@ export type AffiliateLink = z.infer<typeof affiliateLinkSchema>;
 // Same regexes the site build enforces (fetch-content.mjs).
 export const RAW_MERCHANT = /(amazon\.[a-z.]+\/(dp|gp\/product)\/|amzn\.to\/|[?&]tag=)/i;
 export const GO_LINK = /\/go\/([a-z0-9]+(?:-[a-z0-9]+)*)/g;
+
+// ---------------------------------------------------------------------------
+// Approved merchants. Amazon is currently the ONLY network we're enrolled in;
+// an affiliate row pointing anywhere else is a contract violation (this is
+// what let a news.com.au URL slip into production once). Mirrors the region
+// model in apps/web/functions/_lib/affiliates.mjs — the resolver owns the
+// storefront hosts + Associates tags, the pipeline only ships ASINs/searches.
+// ---------------------------------------------------------------------------
+export const AMAZON_MARKETPLACES = {
+  au: 'www.amazon.com.au',
+  us: 'www.amazon.com',
+} as const;
+export type AmazonRegion = keyof typeof AMAZON_MARKETPLACES;
+/** Primary audience market — search fallbacks and default_url use this. */
+export const HOME_REGION: AmazonRegion = 'au';
+
+/** Parse an Amazon PRODUCT url into its marketplace + ASIN, else null. */
+export function parseAmazonUrl(url: string): { region: AmazonRegion; asin: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = parsed.hostname.replace(/^www\./, '');
+  const region = (Object.entries(AMAZON_MARKETPLACES) as Array<[AmazonRegion, string]>).find(
+    ([, h]) => h.replace(/^www\./, '') === host,
+  )?.[0];
+  if (!region) return null;
+  const m = parsed.pathname.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?]|$)/i);
+  if (!m) return null;
+  return { region, asin: m[1].toUpperCase() };
+}
+
+/**
+ * Amazon search-results URL — the "never 404s" destination. Deliberately
+ * carries NO Associates tag: tags are per-marketplace credentials owned by
+ * the redirect resolver (functions/_lib/affiliates.mjs), never stored in data.
+ */
+export function amazonSearchUrl(term: string, region: AmazonRegion = HOME_REGION): string {
+  return `https://${AMAZON_MARKETPLACES[region]}/s?k=${encodeURIComponent(term)}`;
+}
+
+/** True when a URL points at an approved merchant (any Amazon marketplace we use). */
+export function isApprovedMerchantUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    return Object.values(AMAZON_MARKETPLACES).some((h) => h.replace(/^www\./, '') === host);
+  } catch {
+    return false;
+  }
+}
 
 export function slugify(text: string): string {
   return text
@@ -98,6 +163,19 @@ export function validateArticle(
     const parsed = affiliateLinkSchema.safeParse(link);
     if (parsed.success) parsedLinks.push(parsed.data);
     else problems.push(`affiliate link invalid: ${JSON.stringify(link).slice(0, 120)}`);
+  }
+
+  // Merchant allowlist — every destination must be an approved marketplace.
+  for (const link of parsedLinks) {
+    if (!isApprovedMerchantUrl(link.default_url)) {
+      problems.push(`/go/${link.slug}: default_url is not an approved merchant (Amazon only): ${link.default_url}`);
+    }
+    for (const [key, value] of Object.entries(link.regions_json ?? {})) {
+      if (['network', 'search', 'asins'].includes(key)) continue;
+      if (typeof value === 'string' && !isApprovedMerchantUrl(value)) {
+        problems.push(`/go/${link.slug}: region "${key}" URL is not an approved merchant: ${value}`);
+      }
+    }
   }
 
   if (RAW_MERCHANT.test(body)) {
