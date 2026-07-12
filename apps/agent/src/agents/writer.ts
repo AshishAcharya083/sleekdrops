@@ -16,7 +16,6 @@ export async function runWriter(
     model,
     system: `${SITE_CONTEXT}\n\n${EDITORIAL_RULES}\n\n${SEO_RULES}`,
     temperature: 0.7,
-    maxTokens: 16000,
     prompt: `Write the complete article in Markdown. Body only — NO frontmatter,
 NO title H1 (the site renders the title separately). Start with the opening paragraph.
 

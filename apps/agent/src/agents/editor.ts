@@ -14,7 +14,6 @@ export async function runEditor(
     model,
     system: `${SITE_CONTEXT}\n\n${EDITORIAL_RULES}\n\n${SEO_RULES}`,
     temperature: 0.4,
-    maxTokens: 16000,
     prompt: `Revise this draft to resolve every issue below. Keep everything that already
 works — this is a surgical edit, not a rewrite. Never add facts that are not in
 the research dossier. Keep all /go/<slug> links intact (fix them if malformed).
