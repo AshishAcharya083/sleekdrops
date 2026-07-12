@@ -2,11 +2,11 @@
 
 Everything SleekDrops in one repo:
 
-| App | What it is | Stack |
-| --- | --- | --- |
-| [`apps/web`](apps/web) | The public website — sleekdrops.com | Astro → Cloudflare Pages, content from Cloudflare D1 |
+| App                        | What it is                                                                                                   | Stack                                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| [`apps/web`](apps/web)     | The public website — sleekdrops.com                                                                          | Astro → Cloudflare Pages, content from Cloudflare D1                                                                   |
 | [`apps/agent`](apps/agent) | The agent platform — a multi-agent pipeline that discovers trending topics and writes SEO-optimized articles | Node/TypeScript, PostgreSQL, Gemini via Google ADK + Claude subscription via the Claude Agent SDK, hosted on Cloud Run |
-| [`apps/admin`](apps/admin) | Admin panel for the agent platform — pick topics, watch progress, approve publishes, track AI spend | React + Vite → Cloudflare Pages |
+| [`apps/admin`](apps/admin) | Admin panel for the agent platform — pick topics, watch progress, approve publishes, track AI spend          | React + Vite → Cloudflare Pages                                                                                        |
 
 The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archived.
 
@@ -66,14 +66,14 @@ Piecemeal alternatives: `pnpm db:up`, `pnpm dev:agent`, `pnpm dev:admin`,
 The agent platform runs as **one Cloud Run service** in the `sleekdrops` GCP
 project; there are no develop/production splits anywhere except the website.
 
-| What | Where | Trigger |
-| --- | --- | --- |
-| Agent platform (API + worker + scheduler + admin) | Cloud Run `sleekdrops-agent`, us-central1 | `gcloud run deploy` (see below) |
-| Pipeline state | Cloud SQL Postgres `sleekdrops-pg` (db-f1-micro) | — |
-| Secrets (Tavily, D1 token, admin token) | GCP Secret Manager | — |
-| Admin panel | sleekdrops-admin.pages.dev | push to `develop` touching `apps/admin` |
-| Website (develop) | sleekdrops.pages.dev | push to `develop` touching `apps/web` |
-| Website (production) | sleekdrops.com | push to `main` or `content-updated` dispatch |
+| What                                              | Where                                            | Trigger                                      |
+| ------------------------------------------------- | ------------------------------------------------ | -------------------------------------------- |
+| Agent platform (API + worker + scheduler + admin) | Cloud Run `sleekdrops-agent`, us-central1        | `gcloud run deploy` (see below)              |
+| Pipeline state                                    | Cloud SQL Postgres `sleekdrops-pg` (db-f1-micro) | —                                            |
+| Secrets (Tavily, D1 token, admin token)           | GCP Secret Manager                               | —                                            |
+| Admin panel                                       | sleekdrops-admin.pages.dev                       | push to `develop` touching `apps/admin`      |
+| Website (develop)                                 | sleekdrops.pages.dev                             | push to `develop` touching `apps/web`        |
+| Website (production)                              | sleekdrops.com                                   | push to `main` or `content-updated` dispatch |
 
 Gemini calls on Cloud Run go through **Vertex AI with the service account's
 ADC** — no API key anywhere. The Claude subscription token is pasted in admin
@@ -92,3 +92,20 @@ into its header field once. The **API base** field still accepts
 
 See [`apps/agent/README.md`](apps/agent/README.md) for the pipeline design and
 [`apps/web/README.md`](apps/web/README.md) for the editorial rules.
+
+###to deploy
+cd ../.. # back to repo root (…/sleekdrops)
+
+docker buildx build --platform linux/amd64 \
+ -t us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent:v2 \
+ --push .
+
+gcloud run deploy sleekdrops-agent \
+ --image us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent:v2 \
+ --region us-central1
+
+## to deploy at once in cloud run
+
+gcloud projects add-iam-policy-binding sleekdrops \
+ --member=serviceAccount:705604429631-compute@developer.gserviceaccount.com \
+ --role=roles/cloudbuild.builds.builder
