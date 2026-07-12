@@ -109,3 +109,6 @@ gcloud run deploy sleekdrops-agent \
 gcloud projects add-iam-policy-binding sleekdrops \
  --member=serviceAccount:705604429631-compute@developer.gserviceaccount.com \
  --role=roles/cloudbuild.builds.builder
+
+get the auth token from here:
+gcloud secrets versions access latest --secret=admin-token --project sleekdrops | pbcopy
