@@ -1,7 +1,7 @@
 // Assembler — turns the approved draft into the exact D1 payload: validated
 // frontmatter JSON + affiliate_links rows for every /go/ slug in the body.
 // Deterministic code does the validation; the LLM only fills editorial gaps.
-import { chatJson, UsageTracker } from '../llm/openrouter.js';
+import { chatJson, UsageTracker } from '../llm/index.js';
 import {
   estimateReadTime,
   goSlugsIn,

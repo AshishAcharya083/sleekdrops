@@ -2,7 +2,7 @@
 // live web via Tavily, cross-checks against published D1 posts and every
 // previous suggestion, and writes new suggestions for the admin to approve.
 import { q } from '../db/pool.js';
-import { chatJson, UsageTracker } from '../llm/openrouter.js';
+import { chatJson, UsageTracker } from '../llm/index.js';
 import { fetchPublishedPosts } from '../tools/d1.js';
 import { formatSearches, tavilySearchMany } from '../tools/tavily.js';
 import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';

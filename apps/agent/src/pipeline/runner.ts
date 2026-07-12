@@ -3,7 +3,14 @@
 // article to its next stage. Verdict-driven, bounded revision loop —
 // a light version of devteam-platform's card lane pattern.
 import { getSetting, q } from '../db/pool.js';
-import { resolveProvider, UsageTracker } from '../llm/openrouter.js';
+import {
+  claudeConfigured,
+  defaultClaudeModel,
+  defaultGeminiModel,
+  isClaudeModel,
+  llmSettings,
+  UsageTracker,
+} from '../llm/index.js';
 import { runAssembler } from '../agents/assembler.js';
 import { runEditor } from '../agents/editor.js';
 import { runOutliner } from '../agents/outliner.js';
@@ -23,10 +30,26 @@ const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
   publish: 'publisher',
 };
 
+/** Writer + editor follow the admin "prose engine" toggle; the rest is Gemini. */
+const PROSE_AGENTS = new Set(['writer', 'editor']);
+
 export async function modelFor(agent: string): Promise<string> {
+  const settings = await llmSettings();
   const overrides = await getSetting<Record<string, string>>('models', {});
-  if (overrides[agent]) return overrides[agent];
-  return (await resolveProvider()).defaultModel;
+  const pick =
+    overrides[agent] ||
+    (PROSE_AGENTS.has(agent) && (settings.prose_engine ?? 'claude') === 'claude'
+      ? defaultClaudeModel(settings)
+      : defaultGeminiModel(settings));
+  // A Claude pick without a credential degrades to Gemini instead of failing
+  // the stage — the admin panel points this out next to the toggle.
+  if (isClaudeModel(pick) && !(await claudeConfigured())) {
+    console.warn(
+      `[pipeline] ${agent}: Claude engine selected but no subscription token / API key configured — using Gemini`,
+    );
+    return defaultGeminiModel(settings);
+  }
+  return pick;
 }
 
 async function updateArticle(id: string, fields: Record<string, unknown>): Promise<void> {

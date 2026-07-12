@@ -1,7 +1,7 @@
 // SEO Reviewer — scores the draft against the brief and the SEO checklist,
 // returning a structured verdict the runner uses to route (pass → assemble,
 // fail → edit, bounded by max_revision_rounds).
-import { chatJson, UsageTracker } from '../llm/openrouter.js';
+import { chatJson, UsageTracker } from '../llm/index.js';
 import { SEO_RULES, SITE_CONTEXT } from './context.js';
 import type { ArticleRow, SeoReview } from '../pipeline/types.js';
 

@@ -22,18 +22,21 @@ Flow: `research → outline → write → seo_review ⇄ edit → assemble → p
 With `publish_mode = approval` (default) the article parks at
 `waiting_approval` until you hit **Approve & publish** in the admin panel.
 
-## Any AI provider via OpenRouter
+## Two engines, routed by model id
 
-Every LLM call goes through an OpenAI-compatible chat API, resolved at call
-time in this order:
+Every LLM call goes through `src/llm/`, which routes on the model id:
 
-1. Admin **Settings → AI provider** (base URL, API key, default model) —
-   switch providers live, no restart.
-2. `.env` fallbacks: `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY`, `MODEL_DEFAULT`.
+| Engine | Models | Runs | Auth |
+| --- | --- | --- | --- |
+| **Gemini** (Google ADK) | everything not `claude-*` (default `gemini-2.5-flash`) | topic scout, researcher, outliner, SEO reviewer | admin-set AI Studio key → Vertex ADC (`GOOGLE_GENAI_USE_VERTEXAI=true`, keyless on Cloud Run) → `GEMINI_API_KEY` |
+| **Claude subscription** (Claude Agent SDK) | `claude-*` (default `claude-sonnet-4-5`) | writer + editor, switchable in Settings | `claude setup-token` → paste in admin Settings, or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` in `.env` |
 
-Per-agent model overrides sit on top — e.g. writer on
-`anthropic/claude-sonnet-4.5`, reviewer on `openai/gpt-4o`, everything else on
-`google/gemini-2.5-flash`. Usage (tokens + billed USD) is recorded per agent
+The subscription token only works through the Agent SDK/CLI — it is not an API
+key, which is why the Claude engine is a separate execution path. Writer and
+editor follow the admin **Settings → Writer & editor use** toggle (Claude by
+default, graceful fallback to Gemini when no token is configured). Per-agent
+model overrides sit on top and can put any agent on either engine. Usage
+(tokens; USD only where a provider bills per call) is recorded per agent
 session and aggregated in the admin panel.
 
 ## Autonomy: what runs by itself
@@ -69,9 +72,11 @@ cp apps/agent/.env.example apps/agent/.env  # fill in keys
 pnpm dev:agent                              # migrate + API + worker + admin UI on :8787
 ```
 
-Required env: `OPENROUTER_API_KEY`, `TAVILY_API_KEY`. For publishing:
+Required env: `GEMINI_API_KEY` (or Vertex on GCP) and `TAVILY_API_KEY`; add
+`CLAUDE_CODE_OAUTH_TOKEN` to write prose on your Claude plan. For publishing:
 `CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `CLOUDFLARE_D1_TOKEN` (D1 Edit),
-`GITHUB_TOKEN` (repo dispatch). Optional: `ADMIN_TOKEN` to protect the API.
+`GITHUB_TOKEN` (repo dispatch). Optional: `ADMIN_TOKEN` to protect the API —
+required in practice when the API is deployed on Cloud Run.
 
 ## Typical day
 

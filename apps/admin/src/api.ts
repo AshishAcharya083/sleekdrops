@@ -76,10 +76,11 @@ export interface Settings {
   max_revision_rounds: number;
   worker_enabled: boolean;
   llm: {
-    provider?: 'openrouter' | 'gemini' | 'custom';
-    base_url?: string;
-    api_key?: string;
-    default_model?: string;
+    gemini_api_key?: string;
+    gemini_model?: string;
+    claude_token?: string;
+    claude_model?: string;
+    prose_engine?: 'claude' | 'gemini';
   };
   scout_interval_hours: number;
 }
@@ -94,11 +95,14 @@ export function setToken(token: string): void {
 
 /**
  * Where the agent API lives. Empty = same origin (the agent server serves
- * this SPA locally). The Cloudflare Pages deployment of this panel sets it
- * to wherever the agent platform runs, e.g. http://localhost:8787.
+ * this SPA locally). The Cloudflare Pages build bakes in the Cloud Run URL
+ * via VITE_API_BASE as the default; the header field (localStorage) can
+ * still override it, e.g. with http://localhost:8787 for a local platform.
  */
 export function getApiBase(): string {
-  return (localStorage.getItem('sleekdrops_api_base') ?? '').replace(/\/+$/, '');
+  const stored = localStorage.getItem('sleekdrops_api_base');
+  const base = stored ?? (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
+  return base.replace(/\/+$/, '');
 }
 
 export function setApiBase(base: string): void {

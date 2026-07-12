@@ -1,7 +1,7 @@
 // Researcher — builds an evidence dossier for an approved topic: real facts
 // with source URLs, candidate products with genuine Amazon links, target
 // keywords, and competitor notes. Everything downstream cites this dossier.
-import { chatJson, UsageTracker } from '../llm/openrouter.js';
+import { chatJson, UsageTracker } from '../llm/index.js';
 import { formatSearches, tavilySearchMany } from '../tools/tavily.js';
 import { slugify } from '../content/contract.js';
 import { SITE_CONTEXT } from './context.js';

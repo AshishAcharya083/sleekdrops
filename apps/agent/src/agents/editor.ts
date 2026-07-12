@@ -1,6 +1,6 @@
 // Editor — revises the draft to resolve the SEO reviewer's issues while
 // preserving voice, facts, and the /go/<slug> link contract.
-import { chat, UsageTracker } from '../llm/openrouter.js';
+import { chat, UsageTracker } from '../llm/index.js';
 import { EDITORIAL_RULES, SEO_RULES, SITE_CONTEXT } from './context.js';
 import type { ArticleRow } from '../pipeline/types.js';
 

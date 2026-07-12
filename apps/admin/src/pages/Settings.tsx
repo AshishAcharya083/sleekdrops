@@ -45,62 +45,74 @@ export function SettingsPage() {
   return (
     <div className="card">
       <div className="section" style={{ marginTop: 0 }}>
-        <h2>AI provider</h2>
+        <h2>Gemini engine</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          The whole pipeline speaks the OpenAI-compatible chat API — pick who serves
-          it. Empty fields fall back to apps/agent/.env. Keys are stored in the
-          platform database — set ADMIN_TOKEN if the API is reachable by others.
+          Runs topic scout, researcher, outliner and SEO reviewer (and writer/editor
+          when the toggle below says so) through Google ADK. Empty fields fall back
+          to apps/agent/.env; on Cloud Run the key is optional — the service account
+          bills Vertex AI directly. Values are stored in the platform database —
+          set ADMIN_TOKEN if the API is reachable by others.
         </p>
         <div className="settings-grid">
-          <label>Provider</label>
-          <select
-            value={llm.provider ?? 'openrouter'}
-            onChange={(e) =>
-              setSettings({
-                ...settings,
-                llm: { ...llm, provider: e.target.value as 'openrouter' | 'gemini' | 'custom' },
-              })
-            }
-          >
-            <option value="openrouter">OpenRouter — one key, any model (Gemini/Claude/GPT…)</option>
-            <option value="gemini">Google Gemini — AI Studio key, uses your Google Cloud credits</option>
-            <option value="custom">Custom — any OpenAI-compatible endpoint</option>
-          </select>
-          {(llm.provider ?? 'openrouter') === 'custom' && (
-            <>
-              <label>Base URL</label>
-              <input
-                placeholder="https://my-endpoint.example.com/v1"
-                value={llm.base_url ?? ''}
-                onChange={(e) =>
-                  setSettings({ ...settings, llm: { ...llm, base_url: e.target.value } })
-                }
-              />
-            </>
-          )}
-          <label>API key</label>
+          <label>AI Studio API key</label>
           <input
             type="password"
-            placeholder={
-              (llm.provider ?? 'openrouter') === 'gemini'
-                ? '(from .env: GEMINI_API_KEY)'
-                : '(from .env: OPENROUTER_API_KEY)'
+            placeholder="(from .env GEMINI_API_KEY, or Vertex ADC on Cloud Run)"
+            value={llm.gemini_api_key ?? ''}
+            onChange={(e) =>
+              setSettings({ ...settings, llm: { ...llm, gemini_api_key: e.target.value } })
             }
-            value={llm.api_key ?? ''}
-            onChange={(e) => setSettings({ ...settings, llm: { ...llm, api_key: e.target.value } })}
           />
           <label>Default model</label>
           <input
-            placeholder={
-              (llm.provider ?? 'openrouter') === 'gemini'
-                ? 'gemini-2.5-flash (default)'
-                : 'google/gemini-2.5-flash (default)'
-            }
-            value={llm.default_model ?? ''}
+            placeholder="gemini-2.5-flash (default)"
+            value={llm.gemini_model ?? ''}
             onChange={(e) =>
-              setSettings({ ...settings, llm: { ...llm, default_model: e.target.value } })
+              setSettings({ ...settings, llm: { ...llm, gemini_model: e.target.value } })
             }
           />
+        </div>
+      </div>
+
+      <div className="section">
+        <h2>Claude subscription engine</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Writes prose on your Claude plan — $0 marginal cost. Mint a one-year token
+          on any machine with <code>claude setup-token</code> (Pro/Max/Team/Enterprise)
+          and paste it here; no restart needed. Without a token, writer and editor
+          quietly fall back to the Gemini engine.
+        </p>
+        <div className="settings-grid">
+          <label>Subscription token</label>
+          <input
+            type="password"
+            placeholder="(from .env CLAUDE_CODE_OAUTH_TOKEN)"
+            value={llm.claude_token ?? ''}
+            onChange={(e) =>
+              setSettings({ ...settings, llm: { ...llm, claude_token: e.target.value } })
+            }
+          />
+          <label>Claude model</label>
+          <input
+            placeholder="claude-sonnet-4-5 (default)"
+            value={llm.claude_model ?? ''}
+            onChange={(e) =>
+              setSettings({ ...settings, llm: { ...llm, claude_model: e.target.value } })
+            }
+          />
+          <label>Writer &amp; editor use</label>
+          <select
+            value={llm.prose_engine ?? 'claude'}
+            onChange={(e) =>
+              setSettings({
+                ...settings,
+                llm: { ...llm, prose_engine: e.target.value as 'claude' | 'gemini' },
+              })
+            }
+          >
+            <option value="claude">Claude subscription — best prose, uses your plan quota</option>
+            <option value="gemini">Gemini — same engine as the rest of the pipeline</option>
+          </select>
         </div>
       </div>
 
@@ -153,10 +165,11 @@ export function SettingsPage() {
       </div>
 
       <div className="section">
-        <h2>Model per agent (OpenRouter model ids)</h2>
+        <h2>Model per agent</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Empty = the default model above. Any model id your provider offers:
-          google/gemini-2.5-flash, anthropic/claude-sonnet-4.5, openai/gpt-4o…
+          Empty = the engine defaults above. Model ids route the engine too:
+          gemini-* runs on Gemini, claude-* on the Claude subscription — so you can
+          put any single agent on either engine here.
         </p>
         <div className="settings-grid">
           {AGENTS.map((agent) => (

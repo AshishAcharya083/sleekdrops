@@ -11,17 +11,23 @@ export const config = {
     'postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent',
   ),
 
-  openrouter: {
-    apiKey: env('OPENROUTER_API_KEY'),
-    baseUrl: env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
-    // Shown on openrouter.ai activity dashboards.
-    siteUrl: env('OPENROUTER_SITE_URL', 'https://sleekdrops.com'),
-    appName: env('OPENROUTER_APP_NAME', 'sleekdrops-agent'),
-  },
   // Google AI Studio key — bills the GCP project it belongs to, so Google
-  // Cloud credits apply. Used when the admin selects the "gemini" provider.
+  // Cloud credits apply. On Cloud Run, Vertex ADC replaces the key entirely.
   geminiApiKey: env('GEMINI_API_KEY'),
-  modelDefault: env('MODEL_DEFAULT', 'google/gemini-2.5-flash'),
+  geminiModelDefault: env('MODEL_DEFAULT', 'gemini-2.5-flash').replace(/^google\//, ''),
+  vertex: {
+    enabled: env('GOOGLE_GENAI_USE_VERTEXAI').toLowerCase() === 'true',
+    project: env('GOOGLE_CLOUD_PROJECT'),
+    location: env('GOOGLE_CLOUD_LOCATION', 'us-central1'),
+  },
+
+  // Claude subscription (writer/editor engine). The OAuth token comes from
+  // `claude setup-token` and only works through the Claude Agent SDK/CLI.
+  claude: {
+    oauthToken: env('CLAUDE_CODE_OAUTH_TOKEN'),
+    apiKey: env('ANTHROPIC_API_KEY'),
+    modelDefault: env('CLAUDE_MODEL', 'claude-sonnet-4-5'),
+  },
 
   tavilyApiKey: env('TAVILY_API_KEY'),
 

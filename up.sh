@@ -43,7 +43,7 @@ ok "Postgres ready"
 if [ ! -f apps/agent/.env ]; then
   step "Creating apps/agent/.env from example"
   cp apps/agent/.env.example apps/agent/.env
-  echo "  → fill in OPENROUTER_API_KEY / TAVILY_API_KEY (or set the provider in the admin panel)"
+  echo "  → fill in GEMINI_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / TAVILY_API_KEY (or paste them in admin Settings)"
 fi
 
 if [ "$DO_INSTALL" = 1 ]; then

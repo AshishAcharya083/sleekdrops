@@ -1,7 +1,7 @@
 // Scout run orchestration — a topic-scout sweep runs outside the article
 // pipeline (it produces topics, not articles). Triggered from the admin panel.
 import { q } from '../db/pool.js';
-import { UsageTracker } from '../llm/openrouter.js';
+import { UsageTracker } from '../llm/index.js';
 import { runTopicScout } from '../agents/topicScout.js';
 import { modelFor } from './runner.js';
 

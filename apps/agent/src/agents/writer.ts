@@ -1,6 +1,6 @@
 // Writer — produces the full markdown draft from the brief + dossier,
 // following the site's editorial voice and the /go/<slug> link contract.
-import { chat, UsageTracker } from '../llm/openrouter.js';
+import { chat, UsageTracker } from '../llm/index.js';
 import { EDITORIAL_RULES, SEO_RULES, SITE_CONTEXT } from './context.js';
 import type { ArticleRow } from '../pipeline/types.js';
 
