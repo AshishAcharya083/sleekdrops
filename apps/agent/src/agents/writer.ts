@@ -10,7 +10,9 @@ export async function runWriter(
   tracker: UsageTracker,
 ): Promise<string> {
   const brief = article.outline!;
-  const products = article.research?.products ?? [];
+  // Only offer slugs that can actually resolve — a /go/ link with no real
+  // Amazon URL behind it would be stripped at assembly anyway.
+  const products = (article.research?.products ?? []).filter((p) => p.amazonUrl);
 
   const result = await chat({
     model,
@@ -28,6 +30,8 @@ ${JSON.stringify(article.research, null, 2)}
 Product link slugs — when you link a product, use EXACTLY these (markdown links
 to /go/<slug>, e.g. [Sony WH-1000XM6](/go/sony-wh-1000xm6)):
 ${products.map((p) => `- ${p.name}: /go/${p.goSlug}`).join('\n') || '(no products — omit product links)'}
+
+Products NOT in that list must be mentioned WITHOUT any link (plain text only).
 
 Requirements:
 - Hit the word count target (${brief.wordCountTarget} words) with substance, not padding.

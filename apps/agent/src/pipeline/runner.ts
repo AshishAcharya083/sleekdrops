@@ -144,11 +144,16 @@ export async function runStage(article: ArticleRow): Promise<void> {
       case 'assemble': {
         const assembled = await runAssembler(article, model!, tracker);
         await updateArticle(article.id, {
+          draft_md: assembled.body,
           frontmatter: JSON.stringify(assembled.frontmatter),
           affiliate_links: JSON.stringify(assembled.affiliateLinks),
         });
         const publishMode = await getSetting<string>('publish_mode', 'approval');
-        summary = `frontmatter + ${assembled.affiliateLinks.length} affiliate link(s) validated`;
+        summary = `frontmatter + ${assembled.affiliateLinks.length} affiliate link(s) validated${
+          assembled.droppedSlugs.length > 0
+            ? `; stripped unlinkable: ${assembled.droppedSlugs.join(', ')}`
+            : ''
+        }`;
         next =
           publishMode === 'approval'
             ? { stage: 'publish', status: 'waiting_approval' }

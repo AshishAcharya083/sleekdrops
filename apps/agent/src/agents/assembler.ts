@@ -14,6 +14,9 @@ import type { AffiliateLinkRow, ArticleRow } from '../pipeline/types.js';
 export interface AssembledArticle {
   frontmatter: Record<string, unknown>;
   affiliateLinks: AffiliateLinkRow[];
+  /** Body after stripping /go/ links that had no resolvable destination. */
+  body: string;
+  droppedSlugs: string[];
 }
 
 export async function runAssembler(
@@ -22,7 +25,7 @@ export async function runAssembler(
   tracker: UsageTracker,
 ): Promise<AssembledArticle> {
   const brief = article.outline!;
-  const body = article.draft_md!;
+  let body = article.draft_md!;
   const slugsInBody = goSlugsIn(body);
   const products = article.research?.products ?? [];
   const today = new Date().toISOString().slice(0, 10);
@@ -90,11 +93,21 @@ Return JSON {"links": [{"slug": string, "default_url": string, "note": string}]}
   }
   const finalLinks = [...bySlug.values()].filter((l) => slugsInBody.includes(l.slug));
 
-  // A /go/ slug with no resolvable URL would fail the site build — that is a
-  // hard error here, where the admin can see it, not at deploy time.
+  // A /go/ slug with no resolvable URL would fail the site build. Rather than
+  // failing the article, strip those links and keep the product as plain text.
+  const resolvable = new Set(finalLinks.map((l) => l.slug));
+  const droppedSlugs = slugsInBody.filter((slug) => !resolvable.has(slug));
+  for (const slug of droppedSlugs) {
+    body = body
+      .replace(new RegExp(`\\[([^\\]]*)\\]\\(/go/${slug}\\)`, 'g'), '$1')
+      .replace(new RegExp(`/go/${slug}`, 'g'), '');
+  }
+  frontmatter.readTime = estimateReadTime(body);
+
+  // Anything left is a genuine contract violation (schema, raw merchant URL).
   const problems = validateArticle(body, frontmatter, finalLinks);
   if (problems.length > 0) {
     throw new Error(`assembly validation failed:\n- ${problems.join('\n- ')}`);
   }
-  return { frontmatter, affiliateLinks: finalLinks };
+  return { frontmatter, affiliateLinks: finalLinks, body, droppedSlugs };
 }
