@@ -1,0 +1,73 @@
+name: Deploy admin panel
+
+# The agent-platform admin panel is a single environment (unlike the website,
+# which has develop + production): one Pages project, deployed from develop.
+# The deployed panel talks to whichever agent API you point it at via the
+# "API base" field in its header (e.g. http://localhost:8787 while the
+# platform runs on your machine).
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'apps/admin/**'
+      - '.github/workflows/deploy-admin.yml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-admin
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  build-and-deploy:
+    name: Build & deploy (admin)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build admin panel
+        run: pnpm --filter @sleekdrops/admin build
+        env:
+          # Baked-in default API base: the Cloud Run agent platform. The panel's
+          # header field still overrides it (e.g. http://localhost:8787).
+          VITE_API_BASE: ${{ vars.AGENT_API_BASE || 'https://sleekdrops-agent-705604429631.us-central1.run.app' }}
+
+      # Idempotent: fails harmlessly once the project exists.
+      - name: Ensure Pages project exists
+        uses: cloudflare/wrangler-action@v3
+        continue-on-error: true
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/admin
+          command: pages project create sleekdrops-admin --production-branch=develop
+
+      - name: Deploy to Cloudflare Pages (admin)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/admin
+          command: pages deploy dist --project-name=sleekdrops-admin --branch=develop

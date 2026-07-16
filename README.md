@@ -1,73 +1,114 @@
-# SleekDrops
+# SleekDrops monorepo
 
-> **Exclusive deals dropping daily.**
-> An editorial affiliate blog covering honest product reviews, side-by-side comparisons, daily deals, and promo codes — for tech, home, fashion, health, finance, and travel.
+Everything SleekDrops in one repo:
 
-SleekDrops.com is a quietly opinionated publication. Picture a senior product reviewer who's been doing this for ten years and refuses to pretend a $40 gadget is life-changing.
+| App                        | What it is                                                                                                   | Stack                                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| [`apps/web`](apps/web)     | The public website — sleekdrops.com                                                                          | Astro → Cloudflare Pages, content from Cloudflare D1                                                                   |
+| [`apps/agent`](apps/agent) | The agent platform — a multi-agent pipeline that discovers trending topics and writes SEO-optimized articles | Node/TypeScript, PostgreSQL, Gemini via Google ADK + Claude subscription via the Claude Agent SDK, hosted on Cloud Run |
+| [`apps/admin`](apps/admin) | Admin panel for the agent platform — pick topics, watch progress, approve publishes, track AI spend          | React + Vite → Cloudflare Pages                                                                                        |
 
----
+The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archived.
 
-## What this project is
+## How the whole thing fits together
 
-The Astro frontend that renders SleekDrops.com. Editorial content lives in a Cloudflare D1 database (`sleekdrops-content`), fetched at build time. This repo holds the framework, components, layouts, and structural data (authors, categories, deals, promos).
+```
+        ┌───────────────── apps/admin (Cloudflare Pages) ─────────────────┐
+        │      Topics · Pipeline board · Sessions · Usage · Settings      │
+        └───────────────────────────┬─────────────────────────────────────┘
+                                    │ REST (/api/*, ADMIN_TOKEN bearer)
+┌─ apps/agent (Cloud Run, min-instances 1) ─▼─────────────────────────────┐
+│ topic scout → [you approve topics] → research → outline → write         │
+│    → SEO review ⇄ edit (bounded loop) → assemble → publish              │
+│                                                                          │
+│ State:  Cloud SQL PostgreSQL (topics, articles, agent_sessions, settings)│
+│ LLM:    two engines, routed by model id —                                │
+│           gemini-*  → Google ADK → Vertex AI (service-account ADC)       │
+│           claude-*  → Claude Agent SDK → your Claude subscription        │
+│                        (CLAUDE_CODE_OAUTH_TOKEN, pasted in Settings)     │
+└──────────────┬───────────────────────────────────────────┬──────────────┘
+               │ posts + affiliate_links                    │ repository_dispatch
+               ▼                                            ▼ (content-updated)
+        Cloudflare D1  ◄──────────── build-time fetch ── GitHub Actions
+        (sleekdrops-content)                                │
+                                                            ▼
+                                              apps/web → Cloudflare Pages
+```
 
-Two audiences read this codebase:
+- **Two LLM engines.** Gemini (through Google ADK) runs the high-volume
+  structured stages; the writer and editor run on your Claude plan through the
+  Claude Agent SDK — $0 marginal cost — with an admin toggle to put them on
+  Gemini instead. See [`apps/agent/README.md`](apps/agent/README.md).
+- **PostgreSQL** holds pipeline/operational state (atomic job claims, JSONB
+  dossiers, usage aggregation) — Cloud SQL in the cloud, Docker locally.
+- **Cloudflare D1** stays the publish target — the website's build reads it,
+  so the existing deploy flow is untouched (~90s from publish to live).
 
-- **Editorial / content agents.** You don't work here — you write rows to the D1 `posts` and `affiliate_links` tables (database `sleekdrops-content`). A post goes live when its `status` flips to `published` and a rebuild runs.
-- **Engineering.** Layouts, components, build pipeline, design tokens. Start with **[AGENTS.md](./AGENTS.md)**.
-
----
-
-## Business rules & context
-
-These rules survive any rewrite of the code.
-
-### What we publish
-
-| Type | Use for | Rules |
-|---|---|---|
-| **Article** | News, trends, educational pieces | No length minimum. |
-| **Review** | Single product, in-depth | ≥ 1,200 words. Honest decimal rating (1.0–5.0). 3–5 pros, 2–4 cons. Quick Verdict block at the top. Structured product data embedded in frontmatter. |
-| **Guide** | "Best X for Y" buying guides | ≥ 1,500 words. Side-by-side test across ≥ 3 contenders. |
-| **Roundup** | Top-N listicles | Scored against a published rubric. |
-
-Categories: **Tech · Home · Fashion · Health · Finance · Travel.**
-
-### Editorial principles (the three we don't break)
-
-1. **No paid placements. Ever.** No sponsorships, no "promoted" posts.
-2. **If we couldn't test it, we don't review it.** Reviews require ≥2 weeks of real-world use. The autonomous pipeline writes articles, guides, and roundups only — true reviews stay human-driven.
-3. **The cons column is always full.** Every product has flaws. If we can't think of any, we haven't tested long enough.
-
-### Voice
-
-- **Editorial, not promotional.** Copy never reads like a sales pitch.
-- **Honest by rule.** Decimal ratings (4.3, not 4.5★).
-- **Plain and direct.** Short clauses. Concrete nouns.
-- **Calm urgency for deals.** "Ends Friday," not "HURRY!!"
-- **No emoji** in editorial copy (★ in star ratings is the single exception).
-
-### Deals & affiliate rules
-
-- **Always disclose.** Every page with an affiliate link shows `AffiliateDisclosure`. Outbound CTAs carry `rel="sponsored nofollow"`.
-- **Never fabricate prices.** Refresh `updatedAt` when prices change.
-- **Always set `expiresAt`.** Stale deals fall out of the live list automatically.
-- **All affiliate destinations** go through `/go/<slug>` — the slug-to-URL map lives in the D1 `affiliate_links` table.
-
-### Content publishing flow
-
-Editorial content lives in **Cloudflare D1** (database `sleekdrops-content`). Publishing = flipping a post's `status` to `published`, then firing a `content-updated` repository dispatch (or pushing to main / running the workflow manually). The build reads published posts and affiliate links from D1, writes posts into `src/content/blog/`, generates the affiliate redirect data for the `/go/*` Pages Function (`functions/go/[slug].js`, which is geo- and network-aware — see `docs/automation.md`), and ships. End-to-end: ~90 seconds.
-
----
-
-## For developers
-
-All technical detail — stack, folder structure, content fetch pipeline, token system, schemas, commands — lives in **[AGENTS.md](./AGENTS.md)**.
-
-Quickstart:
+## Quickstart (local)
 
 ```bash
-pnpm install
-pnpm dev          # fetches content from D1, then http://localhost:4321
-pnpm build        # full production build
+./up.sh          # Postgres + agent platform (API + worker + admin panel on :8787)
+./up.sh --web    # ... plus the website dev server on :4321
+./down.sh        # stop everything (--wipe also deletes the database)
 ```
+
+First run creates `apps/agent/.env` from the example — add `GEMINI_API_KEY`
+(aistudio.google.com) and `TAVILY_API_KEY`, plus `CLAUDE_CODE_OAUTH_TOKEN`
+(from `claude setup-token`) if the writer/editor should use your Claude plan.
+All three can also be pasted straight into admin **Settings**, no restart.
+Logs live in `.run/`.
+
+Piecemeal alternatives: `pnpm db:up`, `pnpm dev:agent`, `pnpm dev:admin`,
+`pnpm dev:web`, `pnpm build`.
+
+## Cloud deployment (single environment)
+
+The agent platform runs as **one Cloud Run service** in the `sleekdrops` GCP
+project; there are no develop/production splits anywhere except the website.
+
+| What                                              | Where                                            | Trigger                                      |
+| ------------------------------------------------- | ------------------------------------------------ | -------------------------------------------- |
+| Agent platform (API + worker + scheduler + admin) | Cloud Run `sleekdrops-agent`, us-central1        | `gcloud run deploy` (see below)              |
+| Pipeline state                                    | Cloud SQL Postgres `sleekdrops-pg` (db-f1-micro) | —                                            |
+| Secrets (Tavily, D1 token, admin token)           | GCP Secret Manager                               | —                                            |
+| Admin panel                                       | sleekdrops-admin.pages.dev                       | push to `develop` touching `apps/admin`      |
+| Website (develop)                                 | sleekdrops.pages.dev                             | push to `develop` touching `apps/web`        |
+| Website (production)                              | sleekdrops.com                                   | push to `main` or `content-updated` dispatch |
+
+Gemini calls on Cloud Run go through **Vertex AI with the service account's
+ADC** — no API key anywhere. The Claude subscription token is pasted in admin
+Settings (stored in Postgres) or set as the `CLAUDE_CODE_OAUTH_TOKEN` env var.
+
+Redeploy after code changes:
+
+```bash
+gcloud run deploy sleekdrops-agent --source . --region us-central1 --project sleekdrops
+```
+
+The hosted admin panel is pre-pointed at the Cloud Run URL (baked in at build
+time via `VITE_API_BASE`); paste the admin token (Secret Manager `admin-token`)
+into its header field once. The **API base** field still accepts
+`http://localhost:8787` to steer a locally-running platform instead.
+
+See [`apps/agent/README.md`](apps/agent/README.md) for the pipeline design and
+[`apps/web/README.md`](apps/web/README.md) for the editorial rules.
+
+###to deploy
+cd ../.. # back to repo root (…/sleekdrops)
+
+docker buildx build --platform linux/amd64 \
+ -t us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent:v2 \
+ --push .
+
+gcloud run deploy sleekdrops-agent \
+ --image us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent:v2 \
+ --region us-central1
+
+## to deploy at once in cloud run
+
+gcloud projects add-iam-policy-binding sleekdrops \
+ --member=serviceAccount:705604429631-compute@developer.gserviceaccount.com \
+ --role=roles/cloudbuild.builds.builder
+
+get the auth token from here:
+gcloud secrets versions access latest --secret=admin-token --project sleekdrops | pbcopy

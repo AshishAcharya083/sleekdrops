@@ -1,36 +1,24 @@
 {
-  "name": "sleekdrops",
-  "type": "module",
-  "version": "0.1.0",
+  "name": "sleekdrops-monorepo",
   "private": true,
-  "description": "SleekDrops.com — Exclusive deals dropping daily. Editorial affiliate blog built with Astro.",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "SleekDrops — Astro affiliate blog (apps/web) + autonomous AI publishing platform (apps/agent, apps/admin).",
   "engines": {
     "node": ">=22.12.0"
   },
+  "packageManager": "pnpm@10.17.0",
   "scripts": {
-    "fetch-content": "node scripts/fetch-content.mjs",
-    "dev": "node scripts/fetch-content.mjs && astro dev",
-    "start": "node scripts/fetch-content.mjs && astro dev",
-    "prebuild": "node scripts/fetch-content.mjs && node scripts/generate-redirects.mjs",
-    "build": "astro check && astro build",
-    "preview": "astro preview",
-    "astro": "astro",
-    "check": "astro check",
-    "test": "node --experimental-strip-types --test 'src/**/*.test.ts'",
-    "generate:redirects": "node scripts/generate-redirects.mjs"
-  },
-  "dependencies": {
-    "@astrojs/check": "^0.9.9",
-    "@astrojs/rss": "^4.0.18",
-    "@astrojs/sitemap": "3.2.1",
-    "@getdevteam/analytics-web": "^0.1.0",
-    "astro": "^4.16.19",
-    "remark-gfm": "^4.0.1",
-    "schema-dts": "^2.0.0",
-    "sharp": "^0.34.5",
-    "typescript": "^5.6.0"
-  },
-  "devDependencies": {
-    "@types/node": "^25.9.1"
+    "dev:web": "pnpm --filter @sleekdrops/web dev",
+    "dev:agent": "pnpm --filter @sleekdrops/agent dev",
+    "dev:admin": "pnpm --filter @sleekdrops/admin dev",
+    "build": "pnpm -r build",
+    "build:web": "pnpm --filter @sleekdrops/web build",
+    "build:agent": "pnpm --filter @sleekdrops/agent build",
+    "build:admin": "pnpm --filter @sleekdrops/admin build",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter @sleekdrops/agent migrate",
+    "agent": "pnpm --filter @sleekdrops/agent start"
   }
 }

@@ -1,0 +1,12 @@
+# Keep the build context lean — the Dockerfile copies only what it names,
+# but Cloud Build uploads everything not excluded here / in .gcloudignore.
+node_modules
+**/node_modules
+.git
+.run
+.claude
+apps/agent/.env
+apps/web/*
+!apps/web/package.json
+infrastructure
+*.log
