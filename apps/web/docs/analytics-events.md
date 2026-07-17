@@ -1,6 +1,6 @@
 # Analytics event taxonomy
 
-This is the canonical reference for the Mixpanel events SleekDrops emits.
+This is the canonical reference for the analytics events SleekDrops emits (to DevTeam Analytics and GA4).
 It defines every event name, its properties, and the screen that owns it.
 
 Keep this doc and the code in sync.
@@ -8,7 +8,7 @@ Event names live as constants in [`src/lib/analytics.ts`](../src/lib/analytics.t
 
 ## How tracking is wired
 
-All tracking goes through the single wrapper in [`src/lib/analytics.ts`](../src/lib/analytics.ts) - no component calls the Mixpanel SDK directly.
+All tracking goes through the single wrapper in [`src/lib/analytics.ts`](../src/lib/analytics.ts) - no component calls the DevTeam Analytics or GA4 SDKs directly.
 Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../src/scripts/chrome.ts), matching the rest of that file's declarative style:
 
 - **Page views** - a page sets `screen` (and optional `pageProps`) on `BaseLayout`, which serialises them onto `<body data-page-view="...">`.
@@ -16,8 +16,9 @@ Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../sr
 - **Funnel clicks** - an element carries `data-track="<Event Name>"` and an optional JSON `data-track-props`.
   `chrome.ts` fires the event synchronously on click, before the browser follows the link.
 - **Newsletter signups** - a newsletter form carries `data-signup`; the mock-form submit handler fires `Newsletter Signup`.
+- **Chrome UI interactions** - the dark-mode toggle, share button, copy-link button, image lightbox, and TOC nav links already have dedicated event listeners in `chrome.ts` for their own behaviour; each fires its analytics event directly from that handler rather than through a `data-track` attribute.
 
-Mixpanel is initialised with batching off and `sendBeacon` transport so a click event still reaches the server when the click immediately navigates the page away.
+DevTeam Analytics is initialised with `sendBeacon` transport so a click event still reaches the server when the click immediately navigates the page away.
 
 ## No PII
 
@@ -88,6 +89,60 @@ Secondary conversion: a newsletter sign-up attempt (form submit).
 
 Owning components: `Newsletter.astro`, `Footer.astro` subscribe form.
 
+### Theme Toggled
+
+The dark/light mode switch in the site chrome.
+
+| Property | Type | Notes |
+|---|---|---|
+| `theme` | string | The mode switched to: `dark` or `light`. |
+
+Owning component: `chrome.ts` (`[data-theme-toggle]` handler).
+
+### Share Clicked
+
+The share button (Web Share API, with clipboard/prompt fallback).
+
+| Property | Type | Notes |
+|---|---|---|
+| `screen` | string | The screen the share happened on, when known. |
+
+Fires on click, before the share sheet opens or the fallback runs - so it captures share intent even if the visitor cancels the native share dialog.
+
+Owning component: `chrome.ts` (`[data-share]` handler).
+
+### Copy Link Clicked
+
+The copy-link button (clipboard write, with a `window.prompt` fallback).
+
+| Property | Type | Notes |
+|---|---|---|
+| `screen` | string | The screen the click happened on, when known. |
+
+Fires on click; the clipboard write itself can still fail (permissions, browser support) without affecting this event.
+
+Owning component: `chrome.ts` (`[data-copy-link]` handler).
+
+### Image Lightbox Opened
+
+The hero-image lightbox overlay.
+
+| Property | Type | Notes |
+|---|---|---|
+| `screen` | string | The screen the lightbox was opened on, when known. |
+
+Owning component: `chrome.ts` (`[data-lightbox]` handler).
+
+### TOC Link Clicked
+
+A click on an in-article table-of-contents link.
+
+| Property | Type | Notes |
+|---|---|---|
+| `section` | string | The clicked link's visible text (falls back to its `href`). |
+
+Owning component: `chrome.ts` (`[data-toc] a` handler).
+
 ## Verification
 
 Last verified: 2026-06-30 (epic close-out).
@@ -96,11 +151,11 @@ Last verified: 2026-06-30 (epic close-out).
 
 - `npm run check` (`astro check`) - 0 errors across 72 files, so the full event-wiring graph type-checks (the `EVENTS` map, every `data-track` call site, and the consent banner that boots the gate).
 - `npm test` - 30/30 pass. This covers the consent decision table end to end: a GPC/DNT signal denies and never sends, an explicit decline denies, a stored grant flushes, and an unknown/stale state keeps buffering (`src/lib/consent.test.ts`); plus the PII allowlist that scrubs every outgoing payload (`src/lib/pii.test.ts`).
-- `npx astro dev` + `GET /privacy` - the updated privacy page renders and serves the new Mixpanel / Google Analytics disclosures.
+- `npx astro dev` + `GET /privacy` - the updated privacy page renders and serves the new DevTeam Analytics / Google Analytics disclosures.
 
 ### Event-flow trace (code path confirmed for each taxonomy event)
 
-Each funnel event was traced from its real call site through the dispatcher (`chrome.ts`), the consent-gated `track()` buffer, the `scrub()` chokepoint, and out via Mixpanel's `sendBeacon` transport:
+Each funnel event was traced from its real call site through the dispatcher (`chrome.ts`), the consent-gated `track()` buffer, the `scrub()` chokepoint, and out via DevTeam Analytics' `sendBeacon` transport:
 
 | Event | Real call site | Properties sent (post-scrub) |
 |---|---|---|
@@ -109,12 +164,17 @@ Each funnel event was traced from its real call site through the dispatcher (`ch
 | `Deal Card Clicked` | `DealCard.astro`, `DropPanel.astro` | `slug`, `brand`, `placement` (`drop-panel` on the drop card) |
 | `Affiliate Link Clicked` | `deals/[slug].astro`, `promos/[slug].astro`, `Verdict.astro`, `ProductCallout.astro` | `slug`, `brand`, `retailer`, `placement` |
 | `Newsletter Signup` | `Newsletter.astro`, `Footer.astro` (`data-signup`) | `screen` (when known) |
+| `Theme Toggled` | `chrome.ts` `[data-theme-toggle]` click handler | `theme` |
+| `Share Clicked` | `chrome.ts` `[data-share]` click handler | `screen` (when known) |
+| `Copy Link Clicked` | `chrome.ts` `[data-copy-link]` click handler | `screen` (when known) |
+| `Image Lightbox Opened` | `chrome.ts` `[data-lightbox]` click/keydown handler | `screen` (when known) |
+| `TOC Link Clicked` | `chrome.ts` `[data-toc] a` click handler | `section` |
 
-Suppression is enforced in one place (`track()` in `analytics.ts`): events are buffered while consent is unknown, flushed on grant, dropped on deny, and `boot()` denies outright on a GPC/DNT signal - so nothing reaches Mixpanel before consent or after a decline/GPC/DNT.
+Suppression is enforced in one place (`track()` in `analytics.ts`): events are buffered while consent is unknown, flushed on grant, dropped on deny, and `boot()` denies outright on a GPC/DNT signal - so nothing reaches DevTeam Analytics before consent or after a decline/GPC/DNT.
 
 ### Live View walk-through (operational - run on the preview deploy)
 
-This step needs a deployed/preview build with `PUBLIC_Mixpanel__ProjectToken` set and access to the Mixpanel project's Live View; it cannot be exercised in the build sandbox (no deployed build, browser, or Mixpanel project access here). To close it out, deploy the preview, open Mixpanel Live View, and:
+This step needs a deployed/preview build with `PUBLIC_Devteam__IngestKey` set and access to the DevTeam Analytics platform's real-time event view; it cannot be exercised in the build sandbox (no deployed build, browser, or DevTeam Analytics access here). To close it out, deploy the preview, open the DevTeam Analytics platform, and:
 
 1. Before accepting consent, browse a few pages - confirm **no** events appear (buffered, not sent).
 2. Accept analytics, then walk the funnel: home (hero CTA), deal card click, deal-detail view, affiliate "View deal" click, newsletter signup - confirm each event above lands with the listed properties and **no** PII (no emails, names, or query strings).

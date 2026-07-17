@@ -82,6 +82,7 @@ if (!window.__sdChromeInit) {
     try {
       localStorage.setItem('sd-theme', next);
     } catch {}
+    track(EVENTS.themeToggled, { theme: next });
   }
 
   document.querySelectorAll('[data-theme-toggle]').forEach((btn) => {
@@ -111,6 +112,12 @@ if (!window.__sdChromeInit) {
         return el ? { a, el } : null;
       })
       .filter(<T,>(x: T | null): x is T => x !== null);
+
+    tocLinks.forEach((a) => {
+      a.addEventListener('click', () => {
+        track(EVENTS.tocLinkClicked, { section: a.textContent?.trim() || a.getAttribute('href') || '' });
+      });
+    });
 
     const onScroll = (): void => {
       const y = window.scrollY + 120;
@@ -165,6 +172,7 @@ if (!window.__sdChromeInit) {
   document.querySelectorAll<HTMLElement>('[data-share]').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
+      track(EVENTS.shareClicked, screenName ? { screen: screenName } : undefined);
       const url = window.location.href;
       const title = btn.dataset.shareTitle ?? document.title;
       const text = btn.dataset.shareText ?? '';
@@ -192,6 +200,7 @@ if (!window.__sdChromeInit) {
   document.querySelectorAll<HTMLElement>('[data-copy-link]').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
+      track(EVENTS.copyLinkClicked, screenName ? { screen: screenName } : undefined);
       const url = window.location.href;
       try {
         await navigator.clipboard.writeText(url);
@@ -225,6 +234,7 @@ if (!window.__sdChromeInit) {
       lightboxTrigger.setAttribute('aria-label', 'Open full-size image');
 
       const open = (): void => {
+        track(EVENTS.lightboxOpened, screenName ? { screen: screenName } : undefined);
         const overlay = document.createElement('div');
         overlay.className = 'sd-lightbox';
         overlay.setAttribute('role', 'dialog');

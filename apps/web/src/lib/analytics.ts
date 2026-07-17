@@ -51,6 +51,11 @@ export const EVENTS = {
   dealCardClick: 'Deal Card Clicked',
   affiliateClick: 'Affiliate Link Clicked',
   newsletterSignup: 'Newsletter Signup',
+  themeToggled: 'Theme Toggled',
+  shareClicked: 'Share Clicked',
+  copyLinkClicked: 'Copy Link Clicked',
+  lightboxOpened: 'Image Lightbox Opened',
+  tocLinkClicked: 'TOC Link Clicked',
 } as const;
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
@@ -122,6 +127,7 @@ function ensureGa(): void {
     page_location: location.origin + urlToPath(location.href),
     page_referrer: document.referrer ? urlToPath(document.referrer) : '',
   });
+  serverLog('info', 'GA4 initialized -> ' + GA4_ID);
 }
 
 function ensureDevteam(): void {
