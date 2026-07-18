@@ -3,8 +3,8 @@ import BrandMark from '@components/ui/BrandMark.astro';
 import IconButton from '@components/ui/IconButton.astro';
 
 /**
- * Sticky translucent header with brand, primary nav, and the search /
- * theme-toggle icon buttons. Pass `active` to underline the current page.
+ * Sticky translucent header with brand, primary nav, and the theme-toggle
+ * icon button. Pass `active` to underline the current page.
  */
 export interface Props {
   active?: 'home' | 'blog' | 'categories' | 'deals' | 'about' | 'contact';
@@ -29,12 +29,6 @@ const navItems = [
       ))}
     </nav>
     <div class="header-actions">
-      <IconButton title="Search" data={{ search: 'true' }}>
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="11" cy="11" r="7" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
-      </IconButton>
       <IconButton title="Toggle theme" data={{ 'theme-toggle': 'true' }}>
         <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
         <svg class="sun" viewBox="0 0 24 24" aria-hidden="true">

@@ -89,22 +89,6 @@ if (!window.__sdChromeInit) {
     btn.addEventListener('click', toggleTheme);
   });
 
-  /* ---- Search icon: jump to the blog search field ----
-   * The blog listing hosts the search UI (see BlogSearch.astro). If that field
-   * is on the current page, focus it in place; otherwise navigate to /blog and
-   * let the `#search` hash focus it on arrival. */
-  document.querySelectorAll<HTMLElement>('[data-search]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const searchInput = document.querySelector<HTMLInputElement>('[data-search-input]');
-      if (searchInput) {
-        searchInput.focus();
-        searchInput.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      } else {
-        location.href = '/blog#search';
-      }
-    });
-  });
-
   const bar = document.querySelector<HTMLElement>('.progress-bar');
   if (bar) {
     const update = (): void => {
