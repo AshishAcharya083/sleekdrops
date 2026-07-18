@@ -16,7 +16,7 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 | 5 | `seo_reviewer` | seo_review | Strict scored review (0–100) against the brief + SEO checklist → pass/fail verdict |
 | 6 | `editor` | edit | Surgical revision resolving the reviewer's issues and any admin feedback (loops with #5, bounded by `max_revision_rounds`) |
 | 7 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
-| 8 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter (skips itself when `GCS_IMAGES_BUCKET` is unset) |
+| 8 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (real product shot, watermark-free) → resize to a ~1600px 16:9 JPEG → upload to Cloudflare R2 at `posts/{YYYY}/{MM}/{slug}/hero.jpg` and store the public URL in frontmatter; non-fatal fallback to the gradient cover (skips itself when R2 is unconfigured) |
 | 9 | `publisher` | publish | Upserts D1 `posts` + `affiliate_links`, fires the `content-updated` dispatch → site rebuilds |
 
 Flow: `research → outline → write → seo_review ⇄ edit → assemble → image → publish`.

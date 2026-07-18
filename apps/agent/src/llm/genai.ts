@@ -1,7 +1,7 @@
 // Direct @google/genai client for the multimodal work the ADK text wrapper
-// doesn't cover: vision checks on candidate hero images and image generation.
-// Credential resolution mirrors llm/gemini.ts — admin-set AI Studio key, else
-// Vertex ADC (Cloud Run), else GEMINI_API_KEY from .env.
+// doesn't cover: vision checks on candidate hero images. Credential resolution
+// mirrors llm/gemini.ts — admin-set AI Studio key, else Vertex ADC (Cloud Run),
+// else GEMINI_API_KEY from .env.
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { extractJson, llmSettings } from './index.js';
@@ -60,41 +60,4 @@ export async function visionJson<T>(
   const text = res.text ?? '';
   if (!text) throw new Error('vision model returned an empty response');
   return extractJson<T>(text);
-}
-
-/**
- * Generate one image and return its bytes. Uses the Gemini image model
- * (gemini-2.5-flash-image); retries once without imageConfig for older
- * API surfaces that reject it.
- */
-export async function generateImage(
-  prompt: string,
-  model = 'gemini-2.5-flash-image',
-): Promise<{ data: Buffer; mimeType: string }> {
-  const ai = await client();
-  const attempt = async (withAspect: boolean) =>
-    ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseModalities: ['IMAGE'],
-        ...(withAspect ? { imageConfig: { aspectRatio: '16:9' } } : {}),
-      },
-    });
-
-  let res;
-  try {
-    res = await attempt(true);
-  } catch {
-    res = await attempt(false);
-  }
-  for (const part of res.candidates?.[0]?.content?.parts ?? []) {
-    if (part.inlineData?.data) {
-      return {
-        data: Buffer.from(part.inlineData.data, 'base64'),
-        mimeType: part.inlineData.mimeType ?? 'image/png',
-      };
-    }
-  }
-  throw new Error('image model returned no image data');
 }

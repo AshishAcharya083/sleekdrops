@@ -1,17 +1,19 @@
-// Image agent — gives every article a real hero image instead of the empty
-// cover fill. Strategy, in order:
-//   1. FIND: Tavily image search for the topic/products, download candidates,
-//      and vision-check each one (related to the piece? free of watermarks /
-//      stock-site overlays / promo text?).
-//   2. GENERATE: if nothing usable is found, generate a clean 16:9 editorial
-//      hero with the Gemini image model.
-// Whatever wins is uploaded to our own GCS bucket and the public URL goes into
-// frontmatter (heroImage/heroAlt) — never a hotlink to someone else's server.
+// Image agent — gives every article a real product hero image instead of the
+// bare gradient cover fill. Strategy:
+//   FIND: Tavily image search for the product/topic, download candidates, and
+//   vision-check each one — does it actually show the product, is it free of
+//   watermarks / stock-site stamps / promo overlays, is it sharp enough for a
+//   16:9 hero? The first clean, product-showing candidate wins.
+// The winner is resized to a ~1600px 16:9 JPEG (EXIF stripped) and uploaded to
+// our own Cloudflare R2 bucket under posts/{YYYY}/{MM}/{slug}/hero.jpg; the
+// public URL goes into frontmatter (heroImage/heroAlt) — never a hotlink to
+// someone else's server.
 //
 // This stage degrades, never blocks: any failure returns heroImage null and
-// the site keeps rendering its cover-fill fallback.
-import { generateImage, visionJson } from '../llm/genai.js';
-import { gcsConfigured, uploadPublicImage } from '../tools/gcs.js';
+// the site keeps rendering its gradient cover fallback.
+import sharp from 'sharp';
+import { visionJson } from '../llm/genai.js';
+import { r2Configured, uploadPublicImage } from '../tools/r2.js';
 import { tavilyImageSearch } from '../tools/tavily.js';
 import type { ArticleRow } from '../pipeline/types.js';
 
@@ -22,7 +24,7 @@ export interface ImageResult {
 }
 
 interface VisionVerdict {
-  related: boolean;
+  showsProduct: boolean;
   watermarkOrOverlay: boolean;
   usableQuality: boolean;
   alt: string;
@@ -31,11 +33,27 @@ interface VisionVerdict {
 const MIN_BYTES = 25_000; // thumbnails and tracking pixels
 const MAX_BYTES = 10_000_000;
 const IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const EXT: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-};
+const HERO_WIDTH = 1600;
+const HERO_HEIGHT = 900; // 16:9
+const MAX_VISION_CHECKS = 8; // vision calls aren't free — bound the sweep
+
+/** Object key for an article's hero image: posts/{YYYY}/{MM}/{slug}/hero.jpg. */
+export function heroKey(slug: string, isoDate: string): string {
+  const [yyyy, mm] = isoDate.split('-');
+  return `posts/${yyyy}/${mm}/${slug}/hero.jpg`;
+}
+
+/**
+ * Downscale/crop any candidate to the web hero format: 1600x900 JPEG, quality
+ * ~80, auto-oriented and stripped of EXIF (sharp drops metadata by default).
+ */
+export async function resizeToHero(input: Buffer): Promise<Buffer> {
+  return sharp(input)
+    .rotate() // apply EXIF orientation before the metadata is dropped
+    .resize(HERO_WIDTH, HERO_HEIGHT, { fit: 'cover', position: 'attention' })
+    .jpeg({ quality: 80, mozjpeg: true })
+    .toBuffer();
+}
 
 async function download(url: string): Promise<{ data: Buffer; mimeType: string } | null> {
   try {
@@ -61,81 +79,69 @@ export async function runImageAgent(
   article: ArticleRow,
   visionModel: string,
 ): Promise<ImageResult> {
-  if (!gcsConfigured()) {
+  if (!r2Configured()) {
     return {
       heroImage: null,
       heroAlt: null,
-      summary: 'skipped — GCS_IMAGES_BUCKET not configured; cover fill will render instead',
+      summary: 'skipped — Cloudflare R2 not configured; gradient cover will render instead',
     };
   }
 
   const slug = article.slug ?? article.id;
   const title = article.outline?.seoTitle ?? article.title;
   const topProducts = (article.research?.products ?? []).slice(0, 2).map((p) => p.name);
+  const fm = article.frontmatter ?? {};
+  const pubDate =
+    typeof fm.pubDate === 'string' && /^\d{4}-\d{2}-\d{2}/.test(fm.pubDate)
+      ? fm.pubDate
+      : new Date().toISOString().slice(0, 10);
 
-  // ── 1. FIND: search the live web for a clean, related photo ──────────────
   const queries = [
-    topProducts.length > 0 ? `${topProducts[0]} product photo` : `${title} photo`,
-    `${title}`,
+    topProducts.length > 0 ? `${topProducts[0]} official product photo` : `${title} product photo`,
+    topProducts.length > 1 ? `${topProducts[1]} product photo` : `${title}`,
   ];
+
   let checked = 0;
   for (const query of queries) {
     const hits = await tavilyImageSearch(query).catch(() => []);
     for (const hit of hits.slice(0, 6)) {
+      if (checked >= MAX_VISION_CHECKS) break;
       const img = await download(hit.url);
       if (!img) continue;
       checked += 1;
-      if (checked > 8) break; // vision checks aren't free — bound the sweep
       try {
-        const verdict = await visionJson<VisionVerdict>(visionModel, img, `You are vetting a candidate hero image for an article titled "${title}".
+        const verdict = await visionJson<VisionVerdict>(
+          visionModel,
+          img,
+          `You are vetting a candidate hero image for an article titled "${title}".
 Image search context: "${hit.description || query}".
+Prefer clean official brand or retailer product shots of the actual product.
 
 Return JSON:
-{"related": boolean (clearly shows this product/topic),
+{"showsProduct": boolean (clearly shows THIS product/topic, not a generic lifestyle or unrelated stock photo),
  "watermarkOrOverlay": boolean (ANY watermark, stock-site stamp, logo overlay, promo text, price tag or UI chrome),
  "usableQuality": boolean (sharp, well-lit, large enough for a 16:9 hero crop),
- "alt": string (concise, factual alt text for the image)}`);
-        if (verdict.related && !verdict.watermarkOrOverlay && verdict.usableQuality) {
-          const url = await uploadPublicImage(
-            `heroes/${slug}.${EXT[img.mimeType]}`,
-            img.data,
-            img.mimeType,
-          );
+ "alt": string (concise, factual alt text for the image)}`,
+        );
+        if (verdict.showsProduct && !verdict.watermarkOrOverlay && verdict.usableQuality) {
+          const hero = await resizeToHero(img.data);
+          const url = await uploadPublicImage(heroKey(slug, pubDate), hero, 'image/jpeg');
           return {
             heroImage: url,
             heroAlt: verdict.alt || title,
-            summary: `found web image (${hit.url}) → ${url}`,
+            summary: `found product image (${hit.url}) → ${url}`,
           };
         }
       } catch {
         continue; // one bad candidate never sinks the stage
       }
     }
+    if (checked >= MAX_VISION_CHECKS) break;
   }
 
-  // ── 2. GENERATE: fall back to the image model ────────────────────────────
-  try {
-    const generated = await generateImage(
-      `Photorealistic editorial hero photograph for a consumer product article titled "${title}".
-${topProducts.length > 0 ? `Feature: ${topProducts.join(' and ')}.` : ''}
-Wide 16:9 composition, natural lighting, clean uncluttered background, magazine quality.
-Absolutely NO text, NO logos, NO watermarks, NO people's faces.`,
-    );
-    const url = await uploadPublicImage(
-      `heroes/${slug}.${EXT[generated.mimeType] ?? 'png'}`,
-      generated.data,
-      generated.mimeType,
-    );
-    return {
-      heroImage: url,
-      heroAlt: `Illustrative image: ${title}`,
-      summary: `no usable web image (checked ${checked}) — generated one → ${url}`,
-    };
-  } catch (err) {
-    return {
-      heroImage: null,
-      heroAlt: null,
-      summary: `no hero image: web search found nothing usable (checked ${checked}) and generation failed (${err instanceof Error ? err.message : err})`,
-    };
-  }
+  return {
+    heroImage: null,
+    heroAlt: null,
+    summary: `no hero image: checked ${checked} candidate(s), none were clean product shots — gradient cover will render`,
+  };
 }

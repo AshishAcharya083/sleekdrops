@@ -31,14 +31,18 @@ export const config = {
 
   tavilyApiKey: env('TAVILY_API_KEY'),
 
-  // Hero-image storage. The bucket must allow public reads (allUsers →
-  // Storage Object Viewer); uploaded objects are served from
-  // https://storage.googleapis.com/<bucket>/<object>. Empty = image stage
-  // skips itself and articles keep the generated cover fills.
-  gcs: {
-    imagesBucket: env('GCS_IMAGES_BUCKET'),
-    // Override when serving through a CDN / custom domain instead.
-    publicBase: env('GCS_PUBLIC_BASE', 'https://storage.googleapis.com'),
+  // Hero-image storage on Cloudflare R2 (S3-compatible). The image stage
+  // uploads the vetted product photo here under posts/{YYYY}/{MM}/{slug}/hero.jpg
+  // and stores the public URL in the post frontmatter. Any value missing =
+  // stage skips itself and articles fall back to the gradient cover art.
+  r2: {
+    accountId: env('R2_ACCOUNT_ID'),
+    accessKeyId: env('R2_ACCESS_KEY_ID'),
+    secretAccessKey: env('R2_SECRET_ACCESS_KEY'),
+    bucket: env('R2_BUCKET'),
+    // Public domain that serves the bucket (an R2 custom domain or the managed
+    // r2.dev subdomain). Hero URL = `${publicBase}/posts/{YYYY}/{MM}/{slug}/hero.jpg`.
+    publicBase: env('R2_PUBLIC_URL').replace(/\/+$/, ''),
   },
 
   d1: {
