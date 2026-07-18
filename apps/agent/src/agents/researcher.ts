@@ -4,7 +4,7 @@
 import { chatJson, UsageTracker } from '../llm/index.js';
 import { formatSearches, tavilySearchMany } from '../tools/tavily.js';
 import { parseAmazonUrl, slugify } from '../content/contract.js';
-import { siteContext } from './context.js';
+import { operatorBrief, siteContext } from './context.js';
 import type { ArticleRow, ResearchDossier, TopicRow } from '../pipeline/types.js';
 
 export async function runResearcher(
@@ -14,6 +14,7 @@ export async function runResearcher(
   tracker: UsageTracker,
 ): Promise<ResearchDossier> {
   const keywords = topic?.keywords?.length ? topic.keywords.join(', ') : article.title;
+  const brief = operatorBrief(topic);
 
   // Pass 1: let the model plan targeted searches for this specific topic.
   const plan = await chatJson<{ queries: string[] }>(
@@ -26,7 +27,7 @@ Title: ${article.title}
 Category: ${article.category} | Post type: ${article.post_type}
 Angle: ${topic?.angle ?? 'n/a'}
 Target keywords: ${keywords}
-
+${brief ? `\n${brief}\n\nLet the operator brief steer these queries: search to verify and expand on it, not to second-guess it.\n` : ''}
 Return JSON {"queries": string[]} — 5-7 focused search queries covering:
 product candidates and their specs/prices, buyer pain points, expert/owner
 opinions, Amazon Australia availability, and what competing articles cover.`,
@@ -47,9 +48,9 @@ opinions, Amazon Australia availability, and what competing articles cover.`,
       temperature: 0.3,
       maxTokens: 8000,
       prompt: `Synthesize a research dossier for "${article.title}" (${article.post_type}, ${article.category}).
-
+${brief ? `\n${brief}\n\nFold the operator's reference materials into the dossier as facts (with their source where given), and let the operator instructions shape the summary and angle. They are authoritative source material, on par with the search evidence below.\n` : ''}
 STRICT RULES:
-- Use ONLY the evidence below. Never invent specs, prices, or URLs.
+- Use ONLY the evidence below${brief ? ' and the operator brief above' : ''}. Never invent specs, prices, or URLs.
 - amazonUrl: an Amazon PRODUCT page URL (amazon.com.au or amazon.com, containing
   /dp/ or /gp/product/) that literally appears in the evidence — else null.
   A retailer or news site URL is NEVER an amazonUrl. Products without one are
