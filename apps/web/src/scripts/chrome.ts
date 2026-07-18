@@ -17,7 +17,7 @@
  * choice; track() here simply buffers until that choice is made.
  */
 
-import { track, EVENTS, initErrorCapture, serverLog, type EventProps } from '@lib/analytics';
+import { track, EVENTS, initErrorCapture, type EventProps } from '@lib/analytics';
 
 declare global {
   interface Window {
@@ -89,23 +89,18 @@ if (!window.__sdChromeInit) {
     btn.addEventListener('click', toggleTheme);
   });
 
-  /* ---- Search icon: deliberate error-log burst (analytics test harness) ----
-   * There is no search UI yet, so the search button is wired purely to exercise
-   * the DevTeam log pipeline. Each press emits the two severities to *different
-   * places*: one info line, which lands in the platform's Logs view, and then a
-   * burst of identical error-severity lines, which the platform groups into a
-   * single error cluster. The message is a fixed constant so every line in the
-   * burst shares a signature and clusters cleanly; the burst size is >= 5 so a
-   * single press is enough to trip the cluster threshold on the next tick.
-   * serverLog() forwards to devteam.log[level] (the SDK's log capture) and is
-   * consent-gated, so nothing sends until the visitor opts in. */
-  const SEARCH_ERROR_MESSAGE = 'Search failed: query index unavailable';
-  const SEARCH_ERROR_BURST = 5;
+  /* ---- Search icon: jump to the blog search field ----
+   * The blog listing hosts the search UI (see BlogSearch.astro). If that field
+   * is on the current page, focus it in place; otherwise navigate to /blog and
+   * let the `#search` hash focus it on arrival. */
   document.querySelectorAll<HTMLElement>('[data-search]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      serverLog('info', 'Search icon pressed');
-      for (let i = 0; i < SEARCH_ERROR_BURST; i += 1) {
-        serverLog('error', SEARCH_ERROR_MESSAGE);
+      const searchInput = document.querySelector<HTMLInputElement>('[data-search-input]');
+      if (searchInput) {
+        searchInput.focus();
+        searchInput.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      } else {
+        location.href = '/blog#search';
       }
     });
   });

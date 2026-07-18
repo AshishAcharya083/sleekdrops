@@ -2,6 +2,7 @@
 import type { GetStaticPaths, Page } from 'astro';
 import BaseLayout from '@layouts/BaseLayout.astro';
 import ListingHero from '@components/blog/ListingHero.astro';
+import BlogSearch from '@components/blog/BlogSearch.astro';
 import PostGrid from '@components/blog/PostGrid.astro';
 import Pagination from '@components/blog/Pagination.astro';
 import { getAllPosts, type BlogPost } from '@lib/posts';
@@ -42,14 +43,17 @@ const meta = buildMeta({
     dek={baseDescription}
   />
   <div class="container">
-    <div class="listing-grid">
-      <PostGrid posts={page.data} columns={3} />
+    <BlogSearch />
+    <div data-search-default>
+      <div class="listing-grid">
+        <PostGrid posts={page.data} columns={3} />
+      </div>
+      <Pagination
+        currentPage={page.currentPage}
+        lastPage={page.lastPage}
+        basePath="/blog"
+      />
     </div>
-    <Pagination
-      currentPage={page.currentPage}
-      lastPage={page.lastPage}
-      basePath="/blog"
-    />
   </div>
 </BaseLayout>
 

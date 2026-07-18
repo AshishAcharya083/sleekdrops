@@ -118,6 +118,68 @@ main {
   stroke-linecap: round;
 }
 
+/* ============ BLOG SEARCH RESULTS (rendered by BlogSearch.astro) ============ */
+.sd-search-results {
+  padding: 24px 0 48px;
+}
+.sd-search-status {
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--muted);
+  margin: 0 0 20px;
+}
+.sd-search-list {
+  display: grid;
+  gap: 16px;
+}
+.sd-search-item {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: 20px 24px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+.sd-search-item:hover {
+  border-color: var(--hairline-strong);
+  box-shadow: var(--shadow-md);
+  color: inherit;
+}
+.sd-search-item__cat {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+.sd-search-item__title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  font-weight: 400;
+  color: var(--ink);
+  margin: 0 0 6px;
+}
+.sd-search-item__dek {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 0;
+}
+.sd-search-clear {
+  display: inline-block;
+  margin-top: 24px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
 /* ============ ICON BUTTON FLASH (share/copy confirmation) ============ */
 .icon-btn.is-flashed {
   border-color: var(--accent);
