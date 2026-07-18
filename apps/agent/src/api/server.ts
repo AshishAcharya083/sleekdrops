@@ -8,10 +8,44 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { config } from '../config.js';
+import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
 import { isScoutRunning, startScoutRun } from '../pipeline/scout.js';
+import type { ReferenceMaterial } from '../pipeline/types.js';
 import { deleteD1Post, listD1Posts } from '../tools/d1.js';
 import { dispatchContentUpdated } from '../tools/github.js';
+
+/** Reference-material limits - mirror the admin upload guard (multiple .md,
+ *  up to 5 files, 2 MB each) so the API is safe even without the UI. */
+const MAX_REFERENCES = 5;
+const MAX_REFERENCE_BYTES = 2 * 1024 * 1024;
+
+type Validated<T> = { ok: true; value: T } | { ok: false; error: string };
+
+function validateReferences(input: unknown): Validated<ReferenceMaterial[]> {
+  if (input === undefined || input === null) return { ok: true, value: [] };
+  if (!Array.isArray(input)) return { ok: false, error: 'references must be an array' };
+  if (input.length > MAX_REFERENCES) {
+    return { ok: false, error: `at most ${MAX_REFERENCES} reference materials allowed` };
+  }
+  const value: ReferenceMaterial[] = [];
+  for (const raw of input) {
+    if (typeof raw !== 'object' || raw === null) {
+      return { ok: false, error: 'each reference must be an object' };
+    }
+    const { name, content } = raw as { name?: unknown; content?: unknown };
+    if (typeof content !== 'string' || content.trim() === '') {
+      return { ok: false, error: 'each reference needs non-empty markdown content' };
+    }
+    if (Buffer.byteLength(content, 'utf8') > MAX_REFERENCE_BYTES) {
+      return { ok: false, error: 'each reference must be 2 MB or smaller' };
+    }
+    const safeName =
+      typeof name === 'string' && name.trim() ? name.trim().slice(0, 200) : `reference-${value.length + 1}.md`;
+    value.push({ name: safeName, content });
+  }
+  return { ok: true, value };
+}
 
 const ADMIN_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../../admin/dist');
 
@@ -113,6 +147,88 @@ export function createApp(): Hono {
       created.push(article);
     }
     return c.json({ created });
+  });
+
+  // Manual operator topic: hand-written topic + instructions + markdown
+  // references, stored as a draft with NO article row (the staged-review guard -
+  // approval is a separate, explicit step). Passing an `id` edits an existing
+  // draft in place instead of creating a new one.
+  app.post('/api/topics/manual', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as {
+      id?: string;
+      title?: string;
+      instructions?: string;
+      category?: string;
+      post_type?: string;
+      references?: unknown;
+    } | null;
+    if (!body) return c.json({ error: 'invalid JSON body' }, 400);
+
+    const title = body.title?.trim();
+    if (!title) return c.json({ error: 'title is required' }, 400);
+    const normTitle = slugify(title);
+    if (!normTitle) return c.json({ error: 'title must contain letters or numbers' }, 400);
+
+    const category = body.category?.trim() || CATEGORIES[0];
+    if (!(CATEGORIES as readonly string[]).includes(category)) {
+      return c.json({ error: `category must be one of: ${CATEGORIES.join(', ')}` }, 400);
+    }
+    const postType = body.post_type?.trim() || 'article';
+    if (!(POST_TYPES as readonly string[]).includes(postType)) {
+      return c.json({ error: `post_type must be one of: ${POST_TYPES.join(', ')}` }, 400);
+    }
+
+    const refs = validateReferences(body.references);
+    if (!refs.ok) return c.json({ error: refs.error }, 400);
+
+    const instructions = body.instructions?.trim() || null;
+    const notes = JSON.stringify(refs.value);
+
+    try {
+      if (body.id) {
+        const [updated] = await q(
+          `UPDATE topics
+             SET title = $2, norm_title = $3, category = $4, post_type = $5,
+                 instructions = $6, research_notes = $7::jsonb, updated_at = now()
+           WHERE id = $1 AND source = 'manual' AND status = 'draft'
+           RETURNING *`,
+          [body.id, title, normTitle, category, postType, instructions, notes],
+        );
+        if (!updated) return c.json({ error: 'draft topic not found' }, 404);
+        return c.json({ topic: updated });
+      }
+      const [topic] = await q(
+        `INSERT INTO topics
+           (title, norm_title, category, post_type, source, status, instructions, research_notes)
+         VALUES ($1, $2, $3, $4, 'manual', 'draft', $5, $6::jsonb)
+         RETURNING *`,
+        [title, normTitle, category, postType, instructions, notes],
+      );
+      return c.json({ topic }, 201);
+    } catch (err) {
+      if (err instanceof Error && /duplicate key|unique/i.test(err.message)) {
+        return c.json({ error: 'a topic with a similar title already exists' }, 409);
+      }
+      throw err;
+    }
+  });
+
+  // Approve a single draft manual topic → create its article at stage=research.
+  // The costly generation run only ever fires here, never on topic capture.
+  app.post('/api/topics/:id/approve', async (c) => {
+    const [topic] = await q<{ id: string; title: string; category: string; post_type: string }>(
+      `UPDATE topics SET status = 'approved', updated_at = now()
+       WHERE id = $1 AND status = 'draft'
+       RETURNING id, title, category, post_type`,
+      [c.req.param('id')],
+    );
+    if (!topic) return c.json({ error: 'draft topic not found or already approved' }, 409);
+    const [article] = await q(
+      `INSERT INTO articles (topic_id, title, category, post_type)
+       VALUES ($1, $2, $3, $4) RETURNING id, title, stage, status`,
+      [topic.id, topic.title, topic.category, topic.post_type],
+    );
+    return c.json({ article });
   });
 
   app.post('/api/topics/reject', async (c) => {

@@ -5,6 +5,7 @@ const STATUS_COLOR: Record<string, string> = {
   running: 'blue',
   queued: 'blue',
   suggested: 'blue',
+  draft: 'gray',
   waiting_approval: 'amber',
   failed: 'red',
   rejected: 'red',

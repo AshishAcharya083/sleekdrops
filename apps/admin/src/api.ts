@@ -1,6 +1,12 @@
 // Thin API client. If the agent server has ADMIN_TOKEN set, the token typed
 // into the header bar is stored in localStorage and sent as a bearer.
 
+/** A markdown reference the operator supplied (uploaded file or pasted block). */
+export interface ReferenceMaterial {
+  name: string;
+  content: string;
+}
+
 export interface Topic {
   id: string;
   title: string;
@@ -11,8 +17,25 @@ export interface Topic {
   why_trending: string | null;
   sources: string[];
   status: string;
+  /** 'scout' (Topic Scout) | 'manual' (operator-authored). */
+  source: string;
+  instructions: string | null;
+  research_notes: ReferenceMaterial[];
   created_at: string;
 }
+
+/** Payload for POST /api/topics/manual (create when `id` absent, else edit). */
+export interface ManualTopicPayload {
+  id?: string;
+  title: string;
+  instructions: string;
+  category: string;
+  post_type: string;
+  references: ReferenceMaterial[];
+}
+
+export const TOPIC_CATEGORIES = ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel'] as const;
+export const TOPIC_POST_TYPES = ['article', 'guide', 'roundup'] as const;
 
 export interface ArticleSummary {
   id: string;

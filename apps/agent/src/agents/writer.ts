@@ -1,11 +1,18 @@
 // Writer — produces the full markdown draft from the brief + dossier,
 // following the site's editorial voice and the /go/<slug> link contract.
 import { chat, UsageTracker } from '../llm/index.js';
-import { EDITORIAL_RULES, LINK_PLACEMENT_RULES, SEO_RULES, siteContext } from './context.js';
-import type { ArticleRow } from '../pipeline/types.js';
+import {
+  EDITORIAL_RULES,
+  LINK_PLACEMENT_RULES,
+  operatorBrief,
+  SEO_RULES,
+  siteContext,
+} from './context.js';
+import type { ArticleRow, TopicRow } from '../pipeline/types.js';
 
 export async function runWriter(
   article: ArticleRow,
+  topic: TopicRow | null,
   model: string,
   tracker: UsageTracker,
 ): Promise<string> {
@@ -13,6 +20,7 @@ export async function runWriter(
   // Every dossier product is linkable: verified ASINs get a product page, the
   // rest resolve to an Amazon search for the product — so no /go/ slug can 404.
   const products = article.research?.products ?? [];
+  const operator = operatorBrief(topic);
 
   const result = await chat({
     model,
@@ -20,7 +28,7 @@ export async function runWriter(
     temperature: 0.7,
     prompt: `Write the complete article in Markdown. Body only — NO frontmatter,
 NO title H1 (the site renders the title separately). Start with the opening paragraph.
-
+${operator ? `\n${operator}\n` : ''}
 Brief:
 ${JSON.stringify(brief, null, 2)}
 

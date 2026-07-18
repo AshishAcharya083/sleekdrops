@@ -43,6 +43,12 @@ export interface ArticleRow {
   updated_at: string;
 }
 
+/** A markdown reference the operator supplied (uploaded file or pasted block). */
+export interface ReferenceMaterial {
+  name: string;
+  content: string;
+}
+
 export interface TopicRow {
   id: string;
   title: string;
@@ -53,6 +59,12 @@ export interface TopicRow {
   why_trending: string | null;
   sources: string[];
   status: string;
+  /** 'scout' | 'manual' — manual topics carry an operator brief below. */
+  source: string;
+  /** Operator's free-text brief for a manual topic (null for scouted topics). */
+  instructions: string | null;
+  /** Operator-supplied markdown references, treated as authoritative context. */
+  research_notes: ReferenceMaterial[];
 }
 
 export interface TopicSuggestion {
