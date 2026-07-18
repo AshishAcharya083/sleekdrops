@@ -1,6 +1,7 @@
 // Shared editorial context injected into every agent prompt — the pipeline
 // equivalent of devteam-platform's global agent instructions.
 import { AUTHORS, CATEGORIES, POST_TYPES } from '../content/contract.js';
+import type { TopicRow } from '../pipeline/types.js';
 
 /** Today in the audience's timezone (Australia/Sydney), e.g. "2026-07-13". */
 export function todayInSydney(): string {
@@ -39,6 +40,33 @@ Post types the pipeline may produce: ${POST_TYPES.join(', ')}.
 Authors (pick whoever fits the beat):
 ${AUTHORS.map((a) => `- ${a.id}: ${a.name} — ${a.beat}`).join('\n')}
 `.trim();
+}
+
+/**
+ * The operator brief for a manually-authored topic: free-text instructions and
+ * any markdown reference materials the operator attached. Rendered as a single
+ * authoritative block that outranks the agent's generic guidance - a human
+ * editor wrote it specifically for this piece. Empty string when the topic is
+ * scouted or carries no brief, so callers can concatenate it unconditionally.
+ */
+export function operatorBrief(topic: TopicRow | null): string {
+  if (!topic || topic.source !== 'manual') return '';
+  const instructions = topic.instructions?.trim();
+  const references = (topic.research_notes ?? []).filter((r) => r.content?.trim());
+  if (!instructions && references.length === 0) return '';
+
+  const parts = [
+    `OPERATOR BRIEF - authoritative. A human editor wrote this specifically for
+this piece. Treat it as higher priority than the generic guidance above: follow
+its instructions and use its reference materials as primary source facts (same
+standing as gathered evidence). Never contradict it, and never invent facts
+beyond it and the research evidence.`,
+  ];
+  if (instructions) parts.push(`Operator instructions:\n${instructions}`);
+  for (const [i, ref] of references.entries()) {
+    parts.push(`--- reference ${i + 1}: ${ref.name} ---\n${ref.content.trim()}`);
+  }
+  return parts.join('\n\n');
 }
 
 export const EDITORIAL_RULES = `

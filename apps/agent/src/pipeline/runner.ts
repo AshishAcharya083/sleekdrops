@@ -139,7 +139,10 @@ export async function runStage(article: ArticleRow): Promise<void> {
         break;
       }
       case 'write': {
-        const draft = await runWriter(article, model!, tracker);
+        const topic = article.topic_id
+          ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
+          : null;
+        const draft = await runWriter(article, topic, model!, tracker);
         await updateArticle(article.id, { draft_md: draft });
         summary = `draft written (${draft.split(/\s+/).length} words)`;
         next = { stage: 'seo_review', status: 'queued' };
