@@ -14,5 +14,5 @@ minimumReleaseAgeExclude:
   - '@astrojs/cloudflare@13.5.4'
   - miniflare@4.20260520.0
   - wrangler@4.93.1
-  - '@getdevteam/analytics-core@0.1.0'
-  - '@getdevteam/analytics-web@0.1.0'
+  - '@getdevteam/analytics-core@0.2.0'
+  - '@getdevteam/analytics-web@0.2.0'

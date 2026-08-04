@@ -6,6 +6,10 @@ It defines every event name, its properties, and the screen that owns it.
 Keep this doc and the code in sync.
 Event names live as constants in [`src/lib/analytics.ts`](../src/lib/analytics.ts) (the `EVENTS` map); changing a name means changing it in both places.
 
+The agent-platform admin panel reports into the **same** DevTeam project and extends this vocabulary rather than starting a second one.
+Its events, its `X-Trace-Id` correlation contract with the agent API, and its own scrub live in [`apps/admin/docs/analytics-events.md`](../../admin/docs/analytics-events.md).
+Names there follow the Title Case convention used here, so the Analytics tab reads as one taxonomy; nothing in this document applies to the panel, which has no consent banner and no GA4.
+
 ## How tracking is wired
 
 All tracking goes through the single wrapper in [`src/lib/analytics.ts`](../src/lib/analytics.ts) - no component calls the DevTeam Analytics or GA4 SDKs directly.

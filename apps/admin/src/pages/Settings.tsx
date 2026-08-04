@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { EVENTS, captureError, log, track } from '../analytics';
 import type { Settings } from '../api';
 import { api } from '../api';
 
@@ -18,7 +19,12 @@ export function SettingsPage() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    api<Settings>('/api/settings').then(setSettings).catch((e: Error) => setErr(e.message));
+    api<Settings>('/api/settings')
+      .then(setSettings)
+      .catch((e: Error) => {
+        captureError(e, { action: 'settings_load', surface: 'settings' });
+        setErr(e.message);
+      });
   }, []);
 
   if (err) return <div className="error-banner">{err}</div>;
@@ -27,6 +33,19 @@ export function SettingsPage() {
   const save = async () => {
     setErr(null);
     setSaved(false);
+    // Shape only: which engines are configured and which enums are chosen. The
+    // Gemini key and Claude token are reported as set/not-set, never as values.
+    const shape = {
+      publish_mode: settings.publish_mode,
+      worker_enabled: settings.worker_enabled,
+      scout_interval_hours: settings.scout_interval_hours,
+      max_revision_rounds: settings.max_revision_rounds,
+      prose_engine: settings.llm?.prose_engine,
+      models_configured: Object.keys(settings.models ?? {}).length,
+      gemini_key_set: Boolean(settings.llm?.gemini_api_key),
+      claude_token_set: Boolean(settings.llm?.claude_token),
+    };
+    log('info', 'saving platform settings', shape);
     try {
       const next = await api<Settings>('/api/settings', {
         method: 'PUT',
@@ -34,8 +53,11 @@ export function SettingsPage() {
       });
       setSettings(next);
       setSaved(true);
+      track(EVENTS.settingsSaved, shape);
+      log('info', 'platform settings saved', shape);
       setTimeout(() => setSaved(false), 2500);
     } catch (e) {
+      captureError(e, { action: 'settings_save', surface: 'settings' });
       setErr((e as Error).message);
     }
   };

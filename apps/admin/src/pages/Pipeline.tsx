@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { EVENTS, captureError, track } from '../analytics';
 import type { ArticleDetail, ArticleSummary } from '../api';
 import { api, duration, fmtCost, fmtTime } from '../api';
 import { Badge } from '../components';
@@ -60,16 +61,28 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
   const [feedbackSent, setFeedbackSent] = useState(false);
 
   const load = () => {
-    api<ArticleDetail>(`/api/articles/${id}`).then(setDetail).catch((e: Error) => setErr(e.message));
+    api<ArticleDetail>(`/api/articles/${id}`)
+      .then(setDetail)
+      .catch((e: Error) => {
+        captureError(e, { action: 'article_load', article_id: id, surface: 'pipeline' });
+        setErr(e.message);
+      });
   };
   useEffect(load, [id]);
 
   const action = async (path: string) => {
     try {
       await api(`/api/articles/${id}/${path}`, { method: 'POST' });
+      track(EVENTS.articleActioned, {
+        action: path.replace(/-/g, '_'),
+        article_id: id,
+        stage: detail?.article.stage,
+        status: detail?.article.status,
+      });
       load();
       onChanged();
     } catch (e) {
+      captureError(e, { action: path.replace(/-/g, '_'), article_id: id, surface: 'pipeline' });
       setErr((e as Error).message);
     }
   };
@@ -81,12 +94,18 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
         method: 'POST',
         body: JSON.stringify({ feedback: feedback.trim() }),
       });
+      track(EVENTS.articleFeedbackSubmitted, {
+        article_id: id,
+        feedback_length: feedback.trim().length,
+        stage: detail?.article.stage,
+      });
       setFeedback('');
       setFeedbackSent(true);
       setTimeout(() => setFeedbackSent(false), 4000);
       load();
       onChanged();
     } catch (e) {
+      captureError(e, { action: 'article_feedback', article_id: id, surface: 'pipeline' });
       setErr((e as Error).message);
     }
   };

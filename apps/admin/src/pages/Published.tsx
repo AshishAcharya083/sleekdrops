@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { EVENTS, captureError, track } from '../analytics';
 import type { PublishedPost } from '../api';
 import { api, fmtTime } from '../api';
 import { Badge } from '../components';
@@ -29,6 +30,13 @@ export function Published() {
         `/api/published/${encodeURIComponent(post.slug)}`,
         { method: 'DELETE' },
       );
+      track(EVENTS.publishedPostDeleted, {
+        slug: post.slug,
+        category: post.category,
+        post_type: post.post_type,
+        removed_links: res.removedLinks.length,
+        status: res.dispatched ? 'rebuild_dispatched' : 'rebuild_failed',
+      });
       setNotice(
         `Deleted ${post.slug}` +
           (res.removedLinks.length > 0 ? ` (+ ${res.removedLinks.length} orphaned link(s))` : '') +
@@ -36,6 +44,7 @@ export function Published() {
       );
       refresh();
     } catch (e) {
+      captureError(e, { action: 'published_delete', slug: post.slug, surface: 'published' });
       setErr((e as Error).message);
     } finally {
       setBusy(null);
