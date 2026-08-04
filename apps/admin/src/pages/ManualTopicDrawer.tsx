@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { EVENTS, captureError, track } from '../analytics';
 import type { ManualTopicPayload, ReferenceMaterial, Topic } from '../api';
 import { api, TOPIC_CATEGORIES, TOPIC_POST_TYPES } from '../api';
 
@@ -124,6 +125,15 @@ export function ManualTopicDrawer({
     setSavedAsDraft(false);
   };
 
+  /** Structural shape of the brief - counts and enums, never the prose itself. */
+  const briefShape = () => ({
+    mode: savedId ? 'edit' : 'create',
+    category,
+    post_type: postType,
+    reference_count: referenceCount,
+    instructions_provided: instructions.trim() !== '',
+  });
+
   /** Create or update the draft; returns its id, or null on failure. */
   const saveDraft = async (): Promise<string | null> => {
     const payload: ManualTopicPayload = {
@@ -149,10 +159,13 @@ export function ManualTopicDrawer({
     }
     setSubmitting('draft');
     setError(null);
+    const shape = briefShape();
     try {
       await saveDraft();
+      track(EVENTS.manualTopicSaved, { ...shape, action: 'draft' });
       setSavedAsDraft(true);
     } catch (e) {
+      captureError(e, { action: 'manual_topic_draft', surface: 'manual-drawer' });
       setError((e as Error).message);
     } finally {
       setSubmitting(null);
@@ -168,12 +181,21 @@ export function ManualTopicDrawer({
     setConfirmOpen(false);
     setSubmitting('approve');
     setError(null);
+    const shape = briefShape();
     try {
       const id = savedAsDraft && savedId ? savedId : await saveDraft();
       if (!id) throw new Error('could not save the topic');
+      track(EVENTS.manualTopicSaved, { ...shape, action: 'approve', topic_id: id });
       await approve(id);
+      track(EVENTS.topicApproved, {
+        count: 1,
+        source: 'manual',
+        surface: 'manual-drawer',
+        topic_id: id,
+      });
       onSaved(`Topic approved - “${title.trim()}” is now generating.`);
     } catch (e) {
+      captureError(e, { action: 'manual_topic_approve', surface: 'manual-drawer' });
       setError((e as Error).message);
       setSubmitting(null);
     }

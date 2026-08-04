@@ -1,5 +1,11 @@
 // Thin API client. If the agent server has ADMIN_TOKEN set, the token typed
 // into the header bar is stored in localStorage and sent as a bearer.
+//
+// This is also the panel's single fetch chokepoint, so it is where the client
+// trace id goes out as X-Trace-Id and where every request failure is logged and
+// reported with a stack trace. The agent's log lines for the same request carry
+// that id, so a client error in the Analytics tab leads straight to them.
+import { TRACE_HEADER, captureError, getTraceId, log } from './analytics';
 
 /** A markdown reference the operator supplied (uploaded file or pasted block). */
 export interface ReferenceMaterial {
@@ -143,14 +149,45 @@ export function setApiBase(base: string): void {
   localStorage.setItem('sleekdrops_api_base', base.trim());
 }
 
+const elapsed = (startedAt: number): number => Math.round(performance.now() - startedAt);
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${getApiBase()}${path}`, { ...init, headers });
+  const traceId = getTraceId();
+  if (traceId) headers[TRACE_HEADER] = traceId;
+
+  const method = init?.method ?? 'GET';
+  const started = performance.now();
+  log('info', `api request ${method} ${path}`, { route: path, method });
+
+  let res: Response;
+  try {
+    res = await fetch(`${getApiBase()}${path}`, { ...init, headers });
+  } catch (e) {
+    const attributes = { route: path, method, source: 'api', duration_ms: elapsed(started) };
+    log('error', `api request unreachable ${method} ${path}`, attributes);
+    captureError(e, attributes);
+    throw e;
+  }
+
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `HTTP ${res.status}`);
+    const body = (await res.json().catch(() => ({}))) as { error?: string; traceId?: string };
+    const error = new Error(body.error ?? `HTTP ${res.status}`);
+    const attributes = {
+      route: path,
+      method,
+      http_status: res.status,
+      source: 'api',
+      duration_ms: elapsed(started),
+      // The agent returns its trace id on uncaught errors and echoes it on every
+      // response, so the report points at the exact server-side log lines.
+      server_trace_id: body.traceId ?? res.headers.get(TRACE_HEADER) ?? undefined,
+    };
+    log('error', `api request failed ${method} ${path}`, attributes);
+    captureError(error, attributes);
+    throw error;
   }
   return (await res.json()) as T;
 }

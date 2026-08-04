@@ -10,10 +10,14 @@ import { cors } from 'hono/cors';
 import { config } from '../config.js';
 import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
+import { createLogger, runWithTrace } from '../lib/log.js';
 import { isScoutRunning, startScoutRun } from '../pipeline/scout.js';
 import type { ReferenceMaterial } from '../pipeline/types.js';
 import { deleteD1Post, listD1Posts } from '../tools/d1.js';
 import { dispatchContentUpdated } from '../tools/github.js';
+import { TRACE_HEADER, traceMiddleware, type TraceEnv } from './trace.js';
+
+const log = createLogger('api');
 
 /** Reference-material limits - mirror the admin upload guard (multiple .md,
  *  up to 5 files, 2 MB each) so the API is safe even without the UI. */
@@ -49,8 +53,8 @@ function validateReferences(input: unknown): Validated<ReferenceMaterial[]> {
 
 const ADMIN_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../../admin/dist');
 
-export function createApp(): Hono {
-  const app = new Hono();
+export function createApp(): Hono<TraceEnv> {
+  const app = new Hono<TraceEnv>();
   // Chrome's Local Network Access: the Pages-hosted admin (https) calling a
   // localhost agent API needs this header on the CORS preflight response.
   app.use('*', async (c, next) => {
@@ -59,7 +63,38 @@ export function createApp(): Hono {
       c.res.headers.set('Access-Control-Allow-Private-Network', 'true');
     }
   });
-  app.use('*', cors());
+  // Explicit CORS: X-Trace-Id has to survive the preflight from the Cloudflare
+  // Pages origin, and the browser has to be allowed to read the echoed id back.
+  app.use(
+    '*',
+    cors({
+      origin: '*',
+      allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowHeaders: ['Content-Type', 'Authorization', TRACE_HEADER],
+      exposeHeaders: [TRACE_HEADER],
+      maxAge: 86_400,
+    }),
+  );
+
+  // Trace correlation: adopt (or mint) the panel's X-Trace-Id before anything
+  // else on /api/*, so even a 401 is logged under the caller's id.
+  app.use('/api/*', traceMiddleware());
+
+  app.onError((err, c) => {
+    const traceId = c.get('traceId') ?? '';
+    runWithTrace(traceId, () =>
+      log.error('unhandled route error', {
+        method: c.req.method,
+        path: c.req.path,
+        error: err.message,
+        stack: err.stack,
+      }),
+    );
+    // Same { error } shape apps/admin/src/api.ts already reads, plus the trace
+    // id so the panel can point its own error report at these log lines. The
+    // message stays generic - the detail is in the log line, not the response.
+    return c.json({ error: 'internal server error', traceId }, 500, { [TRACE_HEADER]: traceId });
+  });
 
   // Optional bearer auth on the API (set ADMIN_TOKEN to enable).
   app.use('/api/*', async (c, next) => {
@@ -139,11 +174,15 @@ export function createApp(): Hono {
         [id],
       );
       if (!topic) continue;
-      const [article] = await q(
+      const [article] = await q<{ id: string }>(
         `INSERT INTO articles (topic_id, title, category, post_type)
          VALUES ($1, $2, $3, $4) RETURNING id, title, stage, status`,
         [topic.id, topic.title, topic.category, topic.post_type],
       );
+      // Pipeline work is picked up later by the worker's database poll, so the
+      // entity ids logged here are what join those [pipeline] lines back to
+      // this request's trace id.
+      log.info('article queued from topic approval', { topic_id: topic.id, article_id: article.id });
       created.push(article);
     }
     return c.json({ created });
@@ -223,11 +262,15 @@ export function createApp(): Hono {
       [c.req.param('id')],
     );
     if (!topic) return c.json({ error: 'draft topic not found or already approved' }, 409);
-    const [article] = await q(
+    const [article] = await q<{ id: string }>(
       `INSERT INTO articles (topic_id, title, category, post_type)
        VALUES ($1, $2, $3, $4) RETURNING id, title, stage, status`,
       [topic.id, topic.title, topic.category, topic.post_type],
     );
+    log.info('article queued from manual topic approval', {
+      topic_id: topic.id,
+      article_id: article.id,
+    });
     return c.json({ article });
   });
 
@@ -245,6 +288,7 @@ export function createApp(): Hono {
   app.post('/api/scout', async (c) => {
     if (await isScoutRunning()) return c.json({ error: 'a scout run is already in progress' }, 409);
     const id = await startScoutRun();
+    log.info('scout run started', { scout_run_id: id });
     return c.json({ started: id });
   });
 
@@ -280,7 +324,9 @@ export function createApp(): Hono {
        WHERE id = $1 AND status IN ('failed', 'cancelled') RETURNING id`,
       [c.req.param('id')],
     );
-    return rows.length > 0 ? c.json({ ok: true }) : c.json({ error: 'not retryable' }, 409);
+    if (rows.length === 0) return c.json({ error: 'not retryable' }, 409);
+    log.info('article re-queued for retry', { article_id: rows[0].id });
+    return c.json({ ok: true });
   });
 
   app.post('/api/articles/:id/approve-publish', async (c) => {
@@ -289,7 +335,9 @@ export function createApp(): Hono {
        WHERE id = $1 AND stage = 'publish' AND status = 'waiting_approval' RETURNING id`,
       [c.req.param('id')],
     );
-    return rows.length > 0 ? c.json({ ok: true }) : c.json({ error: 'not awaiting approval' }, 409);
+    if (rows.length === 0) return c.json({ error: 'not awaiting approval' }, 409);
+    log.info('article publish approved', { article_id: rows[0].id });
+    return c.json({ ok: true });
   });
 
   app.post('/api/articles/:id/cancel', async (c) => {
@@ -314,9 +362,11 @@ export function createApp(): Hono {
        RETURNING id`,
       [c.req.param('id'), feedback.trim()],
     );
-    return rows.length > 0
-      ? c.json({ ok: true })
-      : c.json({ error: 'article has no draft yet or is currently running' }, 409);
+    if (rows.length === 0) {
+      return c.json({ error: 'article has no draft yet or is currently running' }, 409);
+    }
+    log.info('article re-queued for an editor pass', { article_id: rows[0].id });
+    return c.json({ ok: true });
   });
 
   // ── Published site content (Cloudflare D1 — what the website builds from) ─
@@ -423,6 +473,6 @@ export function createApp(): Hono {
 export function startServer(): void {
   const app = createApp();
   serve({ fetch: app.fetch, port: config.port }, (info) => {
-    console.log(`[api] admin API + panel on http://localhost:${info.port}`);
+    log.info('admin API + panel listening', { url: `http://localhost:${info.port}` });
   });
 }

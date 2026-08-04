@@ -10,6 +10,9 @@ importers:
 
   apps/admin:
     dependencies:
+      '@getdevteam/analytics-web':
+        specifier: ^0.2.0
+        version: 0.2.0
       react:
         specifier: ^19.1.0
         version: 19.2.7
@@ -91,8 +94,8 @@ importers:
         specifier: 3.2.1
         version: 3.2.1
       '@getdevteam/analytics-web':
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^0.2.0
+        version: 0.2.0
       astro:
         specifier: ^4.16.19
         version: 4.16.19(@types/node@25.9.5)(rollup@4.62.2)(typescript@5.9.3)
@@ -1088,11 +1091,11 @@ packages:
   '@gar/promisify@1.1.3':
     resolution: {integrity: sha512-k2Ty1JcVojjJFwrg/ThKi2ujJ7XNLYaFGNB/bWT9wGR+oSMJHMa5w+CUq6p/pVrKeNNgA7pCqEcjSnHVoqJQFw==}
 
-  '@getdevteam/analytics-core@0.1.0':
-    resolution: {integrity: sha512-jd8e0xdLWrITBCWGCoQSh9X4m75k2gFOATidG3L/B1SQ5L1v8lCViEcocswf/rk812feCvQJdu4OyB0vYwYktQ==}
+  '@getdevteam/analytics-core@0.2.0':
+    resolution: {integrity: sha512-wCxU/n4S8MUWgDj4IV8F/AJLuuuIgAbmAImfLGZbRhdibvZlJ2rLShza4/EfAGHRQWrQOQz1mEFC8vlb5V3Obw==}
 
-  '@getdevteam/analytics-web@0.1.0':
-    resolution: {integrity: sha512-IacgsFK0nTuuuiwK6dGagh2E+LW+xKCYdP3vcnHb3JUdy34EycIi/aGSvHcmKRNiEHhxiG+zbWgFkmiOM1gWCQ==}
+  '@getdevteam/analytics-web@0.2.0':
+    resolution: {integrity: sha512-eIgbLNnOJtnjbjPy4Sgyd4b85nZp7vlPJv+rIUOHGIM3Rw5xfnXng4CL2HTWZRqo6OFu6Nk9KkhBchbchEOweQ==}
 
   '@google-cloud/opentelemetry-cloud-monitoring-exporter@0.21.0':
     resolution: {integrity: sha512-+lAew44pWt6rA4l8dQ1gGhH7Uo95wZKfq/GBf9aEyuNDDLQ2XppGEEReu6ujesSqTtZ8ueQFt73+7SReSHbwqg==}
@@ -5708,11 +5711,11 @@ snapshots:
   '@gar/promisify@1.1.3':
     optional: true
 
-  '@getdevteam/analytics-core@0.1.0': {}
+  '@getdevteam/analytics-core@0.2.0': {}
 
-  '@getdevteam/analytics-web@0.1.0':
+  '@getdevteam/analytics-web@0.2.0':
     dependencies:
-      '@getdevteam/analytics-core': 0.1.0
+      '@getdevteam/analytics-core': 0.2.0
 
   '@google-cloud/opentelemetry-cloud-monitoring-exporter@0.21.0(@opentelemetry/api@1.9.0)(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.0))(encoding@0.1.13)':
     dependencies:

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { EVENTS, captureError, track } from '../analytics';
 import type { Topic } from '../api';
 import { api, fmtTime } from '../api';
 import { Badge } from '../components';
@@ -27,15 +28,22 @@ export function Topics() {
     setSelected(next);
   };
 
-  const act = async (fn: () => Promise<unknown>, label: string, ok?: string) => {
+  /** Run an operator action, tracking it once it actually succeeded. */
+  const act = async (
+    fn: () => Promise<unknown>,
+    label: string,
+    { ok, onTracked }: { ok?: string; onTracked?: () => void } = {},
+  ) => {
     setBusy(label);
     setNotice(null);
     try {
       await fn();
+      onTracked?.();
       setSelected(new Set());
       if (ok) setFlash(ok);
       refresh();
     } catch (e) {
+      captureError(e, { action: label, surface: 'topics' });
       setNotice((e as Error).message);
     } finally {
       setBusy(null);
@@ -65,7 +73,11 @@ export function Topics() {
         <button
           className="btn secondary"
           disabled={busy !== null}
-          onClick={() => act(() => api('/api/scout', { method: 'POST' }), 'scout')}
+          onClick={() =>
+            act(() => api('/api/scout', { method: 'POST' }), 'scout', {
+              onTracked: () => track(EVENTS.scoutRunStarted, { surface: 'topics' }),
+            })
+          }
         >
           {busy === 'scout' ? 'Starting…' : '🔍 Find new trending topics'}
         </button>
@@ -78,6 +90,14 @@ export function Topics() {
             act(
               () => api('/api/topics/approve', { method: 'POST', body: JSON.stringify({ ids: [...selected] }) }),
               'approve',
+              {
+                onTracked: () =>
+                  track(EVENTS.topicApproved, {
+                    count: selected.size,
+                    source: 'scout',
+                    surface: 'topics',
+                  }),
+              },
             )
           }
         >
@@ -90,6 +110,7 @@ export function Topics() {
             act(
               () => api('/api/topics/reject', { method: 'POST', body: JSON.stringify({ ids: [...selected] }) }),
               'reject',
+              { onTracked: () => track(EVENTS.topicRejected, { count: selected.size, surface: 'topics' }) },
             )
           }
         >
@@ -243,11 +264,16 @@ export function Topics() {
                 onClick={() => {
                   const topic = confirmApprove;
                   setConfirmApprove(null);
-                  act(
-                    () => api(`/api/topics/${topic.id}/approve`, { method: 'POST' }),
-                    'approve-draft',
-                    `Topic approved - “${topic.title}” is now generating.`,
-                  );
+                  act(() => api(`/api/topics/${topic.id}/approve`, { method: 'POST' }), 'approve-draft', {
+                    ok: `Topic approved - “${topic.title}” is now generating.`,
+                    onTracked: () =>
+                      track(EVENTS.topicApproved, {
+                        count: 1,
+                        source: 'manual',
+                        surface: 'draft-row',
+                        topic_id: topic.id,
+                      }),
+                  });
                 }}
               >
                 Approve &amp; generate
