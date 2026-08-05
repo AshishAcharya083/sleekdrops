@@ -26,6 +26,18 @@ Add these in **Settings → Secrets and variables → Actions → Repository sec
 | `CLOUDFLARE_ACCOUNT_ID`    | Cloudflare dashboard right sidebar of any zone, or **Workers & Pages → Overview**.                               |
 | `CLOUDFLARE_PROJECT_NAME`  | The name of the Pages project you created — e.g. `sleekdrops` (used in the wrangler command).                    |
 
+### DevTeam A/B Testing (required for experiments to run)
+
+Both deploy workflows pass these into the web build as `PUBLIC_AbTesting__ClientKey` / `PUBLIC_AbTesting__Host`.
+Nothing is inlined in the workflow files: the client key is minted per environment in the platform's **A/B Testing** tab, and a stale one serves an empty payload, so every experiment would read 0% while the site still looks healthy.
+
+| Setting                               | Where to get it                                                              |
+| ------------------------------------- | ---------------------------------------------------------------------------- |
+| `AB_TESTING_CLIENT_KEY` (**secret**)  | DevTeam platform → **A/B Testing** → mint a client key, one per environment. |
+| `AB_TESTING_HOST` (**variable**)      | The platform's flag-delivery host, e.g. `http://app.internal.getdevteam.ai`.  |
+
+Leaving either unset is a supported state: the build ships with experiments disabled and every feature renders its code-side default.
+
 ### Cloudflare R2 (only if you've enabled R2 for images)
 
 These are read by the publishing pipeline, **not** by the website build. Add them only when you wire R2 into the agent:

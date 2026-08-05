@@ -13,6 +13,11 @@
  * version is older than the current one. The decision table itself lives in the
  * pure, unit-tested `./consent` module.
  *
+ * A/B testing hangs off the same gate: `./experiments` is started from the grant
+ * path with the DevTeam SDK's own distinct id, and the sticky `$exp_*` stamps it
+ * hands back are merged into every outgoing payload at the send() / serverLog()
+ * chokepoint - the SDK v0.2.0 has no global-properties API to do it for us.
+ *
  * All console lines are prefixed `[analytics]` so you can filter them in the
  * browser devtools console to watch init / send / consent / error activity.
  */
@@ -35,6 +40,12 @@ import {
   rejectionToProps,
   type ErrorProps,
 } from './error-capture';
+import {
+  clearStickyProps,
+  restoreStickyProps,
+  start as startExperiments,
+  stickyProps,
+} from './experiments';
 
 export type { EventProps, ConsentPrompt };
 
@@ -59,6 +70,14 @@ export const EVENTS = {
 } as const;
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
+
+/**
+ * Platform event marking that a visitor was bucketed into an experiment. It is
+ * how the A/B Testing tab measures a result, so its name and its
+ * `experiment_key` / `variant_key` properties are a contract with the platform
+ * rather than part of the product taxonomy above.
+ */
+export const EXPERIMENT_VIEWED_EVENT = '$experiment_viewed';
 
 // DevTeam Analytics ingest key (dtp_...) and host. Host defaults to the local
 // analytics platform; set PUBLIC_Devteam__Host to https://ingest.getdevteam.ai in prod.
@@ -152,7 +171,8 @@ function ensureDevteam(): void {
 
 function send(item: QueuedEvent): void {
   if (!devteam) return;
-  const props = scrub(item.props, item.event);
+  // Experiment stamps go in last so a call site can never shadow them.
+  const props = scrub({ ...item.props, ...stickyProps() }, item.event);
   devteam.track(item.event, props);
   console.info('[analytics] event sent:', item.event, props);
 }
@@ -165,26 +185,59 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  * it lands in the platform's Logs view. Consent-gated: the client is only created
  * after the visitor opts in, so nothing reaches the server before consent. Exported
  * so any script can emit a server-visible log.
+ *
+ * Carries the sticky experiment stamps, so a log line written after a variant is
+ * assigned is attributable to it just like an event is.
  */
 export function serverLog(level: LogLevel, message: string, attributes?: EventProps): void {
   (level === 'debug' ? console.debug : console[level])('[analytics] ' + message, attributes ?? '');
-  devteam?.log[level](message, attributes);
+  const attrs = { ...attributes, ...stickyProps() };
+  devteam?.log[level](message, Object.keys(attrs).length > 0 ? attrs : undefined);
+}
+
+/**
+ * Bucket this visitor into their experiments, keyed on the very id the DevTeam
+ * SDK stamps on every event it sends - exposure and conversion have to join on
+ * the same key, and any other value fails silently at 0%. No client means no
+ * distinct id and no way to measure a result, so experiments stay off.
+ *
+ * Called only from the grant path, so nothing is fetched, bucketed or tracked
+ * before the visitor opts in.
+ */
+function startExperimentsForVisitor(): void {
+  const distinctId = devteam?.getDistinctId();
+  if (!distinctId) return;
+  startExperiments(distinctId, {
+    onExposure(experimentKey, variantKey) {
+      track(EXPERIMENT_VIEWED_EVENT, {
+        experiment_key: experimentKey,
+        variant_key: variantKey,
+      });
+    },
+    log: serverLog,
+  });
 }
 
 /** Load the analytics SDKs and flush anything queued while consent was pending. */
 function applyGrant(): void {
   decision = 'granted';
+  // First, so every event and log this page emits - the buffered ones included -
+  // is attributed to the variants this visitor was bucketed into on an earlier
+  // page load.
+  restoreStickyProps();
   ensureGa();
   ensureDevteam();
   serverLog('info', 'consent granted - analytics active');
   const queued = buffer;
   buffer = [];
   queued.forEach(send);
+  startExperimentsForVisitor();
 }
 
 function applyDeny(): void {
   decision = 'denied';
   buffer = [];
+  clearStickyProps();
   serverLog('info', 'consent denied - no events will be sent');
 }
 

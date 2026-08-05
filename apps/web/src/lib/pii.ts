@@ -46,7 +46,21 @@ const ALLOWED_PROPS = new Set<string>([
   'locale',
   'device',
   'count',
+  'experiment_key',
+  'variant_key',
 ]);
+
+/**
+ * Prefix of the sticky experiment properties (`$exp_<experimentKey>` =
+ * `<variantKey>`) stamped onto every event and log emitted after a variant is
+ * assigned. Experiment keys are minted in the DevTeam A/B Testing tab rather
+ * than declared in code, so this needs a prefix rule instead of a literal name
+ * on ALLOWED_PROPS - without it every experiment would be unmeasurable.
+ *
+ * Safe by construction: both halves are operator-chosen structural ids, never
+ * visitor input, and they still go through the same email redaction below.
+ */
+export const EXPERIMENT_PROP_PREFIX = '$exp_';
 
 /** Allowed fields that may carry a URL and must be reduced to path only. */
 const URL_PROPS = new Set<string>(['url', 'href', 'referrer', 'path']);
@@ -109,6 +123,9 @@ export function urlToPath(value: string): string {
  * `event` widens the allowlist for that event only: CLIENT_ERROR_EVENT also
  * keeps the runtime-error diagnostic fields (message/stack/source/lineno/
  * colno/handled), with the free-text ones URL-reduced and email-redacted.
+ *
+ * Experiment dimensions survive on every event: `experiment_key` / `variant_key`
+ * by name, and the sticky `$exp_*` properties by prefix.
  */
 export function scrub(props?: EventProps | null, event?: string): EventProps {
   const out: EventProps = {};
@@ -122,7 +139,7 @@ export function scrub(props?: EventProps | null, event?: string): EventProps {
       if (typeof raw === 'number') out[key] = raw;
     } else if (isError && ERROR_BOOL_PROPS.has(key)) {
       if (typeof raw === 'boolean') out[key] = raw;
-    } else if (ALLOWED_PROPS.has(key)) {
+    } else if (ALLOWED_PROPS.has(key) || key.startsWith(EXPERIMENT_PROP_PREFIX)) {
       if (typeof raw === 'string') {
         const reduced = URL_PROPS.has(key) ? urlToPath(raw) : raw;
         out[key] = redactEmails(reduced);

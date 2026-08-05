@@ -23,6 +23,13 @@ const [posts, featured, deals] = await Promise.all([
 const latest = posts.filter((p) => p.slug !== featured?.slug).slice(0, 6);
 const today = formatMedium(new Date());
 
+/* The primary hero CTA's label is the reference A/B experiment: it renders
+   statically as the copy below and is swapped in place by chrome.ts if the
+   `hero_cta_copy` feature returns something else. This constant is the
+   code-side default the site falls back to whenever no payload applies. */
+const heroCtaFeature = 'hero_cta_copy';
+const heroCtaLabel = 'Read the latest';
+
 const meta = buildMeta({
   title: 'Exclusive deals dropping daily',
   description:
@@ -45,8 +52,8 @@ const meta = buildMeta({
               href="/blog"
               variant="primary"
               arrow
-              data={{ track: EVENTS.heroCtaClick, 'track-props': JSON.stringify({ cta: 'Read the latest', href: '/blog' }) }}
-            >Read the latest</Button>
+              data={{ track: EVENTS.heroCtaClick, 'track-props': JSON.stringify({ cta: heroCtaLabel, href: '/blog' }) }}
+            ><span data-experiment-copy={heroCtaFeature}>{heroCtaLabel}</span></Button>
             <Button
               href="#today"
               variant="outline"

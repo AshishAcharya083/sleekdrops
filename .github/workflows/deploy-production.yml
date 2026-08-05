@@ -69,6 +69,14 @@ jobs:
           # the Astro build so the DevTeam analytics + logging sink is active.
           PUBLIC_Devteam__IngestKey: dtp_9YapTQMaVMIKD5vLxcIiBl8ByAtwbHILHjrSUi2bshg
           PUBLIC_Devteam__Host: https://ingest.getdevteam.ai
+          # DevTeam A/B Testing - flag-delivery host + per-environment client key.
+          # Held in repo settings rather than inline: the key is minted per
+          # environment in the A/B Testing tab and a stale one serves an empty
+          # payload, so every experiment would read 0% while the site looks
+          # healthy. An empty value disables experiments and every feature falls
+          # back to its code-side default.
+          PUBLIC_AbTesting__Host: ${{ vars.AB_TESTING_HOST }}
+          PUBLIC_AbTesting__ClientKey: ${{ secrets.AB_TESTING_CLIENT_KEY }}
           # Used by apps/web/scripts/fetch-content.mjs to read posts +
           # affiliate links from Cloudflare D1 during the prebuild step. The
           # database id is not a secret; CLOUDFLARE_D1_TOKEN needs

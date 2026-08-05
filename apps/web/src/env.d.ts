@@ -7,6 +7,10 @@ interface ImportMetaEnv {
   readonly PUBLIC_Devteam__IngestKey?: string;
   /** DevTeam Analytics ingest host. Defaults to http://localhost:6080. */
   readonly PUBLIC_Devteam__Host?: string;
+  /** DevTeam A/B Testing flag-delivery host. Empty disables experiments. */
+  readonly PUBLIC_AbTesting__Host?: string;
+  /** DevTeam A/B Testing per-environment client key. Empty disables experiments. */
+  readonly PUBLIC_AbTesting__ClientKey?: string;
 }
 
 interface ImportMeta {
