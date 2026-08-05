@@ -54,13 +54,30 @@ const ALLOWED_PROPS = new Set<string>([
  * Prefix of the sticky experiment properties (`$exp_<experimentKey>` =
  * `<variantKey>`) stamped onto every event and log emitted after a variant is
  * assigned. Experiment keys are minted in the DevTeam A/B Testing tab rather
- * than declared in code, so this needs a prefix rule instead of a literal name
+ * than declared in code, so this needs a shape rule instead of a literal name
  * on ALLOWED_PROPS - without it every experiment would be unmeasurable.
- *
- * Safe by construction: both halves are operator-chosen structural ids, never
- * visitor input, and they still go through the same email redaction below.
  */
 export const EXPERIMENT_PROP_PREFIX = '$exp_';
+
+/**
+ * The full shape a sticky stamp must match. Both halves come from the flag
+ * payload, not from code, so the prefix alone is too loose an allowlist entry:
+ * this narrows the property name to a structural id and its value to a short
+ * variant key, so a hostile or malformed payload cannot smuggle arbitrary
+ * key/value pairs to the analytics sink under a name no review ever saw.
+ */
+const EXPERIMENT_KEY_RE = /^\$exp_[A-Za-z0-9_-]{1,64}$/;
+const EXPERIMENT_VALUE_MAX_LENGTH = 64;
+
+/** True when `key`/`value` are a well-formed `$exp_<experimentKey>` stamp. */
+export function isExperimentStamp(key: string, value: unknown): value is string {
+  return (
+    EXPERIMENT_KEY_RE.test(key) &&
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= EXPERIMENT_VALUE_MAX_LENGTH
+  );
+}
 
 /** Allowed fields that may carry a URL and must be reduced to path only. */
 const URL_PROPS = new Set<string>(['url', 'href', 'referrer', 'path']);
@@ -125,7 +142,7 @@ export function urlToPath(value: string): string {
  * colno/handled), with the free-text ones URL-reduced and email-redacted.
  *
  * Experiment dimensions survive on every event: `experiment_key` / `variant_key`
- * by name, and the sticky `$exp_*` properties by prefix.
+ * by name, and the sticky `$exp_*` properties by the shape rule above.
  */
 export function scrub(props?: EventProps | null, event?: string): EventProps {
   const out: EventProps = {};
@@ -139,7 +156,9 @@ export function scrub(props?: EventProps | null, event?: string): EventProps {
       if (typeof raw === 'number') out[key] = raw;
     } else if (isError && ERROR_BOOL_PROPS.has(key)) {
       if (typeof raw === 'boolean') out[key] = raw;
-    } else if (ALLOWED_PROPS.has(key) || key.startsWith(EXPERIMENT_PROP_PREFIX)) {
+    } else if (key.startsWith(EXPERIMENT_PROP_PREFIX)) {
+      if (isExperimentStamp(key, raw)) out[key] = redactEmails(raw);
+    } else if (ALLOWED_PROPS.has(key)) {
       if (typeof raw === 'string') {
         const reduced = URL_PROPS.has(key) ? urlToPath(raw) : raw;
         out[key] = redactEmails(reduced);

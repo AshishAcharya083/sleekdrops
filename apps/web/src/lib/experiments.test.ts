@@ -5,6 +5,7 @@ import {
   clearStickyProps,
   coerceFeatureValue,
   getFeatureValue,
+  isFlagHostAllowed,
   restoreStickyProps,
   stickyProps,
   subscribe,
@@ -101,10 +102,21 @@ test('ignores anything in storage that is not a $exp_ string stamp', () => {
       $exp_kept: 'control',
       email: 'jordan@example.com',
       $exp_wrong_type: { nested: true },
+      '$exp_not a key': 'control',
+      $exp_over_length: 'v'.repeat(65),
     }),
   });
   withStorage(storage, restoreStickyProps);
   assert.deepEqual(stickyProps(), { $exp_kept: 'control' });
+});
+
+test('retains a bounded number of stamps, whatever the payload wrote', () => {
+  // Stamp names come from the flag payload, so an unbounded store would grow
+  // both localStorage and every outgoing analytics payload without limit.
+  const stored: Record<string, string> = {};
+  for (let i = 0; i < 100; i += 1) stored[`$exp_flag_${i}`] = 'control';
+  withStorage(fakeStorage({ 'sd-exp': JSON.stringify(stored) }), restoreStickyProps);
+  assert.equal(Object.keys(stickyProps()).length, 32);
 });
 
 test('survives corrupt or absent storage without throwing', () => {
@@ -113,6 +125,24 @@ test('survives corrupt or absent storage without throwing', () => {
   );
   withStorage(fakeStorage(), () => assert.doesNotThrow(restoreStickyProps));
   assert.deepEqual(stickyProps(), {});
+});
+
+test('a https page only reads the flag payload over https', () => {
+  // The payload decides what renders and how visitors are bucketed, and it is
+  // neither signed nor encrypted, so a plaintext fetch is a rewrite point for
+  // any network intermediary - and mixed content the browser blocks anyway.
+  assert.equal(isFlagHostAllowed('https://app.internal.getdevteam.ai', 'https:'), true);
+  assert.equal(isFlagHostAllowed('http://app.internal.getdevteam.ai', 'https:'), false);
+});
+
+test('a http page (local dev) may read the payload over http', () => {
+  assert.equal(isFlagHostAllowed('http://localhost:6080', 'http:'), true);
+  assert.equal(isFlagHostAllowed('https://app.internal.getdevteam.ai', 'http:'), true);
+});
+
+test('an unparseable host disables experiments rather than being fetched', () => {
+  assert.equal(isFlagHostAllowed('app.internal.getdevteam.ai', 'https:'), false);
+  assert.equal(isFlagHostAllowed('', 'http:'), false);
 });
 
 test('a decline forgets every stamp, in memory and on disk', () => {

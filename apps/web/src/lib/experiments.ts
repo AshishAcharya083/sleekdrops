@@ -22,6 +22,10 @@
  *  3. **Fail safe.** A missing key, an unreachable platform, an offline visitor
  *     or a wrong-typed payload all yield the caller's code-side default, with no
  *     thrown error and no visual error state.
+ *  4. **The payload is data, never code.** It is read over https on a secure
+ *     page (see `isFlagHostAllowed`) and evaluated with GrowthBook's
+ *     auto-experiments off, so a flag can only change a value the site itself
+ *     asked for - never run script, rewrite the DOM or redirect the visitor.
  *
  * All console lines are prefixed `[analytics]` via the injected logger, so
  * experiment activity filters alongside the rest of the telemetry.
@@ -31,7 +35,7 @@ import type { GrowthBook } from '@growthbook/growthbook';
 
 // Explicit .ts extension: unlike ./analytics this module is loaded directly by
 // the node --test runner (see experiments.test.ts), which needs a real specifier.
-import { EXPERIMENT_PROP_PREFIX, type EventProps } from './pii.ts';
+import { EXPERIMENT_PROP_PREFIX, isExperimentStamp, type EventProps } from './pii.ts';
 
 /**
  * Upper bound on how long an already-open tab can keep serving a stale payload.
@@ -44,6 +48,14 @@ const REFRESH_MS = 60_000;
 
 /** How long the first payload fetch may block before we fall back to defaults. */
 const INIT_TIMEOUT_MS = 3_000;
+
+/**
+ * Upper bound on how many sticky stamps are retained. The names come from the
+ * flag payload, so without a cap a bad or hostile payload could grow both
+ * localStorage and every outgoing analytics payload without limit. A visitor in
+ * more than this many live experiments at once is a misconfiguration.
+ */
+const MAX_STICKY_PROPS = 32;
 
 export type ExperimentLogLevel = 'info' | 'warn';
 
@@ -65,6 +77,28 @@ const clientKey = env?.PUBLIC_AbTesting__ClientKey ?? '';
 /** localStorage key holding the sticky stamps, alongside `sd-consent`/`sd-theme`. */
 const STICKY_KEY = 'sd-exp';
 
+/**
+ * Whether the flag payload may be fetched from `host` on a page served over
+ * `pageProtocol`.
+ *
+ * The payload drives what the page renders and how visitors are bucketed, and it
+ * is neither signed nor encrypted, so on a secure page it may only be read over
+ * a channel a network intermediary cannot rewrite. A plaintext host is allowed
+ * only when the page itself is plaintext - local development against a mock or
+ * an internal platform, where there is no secure channel to downgrade from.
+ *
+ * Refusing rather than trying is also the honest failure: the browser blocks a
+ * http:// fetch from a https:// page as mixed content, so the alternative is
+ * every feature silently reading its default while the site looks healthy.
+ */
+export function isFlagHostAllowed(host: string, pageProtocol: string): boolean {
+  try {
+    return new URL(host).protocol === 'https:' || pageProtocol !== 'https:';
+  } catch {
+    return false;
+  }
+}
+
 let growthbook: GrowthBook | null = null;
 let started = false;
 const subscribers = new Set<() => void>();
@@ -81,7 +115,10 @@ export function stickyProps(): EventProps {
 }
 
 function remember(experimentKey: string, variantKey: string): void {
-  sticky[EXPERIMENT_PROP_PREFIX + experimentKey] = variantKey;
+  const prop = EXPERIMENT_PROP_PREFIX + experimentKey;
+  if (!isExperimentStamp(prop, variantKey)) return;
+  if (!(prop in sticky) && Object.keys(sticky).length >= MAX_STICKY_PROPS) return;
+  sticky[prop] = variantKey;
   try {
     localStorage.setItem(STICKY_KEY, JSON.stringify(sticky));
   } catch {
@@ -101,9 +138,9 @@ export function restoreStickyProps(): void {
     const stored: unknown = JSON.parse(localStorage.getItem(STICKY_KEY) ?? 'null');
     if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return;
     for (const [key, value] of Object.entries(stored)) {
-      if (key.startsWith(EXPERIMENT_PROP_PREFIX) && typeof value === 'string') {
-        sticky[key] = value;
-      }
+      if (!isExperimentStamp(key, value)) continue;
+      if (Object.keys(sticky).length >= MAX_STICKY_PROPS) break;
+      sticky[key] = value;
     }
   } catch {
     /* storage unavailable or corrupt - stamps then hold for this page only */
@@ -182,6 +219,15 @@ async function load(distinctId: string, hooks: ExperimentHooks): Promise<void> {
   const instance = new GrowthBook({
     apiHost,
     clientKey,
+    // The site reads primitive feature values and nothing else. GrowthBook's
+    // auto-experiments are on by default and would let a payload run
+    // `script.innerHTML = <js>` in the page or navigate the visitor away via
+    // window.location.replace(), turning the A/B Testing tab (and anyone who can
+    // tamper with the payload) into a script-injection and open-redirect surface
+    // on the public site. Turn off the capabilities we do not use.
+    disableVisualExperiments: true,
+    disableJsInjection: true,
+    disableUrlRedirectExperiments: true,
     attributes: { id: distinctId },
     trackingCallback: (experiment, result) => {
       const variantKey = String(result.key);
@@ -231,6 +277,14 @@ export function start(distinctId: string, hooks: ExperimentHooks): void {
     hooks.log(
       'warn',
       'A/B testing NOT configured - PUBLIC_AbTesting__ClientKey / PUBLIC_AbTesting__Host are empty',
+    );
+    return;
+  }
+  if (!isFlagHostAllowed(apiHost, location.protocol)) {
+    hooks.log(
+      'warn',
+      'A/B testing disabled - PUBLIC_AbTesting__Host must be a valid https:// URL on a secure page: ' +
+        apiHost,
     );
     return;
   }
