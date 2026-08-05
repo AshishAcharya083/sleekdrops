@@ -21,8 +21,12 @@ Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../sr
   `chrome.ts` fires the event synchronously on click, before the browser follows the link.
 - **Newsletter signups** - a newsletter form carries `data-signup`; the mock-form submit handler fires `Newsletter Signup`.
 - **Chrome UI interactions** - the dark-mode toggle, share button, copy-link button, image lightbox, and TOC nav links already have dedicated event listeners in `chrome.ts` for their own behaviour; each fires its analytics event directly from that handler rather than through a `data-track` attribute.
+- **Experiment copy** - an element carries `data-experiment-copy="<feature key>"`; its default copy renders in the static HTML and `chrome.ts` swaps it in place once the flag payload resolves, rewriting the enclosing `data-track` element's `cta` prop so the funnel event reports the label the visitor actually saw.
 
 DevTeam Analytics is initialised with `sendBeacon` transport so a click event still reaches the server when the click immediately navigates the page away.
+
+A/B testing follows the same chokepoint discipline: [`src/lib/experiments.ts`](../src/lib/experiments.ts) is the only module that touches the GrowthBook SDK, it is started only from the consent-grant path, and every feature read falls back to the caller's code-side default.
+The flag payload is treated as data, never as code: it is read over `https` only (a plaintext host on a secure page is refused with one warning), and GrowthBook's auto-experiments — DOM mutations, JS injection and URL redirects — are disabled, so a flag can change only a value the site itself asked for.
 
 ## No PII
 
@@ -52,7 +56,7 @@ A click on a primary call-to-action in the homepage hero.
 
 | Property | Type | Notes |
 |---|---|---|
-| `cta` | string | The button label, e.g. `Read the latest`. |
+| `cta` | string | The button label, e.g. `Read the latest`. Always the label as rendered, so a variant of the `hero_cta_copy` experiment reports its own copy. |
 | `href` | string | The link target. |
 
 Owning screen: homepage (`Hero` section of `src/pages/index.astro`).
@@ -146,6 +150,33 @@ A click on an in-article table-of-contents link.
 | `section` | string | The clicked link's visible text (falls back to its `href`). |
 
 Owning component: `chrome.ts` (`[data-toc] a` handler).
+
+### $experiment_viewed
+
+Platform event: the visitor was bucketed into a running experiment.
+It is what the DevTeam **A/B Testing** tab measures a result on, so its name and properties are a contract with the platform rather than part of the Title Case product taxonomy above - like `$client_error`.
+
+Emitted by GrowthBook's `trackingCallback` (see [`src/lib/experiments.ts`](../src/lib/experiments.ts)) through the same consent-gated `track()` pipeline as every other event, so it is buffered before a choice, dropped on a decline, and never fires under GPC/DNT.
+Fires once per experiment, at the moment a feature covered by an experiment rule is first evaluated.
+
+| Property | Type | Notes |
+|---|---|---|
+| `experiment_key` | string | The experiment's key, as minted in the A/B Testing tab. |
+| `variant_key` | string | The assigned variation's key (`0`, `1`, ... unless the experiment names them). |
+
+Bucketing uses `attributes.id` = the DevTeam analytics SDK's own distinct id, so exposure and conversion join on the same key.
+
+### `$exp_<experimentKey>` (sticky property)
+
+Once a variant is assigned, `$exp_<experimentKey>` = `<variantKey>` is stamped onto **every** subsequent event and log at the `send()` / `serverLog()` chokepoint in [`src/lib/analytics.ts`](../src/lib/analytics.ts) - the DevTeam SDK v0.2.0 has no global-properties API.
+That is what lets a conversion (`Affiliate Link Clicked`, `Newsletter Signup`, ...) be attributed to a variant without any call site knowing an experiment exists.
+
+The stamps persist in local storage under `sd-exp`, because this is a multi-page static site: a visitor is bucketed on the page that reads the feature and converts on a later page that never does.
+They are written only after consent and deleted on a decline.
+
+Experiment keys are minted in the A/B Testing tab rather than declared in code, so [`src/lib/pii.ts`](../src/lib/pii.ts) allows them through `scrub()` by **shape** — `$exp_` plus up to 64 characters of `[A-Za-z0-9_-]`, carrying a variant key of at most 64 characters; `experiment_key` and `variant_key` are allowlisted by name.
+Without those three rules the strict allowlist would silently drop every experiment dimension and each experiment would read 0% forever.
+The shape is deliberately narrow, and at most 32 stamps are retained: both halves come from the flag payload rather than from code, so a bare prefix rule would let anything authored in the A/B Testing tab reach the sink under a name no allowlist review ever saw.
 
 ## Verification
 

@@ -7,6 +7,7 @@ import {
   urlToPath,
   stripUrlQueries,
   CLIENT_ERROR_EVENT,
+  EXPERIMENT_PROP_PREFIX,
 } from './pii.ts';
 
 test('drops free-text fields not on the allowlist', () => {
@@ -36,6 +37,70 @@ test('keeps allowlisted structural dimensions', () => {
     variant: 'hero',
     theme: 'dark',
   });
+});
+
+test('keeps the exposure event dimensions the A/B Testing tab measures on', () => {
+  const out = scrub(
+    { experiment_key: 'hero_cta_copy', variant_key: 'shorter-copy' },
+    '$experiment_viewed',
+  );
+  assert.deepEqual(out, {
+    experiment_key: 'hero_cta_copy',
+    variant_key: 'shorter-copy',
+  });
+});
+
+test('keeps sticky $exp_* stamps on any event, alongside that event\'s own props', () => {
+  // Experiment keys are minted in the A/B Testing tab, so they survive by
+  // shape rule - a literal allowlist entry could never name them.
+  const out = scrub({
+    cta: 'Read the latest',
+    [`${EXPERIMENT_PROP_PREFIX}hero_cta_copy`]: 'shorter-copy',
+    [`${EXPERIMENT_PROP_PREFIX}drop_panel_order`]: 'control',
+  });
+  assert.deepEqual(out, {
+    cta: 'Read the latest',
+    $exp_hero_cta_copy: 'shorter-copy',
+    $exp_drop_panel_order: 'control',
+  });
+});
+
+test('still drops properties that only resemble the experiment prefix', () => {
+  const out = scrub({ exp_hero: 'x', $experiment: 'y', $exp: 'z' });
+  assert.deepEqual(out, {});
+});
+
+test('the experiment prefix is not a hole for non-primitive values', () => {
+  const out = scrub({
+    $exp_nested: { email: 'jordan@example.com' },
+    $exp_list: ['a', 'b'],
+    $exp_ok: 'control',
+  });
+  assert.deepEqual(out, { $exp_ok: 'control' });
+});
+
+test('the experiment prefix is not a hole for arbitrary payload-supplied names', () => {
+  // Both halves of a stamp come from the flag payload rather than from code, so
+  // the prefix alone would let anything authored in the A/B Testing tab (or
+  // injected into the payload) reach the sink under an unreviewed name.
+  const out = scrub({
+    '$exp_hero cta': 'control',
+    '$exp_<img src=x>': 'control',
+    '$exp_notes: call jordan@example.com': 'control',
+    [`$exp_${'k'.repeat(65)}`]: 'control',
+    $exp_kept: 'control',
+  });
+  assert.deepEqual(out, { $exp_kept: 'control' });
+});
+
+test('an experiment stamp value is capped and never empty', () => {
+  const out = scrub({
+    $exp_long: 'v'.repeat(65),
+    $exp_blank: '',
+    $exp_numeric: 1,
+    $exp_at_cap: 'v'.repeat(64),
+  });
+  assert.deepEqual(out, { $exp_at_cap: 'v'.repeat(64) });
 });
 
 test('reduces url fields to path, dropping the raw query string', () => {

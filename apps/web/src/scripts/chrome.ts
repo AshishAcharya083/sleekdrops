@@ -1,7 +1,7 @@
 /**
  * Chrome behaviour — runs once per page load.
  *
- * Handles five things, all set up declaratively from the DOM so we never
+ * Handles six things, all set up declaratively from the DOM so we never
  * need to import this from a component:
  *
  *  1. Dark-mode toggle (persisted to localStorage `sd-theme`).
@@ -11,6 +11,8 @@
  *  4. Smooth-scroll for in-page anchor links.
  *  5. Product-analytics dispatch (page view + funnel clicks) from `data-*`
  *     hooks, via the analytics wrapper (see docs/analytics-events.md).
+ *  6. A/B experiment copy: swapping `[data-experiment-copy]` labels in place
+ *     once the flag payload resolves, via the experiments wrapper.
  *
  * The analytics SDKs themselves are bootstrapped separately by the
  * ConsentBanner island, which gates the DevTeam + GA4 analytics sinks behind the visitor's consent
@@ -18,6 +20,7 @@
  */
 
 import { track, EVENTS, initErrorCapture, type EventProps } from '@lib/analytics';
+import { getFeatureValue, subscribe as onExperimentsChanged } from '@lib/experiments';
 
 declare global {
   interface Window {
@@ -74,6 +77,39 @@ if (!window.__sdChromeInit) {
       if (event) track(event, parseProps(el.dataset.trackProps));
     });
   });
+
+  /* ---- Experiment copy -------------------------------------------------
+   * An element tagged `data-experiment-copy="<feature key>"` renders its
+   * default copy in the static HTML and has it swapped in place once the flag
+   * payload resolves - never blanked, hidden or delayed, so there is no layout
+   * shift beyond the new label's own width. The rendered text *is* the code-side
+   * default, which keeps the default and the markup from drifting apart.
+   *
+   * The enclosing `data-track` element's `cta` prop is rewritten alongside it,
+   * so the funnel event always reports the label the visitor actually saw.
+   * Feature reads outside consent return the default, so this needs no guard. */
+  const copySlots = [
+    ...document.querySelectorAll<HTMLElement>('[data-experiment-copy]'),
+  ].map((el) => ({
+    el,
+    feature: el.dataset.experimentCopy ?? '',
+    fallback: (el.textContent ?? '').trim(),
+  }));
+
+  if (copySlots.length > 0) {
+    onExperimentsChanged(() => {
+      copySlots.forEach(({ el, feature, fallback }) => {
+        const copy = getFeatureValue(feature, fallback);
+        if (el.textContent === copy) return;
+        el.textContent = copy;
+        const host = el.closest<HTMLElement>('[data-track]');
+        const props = parseProps(host?.dataset.trackProps);
+        if (host && props && typeof props.cta === 'string') {
+          host.dataset.trackProps = JSON.stringify({ ...props, cta: copy });
+        }
+      });
+    });
+  }
 
   function toggleTheme(): void {
     const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';

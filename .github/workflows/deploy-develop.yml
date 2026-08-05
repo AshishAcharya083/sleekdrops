@@ -67,6 +67,14 @@ jobs:
           # settings, so both apps always report into one project.
           PUBLIC_Devteam__IngestKey: ${{ secrets.VITE_DEVTEAM_INGEST_KEY }}
           PUBLIC_Devteam__Host: ${{ vars.VITE_DEVTEAM_HOST }}
+          # DevTeam A/B Testing - flag-delivery host + per-environment client key.
+          # Held in repo settings for the same reason as the ingest key above: the
+          # key is minted per environment in the A/B Testing tab and a stale one
+          # serves an empty payload, so every experiment would read 0% while the
+          # site looks healthy. An empty value disables experiments and every
+          # feature falls back to its code-side default.
+          PUBLIC_AbTesting__Host: ${{ vars.AB_TESTING_HOST }}
+          PUBLIC_AbTesting__ClientKey: ${{ secrets.AB_TESTING_CLIENT_KEY }}
           # Develop is a code-only preview rendered against the SAME live
           # editorial content as production. Content lives in Cloudflare D1,
           # so the build needs the same D1 env vars as prod.

@@ -24,6 +24,7 @@
     "@astrojs/rss": "^4.0.18",
     "@astrojs/sitemap": "3.2.1",
     "@getdevteam/analytics-web": "^0.2.0",
+    "@growthbook/growthbook": "^1.6.5",
     "astro": "^4.16.19",
     "remark-gfm": "^4.0.1",
     "schema-dts": "^2.0.0",
