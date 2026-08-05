@@ -32,6 +32,7 @@ import {
   type ConsentPrompt,
   type ConsentStatus,
 } from './consent';
+import { whenDistinctIdRestored } from './distinct-id';
 import { scrub, urlToPath, CLIENT_ERROR_EVENT, type EventProps } from './pii';
 import {
   ErrorDeduper,
@@ -201,20 +202,26 @@ export function serverLog(level: LogLevel, message: string, attributes?: EventPr
  * the same key, and any other value fails silently at 0%. No client means no
  * distinct id and no way to measure a result, so experiments stay off.
  *
+ * The id is taken once the SDK has restored it from storage (see
+ * `./distinct-id`); reading it in the same tick the client is created would
+ * bucket a returning visitor on a throwaway id.
+ *
  * Called only from the grant path, so nothing is fetched, bucketed or tracked
  * before the visitor opts in.
  */
 function startExperimentsForVisitor(): void {
-  const distinctId = devteam?.getDistinctId();
-  if (!distinctId) return;
-  startExperiments(distinctId, {
-    onExposure(experimentKey, variantKey) {
-      track(EXPERIMENT_VIEWED_EVENT, {
-        experiment_key: experimentKey,
-        variant_key: variantKey,
-      });
-    },
-    log: serverLog,
+  if (!devteam) return;
+  whenDistinctIdRestored(devteam, (distinctId) => {
+    if (!distinctId) return;
+    startExperiments(distinctId, {
+      onExposure(experimentKey, variantKey) {
+        track(EXPERIMENT_VIEWED_EVENT, {
+          experiment_key: experimentKey,
+          variant_key: variantKey,
+        });
+      },
+      log: serverLog,
+    });
   });
 }
 
