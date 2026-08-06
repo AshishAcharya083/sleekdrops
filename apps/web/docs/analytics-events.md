@@ -22,6 +22,8 @@ Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../sr
 - **Newsletter signups** - a newsletter form carries `data-signup`; the mock-form submit handler fires `Newsletter Signup`.
 - **Chrome UI interactions** - the dark-mode toggle, share button, copy-link button, image lightbox, and TOC nav links already have dedicated event listeners in `chrome.ts` for their own behaviour; each fires its analytics event directly from that handler rather than through a `data-track` attribute.
 - **Experiment copy** - an element carries `data-experiment-copy="<feature key>"`; its default copy renders in the static HTML and `chrome.ts` swaps it in place once the flag payload resolves, rewriting the enclosing `data-track` element's `cta` prop so the funnel event reports the label the visitor actually saw.
+- **Experiment nav items** - a primary-nav anchor carries `data-experiment-nav-item="<feature key>"`; the item renders in the static HTML for every visitor and `chrome.ts` removes it from the DOM once a boolean flag resolves true, restoring it in its original slot if the value flips back.
+  The decision layer is the pure [`src/lib/nav-experiment.ts`](../src/lib/nav-experiment.ts), which also owns the rule that the flag is read **only** while the primary nav is displayed (wider than the `(max-width: 900px)` breakpoint that hides `.site-nav`) - reading a feature is what buckets a visitor, so a narrow-viewport read would count an exposure for a treatment that visitor can never see.
 
 DevTeam Analytics is initialised with `sendBeacon` transport so a click event still reaches the server when the click immediately navigates the page away.
 
@@ -177,6 +179,25 @@ They are written only after consent and deleted on a decline.
 Experiment keys are minted in the A/B Testing tab rather than declared in code, so [`src/lib/pii.ts`](../src/lib/pii.ts) allows them through `scrub()` by **shape** — `$exp_` plus up to 64 characters of `[A-Za-z0-9_-]`, carrying a variant key of at most 64 characters; `experiment_key` and `variant_key` are allowlisted by name.
 Without those three rules the strict allowlist would silently drop every experiment dimension and each experiment would read 0% forever.
 The shape is deliberately narrow, and at most 32 stamps are retained: both halves come from the flag payload rather than from code, so a bare prefix rule would let anything authored in the A/B Testing tab reach the sink under a name no allowlist review ever saw.
+
+## Running experiments
+
+Flags are authored in the DevTeam **A/B Testing** tab; the code-side default is what ships whenever no payload applies, so a missing or stopped flag always renders the control experience.
+
+| Flag key | Type | Environment | Variations | Conversion metric | Surface |
+|---|---|---|---|---|---|
+| `hero_cta_copy` | string | Development | payload copy vs. the code-side `Read the latest` | `Hero CTA Clicked` | `[data-experiment-copy]` on the homepage hero CTA (`src/pages/index.astro`) |
+| `remove-about-page` | boolean | Development | `control` = `false` (50%), `b` = `true` (50%) | `Page Viewed` | `[data-experiment-nav-item]` on the About anchor in `Header.astro` |
+
+`remove-about-page` ("Remove about page option from nav bar") asks whether the About entry earns its slot in the six-item primary nav.
+Control keeps the nav as rendered; variant B removes the About item from the DOM after the payload resolves.
+Both variants ship in the same build - the split happens at runtime in the flag payload, never at merge time.
+
+Its exposure is **desktop-only by design**: `.site-nav` is `display: none` below 900px and there is no mobile drawer, so a narrow-viewport visitor cannot receive the treatment and the flag is never read for them (no bucketing, no `$experiment_viewed`).
+Crossing the breakpoint upward re-checks and buckets at that point.
+Nothing about `/about` itself changes in either variant: the page, its indexability, its sitemap entry and its footer link are identical, so the experiment measures nav composition alone.
+
+On the first consented page load the buffered `Page Viewed` flushes before bucketing completes, so the `$exp_remove-about-page` stamp appears from the next page load onward - a property of the consent-then-bucket order, not something to work around with a second `Page Viewed`.
 
 ## Verification
 
