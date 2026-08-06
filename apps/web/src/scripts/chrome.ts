@@ -13,6 +13,9 @@
  *     hooks, via the analytics wrapper (see docs/analytics-events.md).
  *  6. A/B experiment copy: swapping `[data-experiment-copy]` labels in place
  *     once the flag payload resolves, via the experiments wrapper.
+ *  7. A/B experiment nav items: removing (and restoring) a
+ *     `[data-experiment-nav-item]` entry in the primary nav from the same
+ *     payload, while the nav is on screen.
  *
  * The analytics SDKs themselves are bootstrapped separately by the
  * ConsentBanner island, which gates the DevTeam + GA4 analytics sinks behind the visitor's consent
@@ -21,6 +24,12 @@
 
 import { track, EVENTS, initErrorCapture, type EventProps } from '@lib/analytics';
 import { getFeatureValue, subscribe as onExperimentsChanged } from '@lib/experiments';
+import {
+  applyNavExperimentItems,
+  captureNavExperimentItems,
+  NAV_HIDDEN_QUERY,
+  NAV_ITEM_ATTRIBUTE,
+} from '@lib/nav-experiment';
 
 declare global {
   interface Window {
@@ -109,6 +118,32 @@ if (!window.__sdChromeInit) {
         }
       });
     });
+  }
+
+  /* ---- Experiment nav items --------------------------------------------
+   * A nav entry tagged `data-experiment-nav-item="<feature key>"` ships in the
+   * static HTML for every visitor, so control and variant are served the same
+   * markup and the split happens at runtime. Once the payload resolves, a true
+   * value takes the entry out of the DOM - not out of view, so it leaves the
+   * accessibility tree and the tab order too - and a value flipping back puts
+   * it in the slot it rendered in.
+   *
+   * The flag is read only while the primary nav is displayed: below its
+   * breakpoint the nav is `display: none` with no drawer behind it, and reading
+   * a feature is what buckets the visitor, so a read there would count an
+   * exposure for a treatment that visitor can never see. */
+  const navExperimentItems = captureNavExperimentItems(
+    document.querySelectorAll<HTMLElement>(`[${NAV_ITEM_ATTRIBUTE}]`),
+  );
+
+  if (navExperimentItems.length > 0) {
+    const navHidden = window.matchMedia(NAV_HIDDEN_QUERY);
+    const applyNavExperiments = (): void =>
+      applyNavExperimentItems(navExperimentItems, navHidden.matches, (feature) =>
+        getFeatureValue(feature, false),
+      );
+    onExperimentsChanged(applyNavExperiments);
+    navHidden.addEventListener('change', applyNavExperiments);
   }
 
   function toggleTheme(): void {
