@@ -57,8 +57,8 @@ const OPERATOR_ID_KEY = 'sleekdrops_operator_id';
 // DevTeam Analytics ingest key (dtp_...) and host. Both come from the build
 // environment; there is deliberately no fallback in source, and an empty value
 // disables the sink silently after one warning.
-const ingestKey = import.meta.env.VITE_DEVTEAM_INGEST_KEY ?? '';
-const ingestHost = import.meta.env.VITE_DEVTEAM_HOST ?? '';
+const ingestKey = import.meta.env.VITE_DEVTEAM_ANALYTICS_INGEST_KEY ?? '';
+const ingestHost = import.meta.env.VITE_DEVTEAM_ANALYTICS_HOST ?? '';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -74,7 +74,7 @@ function ensureClient(): AnalyticsClient | null {
   resolved = true;
   if (!ingestKey || !ingestHost) {
     console.warn(
-      '[analytics] DevTeam analytics disabled — VITE_DEVTEAM_INGEST_KEY / VITE_DEVTEAM_HOST are not set',
+      '[analytics] DevTeam analytics disabled — VITE_DEVTEAM_ANALYTICS_INGEST_KEY / VITE_DEVTEAM_ANALYTICS_HOST are not set',
     );
     return null;
   }

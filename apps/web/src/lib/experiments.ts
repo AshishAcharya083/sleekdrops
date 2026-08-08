@@ -71,8 +71,8 @@ export interface ExperimentHooks {
 // empty value disables experiments silently after one warning - exactly how the
 // DevTeam analytics sink handles a missing ingest key.
 const env = import.meta.env as ImportMetaEnv | undefined;
-const apiHost = env?.PUBLIC_AbTesting__Host ?? '';
-const clientKey = env?.PUBLIC_AbTesting__ClientKey ?? '';
+const apiHost = env?.PUBLIC_DEVTEAM_FLAGS_HOST ?? '';
+const clientKey = env?.PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY ?? '';
 
 /** localStorage key holding the sticky stamps, alongside `sd-consent`/`sd-theme`. */
 const STICKY_KEY = 'sd-exp';
@@ -276,14 +276,14 @@ export function start(distinctId: string, hooks: ExperimentHooks): void {
   if (!clientKey || !apiHost) {
     hooks.log(
       'warn',
-      'A/B testing NOT configured - PUBLIC_AbTesting__ClientKey / PUBLIC_AbTesting__Host are empty',
+      'A/B testing NOT configured - PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY / PUBLIC_DEVTEAM_FLAGS_HOST are empty',
     );
     return;
   }
   if (!isFlagHostAllowed(apiHost, location.protocol)) {
     hooks.log(
       'warn',
-      'A/B testing disabled - PUBLIC_AbTesting__Host must be a valid https:// URL on a secure page: ' +
+      'A/B testing disabled - PUBLIC_DEVTEAM_FLAGS_HOST must be a valid https:// URL on a secure page: ' +
         apiHost,
     );
     return;
