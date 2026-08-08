@@ -230,7 +230,7 @@ Suppression is enforced in one place (`track()` in `analytics.ts`): events are b
 
 ### Live View walk-through (operational - run on the preview deploy)
 
-This step needs a deployed/preview build with `PUBLIC_Devteam__IngestKey` set and access to the DevTeam Analytics platform's real-time event view; it cannot be exercised in the build sandbox (no deployed build, browser, or DevTeam Analytics access here). To close it out, deploy the preview, open the DevTeam Analytics platform, and:
+This step needs a deployed/preview build with `PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY` set and access to the DevTeam Analytics platform's real-time event view; it cannot be exercised in the build sandbox (no deployed build, browser, or DevTeam Analytics access here). To close it out, deploy the preview, open the DevTeam Analytics platform, and:
 
 1. Before accepting consent, browse a few pages - confirm **no** events appear (buffered, not sent).
 2. Accept analytics, then walk the funnel: home (hero CTA), deal card click, deal-detail view, affiliate "View deal" click, newsletter signup - confirm each event above lands with the listed properties and **no** PII (no emails, names, or query strings).

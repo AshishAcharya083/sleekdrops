@@ -20,7 +20,7 @@ It is a deliberate simplification of the website's wrapper: same chokepoint and 
 
 ## Configuration
 
-`VITE_DEVTEAM_INGEST_KEY` and `VITE_DEVTEAM_HOST` (see [`.env.example`](../.env.example)) configure the sink at build time.
+`VITE_DEVTEAM_ANALYTICS_INGEST_KEY` and `VITE_DEVTEAM_ANALYTICS_HOST` (see [`.env.example`](../.env.example)) configure the sink at build time.
 Either value being empty disables analytics silently after one `console.warn` - the panel keeps working and never throws.
 No key, host or fallback value is hardcoded in source.
 
@@ -230,4 +230,4 @@ Last verified: 2026-08-04.
 
 Run `./up.sh`, open the panel, and confirm in the browser console (`[analytics]` prefix) that each instrumented action emits exactly one event.
 Then force a failure (wrong admin token, or stop the API) and confirm a single `[analytics] error captured` line with a stack, and that `.run/agent.log` holds a line with the identical `trace_id`.
-Finally, rebuild with an empty `VITE_DEVTEAM_INGEST_KEY` and confirm the panel still works, warns once, and sends no `X-Trace-Id`.
+Finally, rebuild with an empty `VITE_DEVTEAM_ANALYTICS_INGEST_KEY` and confirm the panel still works, warns once, and sends no `X-Trace-Id`.

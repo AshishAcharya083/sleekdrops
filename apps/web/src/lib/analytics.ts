@@ -81,10 +81,10 @@ export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
 export const EXPERIMENT_VIEWED_EVENT = '$experiment_viewed';
 
 // DevTeam Analytics ingest key (dtp_...) and host. Host defaults to the local
-// analytics platform; set PUBLIC_Devteam__Host to https://ingest.getdevteam.ai in prod.
+// analytics platform; set PUBLIC_DEVTEAM_ANALYTICS_HOST to https://ingest.getdevteam.ai in prod.
 // An empty key disables the DevTeam sink silently.
-const devteamKey = import.meta.env.PUBLIC_Devteam__IngestKey;
-const devteamHost = import.meta.env.PUBLIC_Devteam__Host ?? 'http://localhost:6080';
+const devteamKey = import.meta.env.PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY;
+const devteamHost = import.meta.env.PUBLIC_DEVTEAM_ANALYTICS_HOST ?? 'http://localhost:6080';
 
 type Decision = ConsentStatus | 'unknown';
 
@@ -153,7 +153,7 @@ function ensureGa(): void {
 function ensureDevteam(): void {
   if (devteam) return;
   if (!devteamKey) {
-    serverLog('warn', 'DevTeam analytics NOT configured - PUBLIC_Devteam__IngestKey is empty');
+    serverLog('warn', 'DevTeam analytics NOT configured - PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY is empty');
     return;
   }
   devteam = createAnalytics({
