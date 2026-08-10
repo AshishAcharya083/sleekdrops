@@ -31,6 +31,7 @@ import {
   serverLog,
   type EventProps,
 } from '@lib/analytics';
+import { resolveAnchorScrollTop } from '@lib/anchor-scroll';
 import { getFeatureValue, subscribe as onExperimentsChanged } from '@lib/experiments';
 import {
   applyNavExperimentItems,
@@ -252,25 +253,28 @@ if (!window.__sdChromeInit) {
    *    kept from reaching this branch at all - the hero renders `#today` only
    *    when DropPanel emits it, and scripts/check-anchors.mjs fails the build on
    *    any in-page href with no matching id - so this is the belt to that brace.
-   *  - Target off screen, or tucked under the fixed header: smooth-scroll to it,
-   *    then flash it.
-   *  - Target already fully in view (the desktop hero, where the drop panel sits
-   *    beside the CTA): a scroll would move nothing, so skip it and flash. */
+   *  - Target somewhere else on the page: smooth-scroll to it, then flash it.
+   *    "Somewhere else" is a scroll distance, not a visibility test - a heading
+   *    in the lower half of the screen is already in view and still a useful
+   *    scroll away, and article TOC links live on exactly that case.
+   *  - Target already where the scroll would land it (the desktop hero, where
+   *    the drop panel sits beside the CTA, and the last section of a page the
+   *    document cannot scroll any further): flash it in place. */
   const ANCHOR_FLASH_CLASS = 'is-anchor-target';
   const ANCHOR_FLASH_MS = 1200;
-  /* Clearance for the fixed site header, which the scroll lands the target below
-     and which is therefore also the top of the visible area. */
-  const ANCHOR_SCROLL_OFFSET = 90;
   /* Frames of an unchanged scroll position that count as "landed", and the cap
      that ends the wait if the visitor keeps scrolling by hand. */
   const SETTLED_FRAMES = 3;
   const MAX_SETTLE_FRAMES = 120;
 
-  const isFullyInViewport = (el: HTMLElement): boolean => {
-    const { top, bottom } = el.getBoundingClientRect();
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-    return top >= ANCHOR_SCROLL_OFFSET && bottom <= viewportHeight;
-  };
+  const anchorScrollTop = (el: HTMLElement): number | null =>
+    resolveAnchorScrollTop({
+      targetTop: el.offsetTop,
+      scrollY: window.scrollY,
+      maxScrollY:
+        document.documentElement.scrollHeight -
+        (window.innerHeight || document.documentElement.clientHeight),
+    });
 
   /* Run once the smooth scroll has actually landed. A long jump takes longer
      than the flash lasts, so flashing on click would leave the visitor arriving
@@ -296,11 +300,12 @@ if (!window.__sdChromeInit) {
       const el = id ? document.getElementById(id) : null;
       if (!el) return;
       e.preventDefault();
-      if (isFullyInViewport(el)) {
+      const top = anchorScrollTop(el);
+      if (top === null) {
         flashClass(el, ANCHOR_FLASH_CLASS, ANCHOR_FLASH_MS);
         return;
       }
-      window.scrollTo({ top: el.offsetTop - ANCHOR_SCROLL_OFFSET, behavior: 'smooth' });
+      window.scrollTo({ top, behavior: 'smooth' });
       whenScrollSettles(() => flashClass(el, ANCHOR_FLASH_CLASS, ANCHOR_FLASH_MS));
     });
   });
