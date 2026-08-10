@@ -8,13 +8,15 @@
  * SDK fetches that payload and evaluates every rule locally, so a feature read
  * is synchronous and costs no request.
  *
- * Three properties this module has to guarantee:
+ * Four properties this module has to guarantee:
  *
- *  1. **Consent first.** Nothing is fetched, bucketed or tracked until
- *     `start()` is called, and `./analytics` only calls it from the consent-
- *     grant path. The SDK itself is loaded with a dynamic import inside
- *     `start()`, so on a declined or GPC/DNT visit its code never even reaches
- *     the browser.
+ *  1. **Consent first, and only for as long as it lasts.** Nothing is fetched,
+ *     bucketed or tracked until `start()` is called, and `./analytics` only
+ *     calls it from the consent-grant path. The SDK itself is loaded with a
+ *     dynamic import inside `start()`, so on a declined or GPC/DNT visit its
+ *     code never even reaches the browser. `stop()` is the other half: the
+ *     withdrawal path calls it, and it takes down everything the grant started -
+ *     stream, poll, instance and stamps - in the same page load.
  *  2. **One identity.** `attributes.id` is the distinct id the DevTeam
  *     analytics SDK reports for this visitor, passed in by the caller. Bucketing
  *     and measurement have to join on the same key; any other value fails
@@ -33,8 +35,9 @@
 
 import type { GrowthBook } from '@growthbook/growthbook';
 
-// Explicit .ts extension: unlike ./analytics this module is loaded directly by
-// the node --test runner (see experiments.test.ts), which needs a real specifier.
+// Explicit .ts extensions: unlike ./analytics this module is loaded directly by
+// the node --test runner (see experiments.test.ts), which needs real specifiers.
+import { flagsEnv, type FlagsEnv } from './flags-env.ts';
 import { EXPERIMENT_PROP_PREFIX, isExperimentStamp, type EventProps } from './pii.ts';
 
 /**
@@ -66,14 +69,6 @@ export interface ExperimentHooks {
   log(level: ExperimentLogLevel, message: string): void;
 }
 
-// GrowthBook flag-delivery host and per-environment client key. Both come from
-// the build environment; there is deliberately no fallback in source, and an
-// empty value disables experiments silently after one warning - exactly how the
-// DevTeam analytics sink handles a missing ingest key.
-const env = import.meta.env as ImportMetaEnv | undefined;
-const apiHost = env?.PUBLIC_DEVTEAM_FLAGS_HOST ?? '';
-const clientKey = env?.PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY ?? '';
-
 /** localStorage key holding the sticky stamps, alongside `sd-consent`/`sd-theme`. */
 const STICKY_KEY = 'sd-exp';
 
@@ -101,6 +96,15 @@ export function isFlagHostAllowed(host: string, pageProtocol: string): boolean {
 
 let growthbook: GrowthBook | null = null;
 let started = false;
+/** Handle on the staleness poll below, so a withdrawal can stop it. */
+let refreshTimer: number | null = null;
+/**
+ * Which start()/stop() cycle the in-flight load belongs to. A withdrawal can land
+ * while the SDK chunk or its first payload fetch is still in the air, and what
+ * arrives after it must not become this document's live instance: it would carry
+ * the stream and the tracking callback back past the moment the visitor said stop.
+ */
+let run = 0;
 const subscribers = new Set<() => void>();
 const sticky: EventProps = {};
 
@@ -211,14 +215,16 @@ export function subscribe(apply: () => void): void {
   }
 }
 
-async function load(distinctId: string, hooks: ExperimentHooks): Promise<void> {
+async function load(distinctId: string, hooks: ExperimentHooks, env: FlagsEnv): Promise<void> {
+  const thisRun = run;
   // Dynamically imported so the SDK is only downloaded once a visitor has opted
   // in - a declined or GPC/DNT visit never fetches this chunk at all.
   const { GrowthBook } = await import('@growthbook/growthbook');
+  if (run !== thisRun) return;
 
   const instance = new GrowthBook({
-    apiHost,
-    clientKey,
+    apiHost: env.apiHost,
+    clientKey: env.clientKey,
     // The site reads primitive feature values and nothing else. GrowthBook's
     // auto-experiments are on by default and would let a payload run
     // `script.innerHTML = <js>` in the page or navigate the visitor away via
@@ -243,6 +249,12 @@ async function load(distinctId: string, hooks: ExperimentHooks): Promise<void> {
     streaming: true,
     timeout: INIT_TIMEOUT_MS,
   });
+  // init() is what opens the stream, so a withdrawal that landed while it was in
+  // flight found nothing to close: this instance has to take itself down.
+  if (run !== thisRun) {
+    teardown(instance);
+    return;
+  }
   if (!success) {
     hooks.log(
       'warn',
@@ -250,17 +262,31 @@ async function load(distinctId: string, hooks: ExperimentHooks): Promise<void> {
         String(error ?? 'timed out'),
     );
   } else {
-    hooks.log('info', 'A/B testing initialized -> ' + apiHost);
+    hooks.log('info', 'A/B testing initialized -> ' + env.apiHost);
   }
   notify();
 
-  window.setInterval(() => {
+  refreshTimer = window.setInterval(() => {
     // skipCache forces a network read, so the poll is a real upper bound on
     // staleness rather than a no-op against a still-fresh cache entry.
     instance.refreshFeatures({ skipCache: true }).catch(() => {
       /* offline or platform down - the last known payload (or the defaults) stands */
     });
   }, REFRESH_MS);
+}
+
+/**
+ * Take one instance down: its subscription to the flag host closed, its payload
+ * released, no callback of ours left reachable from it.
+ *
+ * `destroyAllStreams` is what actually closes the SSE connection. Without it
+ * `destroy()` only unsubscribes this instance from the stream, and the stream -
+ * which the SDK keeps in module-level state keyed by host and client key, not on
+ * the instance - stays open and connected to the flag host with nobody listening.
+ * The site creates exactly one instance per document, so "all streams" is ours.
+ */
+function teardown(instance: GrowthBook): void {
+  instance.destroy({ destroyAllStreams: true });
 }
 
 /**
@@ -273,24 +299,58 @@ async function load(distinctId: string, hooks: ExperimentHooks): Promise<void> {
 export function start(distinctId: string, hooks: ExperimentHooks): void {
   if (started) return;
   started = true;
-  if (!clientKey || !apiHost) {
+  const env = flagsEnv();
+  if (!env.clientKey || !env.apiHost) {
     hooks.log(
       'warn',
       'A/B testing NOT configured - PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY / PUBLIC_DEVTEAM_FLAGS_HOST are empty',
     );
     return;
   }
-  if (!isFlagHostAllowed(apiHost, location.protocol)) {
+  if (!isFlagHostAllowed(env.apiHost, location.protocol)) {
     hooks.log(
       'warn',
       'A/B testing disabled - PUBLIC_DEVTEAM_FLAGS_HOST must be a valid https:// URL on a secure page: ' +
-        apiHost,
+        env.apiHost,
     );
     return;
   }
-  load(distinctId, hooks).catch((error: unknown) => {
+  load(distinctId, hooks, env).catch((error: unknown) => {
     // Telemetry must never be able to break the site it measures: on any
     // failure every feature simply keeps its code-side default.
     hooks.log('warn', 'A/B testing disabled - SDK failed to initialise: ' + String(error));
   });
+}
+
+/**
+ * Stop A/B testing where it stands. Called from the consent-withdrawal path in
+ * `./analytics`, alongside the two analytics sinks' own stops.
+ *
+ * Everything `start()` set running has to go, because withdrawal is reachable
+ * from the footer control long after the grant that started it: the subscription
+ * to the flag host, the staleness poll, and - above all - the instance itself.
+ * Dropping the instance is what makes every later feature read return its
+ * code-side default, and so what keeps the tracking callback from bucketing the
+ * visitor, stamping a fresh `sd-exp` and emitting an exposure after they opted
+ * out. A read after a withdrawal is a routine event rather than a corner case:
+ * `chrome.ts` re-reads every experiment-backed slot on each payload change and
+ * on every crossing of the nav breakpoint.
+ *
+ * The stamps go last, once nothing is left that could write one back.
+ *
+ * Leaves `started` false, so a visitor who opts back in on the same page is
+ * bucketed again rather than silently left out of every experiment - the same
+ * reason the GA4 opt-out flag is cleared on a re-grant.
+ */
+export function stop(): void {
+  run += 1;
+  started = false;
+  if (refreshTimer !== null) {
+    window.clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+  const instance = growthbook;
+  growthbook = null;
+  if (instance) teardown(instance);
+  clearStickyProps();
 }
