@@ -5,7 +5,9 @@
  * actually wired to it, and neither of them can be imported here (an `.astro`
  * island script sets its page up the moment it runs), so those two are read as
  * text - the approach `hero-cta.test.ts` and `analytics.test.ts` already use for
- * the files a test cannot execute.
+ * the files a test cannot execute. What the island then does with a request it
+ * hears is `./consent-surface`, which is executed rather than read: see
+ * consent-surface.test.ts.
  */
 
 import { test } from 'node:test';
@@ -88,19 +90,15 @@ test('the footer control is revealed by its own script rather than shipped dead'
   assert.match(footer, /\bhidden = false/);
 });
 
-test('the consent island listens for the request and reopens its dialog on it', () => {
+test('the consent island hands the document to the surface that listens on it', () => {
+  // What the island does with the request - reopen the dialog pre-filled, close it
+  // without resurrecting a spent prompt, hand focus back exactly once - is
+  // `@lib/consent-surface`, asserted for real in consent-surface.test.ts. The one
+  // thing only the island can get wrong is which channel that surface listens on,
+  // which is the same drift this module exists to prevent.
   const banner = source(BANNER);
-  assert.match(banner, /onOpenConsentPreferences\(document, openPrefs\)/);
-  // show() is what un-hides the root that dismiss() closed for good once a
-  // decision was on file, so the dialog has to be opened through it.
-  assert.match(banner, /const openPrefs[\s\S]*?show\('prefs'\)/);
-  // Reopened over a saved choice, the switch has to show that choice.
-  assert.match(banner, /analyticsSwitch\.checked = consentStatus\(\) === 'granted'/);
-  // And closing it must not resurrect the prompt the choice was made on: the
-  // surface behind the dialog is spent the moment the visitor decides. Without
-  // this, accepting and then reopening from the footer on the same page brings
-  // the first-visit banner back when the dialog closes.
-  assert.match(banner, /const dismiss[\s\S]*?previousSurface = null/);
+  assert.match(banner, /createConsentSurface\(\{[\s\S]*?channel: document,/);
+  assert.match(banner, /surface\.start\(prompt\)/);
 });
 
 test('the promise of a footer control names a control the footer actually ships', () => {

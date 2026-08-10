@@ -88,12 +88,30 @@ function openTab() {
   return {
     local: new Map<string, string>(),
     session: new Map<string, string>(),
+    cookies: new Map<string, string>(),
     events: [] as WireEvent[],
     logs: [] as WireLog[],
   };
 }
 
 type Tab = ReturnType<typeof openTab>;
+
+/**
+ * One `document.cookie` write, the way the browser applies it: a `name=value` pair
+ * plus attributes, where an expiry already in the past (what `max-age=0` means)
+ * removes the pair instead of storing it. Domain and path are not modelled - this
+ * jar is one document on one host - so a removal aimed at any scope reaches it.
+ */
+function writeCookie(tab: Tab, entry: string): void {
+  const [pair, ...attributes] = entry.split(';').map((part) => part.trim());
+  const separator = pair.indexOf('=');
+  const name = separator === -1 ? pair : pair.slice(0, separator);
+  if (attributes.some((attribute) => /^max-age=(0|-)/i.test(attribute))) {
+    tab.cookies.delete(name);
+    return;
+  }
+  tab.cookies.set(name, pair.slice(separator + 1));
+}
 
 const storageOf = (map: Map<string, string>) => ({
   getItem: (key: string): string | null => map.get(key) ?? null,
@@ -140,6 +158,12 @@ function loadPage(tab: Tab, path: string): { scripts: AppendedScript[] } {
     removeEventListener: (): void => {},
     referrer: '',
     visibilityState: 'visible',
+    get cookie(): string {
+      return [...tab.cookies].map(([name, value]) => `${name}=${value}`).join('; ');
+    },
+    set cookie(entry: string) {
+      writeCookie(tab, entry);
+    },
   };
   Object.assign(globalThis, {
     window,
@@ -159,6 +183,7 @@ function navigateTo(path: string): void {
       pathname: path,
       href: `https://sleekdrops.com${path}`,
       origin: 'https://sleekdrops.com',
+      hostname: 'sleekdrops.com',
       protocol: 'https:',
     },
   });
@@ -205,6 +230,32 @@ const sdkKeys = (tab: Tab): string[] =>
 
 const ga4Tags = (scripts: AppendedScript[]): AppendedScript[] =>
   scripts.filter((script) => String(script.src).includes('googletagmanager.com'));
+
+/**
+ * The measurement id the document's GA4 tag was actually loaded with, read off the
+ * tag rather than restated here - it is the id the opt-out flag has to name, and a
+ * flag naming any other property is a flag gtag.js never reads.
+ */
+function ga4MeasurementId(scripts: AppendedScript[]): string {
+  const tag = ga4Tags(scripts)[0];
+  assert.ok(tag?.src, 'expected the document to have loaded a GA4 tag');
+  return new URL(tag.src).searchParams.get('id') ?? '';
+}
+
+/** gtag.js's per-property kill switch, as the tag itself would read it. */
+const gaOptOut = (measurementId: string): unknown =>
+  (globalThis.window as unknown as Record<string, unknown>)[`ga-disable-${measurementId}`];
+
+/**
+ * The identifier cookies gtag.js writes once it is running. The harness records the
+ * tag by src rather than executing Google's script, so its cookies are put in the
+ * jar here - shaped as GA4 writes them, `_ga` on the site and `_ga_<container>` for
+ * the property.
+ */
+function gaWritesItsCookies(tab: Tab, measurementId: string): void {
+  tab.cookies.set('_ga', 'GA1.1.1234567890.1700000000');
+  tab.cookies.set(`_ga_${measurementId.replace('G-', '')}`, 'GS1.1.1700000000.1.0.1700000000.0.0.0');
+}
 
 /**
  * Whether a withdrawal has fully settled: the detached client's final flush has
@@ -555,6 +606,46 @@ test('withdrawal leaves no analytics storage behind, not even from its own log l
   // The batch queued while consent was live is delivered by the final flush
   // rather than left on disk to be re-sent on some later page load.
   assert.deepEqual(names(tab), [SESSION_START, PAGE_VIEW]);
+});
+
+test('withdrawal stops the GA4 tag too, not only the DevTeam sink', async () => {
+  // Reachable now that the footer control can reopen the dialog over a page that
+  // already granted: withdrawing cannot unload gtag.js - the script is in the DOM
+  // and window.gtag stays callable - so anything short of its own opt-out flag
+  // leaves it emitting (user_engagement on every visibility change and unload, plus
+  // the property's enhanced measurement) and holding its identifier cookie for the
+  // rest of the document.
+  const tab = openTab();
+  const { scripts } = loadPage(tab, '/');
+  chrome.grantConsent();
+  chrome.trackPageView({ referrer: '' });
+  await tick();
+  const measurementId = ga4MeasurementId(scripts);
+  gaWritesItsCookies(tab, measurementId);
+
+  banner.denyConsent();
+  await until(() => sdkKeys(tab).length === 0, 'the withdrawal never cleared the SDK storage');
+
+  assert.equal(gaOptOut(measurementId), true, 'the tag must be told to stop sending');
+  assert.deepEqual([...tab.cookies.keys()], [], 'and must not keep identifying the visitor');
+});
+
+test('opting back in re-enables the GA4 tag the withdrawal switched off', async () => {
+  // The tag is only loaded once per document, so nothing on the re-grant path would
+  // clear a stale opt-out flag: a visitor who withdrew and changed their mind would
+  // go uncounted in GA4 for the rest of the page while believing they opted in.
+  const tab = openTab();
+  const { scripts } = loadPage(tab, '/');
+  chrome.grantConsent();
+  const measurementId = ga4MeasurementId(scripts);
+  banner.denyConsent();
+  await until(() => sdkKeys(tab).length === 0, 'the withdrawal never cleared the SDK storage');
+  assert.equal(gaOptOut(measurementId), true);
+
+  chrome.grantConsent();
+
+  assert.equal(gaOptOut(measurementId), false);
+  assert.equal(ga4Tags(scripts).length, 1, 'one GA4 tag per document');
 });
 
 test('opting back in after a withdrawal sends again, on a fresh client', async () => {

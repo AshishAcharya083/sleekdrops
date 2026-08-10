@@ -5,8 +5,10 @@
  *
  * One root holds three surfaces (banner, GPC info card, preferences dialog);
  * the consent state machine in `@lib/analytics` decides which — if any — to
- * reveal on load. Everything is hidden until the client script runs, so the
- * static HTML never flashes a prompt at a visitor who has already chosen.
+ * reveal on load, and `@lib/consent-surface` moves between them (including when
+ * the footer's Privacy preferences control asks for the dialog back). Everything
+ * is hidden until the client script runs, so the static HTML never flashes a
+ * prompt at a visitor who has already chosen.
  */
 const policyDate = '28 June 2026';
 ---
@@ -386,46 +388,14 @@ const policyDate = '28 June 2026';
 
 <script>
   import { boot, consentStatus, grantConsent, denyConsent } from '@lib/analytics';
-  import { onOpenConsentPreferences } from '@lib/consent-preferences';
-
-  type SurfaceName = 'banner' | 'gpc' | 'prefs';
+  import { createConsentSurface } from '@lib/consent-surface';
 
   const root = document.querySelector<HTMLElement>('[data-consent-root]');
   if (root) {
-    const surfaces: Record<SurfaceName, HTMLElement | null> = {
-      banner: root.querySelector('[data-surface="banner"]'),
-      gpc: root.querySelector('[data-surface="gpc"]'),
-      prefs: root.querySelector('[data-surface="prefs"]'),
-    };
+    const prefsPanel = root.querySelector<HTMLElement>('[data-surface="prefs"]');
     const analyticsSwitch = root.querySelector<HTMLInputElement>('[data-analytics-switch]');
     const policyPill = root.querySelector<HTMLElement>('[data-policy-pill]');
     const policyNote = root.querySelector<HTMLElement>('[data-policy-note]');
-
-    let previousSurface: 'banner' | 'gpc' | null = null;
-    let returnFocusTo: HTMLElement | null = null;
-
-    const show = (name: SurfaceName): void => {
-      root.hidden = false;
-      (Object.keys(surfaces) as SurfaceName[]).forEach((key) => {
-        const el = surfaces[key];
-        if (el) el.hidden = key !== name;
-      });
-    };
-
-    const dismiss = (): void => {
-      root.hidden = true;
-      document.removeEventListener('keydown', onPrefsKey);
-      // Every caller of this is a decision, so the prompt it was taken on is
-      // spent: reopening the dialog from the footer later and closing it must put
-      // the consent UI away, not bring back a banner asking for a choice that has
-      // already been made on this very page.
-      previousSurface = null;
-      // Whatever opened the dialog from outside gets focus back - the footer
-      // control, when the visitor reopened their preferences from there and saved
-      // or closed. A control inside this root is hidden now and cannot take it.
-      if (returnFocusTo && !root.contains(returnFocusTo)) returnFocusTo.focus();
-      returnFocusTo = null;
-    };
 
     const focusable = (el: HTMLElement): HTMLElement[] =>
       [...el.querySelectorAll<HTMLElement>('button, [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter(
@@ -433,15 +403,14 @@ const policyDate = '28 June 2026';
       );
 
     function onPrefsKey(ev: KeyboardEvent): void {
-      const panel = surfaces.prefs;
-      if (!panel || panel.hidden) return;
+      if (!prefsPanel || prefsPanel.hidden) return;
       if (ev.key === 'Escape') {
         ev.preventDefault();
-        closePrefs();
+        surface.closePrefs();
         return;
       }
       if (ev.key !== 'Tab') return;
-      const items = focusable(panel);
+      const items = focusable(prefsPanel);
       if (items.length === 0) return;
       const first = items[0];
       const last = items[items.length - 1];
@@ -454,29 +423,27 @@ const policyDate = '28 June 2026';
       }
     }
 
-    const openPrefs = (): void => {
-      returnFocusTo = document.activeElement as HTMLElement | null;
-      // Pre-filled from the decision actually in force, so a visitor reopening
-      // this from the footer sees what they last saved rather than the opt-in
-      // default - and saving without touching the switch changes nothing.
-      if (analyticsSwitch) analyticsSwitch.checked = consentStatus() === 'granted';
-      show('prefs');
-      document.addEventListener('keydown', onPrefsKey);
-      focusable(surfaces.prefs as HTMLElement)[0]?.focus();
-    };
-
-    const closePrefs = (): void => {
-      document.removeEventListener('keydown', onPrefsKey);
-      // With no surface behind it - the dialog was reopened from the footer, over
-      // a page with a decision already on file - closing puts the consent UI away
-      // entirely; dismiss() hands focus back to whatever opened it.
-      if (previousSurface) {
-        show(previousSurface);
-        returnFocusTo?.focus();
-      } else {
-        dismiss();
-      }
-    };
+    // Which surface is on screen, which prompt is still owed an answer and where
+    // focus goes on close all live in @lib/consent-surface, where they are testable;
+    // everything below is the DOM this page happens to hold them in. The document is
+    // the channel the footer control's request arrives on.
+    const surface = createConsentSurface({
+      root,
+      surfaces: {
+        banner: root.querySelector<HTMLElement>('[data-surface="banner"]'),
+        gpc: root.querySelector<HTMLElement>('[data-surface="gpc"]'),
+        prefs: prefsPanel,
+      },
+      analyticsSwitch,
+      channel: document,
+      consentStatus,
+      activeElement: () => document.activeElement as HTMLElement | null,
+      onPrefsOpened: () => {
+        document.addEventListener('keydown', onPrefsKey);
+        if (prefsPanel) focusable(prefsPanel)[0]?.focus();
+      },
+      onPrefsClosed: () => document.removeEventListener('keydown', onPrefsKey),
+    });
 
     root.addEventListener('click', (ev) => {
       const action = (ev.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
@@ -484,48 +451,35 @@ const policyDate = '28 June 2026';
       switch (action) {
         case 'accept':
           grantConsent();
-          dismiss();
+          surface.dismiss();
           break;
         case 'decline':
           denyConsent();
-          dismiss();
+          surface.dismiss();
           break;
         case 'customize':
-          openPrefs();
+          surface.openPrefs();
           break;
         case 'close-prefs':
-          closePrefs();
+          surface.closePrefs();
           break;
         case 'save':
           if (analyticsSwitch?.checked) grantConsent();
           else denyConsent();
-          dismiss();
+          surface.dismiss();
           break;
         case 'decline-all':
           denyConsent();
-          dismiss();
+          surface.dismiss();
           break;
       }
     });
 
-    // The way back in. Once a decision is on file boot() returns 'none' on every
-    // later load and this root stays hidden, so without a control that can reopen
-    // it a visitor could never see - let alone change - what they chose. The
-    // footer control dispatches this on the document; openPrefs() un-hides the
-    // root through show().
-    onOpenConsentPreferences(document, openPrefs);
-
     const prompt = boot();
-    if (prompt === 'banner' || prompt === 'policy-update') {
-      previousSurface = 'banner';
-      if (prompt === 'policy-update') {
-        policyPill?.removeAttribute('hidden');
-        policyNote?.removeAttribute('hidden');
-      }
-      show('banner');
-    } else if (prompt === 'gpc') {
-      previousSurface = 'gpc';
-      show('gpc');
+    if (prompt === 'policy-update') {
+      policyPill?.removeAttribute('hidden');
+      policyNote?.removeAttribute('hidden');
     }
+    surface.start(prompt);
   }
 </script>

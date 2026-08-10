@@ -6,7 +6,9 @@
  * event is queued in an in-memory buffer while consent is unknown; on grant the
  * buffer flushes and subsequent events send live, on deny (including a GPC/DNT
  * signal) the buffer is dropped and nothing is ever sent. Every outgoing payload
- * - buffered or live - runs through the central PII scrub() first.
+ * - buffered or live - runs through the central PII scrub() first. A withdrawal
+ * arriving after a grant - the footer's preferences control makes that reachable on
+ * any page - stops both sinks where they stand and clears what each of them stored.
  *
  * The consent choice persists to localStorage under `sd-consent`, mirroring the
  * `sd-theme` handling in chrome.ts; we re-prompt only when the stored policy
@@ -73,6 +75,12 @@ import {
 export type { EventProps, ConsentPrompt };
 
 const GA4_ID = 'G-8B65NZ3BD4';
+
+/** gtag.js's documented per-property kill switch: set truthy and the tag sends nothing. */
+const GA_DISABLE_FLAG = `ga-disable-${GA4_ID}`;
+
+/** GA4's identifier cookies - `_ga` and the per-property `_ga_<container>`. */
+const GA_COOKIE = /^_ga(_|$)/;
 
 /**
  * The product event taxonomy. Every track call uses one of these names so the
@@ -166,6 +174,54 @@ function writeConsent(status: ConsentStatus): void {
   } catch {
     /* storage unavailable (private mode, quota) - consent holds for the session */
   }
+}
+
+/**
+ * Turn the GA4 tag off - or, on a re-grant, back on - for the rest of this
+ * document.
+ *
+ * Withdrawal cannot take gtag.js away: the script stays in the DOM, `window.gtag`
+ * stays callable, and the tag goes on emitting on its own (a `user_engagement` on
+ * every visibility change and unload, plus whatever enhanced measurement the
+ * property has switched on). Its opt-out flag is the only thing that stops it.
+ * Setting it back to false matters just as much - `ensureGa()` is a no-op once the
+ * tag is loaded, so a visitor who withdraws and opts back in on the same page would
+ * otherwise stay silently opted out of the sink they just re-consented to.
+ */
+function setGaOptOut(disabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  (window as unknown as Record<string, boolean>)[GA_DISABLE_FLAG] = disabled;
+}
+
+/**
+ * Expire GA4's identifier cookies. gtag.js writes them with `path=/` on the
+ * registrable domain, which is not necessarily the host this page is served from,
+ * and a cookie is only removed by a write matching the pair it was set with - so
+ * every domain this host could have used is tried. A write for a domain the page
+ * is not allowed to set is dropped by the browser.
+ */
+function forgetGaCookies(): void {
+  if (typeof document === 'undefined' || typeof document.cookie !== 'string') return;
+  const names = document.cookie
+    .split(';')
+    .map((pair) => pair.split('=')[0].trim())
+    .filter((name) => GA_COOKIE.test(name));
+  if (names.length === 0) return;
+  const labels = (typeof location === 'undefined' ? '' : location.hostname).split('.');
+  // Every parent domain down to - but not including - the public suffix, which no
+  // site is allowed to write, plus the host itself (no domain attribute at all).
+  const parents = labels.slice(0, -1).map((_, index) => `; domain=.${labels.slice(index).join('.')}`);
+  names.forEach((name) => {
+    ['', ...parents].forEach((domain) => {
+      document.cookie = `${name}=; path=/; max-age=0${domain}`;
+    });
+  });
+}
+
+/** Stop the GA4 sink and take its identifier cookies with it. */
+function stopGa(): void {
+  setGaOptOut(true);
+  forgetGaCookies();
 }
 
 function ensureGa(): void {
@@ -353,6 +409,7 @@ function applyGrant(): void {
   // is attributed to the variants this visitor was bucketed into on an earlier
   // page load.
   restoreStickyProps();
+  setGaOptOut(false);
   ensureGa();
   ensureDevteam();
   serverLog('info', 'consent granted - analytics active');
@@ -422,6 +479,9 @@ function applyDeny(): void {
   s.decision = 'denied';
   dropBuffer(s);
   clearStickyProps();
+  // Both sinks, not just the DevTeam one: withdrawal is reachable from the footer
+  // control long after a grant, so GA4 can be running when it happens.
+  stopGa();
   stopAnalytics(s);
   serverLog('info', 'consent denied - no events will be sent');
 }
