@@ -25,6 +25,7 @@
 
 import {
   track,
+  trackPageView,
   EVENTS,
   initErrorCapture,
   isEventName,
@@ -77,15 +78,14 @@ if (!window.__sdChromeInit) {
   };
 
   /* Page view: every page reports a 'Page Viewed', enriched with the screen
-     context BaseLayout declares on <body data-page-view>. path/referrer are
-     always included so a page that declares no screen is still counted. */
+     context BaseLayout declares on <body data-page-view>. referrer is always
+     included so a page that declares no screen is still counted; the normalized
+     path is stamped by trackPageView itself, which also holds the
+     one-per-document guard - so a second entry point reaching this dispatch, or a
+     re-run of it, cannot report the same page view twice. */
   const pageView = parseProps(document.body.dataset.pageView);
   const screenName = typeof pageView?.screen === 'string' ? pageView.screen : undefined;
-  track(EVENTS.pageView, {
-    path: location.pathname,
-    referrer: document.referrer,
-    ...pageView,
-  });
+  trackPageView({ referrer: document.referrer, ...pageView });
 
   /* Funnel-step clicks: hero CTAs, deal cards, affiliate "View deal" buttons.
      The event fires synchronously here, before the browser follows the link.

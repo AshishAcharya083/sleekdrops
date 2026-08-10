@@ -16,7 +16,14 @@
  * A/B testing hangs off the same gate: `./experiments` is started from the grant
  * path with the DevTeam SDK's own distinct id, and the sticky `$exp_*` stamps it
  * hands back are merged into every outgoing payload at the send() / serverLog()
- * chokepoint - the SDK v0.2.0 has no global-properties API to do it for us.
+ * chokepoint - the SDK v0.2.0 has no global-properties API to do it for us. The
+ * `theme`, `visit_id` and `event_id` stamps ride the same chokepoint.
+ *
+ * Everything that has to be one-per-document - the client, the consent decision,
+ * the buffer, the GA4 tag, the error listeners, the page-view dispatch - lives on
+ * the document-scoped state in `./analytics-scope` rather than in module-local
+ * `let`s, so two copies of this module still mean one of each. See that module for
+ * why that is not hypothetical here.
  *
  * All console lines are prefixed `[analytics]` so you can filter them in the
  * browser devtools console to watch init / send / consent / error activity.
@@ -24,6 +31,17 @@
 
 import { createAnalytics, type AnalyticsClient } from '@getdevteam/analytics-web';
 
+import {
+  analyticsScope,
+  bufferEvent,
+  claimOnce,
+  drainBuffer,
+  dropBuffer,
+  ensureClient,
+  type AnalyticsScope,
+  type QueuedEvent,
+  type ScopeHost,
+} from './analytics-scope';
 import {
   CONSENT_KEY,
   POLICY_VERSION,
@@ -34,6 +52,7 @@ import {
 } from './consent';
 import { whenDistinctIdRestored } from './distinct-id';
 import { scrub, urlToPath, CLIENT_ERROR_EVENT, type EventProps } from './pii';
+import { clearVisit, newEventId, normalizePath, touchVisit, type VisitStorage } from './visit';
 import {
   ErrorDeduper,
   errorEventToProps,
@@ -104,17 +123,23 @@ export type TrackableEvent =
 const devteamKey = import.meta.env.PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY;
 const devteamHost = import.meta.env.PUBLIC_DEVTEAM_ANALYTICS_HOST ?? 'http://localhost:6080';
 
-type Decision = ConsentStatus | 'unknown';
-
-interface QueuedEvent {
-  event: TrackableEvent;
-  props?: EventProps;
+declare global {
+  interface Window {
+    __sdAnalytics?: unknown;
+  }
 }
 
-let decision: Decision = 'unknown';
-let gaReady = false;
-let devteam: AnalyticsClient | null = null;
-let buffer: QueuedEvent[] = [];
+type Scope = AnalyticsScope<AnalyticsClient, TrackableEvent>;
+
+/** Stand-in host for the static build and the test runner, where there is no `window`. */
+const buildHost: ScopeHost = {};
+
+/** This document's analytics state - one client, one decision, one buffer. */
+function scope(): Scope {
+  return analyticsScope<AnalyticsClient, TrackableEvent>(
+    typeof window === 'undefined' ? buildHost : window,
+  );
+}
 
 /** True when the browser is signalling Global Privacy Control or Do-Not-Track. */
 export function hasPrivacySignal(): boolean {
@@ -147,8 +172,9 @@ function writeConsent(status: ConsentStatus): void {
 }
 
 function ensureGa(): void {
-  if (gaReady || typeof document === 'undefined') return;
-  gaReady = true;
+  const s = scope();
+  if (s.gaReady || typeof document === 'undefined') return;
+  s.gaReady = true;
   const tag = document.createElement('script');
   tag.async = true;
   tag.src = `https://www.googletagmanager.com/gtag/js?id=${GA4_ID}`;
@@ -160,31 +186,43 @@ function ensureGa(): void {
   };
   w.gtag('js', new Date());
   // Override the page params GA4 would otherwise auto-capture so raw query
-  // strings (which can carry PII) never reach Google - path only.
+  // strings (which can carry PII) never reach Google - path only. The page
+  // identity is normalized, exactly as the `Page Viewed` event's `path` is, so a
+  // slash-suffixed entry URL does not split GA4's page count either; the referrer
+  // gets the same plain reduction as the event's, so the two sinks agree.
   w.gtag('config', GA4_ID, {
-    page_location: location.origin + urlToPath(location.href),
-    page_referrer: document.referrer ? urlToPath(document.referrer) : '',
+    page_location: location.origin + normalizePath(location.href),
+    page_referrer: urlToPath(document.referrer),
   });
   serverLog('info', 'GA4 initialized -> ' + GA4_ID);
 }
 
+/**
+ * The document's DevTeam client, created on the first call and shared by every
+ * later one. Creating a client is what opens a DevTeam session and so emits
+ * `$session_start`, which is why the guard is document-scoped rather than
+ * module-scoped: two copies of this module must still produce one session.
+ */
 function ensureDevteam(): void {
-  if (devteam) return;
+  const s = scope();
+  if (s.client) return;
   if (!devteamKey) {
     serverLog('warn', 'DevTeam analytics NOT configured - PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY is empty');
     return;
   }
-  devteam = createAnalytics({
-    key: devteamKey,
-    host: devteamHost,
-    // Page views are emitted explicitly (EVENTS.pageView), so the SDK's own
-    // auto-pageview stays off to avoid double-counting.
-    trackPageviews: false,
-    // Uncaught errors already route through track() as a $client_error event, so
-    // the SDK's built-in error capture stays off to avoid duplicate reports.
-    autoCaptureErrors: false,
-    onError: (error) => console.error('[analytics] DevTeam SDK error:', error),
-  });
+  ensureClient(s, () =>
+    createAnalytics({
+      key: devteamKey,
+      host: devteamHost,
+      // Page views are emitted explicitly (EVENTS.pageView), so the SDK's own
+      // auto-pageview stays off to avoid double-counting.
+      trackPageviews: false,
+      // Uncaught errors already route through track() as a $client_error event, so
+      // the SDK's built-in error capture stays off to avoid duplicate reports.
+      autoCaptureErrors: false,
+      onError: (error) => console.error('[analytics] DevTeam SDK error:', error),
+    }),
+  );
   serverLog('info', 'DevTeam analytics initialized -> ' + devteamHost);
 }
 
@@ -206,15 +244,49 @@ function themeStamp(): EventProps {
   return { theme };
 }
 
-function send(item: QueuedEvent): void {
-  if (!devteam) return;
+/** sessionStorage, where the visit id lives, or null when it is unavailable. */
+function visitStorage(): VisitStorage | null {
+  try {
+    return typeof sessionStorage === 'undefined' ? null : sessionStorage;
+  } catch {
+    /* blocked by the browser (private mode, third-party context) */
+    return null;
+  }
+}
+
+/**
+ * This visit's session id, stamped on every outgoing event and log.
+ *
+ * It is the only thing that ties a visit spanning more than one page load into
+ * one session: the DevTeam SDK's own `session_id` is per client and per document
+ * (see `./visit`), so a reload or a re-navigation reports a second
+ * `$session_start` no matter what this site does. `visit_id` is deliberately not
+ * called `session_id` - the wire event already carries the SDK's own field under
+ * that name, and two disagreeing `session_id`s on one event would be worse than
+ * none.
+ *
+ * Consent-gated at the strictest point available: it returns nothing at all until
+ * the decision is `granted`, so no storage is written for a visitor who has not
+ * opted in - including on the deny path, which logs through serverLog().
+ */
+function visitStamp(): EventProps {
+  if (scope().decision !== 'granted') return {};
+  const storage = visitStorage();
+  if (!storage) return {};
+  return { visit_id: touchVisit(storage, Date.now()) };
+}
+
+function send(item: QueuedEvent<TrackableEvent>): void {
+  const client = scope().client;
+  if (!client) return;
   // The theme stamp goes in first, so the one call site that carries a more
   // precise per-event value ('Theme Toggled', which records the mode switched
   // to) keeps it; the two agree by construction anyway, since toggleTheme sets
-  // the attribute before it tracks. Experiment stamps go in last so a call site
-  // can never shadow them.
-  const props = scrub({ ...themeStamp(), ...item.props, ...stickyProps() }, item.event);
-  devteam.track(item.event, props);
+  // the attribute before it tracks. `item.props` carries the event_id minted at
+  // the call site. The visit and experiment stamps go in last so no call site can
+  // shadow the two keys the platform counts on.
+  const props = scrub({ ...themeStamp(), ...item.props, ...visitStamp(), ...stickyProps() }, item.event);
+  client.track(item.event, props);
   console.info('[analytics] event sent:', item.event, props);
 }
 
@@ -233,8 +305,8 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  */
 export function serverLog(level: LogLevel, message: string, attributes?: EventProps): void {
   (level === 'debug' ? console.debug : console[level])('[analytics] ' + message, attributes ?? '');
-  const attrs = { ...themeStamp(), ...attributes, ...stickyProps() };
-  devteam?.log[level](message, Object.keys(attrs).length > 0 ? attrs : undefined);
+  const attrs = { ...themeStamp(), ...attributes, ...visitStamp(), ...stickyProps() };
+  scope().client?.log[level](message, Object.keys(attrs).length > 0 ? attrs : undefined);
 }
 
 /**
@@ -251,8 +323,9 @@ export function serverLog(level: LogLevel, message: string, attributes?: EventPr
  * before the visitor opts in.
  */
 function startExperimentsForVisitor(): void {
-  if (!devteam) return;
-  whenDistinctIdRestored(devteam, (distinctId) => {
+  const client = scope().client;
+  if (!client) return;
+  whenDistinctIdRestored(client, (distinctId) => {
     if (!distinctId) return;
     startExperiments(distinctId, {
       onExposure(experimentKey, variantKey) {
@@ -266,9 +339,18 @@ function startExperimentsForVisitor(): void {
   });
 }
 
-/** Load the analytics SDKs and flush anything queued while consent was pending. */
+/**
+ * Load the analytics SDKs and flush anything queued while consent was pending.
+ *
+ * Idempotent per document: a second grant - a second copy of this module, or a
+ * visitor re-saving their preferences with analytics still on - must not open a
+ * second session, inject a second GA4 tag, start a second experiment client or
+ * re-flush a buffer.
+ */
 function applyGrant(): void {
-  decision = 'granted';
+  const s = scope();
+  if (s.decision === 'granted') return;
+  s.decision = 'granted';
   // First, so every event and log this page emits - the buffered ones included -
   // is attributed to the variants this visitor was bucketed into on an earlier
   // page load.
@@ -276,16 +358,40 @@ function applyGrant(): void {
   ensureGa();
   ensureDevteam();
   serverLog('info', 'consent granted - analytics active');
-  const queued = buffer;
-  buffer = [];
-  queued.forEach(send);
+  drainBuffer(s).forEach(send);
   startExperimentsForVisitor();
 }
 
+/**
+ * The DevTeam SDK's own storage keys, restated here because analytics-core is a
+ * transitive dependency (the same reason distinct-id.test.ts restates one). A
+ * rename upstream makes the withdrawal path stop clearing them, which the
+ * consent test asserts against rather than letting it pass silently.
+ */
+const SDK_STORAGE_KEYS = ['devteam_analytics.distinct_id', 'devteam_analytics.queue'];
+
+/**
+ * Everything the analytics purpose stores in the browser, gone: this site's visit
+ * id, and the SDK's device id and any batch it had not yet delivered. Withdrawal
+ * has to leave nothing behind for a later page load to restore, which is also
+ * what keeps the visit id inside the consent the visitor actually gave.
+ */
+function forgetAnalyticsStorage(): void {
+  clearVisit(visitStorage());
+  try {
+    SDK_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    /* storage unavailable - there is nothing stored to forget */
+  }
+}
+
 function applyDeny(): void {
-  decision = 'denied';
-  buffer = [];
+  const s = scope();
+  if (s.decision === 'denied') return;
+  s.decision = 'denied';
+  dropBuffer(s);
   clearStickyProps();
+  forgetAnalyticsStorage();
   serverLog('info', 'consent denied - no events will be sent');
 }
 
@@ -298,13 +404,42 @@ function applyDeny(): void {
  * constant in the EVENTS map cannot reach the analytics platform.
  */
 export function track(event: TrackableEvent, props?: EventProps): void {
-  if (decision === 'denied') return;
-  if (decision === 'granted') {
-    send({ event, props });
+  const s = scope();
+  if (s.decision === 'denied') return;
+  // The idempotency key is minted here, at the moment the call is made, and never
+  // at send time: an event held in the consent buffer keeps the id it was created
+  // with, so if the same payload reaches the platform twice - a re-sent batch, a
+  // second load restoring the SDK's persisted queue - the two copies carry one id
+  // and collapse into one event. It always wins over a caller-supplied value.
+  const item: QueuedEvent<TrackableEvent> = { event, props: { ...props, event_id: newEventId() } };
+  if (s.decision === 'granted') {
+    send(item);
     return;
   }
-  buffer.push({ event, props });
+  bufferEvent(s, item);
   console.debug('[analytics] event buffered (awaiting consent):', event);
+}
+
+/**
+ * Record this document's page view - once, however many times this is called and
+ * from whichever entry point.
+ *
+ * The guard is keyed on the event name plus the normalized path rather than on a
+ * bare "already dispatched" flag, so a same-document navigation to a different
+ * path is still counted, while a repeat of the same path (a second entry point, a
+ * bfcache restore, a re-run of the dispatch path) is not.
+ *
+ * `path` is the normalized one and is applied last, so the count cannot split
+ * across `/deals/foo` and `/deals/foo/` and no caller can override it with the
+ * raw location.
+ */
+export function trackPageView(props?: EventProps): void {
+  const path = normalizePath(typeof location === 'undefined' ? '/' : location.pathname) || '/';
+  if (!claimOnce(scope(), `${EVENTS.pageView}|${path}`)) {
+    console.debug('[analytics] page view already recorded for this document:', path);
+    return;
+  }
+  track(EVENTS.pageView, { ...props, path });
 }
 
 /** Persist an explicit opt-in and start sending. */
@@ -325,6 +460,10 @@ export function denyConsent(): void {
  * chrome.ts through the same buffered, consent-gated track() pipeline, so they
  * flush on a silent grant and are dropped on any denial regardless of which
  * script ran first.
+ *
+ * Safe to call more than once per document: the effect it applies is idempotent,
+ * so a second entry point calling boot() re-reads the decision without opening a
+ * second session or re-flushing the buffer.
  */
 export function boot(): ConsentPrompt {
   const { prompt, effect } = resolveConsent(readConsent(), hasPrivacySignal());
@@ -347,13 +486,11 @@ function reportError(props: ErrorProps): void {
     // Also forward to the platform's log pipeline so errors land in the Logs view,
     // not only as $client_error events. The client only exists after consent, so
     // this stays consent-gated like track().
-    devteam?.log.error(String(props.message ?? 'client error'), scrub(props, CLIENT_ERROR_EVENT));
+    scope().client?.log.error(String(props.message ?? 'client error'), scrub(props, CLIENT_ERROR_EVENT));
   } catch {
     /* error reporting is best-effort - never let it surface to the user */
   }
 }
-
-let errorCaptureReady = false;
 
 /**
  * Register global listeners that forward uncaught errors and unhandled promise
@@ -365,8 +502,10 @@ let errorCaptureReady = false;
  * (consent gate respected).
  */
 export function initErrorCapture(): void {
-  if (errorCaptureReady || typeof window === 'undefined') return;
-  errorCaptureReady = true;
+  if (typeof window === 'undefined') return;
+  const s = scope();
+  if (s.errorCaptureReady) return;
+  s.errorCaptureReady = true;
 
   window.addEventListener('error', (event: ErrorEvent) => {
     reportError(errorEventToProps(event));

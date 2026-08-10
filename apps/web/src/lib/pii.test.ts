@@ -116,6 +116,29 @@ test('reduces url fields to path, dropping the raw query string', () => {
   });
 });
 
+test('an absent referrer stays absent rather than being reported as the root', () => {
+  // document.referrer is '' on every direct visit. Resolving that against the
+  // reduction base would report '/', making a typed-in visit look like one that
+  // arrived from the homepage.
+  assert.deepEqual(scrub({ referrer: '', url: '', path: '' }), {
+    referrer: '',
+    url: '',
+    path: '',
+  });
+  assert.equal(urlToPath(''), '');
+});
+
+test('keeps the idempotency and visit keys, which the platform counts on', () => {
+  const out = scrub({
+    event_id: '0b5b7e0a-1d2c-4f3e-8a9b-1c2d3e4f5a6b',
+    visit_id: 'aa8002b5-b879-4f8d-993c-0e3fd9b0990a',
+  });
+  assert.deepEqual(out, {
+    event_id: '0b5b7e0a-1d2c-4f3e-8a9b-1c2d3e4f5a6b',
+    visit_id: 'aa8002b5-b879-4f8d-993c-0e3fd9b0990a',
+  });
+});
+
 test('redacts emails embedded in surviving string values', () => {
   const out = scrub({ title: 'Email us at help@sleekdrops.com for support' });
   assert.equal(out.title, 'Email us at [redacted] for support');
