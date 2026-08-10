@@ -8,18 +8,20 @@
  * signal) the buffer is dropped and nothing is ever sent. Every outgoing payload
  * - buffered or live - runs through the central PII scrub() first. A withdrawal
  * arriving after a grant - the footer's preferences control makes that reachable on
- * any page - stops both sinks where they stand and clears what each of them stored.
+ * any page - stops both sinks and the A/B testing SDK where they stand and clears
+ * what each of them stored.
  *
  * The consent choice persists to localStorage under `sd-consent`, mirroring the
  * `sd-theme` handling in chrome.ts; we re-prompt only when the stored policy
  * version is older than the current one. The decision table itself lives in the
  * pure, unit-tested `./consent` module.
  *
- * A/B testing hangs off the same gate: `./experiments` is started from the grant
- * path with the DevTeam SDK's own distinct id, and the sticky `$exp_*` stamps it
- * hands back are merged into every outgoing payload at the send() / serverLog()
- * chokepoint - the SDK v0.2.0 has no global-properties API to do it for us. The
- * `theme`, `visit_id` and `event_id` stamps ride the same chokepoint.
+ * A/B testing hangs off the same gate at both ends: `./experiments` is started
+ * from the grant path with the DevTeam SDK's own distinct id and stopped from the
+ * withdrawal path, and the sticky `$exp_*` stamps it hands back are merged into
+ * every outgoing payload at the send() / serverLog() chokepoint - the SDK v0.2.0
+ * has no global-properties API to do it for us. The `theme`, `visit_id` and
+ * `event_id` stamps ride the same chokepoint.
  *
  * Everything that has to be one-per-document - the client, the consent decision,
  * the buffer, the GA4 tag, the error listeners, the page-view dispatch - lives on
@@ -66,10 +68,10 @@ import {
   type ErrorProps,
 } from './error-capture.ts';
 import {
-  clearStickyProps,
   restoreStickyProps,
   start as startExperiments,
   stickyProps,
+  stop as stopExperiments,
 } from './experiments.ts';
 
 export type { EventProps, ConsentPrompt };
@@ -478,9 +480,12 @@ function applyDeny(): void {
   if (s.decision === 'denied') return;
   s.decision = 'denied';
   dropBuffer(s);
-  clearStickyProps();
-  // Both sinks, not just the DevTeam one: withdrawal is reachable from the footer
-  // control long after a grant, so GA4 can be running when it happens.
+  // Everything the grant started, not just the DevTeam sink: withdrawal is
+  // reachable from the footer control long after a grant, so the GA4 tag can be
+  // running when it happens and A/B testing can be holding an open subscription
+  // to the flag host - one whose next payload would bucket the visitor and stamp
+  // an assignment on them after they opted out.
+  stopExperiments();
   stopGa();
   stopAnalytics(s);
   serverLog('info', 'consent denied - no events will be sent');
