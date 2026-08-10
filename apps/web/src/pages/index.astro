@@ -9,16 +9,18 @@ import FeaturedPost from '@components/blog/FeaturedPost.astro';
 import PostGrid from '@components/blog/PostGrid.astro';
 import Newsletter from '@components/layout/Newsletter.astro';
 import { getAllPosts, getFeaturedPost } from '@lib/posts';
-import { getActiveDeals } from '@data/deals';
+import { getActiveDeals, todaysDrop } from '@data/deals';
 import { buildHomeSchema, buildMeta } from '@lib/seo';
 import { formatMedium } from '@lib/format';
+import { resolveHeroSecondaryCta, resolveDropPanelAction } from '@lib/hero-cta';
 import { EVENTS } from '@lib/analytics';
 
-const [posts, featured, deals] = await Promise.all([
+const [posts, featured, activeDeals] = await Promise.all([
   getAllPosts(),
   getFeaturedPost(),
-  Promise.resolve(getActiveDeals().slice(0, 3)),
+  Promise.resolve(getActiveDeals()),
 ]);
+const deals = activeDeals.slice(0, 3);
 
 const latest = posts.filter((p) => p.slug !== featured?.slug).slice(0, 6);
 const today = formatMedium(new Date());
@@ -29,6 +31,15 @@ const today = formatMedium(new Date());
    code-side default the site falls back to whenever no payload applies. */
 const heroCtaFeature = 'hero_cta_copy';
 const heroCtaLabel = 'Read the latest';
+
+/* The second hero CTA is derived from deal state, never hardcoded: the
+   `#today` anchor variant exists only when DropPanel renders that id, so the
+   button can't ship pointing at a target that isn't on the page. */
+const secondaryCta = resolveHeroSecondaryCta({
+  hasActiveDrop: todaysDrop !== undefined,
+  archivedDealCount: activeDeals.length,
+});
+const dropPanelAction = resolveDropPanelAction(secondaryCta);
 
 const meta = buildMeta({
   title: 'Exclusive deals dropping daily',
@@ -54,14 +65,16 @@ const meta = buildMeta({
               arrow
               data={{ track: EVENTS.heroCtaClick, 'track-props': JSON.stringify({ cta: heroCtaLabel, href: '/blog' }) }}
             ><span data-experiment-copy={heroCtaFeature}>{heroCtaLabel}</span></Button>
+            {secondaryCta.kind !== 'none' && (
             <Button
-              href="#today"
+              href={secondaryCta.href}
               variant="outline"
-              data={{ track: EVENTS.heroCtaClick, 'track-props': JSON.stringify({ cta: "See today's drop", href: '#today' }) }}
-            >See today's drop</Button>
+              data={{ track: EVENTS.heroCtaClick, 'track-props': JSON.stringify({ cta: secondaryCta.label, href: secondaryCta.href }) }}
+            >{secondaryCta.label}</Button>
+            )}
           </div>
         </div>
-        <DropPanel />
+        <DropPanel emptyAction={dropPanelAction} />
       </div>
     </div>
   </section>
@@ -83,6 +96,9 @@ const meta = buildMeta({
     </div>
   </section>
 
+  {/* Omitted entirely with no live deals - a heading over an empty row reads as
+      a broken page, and the hero's no-drop panel already carries the message. */}
+  {deals.length > 0 && (
   <section class="block">
     <div class="container">
       <header class="section-head">
@@ -97,6 +113,7 @@ const meta = buildMeta({
       </div>
     </div>
   </section>
+  )}
 
   <Newsletter />
 </BaseLayout>

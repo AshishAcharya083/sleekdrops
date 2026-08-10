@@ -42,13 +42,31 @@ const meta = buildMeta({
 
   <div class="container">
     <div class="deals-hero">
+      {/* No action on this page: "browse past drops" would point /deals at
+          itself, and the empty state directly below already carries the one
+          real next step. Two buttons to the same place inside one screen is
+          noise, not a second option. */}
       <DropPanel />
     </div>
 
-    <h2 class="rest-title">More this week</h2>
-    <div class="deals-grid">
-      {deals.map((deal) => <DealCard deal={deal} />)}
-    </div>
+    {deals.length > 0 ? (
+      <>
+        <h2 class="rest-title">More this week</h2>
+        <div class="deals-grid">
+          {deals.map((deal) => <DealCard deal={deal} />)}
+        </div>
+      </>
+    ) : (
+      <div class="deals-empty">
+        <h2 class="rest-title">Nothing else live right now</h2>
+        <p>
+          We list a deal only while its price actually holds, so this page runs empty
+          between drops rather than padded with expired ones. The reviews behind the
+          picks are the better read in the meantime.
+        </p>
+        <a class="more" href="/reviews">Read the reviews →</a>
+      </div>
+    )}
 
     <div class="disclosure-wrap">
       <AffiliateDisclosure />
@@ -72,5 +90,20 @@ const meta = buildMeta({
     gap: 16px;
   }
   @media (max-width: 900px) { .deals-grid { grid-template-columns: 1fr; } }
+  .deals-empty { max-width: 56ch; }
+  .deals-empty p {
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--muted);
+    margin: 0 0 20px;
+  }
+  .deals-empty .more {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    text-decoration: none;
+    padding-bottom: 4px;
+    border-bottom: 1.5px solid var(--accent);
+  }
   .disclosure-wrap { padding: 80px 0 32px; max-width: 68ch; }
 </style>

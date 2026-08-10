@@ -2,19 +2,37 @@
 import Eyebrow from '@components/ui/Eyebrow.astro';
 import Button from '@components/ui/Button.astro';
 import { todaysDrop } from '@data/deals';
+import { DROP_PANEL_ID, type DropPanelAction } from '@lib/hero-cta';
 import { EVENTS } from '@lib/analytics';
 
 /**
  * DropPanel — the dark featured-deal card in the hero. Data lives in
  * src/data/deals.ts so editorial and merchandising stay out of layout.
  *
- * Renders nothing when there's no active drop (empty deals array), so it's
- * safe to drop into a layout unconditionally.
+ * The panel always renders: with no active drop it says so in the same card
+ * styling instead of leaving a hole in the hero grid. It emits
+ * `id="today"` only in the active-drop state, because that id is the target of
+ * the hero's anchor CTA (see src/lib/hero-cta.ts) and an id on an empty state
+ * would resurrect the dead anchor this component exists to prevent.
+ *
+ * No countdown or ETA in the no-drop state: nothing in this codebase schedules
+ * drops, so a promised time would be a claim we cannot keep.
  */
+export interface Props {
+  /**
+   * Where the no-drop state sends the visitor. A prop rather than a hardcoded
+   * link because the right destination is the caller's to know: /deals renders
+   * this panel too, where "browse past drops" would point the page at itself.
+   * Omit it to render no action - see resolveDropPanelAction in @lib/hero-cta.
+   */
+  emptyAction?: DropPanelAction;
+}
+
+const { emptyAction } = Astro.props;
 const d = todaysDrop;
 ---
-{d && (
-<aside class="drop-panel" id="today">
+{d ? (
+<aside class="drop-panel" id={DROP_PANEL_ID}>
   <div>
     <Eyebrow dot>Today's drop · {d.brand}</Eyebrow>
     <h3>{d.title.replace(/\.$/, '')}</h3>
@@ -34,6 +52,22 @@ const d = todaysDrop;
       data={{ track: EVENTS.dealCardClick, 'track-props': JSON.stringify({ slug: d.slug, brand: d.brand, placement: 'drop-panel' }) }}
     >View deal</Button>
   </div>
+</aside>
+) : (
+<aside class="drop-panel drop-panel--empty">
+  <div>
+    <Eyebrow>No drop live</Eyebrow>
+    <h3>No live drop right now.</h3>
+    <p class="desc">Drops land without a fixed schedule. Here is everything we have run so far.</p>
+  </div>
+  {/* Slot for the deferred "email me the next drop" capture - a single field
+      drops in here without touching the panel's layout. */}
+  <slot name="notify" />
+  {emptyAction && (
+  <div class="drop-cta">
+    <Button href={emptyAction.href} variant="accent" arrow>{emptyAction.label}</Button>
+  </div>
+  )}
 </aside>
 )}
 

@@ -19,7 +19,7 @@ Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../sr
   `chrome.ts` reads that payload on load and fires `Page Viewed`.
 - **Funnel clicks** - an element carries `data-track="<Event Name>"` and an optional JSON `data-track-props`.
   `chrome.ts` fires the event synchronously on click, before the browser follows the link.
-- **Newsletter signups** - a newsletter form carries `data-signup`; the mock-form submit handler fires `Newsletter Signup`.
+- **Newsletter signups** - not currently emitted. There is no mailing list behind the site yet, so the newsletter band and the footer subscribe block carry no form at all; firing a conversion for a submission that stores nothing would report a signup that never happened. The event stays in the taxonomy for the capture that replaces them.
 - **Chrome UI interactions** - the dark-mode toggle, share button, copy-link button, image lightbox, and TOC nav links already have dedicated event listeners in `chrome.ts` for their own behaviour; each fires its analytics event directly from that handler rather than through a `data-track` attribute.
 - **Experiment copy** - an element carries `data-experiment-copy="<feature key>"`; its default copy renders in the static HTML and `chrome.ts` swaps it in place once the flag payload resolves, rewriting the enclosing `data-track` element's `cta` prop so the funnel event reports the label the visitor actually saw.
 - **Experiment nav items** - a primary-nav anchor carries `data-experiment-nav-item="<feature key>"`; the item renders in the static HTML for every visitor and `chrome.ts` removes it from the DOM once a boolean flag resolves true, restoring it in its original slot if the value flips back.
@@ -93,11 +93,15 @@ Owning components: `deals/[slug].astro`, `promos/[slug].astro`, `Verdict.astro`,
 
 Secondary conversion: a newsletter sign-up attempt (form submit).
 
+**Not emitted today.** No mailing list exists, so no page renders a signup form
+and nothing fires this event. Reserved for the notify-me capture that replaces
+the placeholder bands.
+
 | Property | Type | Notes |
 |---|---|---|
 | `screen` | string | The screen the signup happened on, when known. |
 
-Owning components: `Newsletter.astro`, `Footer.astro` subscribe form.
+Owning components: none yet - `Newsletter.astro` and `Footer.astro` once the capture ships.
 
 ### Theme Toggled
 
@@ -171,7 +175,7 @@ Bucketing uses `attributes.id` = the DevTeam analytics SDK's own distinct id, so
 ### `$exp_<experimentKey>` (sticky property)
 
 Once a variant is assigned, `$exp_<experimentKey>` = `<variantKey>` is stamped onto **every** subsequent event and log at the `send()` / `serverLog()` chokepoint in [`src/lib/analytics.ts`](../src/lib/analytics.ts) - the DevTeam SDK v0.2.0 has no global-properties API.
-That is what lets a conversion (`Affiliate Link Clicked`, `Newsletter Signup`, ...) be attributed to a variant without any call site knowing an experiment exists.
+That is what lets a conversion (`Affiliate Link Clicked`, `Deal Card Clicked`, ...) be attributed to a variant without any call site knowing an experiment exists.
 
 The stamps persist in local storage under `sd-exp`, because this is a multi-page static site: a visitor is bucketed on the page that reads the feature and converts on a later page that never does.
 They are written only after consent and deleted on a decline.
@@ -219,7 +223,7 @@ Each funnel event was traced from its real call site through the dispatcher (`ch
 | `Hero CTA Clicked` | `index.astro` hero buttons | `cta`, `href` (path-reduced) |
 | `Deal Card Clicked` | `DealCard.astro`, `DropPanel.astro` | `slug`, `brand`, `placement` (`drop-panel` on the drop card) |
 | `Affiliate Link Clicked` | `deals/[slug].astro`, `promos/[slug].astro`, `Verdict.astro`, `ProductCallout.astro` | `slug`, `brand`, `retailer`, `placement` |
-| `Newsletter Signup` | `Newsletter.astro`, `Footer.astro` (`data-signup`) | `screen` (when known) |
+| `Newsletter Signup` | _none - no signup form ships while there is no mailing list_ | `screen` (when known) |
 | `Theme Toggled` | `chrome.ts` `[data-theme-toggle]` click handler | `theme` |
 | `Share Clicked` | `chrome.ts` `[data-share]` click handler | `screen` (when known) |
 | `Copy Link Clicked` | `chrome.ts` `[data-copy-link]` click handler | `screen` (when known) |
