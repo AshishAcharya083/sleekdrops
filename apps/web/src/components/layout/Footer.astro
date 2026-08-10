@@ -49,6 +49,12 @@ const year = new Date().getFullYear();
         <a href="/contact">Contact</a>
         <a href="/privacy">Privacy</a>
         <a href="/disclaimer">Disclaimer</a>
+        {/* The dialog this reopens is client-side only, so the control ships
+            hidden and the island script below reveals it - a visitor without
+            JavaScript is shown no control rather than a dead one. It is the
+            footer entry the preferences dialog and the privacy policy both
+            promise. */}
+        <button type="button" aria-haspopup="dialog" data-consent-preferences hidden>Privacy preferences</button>
       </span>
     </div>
   </div>
@@ -103,11 +109,44 @@ const year = new Date().getFullYear();
     gap: 16px;
     flex-wrap: wrap;
   }
-  .footer-links { display: flex; gap: 18px; flex-wrap: wrap; }
+  .footer-links { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
   .footer-links a { color: var(--muted); text-decoration: none; }
   .footer-links a:hover { color: var(--accent); }
+  /* Reads as one of the links beside it - it is the same kind of destination,
+     it just opens a dialog instead of a page. */
+  .footer-links button {
+    font: inherit;
+    line-height: inherit;
+    color: var(--muted);
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+  .footer-links button:hover { color: var(--accent); }
+  .footer-links button[hidden] { display: none; }
 
   @media (max-width: 900px) {
     .footer-grid { grid-template-columns: 1fr; gap: 32px; }
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    .footer-links button { transition: none; }
+  }
 </style>
+
+<script>
+  import { openConsentPreferences } from '@lib/consent-preferences';
+
+  document.querySelectorAll<HTMLButtonElement>('[data-consent-preferences]').forEach((button) => {
+    button.hidden = false;
+    button.addEventListener('click', () => {
+      // Safari does not focus a button on click, and the dialog hands focus back
+      // to whatever was focused when it opened - so say it explicitly rather than
+      // leave the visitor's focus on <body> when they close it again.
+      button.focus();
+      openConsentPreferences(document);
+    });
+  });
+</script>

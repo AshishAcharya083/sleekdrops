@@ -309,6 +309,7 @@ Every row additionally carries the `event_id` and `visit_id` keys and the `theme
 | `TOC Link Clicked` | `chrome.ts` `[data-toc] a` click handler | `section` |
 
 Suppression is enforced in one place (`track()` in `analytics.ts`): events are buffered while consent is unknown, flushed on grant, dropped on deny, and `boot()` denies outright on a GPC/DNT signal - so nothing reaches DevTeam Analytics before consent or after a decline/GPC/DNT.
+Withdrawal is reachable from every page: the **Privacy preferences** control in the footer dispatches the `consent:open-preferences` document event owned by [`src/lib/consent-preferences.ts`](../src/lib/consent-preferences.ts), which reopens the consent island's dialog pre-filled from `consentStatus()` - the decision in force - so a visitor can turn analytics back off long after the banner is gone.
 
 ### Live View walk-through (operational - run on the preview deploy)
 

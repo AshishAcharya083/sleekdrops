@@ -77,7 +77,7 @@ const policyDate = '28 June 2026';
         <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
       </button>
     </div>
-    <p class="sd-prefs__sub">Choose what Sleekdrops may measure. You can change this any time from the footer.</p>
+    <p class="sd-prefs__sub">Choose what Sleekdrops may measure. You can change this any time from <strong>Privacy preferences</strong> in the footer.</p>
 
     <div class="pref-row">
       <div class="pref-row__text">
@@ -385,7 +385,8 @@ const policyDate = '28 June 2026';
 </style>
 
 <script>
-  import { boot, grantConsent, denyConsent } from '@lib/analytics';
+  import { boot, consentStatus, grantConsent, denyConsent } from '@lib/analytics';
+  import { onOpenConsentPreferences } from '@lib/consent-preferences';
 
   type SurfaceName = 'banner' | 'gpc' | 'prefs';
 
@@ -414,6 +415,16 @@ const policyDate = '28 June 2026';
     const dismiss = (): void => {
       root.hidden = true;
       document.removeEventListener('keydown', onPrefsKey);
+      // Every caller of this is a decision, so the prompt it was taken on is
+      // spent: reopening the dialog from the footer later and closing it must put
+      // the consent UI away, not bring back a banner asking for a choice that has
+      // already been made on this very page.
+      previousSurface = null;
+      // Whatever opened the dialog from outside gets focus back - the footer
+      // control, when the visitor reopened their preferences from there and saved
+      // or closed. A control inside this root is hidden now and cannot take it.
+      if (returnFocusTo && !root.contains(returnFocusTo)) returnFocusTo.focus();
+      returnFocusTo = null;
     };
 
     const focusable = (el: HTMLElement): HTMLElement[] =>
@@ -445,6 +456,10 @@ const policyDate = '28 June 2026';
 
     const openPrefs = (): void => {
       returnFocusTo = document.activeElement as HTMLElement | null;
+      // Pre-filled from the decision actually in force, so a visitor reopening
+      // this from the footer sees what they last saved rather than the opt-in
+      // default - and saving without touching the switch changes nothing.
+      if (analyticsSwitch) analyticsSwitch.checked = consentStatus() === 'granted';
       show('prefs');
       document.addEventListener('keydown', onPrefsKey);
       focusable(surfaces.prefs as HTMLElement)[0]?.focus();
@@ -452,6 +467,9 @@ const policyDate = '28 June 2026';
 
     const closePrefs = (): void => {
       document.removeEventListener('keydown', onPrefsKey);
+      // With no surface behind it - the dialog was reopened from the footer, over
+      // a page with a decision already on file - closing puts the consent UI away
+      // entirely; dismiss() hands focus back to whatever opened it.
       if (previousSurface) {
         show(previousSurface);
         returnFocusTo?.focus();
@@ -489,6 +507,13 @@ const policyDate = '28 June 2026';
           break;
       }
     });
+
+    // The way back in. Once a decision is on file boot() returns 'none' on every
+    // later load and this root stays hidden, so without a control that can reopen
+    // it a visitor could never see - let alone change - what they chose. The
+    // footer control dispatches this on the document; openPrefs() un-hides the
+    // root through show().
+    onOpenConsentPreferences(document, openPrefs);
 
     const prompt = boot();
     if (prompt === 'banner' || prompt === 'policy-update') {

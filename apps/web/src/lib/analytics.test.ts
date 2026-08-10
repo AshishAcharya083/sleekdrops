@@ -484,6 +484,56 @@ test('a second decline is a no-op, not a second withdrawal', async () => {
   );
 });
 
+test('the preferences dialog reads back the decision in force, not the opt-in default', async () => {
+  const tab = openTab();
+  loadPage(tab, '/');
+  assert.equal(chrome.consentStatus(), null, 'nothing is in force before the visitor chooses');
+
+  chrome.grantConsent();
+  chrome.trackPageView({ referrer: '' });
+  await tick();
+  assert.equal(banner.consentStatus(), 'granted');
+
+  // The next page load, where the footer control is the only way back in: boot()
+  // applies the stored record silently and the banner stays hidden, so the switch
+  // the dialog reopens with can only be filled from here.
+  loadPage(tab, '/deals');
+  assert.equal(banner.boot(), 'none');
+  assert.equal(banner.consentStatus(), 'granted');
+});
+
+test('withdrawing on a later page load stops analytics and holds on the one after it', async () => {
+  const tab = openTab();
+  loadPage(tab, '/');
+  chrome.grantConsent();
+  chrome.trackPageView({ referrer: '' });
+  await tick();
+
+  loadPage(tab, '/deals');
+  banner.boot();
+  banner.trackPageView({ referrer: '' });
+  await flush();
+
+  // What Save does with the analytics switch turned back off in a dialog reopened
+  // from the footer.
+  banner.denyConsent();
+  await until(() => sdkKeys(tab).length === 0, 'the withdrawal never cleared the SDK storage');
+  assert.equal(chrome.consentStatus(), 'denied');
+
+  loadPage(tab, '/contact');
+  assert.equal(chrome.boot(), 'none');
+  assert.equal(chrome.consentStatus(), 'denied');
+  chrome.trackPageView({ referrer: '' });
+  await tick();
+  assert.equal(documentScope()?.client, null, 'a visitor who withdrew gets no client');
+  assert.deepEqual(
+    propOf(tab, 'path').filter((path) => path === '/contact'),
+    [],
+    'a visitor who withdrew must not be counted on the next page',
+  );
+  assert.deepEqual([...tab.session.keys()], [], 'and no visit id survives the withdrawal');
+});
+
 test('withdrawal leaves no analytics storage behind, not even from its own log line', async () => {
   const tab = openTab();
   loadPage(tab, '/');

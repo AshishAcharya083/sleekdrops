@@ -473,6 +473,16 @@ export function trackPageView(props?: EventProps): void {
   track(EVENTS.pageView, { ...props, path });
 }
 
+/**
+ * The consent decision in force for this document, or null while the visitor has
+ * not made one. Read by the preferences dialog so reopening it shows what is
+ * actually in effect rather than the opt-in default.
+ */
+export function consentStatus(): ConsentStatus | null {
+  const decision = scope().decision;
+  return decision === 'unknown' ? null : decision;
+}
+
 /** Persist an explicit opt-in and start sending. */
 export function grantConsent(): void {
   writeConsent('granted');
