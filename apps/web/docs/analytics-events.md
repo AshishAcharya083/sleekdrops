@@ -19,6 +19,7 @@ Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../sr
   `chrome.ts` reads that payload on load and fires `Page Viewed`.
 - **Funnel clicks** - an element carries `data-track="<Event Name>"` and an optional JSON `data-track-props`.
   `chrome.ts` fires the event synchronously on click, before the browser follows the link.
+  The attribute value is the one event name that reaches `track()` as a runtime string, so the dispatcher checks it against the `EVENTS` values first and drops an unknown name with a single `serverLog('warn', ...)` line instead of sending it.
 - **Newsletter signups** - a newsletter form carries `data-signup`; the mock-form submit handler fires `Newsletter Signup`.
 - **Chrome UI interactions** - the dark-mode toggle, share button, copy-link button, image lightbox, and TOC nav links already have dedicated event listeners in `chrome.ts` for their own behaviour; each fires its analytics event directly from that handler rather than through a `data-track` attribute.
 - **Experiment copy** - an element carries `data-experiment-copy="<feature key>"`; its default copy renders in the static HTML and `chrome.ts` swaps it in place once the flag payload resolves, rewriting the enclosing `data-track` element's `cta` prop so the funnel event reports the label the visitor actually saw.
@@ -26,6 +27,16 @@ Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../sr
   The decision layer is the pure [`src/lib/nav-experiment.ts`](../src/lib/nav-experiment.ts), which also owns the rule that the flag is read **only** while the primary nav is displayed (wider than the `(max-width: 900px)` breakpoint that hides `.site-nav`) - reading a feature is what buckets a visitor, so a narrow-viewport read would count an exposure for a treatment that visitor can never see.
 
 DevTeam Analytics is initialised with `sendBeacon` transport so a click event still reaches the server when the click immediately navigates the page away.
+
+### The taxonomy is enforced, not just documented
+
+"Keep this doc and the code in sync" is a build failure rather than a convention.
+Two mechanisms hold it:
+
+- **Compile time** - `track()` takes the taxonomy union (`EventName` plus the two platform events `$experiment_viewed` and `$client_error`), not `string`, so a call site cannot name an event that has no constant in the `EVENTS` map.
+- **Test time** - [`src/lib/taxonomy.test.ts`](../src/lib/taxonomy.test.ts) runs in the normal `npm test` pass and fails on three kinds of drift: an `EVENTS` constant with no `### <Event Name>` section in this document, an event documented here with no constant (the platform events and the two state properties below are exempted by exact name), and any `data-track` / `data={{ track: ... }}` dispatch site in a `.astro` file that hardcodes the event-name string instead of interpolating an `EVENTS.*` reference.
+
+Together with the dispatcher's runtime check they close every path an unnamed event could take to the analytics platform, so an event arriving in production that is absent from this document means a stale deployed bundle or an out-of-repo script - never a source-side omission.
 
 A/B testing follows the same chokepoint discipline: [`src/lib/experiments.ts`](../src/lib/experiments.ts) is the only module that touches the GrowthBook SDK, it is started only from the consent-grant path, and every feature read falls back to the caller's code-side default.
 The flag payload is treated as data, never as code: it is read over `https` only (a plaintext host on a secure page is refused with one warning), and GrowthBook's auto-experiments — DOM mutations, JS injection and URL redirects — are disabled, so a flag can change only a value the site itself asked for.
@@ -109,6 +120,10 @@ The dark/light mode switch in the site chrome.
 
 Owning component: `chrome.ts` (`[data-theme-toggle]` handler).
 
+This event is the *switch rate* half of theme measurement - who changes mode, and who changes back.
+The *population share* half is the [`theme` state property](#theme-state-property) stamped on every event, which is what answers "how many visitors read the site in dark mode"; read the two together.
+The handler sets the `data-theme` attribute before it tracks, so this event's own `theme` property and the stamp on it always agree.
+
 ### Share Clicked
 
 The share button (Web Share API, with clipboard/prompt fallback).
@@ -180,6 +195,19 @@ Experiment keys are minted in the A/B Testing tab rather than declared in code, 
 Without those three rules the strict allowlist would silently drop every experiment dimension and each experiment would read 0% forever.
 The shape is deliberately narrow, and at most 32 stamps are retained: both halves come from the flag payload rather than from code, so a bare prefix rule would let anything authored in the A/B Testing tab reach the sink under a name no allowlist review ever saw.
 
+### `theme` (state property)
+
+`theme` = `dark` or `light` is stamped onto **every** outgoing event and log at the `send()` / `serverLog()` chokepoint in [`src/lib/analytics.ts`](../src/lib/analytics.ts), alongside the sticky `$exp_*` stamps and for the same reason - the DevTeam SDK v0.2.0 has no global-properties API.
+
+It is state, not a step: `Theme Toggled` fires only for the minority who touch the switch, so it can report a switch rate but structurally cannot report what share of visitors are in dark mode, and no other metric can be broken down by theme.
+The stamp supplies that denominator and lets any funnel step be split by mode.
+
+The value is read at send time from the `data-theme` attribute on `<html>`, which the inline boot script in `SEOHead.astro` restores from `sd-theme` before first paint and `toggleTheme` maintains thereafter; no attribute means the `light` default.
+There is deliberately no new storage key, no `identify()` call and no `system` third value - the attribute is the only theme state the site has, and a static marketing site with no accounts has no user record to persist a preference to.
+
+Being merged in at the chokepoint, it inherits the consent gate, the pre-consent buffer and the `scrub()` pass exactly as event properties do: nothing is stamped before the visitor opts in, and `theme` is allowlisted by name in [`src/lib/pii.ts`](../src/lib/pii.ts).
+A call site that carries its own `theme` property wins over the stamp, which is what keeps `Theme Toggled` reporting the mode it switched **to** even if a buffered event flushes later.
+
 ## Running experiments
 
 Flags are authored in the DevTeam **A/B Testing** tab; the code-side default is what ships whenever no payload applies, so a missing or stopped flag always renders the control experience.
@@ -201,17 +229,19 @@ On the first consented page load the buffered `Page Viewed` flushes before bucke
 
 ## Verification
 
-Last verified: 2026-06-30 (epic close-out).
+Last verified: 2026-08-10 (taxonomy-parity guard).
+A production report of a `Theme Toggled` event missing from the code and this document was investigated and found to be a false alarm: the constant, the `chrome.ts` call site, this document's row and the `theme` PII allowlist entry were all already present and correct on `main`, and the event was passing through the consent-gated, scrubbed `track()` chokepoint as designed.
 
 ### Automated (run in this environment)
 
-- `npm run check` (`astro check`) - 0 errors across 72 files, so the full event-wiring graph type-checks (the `EVENTS` map, every `data-track` call site, and the consent banner that boots the gate).
-- `npm test` - 30/30 pass. This covers the consent decision table end to end: a GPC/DNT signal denies and never sends, an explicit decline denies, a stored grant flushes, and an unknown/stale state keeps buffering (`src/lib/consent.test.ts`); plus the PII allowlist that scrubs every outgoing payload (`src/lib/pii.test.ts`).
+- `npm run check` (`astro check`) - 0 errors, so the full event-wiring graph type-checks (the `EVENTS` map, every `data-track` call site, and the consent banner that boots the gate). `track()` now takes the taxonomy union rather than `string`, so this run is also what proves no code call site names an undeclared event.
+- `npm test` - 68/68 pass. This covers the consent decision table end to end: a GPC/DNT signal denies and never sends, an explicit decline denies, a stored grant flushes, and an unknown/stale state keeps buffering (`src/lib/consent.test.ts`); the PII allowlist that scrubs every outgoing payload (`src/lib/pii.test.ts`); and the taxonomy parity guard over the `EVENTS` map, this document and the `.astro` dispatch sites (`src/lib/taxonomy.test.ts`).
 - `npx astro dev` + `GET /privacy` - the updated privacy page renders and serves the new DevTeam Analytics / Google Analytics disclosures.
 
 ### Event-flow trace (code path confirmed for each taxonomy event)
 
-Each funnel event was traced from its real call site through the dispatcher (`chrome.ts`), the consent-gated `track()` buffer, the `scrub()` chokepoint, and out via DevTeam Analytics' `sendBeacon` transport:
+Each funnel event was traced from its real call site through the dispatcher (`chrome.ts`), the consent-gated `track()` buffer, the `scrub()` chokepoint, and out via DevTeam Analytics' `sendBeacon` transport.
+Every row additionally carries the `theme` state stamp and any sticky `$exp_*` stamps, which are merged in at the chokepoint rather than at the call site:
 
 | Event | Real call site | Properties sent (post-scrub) |
 |---|---|---|
@@ -235,5 +265,7 @@ This step needs a deployed/preview build with `PUBLIC_DEVTEAM_ANALYTICS_INGEST_K
 1. Before accepting consent, browse a few pages - confirm **no** events appear (buffered, not sent).
 2. Accept analytics, then walk the funnel: home (hero CTA), deal card click, deal-detail view, affiliate "View deal" click, newsletter signup - confirm each event above lands with the listed properties and **no** PII (no emails, names, or query strings).
 3. Reset consent, decline (or enable GPC/DNT), repeat the walk - confirm **no** events appear.
+4. Hit the theme toggle once - confirm exactly **one** `Theme Toggled` lands, spelled exactly that, with `theme` = the mode switched to.
+5. On a fresh visit that never touches the toggle, confirm `Page Viewed` still carries the `theme` state stamp (`light` by default, `dark` for a visitor with the stored preference).
 
 Record the operator, date, and Live View screenshots here once complete.

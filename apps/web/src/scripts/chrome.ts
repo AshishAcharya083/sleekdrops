@@ -22,7 +22,14 @@
  * choice; track() here simply buffers until that choice is made.
  */
 
-import { track, EVENTS, initErrorCapture, type EventProps } from '@lib/analytics';
+import {
+  track,
+  EVENTS,
+  initErrorCapture,
+  isEventName,
+  serverLog,
+  type EventProps,
+} from '@lib/analytics';
 import { getFeatureValue, subscribe as onExperimentsChanged } from '@lib/experiments';
 import {
   applyNavExperimentItems,
@@ -79,11 +86,22 @@ if (!window.__sdChromeInit) {
   });
 
   /* Funnel-step clicks: hero CTAs, deal cards, affiliate "View deal" buttons.
-     The event fires synchronously here, before the browser follows the link. */
+     The event fires synchronously here, before the browser follows the link.
+
+     This is the only path by which an event name reaches track() as a runtime
+     string rather than as an EVENTS constant the compiler checked, so the name
+     is validated against the taxonomy here: an unknown one is dropped and
+     reported rather than sent, which keeps docs/analytics-events.md canonical
+     for everything the platform actually receives. */
   document.querySelectorAll<HTMLElement>('[data-track]').forEach((el) => {
     el.addEventListener('click', () => {
       const event = el.dataset.track;
-      if (event) track(event, parseProps(el.dataset.trackProps));
+      if (!event) return;
+      if (!isEventName(event)) {
+        serverLog('warn', `data-track name is not in the event taxonomy, dropped: ${event}`);
+        return;
+      }
+      track(event, parseProps(el.dataset.trackProps));
     });
   });
 
