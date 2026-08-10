@@ -72,6 +72,11 @@ export const EVENTS = {
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
 
+/** True when `value` is one of the taxonomy names in the EVENTS map. */
+export function isEventName(value: string): value is EventName {
+  return (Object.values(EVENTS) as string[]).includes(value);
+}
+
 /**
  * Platform event marking that a visitor was bucketed into an experiment. It is
  * how the A/B Testing tab measures a result, so its name and its
@@ -79,6 +84,19 @@ export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
  * rather than part of the product taxonomy above.
  */
 export const EXPERIMENT_VIEWED_EVENT = '$experiment_viewed';
+
+/**
+ * Every name track() will accept: the product taxonomy plus the two platform
+ * events, which are named contracts with the analytics platform rather than
+ * taxonomy entries. Narrowing the parameter to this union is what makes an
+ * undeclared event name a compile error instead of a silent funnel split; the
+ * one name that arrives as a runtime string (a `data-track` attribute) is
+ * checked against the EVENTS values by the dispatcher in chrome.ts.
+ */
+export type TrackableEvent =
+  | EventName
+  | typeof EXPERIMENT_VIEWED_EVENT
+  | typeof CLIENT_ERROR_EVENT;
 
 // DevTeam Analytics ingest key (dtp_...) and host. Host defaults to the local
 // analytics platform; set PUBLIC_DEVTEAM_ANALYTICS_HOST to https://ingest.getdevteam.ai in prod.
@@ -89,7 +107,7 @@ const devteamHost = import.meta.env.PUBLIC_DEVTEAM_ANALYTICS_HOST ?? 'http://loc
 type Decision = ConsentStatus | 'unknown';
 
 interface QueuedEvent {
-  event: string;
+  event: TrackableEvent;
   props?: EventProps;
 }
 
@@ -170,10 +188,32 @@ function ensureDevteam(): void {
   serverLog('info', 'DevTeam analytics initialized -> ' + devteamHost);
 }
 
+/**
+ * The visitor's current theme as a state property, stamped onto every outgoing
+ * event and log. It is read from the `data-theme` attribute that the boot script
+ * in SEOHead and toggleTheme in chrome.ts already maintain, so there is no
+ * second source of truth and no new storage key; no attribute means the light
+ * default.
+ *
+ * Stamping it here is what makes theme a population share rather than only a
+ * switch rate: the 'Theme Toggled' event alone can never say what proportion of
+ * visitors read the site in dark mode, because the majority - everyone sitting
+ * on their stored or default preference - never touch the toggle.
+ */
+function themeStamp(): EventProps {
+  if (typeof document === 'undefined') return {};
+  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  return { theme };
+}
+
 function send(item: QueuedEvent): void {
   if (!devteam) return;
-  // Experiment stamps go in last so a call site can never shadow them.
-  const props = scrub({ ...item.props, ...stickyProps() }, item.event);
+  // The theme stamp goes in first, so the one call site that carries a more
+  // precise per-event value ('Theme Toggled', which records the mode switched
+  // to) keeps it; the two agree by construction anyway, since toggleTheme sets
+  // the attribute before it tracks. Experiment stamps go in last so a call site
+  // can never shadow them.
+  const props = scrub({ ...themeStamp(), ...item.props, ...stickyProps() }, item.event);
   devteam.track(item.event, props);
   console.info('[analytics] event sent:', item.event, props);
 }
@@ -187,12 +227,13 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  * after the visitor opts in, so nothing reaches the server before consent. Exported
  * so any script can emit a server-visible log.
  *
- * Carries the sticky experiment stamps, so a log line written after a variant is
- * assigned is attributable to it just like an event is.
+ * Carries the sticky experiment stamps and the theme state stamp, so a log line
+ * written after a variant is assigned is attributable to it just like an event
+ * is, and every line can be broken down by theme.
  */
 export function serverLog(level: LogLevel, message: string, attributes?: EventProps): void {
   (level === 'debug' ? console.debug : console[level])('[analytics] ' + message, attributes ?? '');
-  const attrs = { ...attributes, ...stickyProps() };
+  const attrs = { ...themeStamp(), ...attributes, ...stickyProps() };
   devteam?.log[level](message, Object.keys(attrs).length > 0 ? attrs : undefined);
 }
 
@@ -252,8 +293,11 @@ function applyDeny(): void {
  * Record an event. While consent is unknown the event is buffered in memory;
  * once granted it (and anything buffered) sends live; once denied it is
  * dropped. Callers never need to guard their tracking calls.
+ *
+ * `event` is the taxonomy union rather than a string: an event name that has no
+ * constant in the EVENTS map cannot reach the analytics platform.
  */
-export function track(event: string, props?: EventProps): void {
+export function track(event: TrackableEvent, props?: EventProps): void {
   if (decision === 'denied') return;
   if (decision === 'granted') {
     send({ event, props });
