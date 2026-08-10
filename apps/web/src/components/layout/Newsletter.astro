@@ -5,6 +5,13 @@ import Eyebrow from '@components/ui/Eyebrow.astro';
  * Newsletter sign-up band. Shown near the page foot on the home, blog
  * listing, and about pages. Tone (per the design system) is calm and
  * declarative — no urgency hype.
+ *
+ * There is no mailing list behind this yet: no ESP, no subscribers table, no
+ * endpoint. The band therefore carries no email field and no submit control -
+ * an input that accepts an address and answers "✓ Subscribed" tells the visitor
+ * something untrue, and leaving the input while captioning it "coming soon"
+ * only means people type into it anyway. The layout is otherwise untouched so
+ * the real capture drops straight back into it.
  */
 export interface Props {
   eyebrow?: string;
@@ -22,11 +29,10 @@ const {
     <Eyebrow accent>{eyebrow}</Eyebrow>
     <h2 set:html={headline} />
     <p>{desc}</p>
-    <form class="newsletter-form" data-mock-form data-mock-label="✓ Subscribed" data-signup>
-      <input type="email" placeholder="you@inbox.com" required aria-label="Email address" />
-      <button type="submit">Subscribe</button>
-    </form>
-    <div class="newsletter-meta">Free · Unsubscribe in one click · ~38,000 readers</div>
+    <div class="newsletter-pending">
+      <button type="button" disabled>Coming soon</button>
+    </div>
+    <div class="newsletter-meta">Drop alerts are coming soon. There is no list to join yet.</div>
   </div>
 </section>
 
@@ -55,26 +61,11 @@ const {
     max-width: 50ch;
     margin: 0 auto 32px;
   }
-  .newsletter-form {
-    max-width: 480px;
-    margin: 0 auto;
+  .newsletter-pending {
     display: flex;
-    background: var(--surface);
-    border: 1px solid var(--hairline-strong);
-    border-radius: 999px;
-    overflow: hidden;
-    padding: 5px 5px 5px 22px;
+    justify-content: center;
   }
-  .newsletter-form input {
-    flex: 1;
-    border: 0;
-    outline: none;
-    background: transparent;
-    font-family: var(--font-body);
-    font-size: 15px;
-    color: var(--ink);
-  }
-  .newsletter-form button {
+  .newsletter-pending button {
     background: var(--ink);
     color: var(--paper);
     border: 0;
@@ -83,7 +74,8 @@ const {
     font-family: var(--font-body);
     font-size: 14px;
     font-weight: 600;
-    cursor: pointer;
+    opacity: 0.45;
+    cursor: not-allowed;
   }
   .newsletter-meta {
     font-size: 12px;

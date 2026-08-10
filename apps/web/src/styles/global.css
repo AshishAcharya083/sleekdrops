@@ -139,3 +139,22 @@ main {
   pointer-events: none;
 }
 .icon-btn { position: relative; }
+
+/* ============ ANCHOR TARGET FLASH (in-page CTA acknowledgement) ============
+   Added by chrome.ts when an in-page link is followed, and removed again on a
+   timer. It is what makes an anchor CTA visible when the target was already on
+   screen and the scroll therefore moved nothing. */
+.is-anchor-target {
+  animation: sd-anchor-flash var(--dur-slow) var(--ease-out);
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+@keyframes sd-anchor-flash {
+  from { outline-color: transparent; }
+  to { outline-color: var(--accent); }
+}
+/* The acknowledgement still has to be visible without motion - only the fade in
+   is dropped, never the highlight itself. */
+@media (prefers-reduced-motion: reduce) {
+  .is-anchor-target { animation: none; }
+}

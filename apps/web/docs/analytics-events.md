@@ -20,7 +20,7 @@ Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../sr
 - **Funnel clicks** - an element carries `data-track="<Event Name>"` and an optional JSON `data-track-props`.
   `chrome.ts` fires the event synchronously on click, before the browser follows the link.
   The attribute value is the one event name that reaches `track()` as a runtime string, so the dispatcher checks it against the `EVENTS` values first and drops an unknown name with a single `serverLog('warn', ...)` line instead of sending it.
-- **Newsletter signups** - a newsletter form carries `data-signup`; the mock-form submit handler fires `Newsletter Signup`.
+- **Newsletter signups** - not currently emitted. There is no mailing list behind the site yet, so the newsletter band and the footer subscribe block carry no form at all; firing a conversion for a submission that stores nothing would report a signup that never happened. The event stays in the taxonomy for the capture that replaces them.
 - **Chrome UI interactions** - the dark-mode toggle, share button, copy-link button, image lightbox, and TOC nav links already have dedicated event listeners in `chrome.ts` for their own behaviour; each fires its analytics event directly from that handler rather than through a `data-track` attribute.
 - **Experiment copy** - an element carries `data-experiment-copy="<feature key>"`; its default copy renders in the static HTML and `chrome.ts` swaps it in place once the flag payload resolves, rewriting the enclosing `data-track` element's `cta` prop so the funnel event reports the label the visitor actually saw.
 - **Experiment nav items** - a primary-nav anchor carries `data-experiment-nav-item="<feature key>"`; the item renders in the static HTML for every visitor and `chrome.ts` removes it from the DOM once a boolean flag resolves true, restoring it in its original slot if the value flips back.
@@ -104,11 +104,15 @@ Owning components: `deals/[slug].astro`, `promos/[slug].astro`, `Verdict.astro`,
 
 Secondary conversion: a newsletter sign-up attempt (form submit).
 
+**Not emitted today.** No mailing list exists, so no page renders a signup form
+and nothing fires this event. Reserved for the notify-me capture that replaces
+the placeholder bands.
+
 | Property | Type | Notes |
 |---|---|---|
 | `screen` | string | The screen the signup happened on, when known. |
 
-Owning components: `Newsletter.astro`, `Footer.astro` subscribe form.
+Owning components: none yet - `Newsletter.astro` and `Footer.astro` once the capture ships.
 
 ### Theme Toggled
 
@@ -186,7 +190,7 @@ Bucketing uses `attributes.id` = the DevTeam analytics SDK's own distinct id, so
 ### `$exp_<experimentKey>` (sticky property)
 
 Once a variant is assigned, `$exp_<experimentKey>` = `<variantKey>` is stamped onto **every** subsequent event and log at the `send()` / `serverLog()` chokepoint in [`src/lib/analytics.ts`](../src/lib/analytics.ts) - the DevTeam SDK v0.2.0 has no global-properties API.
-That is what lets a conversion (`Affiliate Link Clicked`, `Newsletter Signup`, ...) be attributed to a variant without any call site knowing an experiment exists.
+That is what lets a conversion (`Affiliate Link Clicked`, `Deal Card Clicked`, ...) be attributed to a variant without any call site knowing an experiment exists.
 
 The stamps persist in local storage under `sd-exp`, because this is a multi-page static site: a visitor is bucketed on the page that reads the feature and converts on a later page that never does.
 They are written only after consent and deleted on a decline.
@@ -235,7 +239,7 @@ A production report of a `Theme Toggled` event missing from the code and this do
 ### Automated (run in this environment)
 
 - `npm run check` (`astro check`) - 0 errors, so the full event-wiring graph type-checks (the `EVENTS` map, every `data-track` call site, and the consent banner that boots the gate). `track()` now takes the taxonomy union rather than `string`, so this run is also what proves no code call site names an undeclared event.
-- `npm test` - 68/68 pass. This covers the consent decision table end to end: a GPC/DNT signal denies and never sends, an explicit decline denies, a stored grant flushes, and an unknown/stale state keeps buffering (`src/lib/consent.test.ts`); the PII allowlist that scrubs every outgoing payload (`src/lib/pii.test.ts`); and the taxonomy parity guard over the `EVENTS` map, this document and the `.astro` dispatch sites (`src/lib/taxonomy.test.ts`).
+- `npm test` - 88/88 pass. This covers the consent decision table end to end: a GPC/DNT signal denies and never sends, an explicit decline denies, a stored grant flushes, and an unknown/stale state keeps buffering (`src/lib/consent.test.ts`); the PII allowlist that scrubs every outgoing payload (`src/lib/pii.test.ts`); and the taxonomy parity guard over the `EVENTS` map, this document and the `.astro` dispatch sites (`src/lib/taxonomy.test.ts`).
 - `npx astro dev` + `GET /privacy` - the updated privacy page renders and serves the new DevTeam Analytics / Google Analytics disclosures.
 
 ### Event-flow trace (code path confirmed for each taxonomy event)
@@ -249,7 +253,7 @@ Every row additionally carries the `theme` state stamp and any sticky `$exp_*` s
 | `Hero CTA Clicked` | `index.astro` hero buttons | `cta`, `href` (path-reduced) |
 | `Deal Card Clicked` | `DealCard.astro`, `DropPanel.astro` | `slug`, `brand`, `placement` (`drop-panel` on the drop card) |
 | `Affiliate Link Clicked` | `deals/[slug].astro`, `promos/[slug].astro`, `Verdict.astro`, `ProductCallout.astro` | `slug`, `brand`, `retailer`, `placement` |
-| `Newsletter Signup` | `Newsletter.astro`, `Footer.astro` (`data-signup`) | `screen` (when known) |
+| `Newsletter Signup` | _none - no signup form ships while there is no mailing list_ | `screen` (when known) |
 | `Theme Toggled` | `chrome.ts` `[data-theme-toggle]` click handler | `theme` |
 | `Share Clicked` | `chrome.ts` `[data-share]` click handler | `screen` (when known) |
 | `Copy Link Clicked` | `chrome.ts` `[data-copy-link]` click handler | `screen` (when known) |
@@ -263,7 +267,7 @@ Suppression is enforced in one place (`track()` in `analytics.ts`): events are b
 This step needs a deployed/preview build with `PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY` set and access to the DevTeam Analytics platform's real-time event view; it cannot be exercised in the build sandbox (no deployed build, browser, or DevTeam Analytics access here). To close it out, deploy the preview, open the DevTeam Analytics platform, and:
 
 1. Before accepting consent, browse a few pages - confirm **no** events appear (buffered, not sent).
-2. Accept analytics, then walk the funnel: home (hero CTA), deal card click, deal-detail view, affiliate "View deal" click, newsletter signup - confirm each event above lands with the listed properties and **no** PII (no emails, names, or query strings).
+2. Accept analytics, then walk the funnel: home (hero CTA), deal card click, deal-detail view, affiliate "View deal" click - confirm each event above lands with the listed properties and **no** PII (no emails, names, or query strings). There is no newsletter signup step while no form ships.
 3. Reset consent, decline (or enable GPC/DNT), repeat the walk - confirm **no** events appear.
 4. Hit the theme toggle once - confirm exactly **one** `Theme Toggled` lands, spelled exactly that, with `theme` = the mode switched to.
 5. On a fresh visit that never touches the toggle, confirm `Page Viewed` still carries the `theme` state stamp (`light` by default, `dark` for a visitor with the stored preference).

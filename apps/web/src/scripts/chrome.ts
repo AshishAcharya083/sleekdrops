@@ -1,14 +1,15 @@
 /**
  * Chrome behaviour — runs once per page load.
  *
- * Handles six things, all set up declaratively from the DOM so we never
+ * Handles seven things, all set up declaratively from the DOM so we never
  * need to import this from a component:
  *
  *  1. Dark-mode toggle (persisted to localStorage `sd-theme`).
  *  2. Reading-progress bar (only updates when the `.progress-bar` is on
  *     the page — i.e. inside a BaseLayout with `progress`).
  *  3. TOC active-link highlighting on scroll (uses any `[data-toc]` nav).
- *  4. Smooth-scroll for in-page anchor links.
+ *  4. Smooth-scroll for in-page anchor links, plus a highlight flash so the
+ *     click is acknowledged even when the target is already on screen.
  *  5. Product-analytics dispatch (page view + funnel clicks) from `data-*`
  *     hooks, via the analytics wrapper (see docs/analytics-events.md).
  *  6. A/B experiment copy: swapping `[data-experiment-copy]` labels in place
@@ -30,6 +31,7 @@ import {
   serverLog,
   type EventProps,
 } from '@lib/analytics';
+import { resolveAnchorScrollTop } from '@lib/anchor-scroll';
 import { getFeatureValue, subscribe as onExperimentsChanged } from '@lib/experiments';
 import {
   applyNavExperimentItems,
@@ -222,40 +224,101 @@ if (!window.__sdChromeInit) {
     onScroll();
   }
 
-  document
-    .querySelectorAll<HTMLFormElement>('[data-mock-form]')
-    .forEach((form) => {
-      form.addEventListener('submit', (e) => {
-        e.preventDefault();
-        if (form.dataset.signup !== undefined) {
-          track(EVENTS.newsletterSignup, screenName ? { screen: screenName } : undefined);
-        }
-        const label = form.dataset.mockLabel ?? '✓ Done';
-        const button = form.querySelector('button');
-        if (button) button.textContent = label;
-      });
+  /* ---- Self-clearing class flash ----------------------------------------
+   * The acknowledgement mechanism for controls that act without navigating.
+   * Re-firing restarts the window rather than letting the first timer strip the
+   * class out from under the second flash - which is exactly what a visitor
+   * clicking the same control three times in a row produces. */
+  const pendingFlashes = new WeakMap<Element, number>();
+  const flashClass = (el: Element, className: string, ms: number, onEnd?: () => void): void => {
+    const pending = pendingFlashes.get(el);
+    if (pending !== undefined) window.clearTimeout(pending);
+    el.classList.add(className);
+    pendingFlashes.set(
+      el,
+      window.setTimeout(() => {
+        pendingFlashes.delete(el);
+        el.classList.remove(className);
+        onEnd?.();
+      }, ms),
+    );
+  };
+
+  /* ---- In-page anchor links ---------------------------------------------
+   * Three outcomes, and every one of them is visible to the visitor:
+   *
+   *  - No such target on this page: do nothing at all, explicitly. Skipping
+   *    preventDefault leaves the browser's own behaviour for the link intact
+   *    rather than swallowing the click into a silent no-op. Anchor CTAs are
+   *    kept from reaching this branch at all - the hero renders `#today` only
+   *    when DropPanel emits it, and scripts/check-anchors.mjs fails the build on
+   *    any in-page href with no matching id - so this is the belt to that brace.
+   *  - Target somewhere else on the page: smooth-scroll to it, then flash it.
+   *    "Somewhere else" is a scroll distance, not a visibility test - a heading
+   *    in the lower half of the screen is already in view and still a useful
+   *    scroll away, and article TOC links live on exactly that case.
+   *  - Target already where the scroll would land it (the desktop hero, where
+   *    the drop panel sits beside the CTA, and the last section of a page the
+   *    document cannot scroll any further): flash it in place. */
+  const ANCHOR_FLASH_CLASS = 'is-anchor-target';
+  const ANCHOR_FLASH_MS = 1200;
+  /* Frames of an unchanged scroll position that count as "landed", and the cap
+     that ends the wait if the visitor keeps scrolling by hand. */
+  const SETTLED_FRAMES = 3;
+  const MAX_SETTLE_FRAMES = 120;
+
+  const anchorScrollTop = (el: HTMLElement): number | null =>
+    resolveAnchorScrollTop({
+      targetTop: el.offsetTop,
+      scrollY: window.scrollY,
+      maxScrollY:
+        document.documentElement.scrollHeight -
+        (window.innerHeight || document.documentElement.clientHeight),
     });
+
+  /* Run once the smooth scroll has actually landed. A long jump takes longer
+     than the flash lasts, so flashing on click would leave the visitor arriving
+     at the target with nothing to see. Polling the scroll position beats
+     `scrollend`, which Safari still doesn't have, and settles immediately when
+     the scroll turns out to move nothing. */
+  const whenScrollSettles = (run: () => void): void => {
+    let previous = window.scrollY;
+    let unchanged = 0;
+    let frames = 0;
+    const tick = (): void => {
+      unchanged = window.scrollY === previous ? unchanged + 1 : 0;
+      previous = window.scrollY;
+      if (unchanged >= SETTLED_FRAMES || ++frames >= MAX_SETTLE_FRAMES) run();
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  };
 
   document.querySelectorAll<HTMLAnchorElement>('a[href^="#"]').forEach((a) => {
     a.addEventListener('click', (e) => {
       const id = a.getAttribute('href')?.slice(1) ?? '';
-      const el = document.getElementById(id);
-      if (el) {
-        e.preventDefault();
-        window.scrollTo({ top: el.offsetTop - 90, behavior: 'smooth' });
+      const el = id ? document.getElementById(id) : null;
+      if (!el) return;
+      e.preventDefault();
+      const top = anchorScrollTop(el);
+      if (top === null) {
+        flashClass(el, ANCHOR_FLASH_CLASS, ANCHOR_FLASH_MS);
+        return;
       }
+      window.scrollTo({ top, behavior: 'smooth' });
+      whenScrollSettles(() => flashClass(el, ANCHOR_FLASH_CLASS, ANCHOR_FLASH_MS));
     });
   });
 
   /* ---- Share button (Web Share API w/ clipboard fallback) ---- */
   const flashLabel = (el: HTMLElement, label: string, ms = 1500): void => {
-    const prev = el.getAttribute('title') ?? '';
+    const prev = el.dataset.flashTitle ?? el.getAttribute('title') ?? '';
+    el.dataset.flashTitle = prev;
     el.setAttribute('title', label);
-    el.classList.add('is-flashed');
-    window.setTimeout(() => {
+    flashClass(el, 'is-flashed', ms, () => {
       el.setAttribute('title', prev);
-      el.classList.remove('is-flashed');
-    }, ms);
+      delete el.dataset.flashTitle;
+    });
   };
 
   document.querySelectorAll<HTMLElement>('[data-share]').forEach((btn) => {
