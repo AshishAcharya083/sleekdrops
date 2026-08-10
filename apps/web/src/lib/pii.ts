@@ -48,6 +48,13 @@ const ALLOWED_PROPS = new Set<string>([
   'count',
   'experiment_key',
   'variant_key',
+  // Idempotency and grouping keys minted in ./visit: a random per-event id the
+  // platform can collapse duplicates on, and the random id of the visit that
+  // produced the event. Neither is derived from the visitor or the device, and
+  // both are useless without the other events they sit beside - but they are
+  // structural dimensions the platform reads, so they have to survive the scrub.
+  'event_id',
+  'visit_id',
 ]);
 
 /**
@@ -122,8 +129,14 @@ export function stripUrlQueries(value: string): string {
 /**
  * Reduce a URL or path string to its pathname, dropping the query string and
  * fragment (and host, for absolute URLs). The base lets relative paths parse.
+ *
+ * An empty value stays empty. Resolving it against the base would report `/`,
+ * which on `referrer` - empty for every direct visit - is not a reduction but a
+ * fabrication: it makes a visitor who typed the URL indistinguishable from one who
+ * arrived from the homepage.
  */
 export function urlToPath(value: string): string {
+  if (value === '') return '';
   try {
     return new URL(value, 'http://sd.invalid').pathname;
   } catch {

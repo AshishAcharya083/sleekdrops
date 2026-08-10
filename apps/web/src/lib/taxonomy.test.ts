@@ -43,6 +43,8 @@ const SECTIONS_WITHOUT_A_CONSTANT = new Set([
   '$client_error',
   '$exp_<experimentKey> (sticky property)',
   'theme (state property)',
+  'event_id (state property)',
+  'visit_id (state property)',
 ]);
 
 /** Every event name in the `EVENTS` map, read out of the module source. */

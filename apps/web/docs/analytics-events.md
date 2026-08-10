@@ -16,7 +16,7 @@ All tracking goes through the single wrapper in [`src/lib/analytics.ts`](../src/
 Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../src/scripts/chrome.ts), matching the rest of that file's declarative style:
 
 - **Page views** - a page sets `screen` (and optional `pageProps`) on `BaseLayout`, which serialises them onto `<body data-page-view="...">`.
-  `chrome.ts` reads that payload on load and fires `Page Viewed`.
+  `chrome.ts` reads that payload on load and fires `Page Viewed` through `trackPageView()`, which stamps the normalized path and holds the one-per-document guard.
 - **Funnel clicks** - an element carries `data-track="<Event Name>"` and an optional JSON `data-track-props`.
   `chrome.ts` fires the event synchronously on click, before the browser follows the link.
   The attribute value is the one event name that reaches `track()` as a runtime string, so the dispatcher checks it against the `EVENTS` values first and drops an unknown name with a single `serverLog('warn', ...)` line instead of sending it.
@@ -51,11 +51,17 @@ Consent and PII enforcement are handled separately by the consent/PII gate.
 
 ### Page Viewed
 
-Fired once per page load on the key screens.
+Fired **exactly once per document per path**, on the key screens.
 The deal-detail page view doubles as the "deal detail viewed" funnel step (it carries the deal `slug` and `brand`).
+
+"Exactly once" is a guarantee, not a convention: `chrome.ts` dispatches through `trackPageView()` in [`src/lib/analytics.ts`](../src/lib/analytics.ts), which claims a document-scoped key of `Page Viewed` plus the normalized path and drops any repeat.
+So a second script entry point reaching the dispatch, a bfcache restore or a re-run of the dispatch path cannot report a second view, while a same-document navigation to a different path still can.
+`path` is stamped by the dispatcher itself, normalized (`trailingSlash: 'never'`, so `/deals/foo/` and `/deals/foo` are one page) and applied last, so no call site can override it with the raw location and a redirected entry URL cannot split the count across two spellings.
 
 | Property | Type | Notes |
 |---|---|---|
+| `path` | string | The normalized path, stamped by the dispatcher. |
+| `referrer` | string | Reduced to path by `scrub()`, and empty on a direct visit. |
 | `screen` | string | One of `home`, `blog-listing`, `blog-post`, `deals-listing`, `deal-detail`. |
 | `category` | string | Category slug. Present on `blog-post` and `deal-detail`. |
 | `slug` | string | Post or deal slug. Present on `blog-post` and `deal-detail`. |
@@ -212,6 +218,38 @@ There is deliberately no new storage key, no `identify()` call and no `system` t
 Being merged in at the chokepoint, it inherits the consent gate, the pre-consent buffer and the `scrub()` pass exactly as event properties do: nothing is stamped before the visitor opts in, and `theme` is allowlisted by name in [`src/lib/pii.ts`](../src/lib/pii.ts).
 A call site that carries its own `theme` property wins over the stamp, which is what keeps `Theme Toggled` reporting the mode it switched **to** even if a buffered event flushes later.
 
+### `event_id` (state property)
+
+A UUID v4 on **every** outgoing event: the per-event idempotency key the analytics platform can collapse duplicates on.
+
+It is minted in `track()` at the moment the call is made — not at send time — so an event held in the pre-consent buffer keeps the id it was created with.
+That is what makes it useful: if the same payload reaches the platform twice, both copies carry one id.
+Two paths in the SDK can do that, and neither is visible from this repo's source: it persists its unflushed queue to `localStorage` and restores it into the next page load's client, and a batch whose response is lost (a `keepalive` flush on pagehide) is requeued and re-sent verbatim.
+
+Dedup on `(site, event_id)` with a 24-hour look-back is the platform's half of the contract and is **not** implemented in this repository (the ingest server is the external DevTeam Analytics platform).
+The client's half is done: every event carries the key.
+The value is 36 bytes of `[A-Za-z0-9-]`, which satisfies the strictest per-event id limit among comparable products (Mixpanel's `$insert_id`).
+
+`crypto.randomUUID` is used where available and falls back to `crypto.getRandomValues`, then to `Math.random`, because `randomUUID` is exposed only in a secure context.
+The id is random per call and is never derived from the visitor, the device or any stored identifier.
+
+### `visit_id` (state property)
+
+A random id for the visit, on **every** outgoing event, so page views from one visit are counted as one session.
+
+It exists because of a hard limit in `@getdevteam/analytics-web` 0.2.0: the SDK's own session id lives in a closure, is not persisted, and `ClientConfig` exposes no way to set or restore it.
+Every document load therefore opens a fresh SDK session and emits its own `$session_start`, and a visit that spans two loads — a reload, a re-navigation, a redirect chain — reports two of them with nothing in the payload tying them together.
+`visit_id` is that tie, and it is why it is **not** called `session_id`: the wire event already carries the SDK's own field under that name, and two disagreeing `session_id`s on one event would be worse than none.
+
+`$session_start` is minted inside the SDK and carries no properties at all, so it has no `visit_id` of its own; it joins to a visit through the `session_id` it shares with the events that do.
+
+Stored under `sd_sid` in **sessionStorage** with a rolling 30-minute inactivity stamp (matching the SDK's own session window), written only once the analytics category is granted, and deleted the moment the visitor declines or withdraws - along with the SDK's device id and its persisted queue.
+Withdrawal detaches the client and shuts it down *before* it clears anything, because the SDK re-persists its queue on every enqueue: leave a client attached and the deny path's own log line writes back the device id and the granted-period events one statement after they were removed.
+What the client had already queued under consent is delivered by its final flush rather than left on disk for a later load to restore.
+sessionStorage rather than localStorage because a visit is one tab: the browser clearing the item when the tab closes is a shorter retention than any expiry stamp we could implement.
+A stored value is shape-checked on the way out of storage, so nothing else on the origin can smuggle a value of its choosing onto the payload.
+See the storage inventory in [`src/pages/privacy.astro`](../src/pages/privacy.astro); this addition does **not** bump `POLICY_VERSION` (see the constant for the bump rules).
+
 ## Running experiments
 
 Flags are authored in the DevTeam **A/B Testing** tab; the code-side default is what ships whenever no payload applies, so a missing or stopped flag always renders the control experience.
@@ -233,23 +271,33 @@ On the first consented page load the buffered `Page Viewed` flushes before bucke
 
 ## Verification
 
-Last verified: 2026-08-10 (taxonomy-parity guard).
+Last verified: 2026-08-10 (duplicate top-of-funnel events; taxonomy-parity guard).
+
+A production journey recording four events in a zero-second span - `$session_start` -> `Page Viewed` -> `$session_start` -> `Page Viewed` (signature `1707c53280a2635389cbc470003e7016`, 2026-08-08 08:09:18Z) - was reproduced and traced to **two document loads in one visit**, not to a double dispatch and not to two analytics module instances:
+
+- **Two module instances: ruled out.** The production bundle (`astro build` with the ingest key set) emits a single hoisted script for both client entry points - `BaseLayout`'s `import '../scripts/chrome'` and the `ConsentBanner` island - with one copy of `src/lib/analytics.ts` and one copy of the SDK, and one `<script type="module">` tag per page. Two instances also could not produce the observed shape: only the banner calls `boot()`, so the second instance's `Page Viewed` would be stranded in an unflushed buffer rather than duplicated.
+- **Two loads: confirmed.** The SDK flushes at 20 events or every 5 seconds, and persists its unflushed queue to `localStorage`, restoring it into the **next** page load's client with `unshift`. So a second load inside the flush window delivers load 1's events in front of its own, in one batch: `$session_start`, `Page Viewed`, `$session_start`, `Page Viewed`, sub-second apart. Each load opens its own session because the SDK's session id lives in a closure and 0.2.0 exposes no way to persist or restore it. `REPRODUCTION` in [`src/lib/analytics.test.ts`](../src/lib/analytics.test.ts) reproduces this against the real SDK and is kept as the regression's premise.
+- **A transport double-flush of one batch is not needed to explain it**, but the same persisted queue makes it possible: `takeBatch` removes items before sending, and a batch whose response is lost is requeued verbatim and re-sent on a later load. `event_id` is what collapses that case.
+
+The fix is at the client boundary this repo owns - a document-scoped single client, a page-view dispatch that claims one key per document, `visit_id` for session continuity across loads, and `event_id` on every payload. Server-side dedup on `(site, event_id)` belongs to the DevTeam Analytics platform and is not implemented here.
+
 A production report of a `Theme Toggled` event missing from the code and this document was investigated and found to be a false alarm: the constant, the `chrome.ts` call site, this document's row and the `theme` PII allowlist entry were all already present and correct on `main`, and the event was passing through the consent-gated, scrubbed `track()` chokepoint as designed.
 
 ### Automated (run in this environment)
 
 - `npm run check` (`astro check`) - 0 errors, so the full event-wiring graph type-checks (the `EVENTS` map, every `data-track` call site, and the consent banner that boots the gate). `track()` now takes the taxonomy union rather than `string`, so this run is also what proves no code call site names an undeclared event.
-- `npm test` - 88/88 pass. This covers the consent decision table end to end: a GPC/DNT signal denies and never sends, an explicit decline denies, a stored grant flushes, and an unknown/stale state keeps buffering (`src/lib/consent.test.ts`); the PII allowlist that scrubs every outgoing payload (`src/lib/pii.test.ts`); and the taxonomy parity guard over the `EVENTS` map, this document and the `.astro` dispatch sites (`src/lib/taxonomy.test.ts`).
+- `npm test` - 130/130 pass. This covers the consent decision table end to end: a GPC/DNT signal denies and never sends, an explicit decline denies, a stored grant flushes, and an unknown/stale state keeps buffering (`src/lib/consent.test.ts`); the PII allowlist that scrubs every outgoing payload (`src/lib/pii.test.ts`); the taxonomy parity guard over the `EVENTS` map, this document and the `.astro` dispatch sites (`src/lib/taxonomy.test.ts`); and the duplicate-event guards - one client and one `$session_start` per document across two module copies, one `Page Viewed` per document per path, visit continuity across a slash-suffixed entry URL, `event_id` surviving the consent buffer, and withdrawal leaving no analytics storage behind (`src/lib/analytics.test.ts`, `src/lib/visit.test.ts`).
+  Those guard tests drive the shipped `src/lib/analytics.ts` itself - imported twice, as the two distinct module instances a per-entry-point bundle would produce - against the real SDK wired to in-test storage and transport, so removing any guard from the module fails a test rather than only a stand-in's copy of it. The module's build-time ingest key and host are the one thing substituted, through the `src/lib/analytics-env.ts` seam; that is why the test script passes node's `--experimental-test-module-mocks`.
 - `npx astro dev` + `GET /privacy` - the updated privacy page renders and serves the new DevTeam Analytics / Google Analytics disclosures.
 
 ### Event-flow trace (code path confirmed for each taxonomy event)
 
 Each funnel event was traced from its real call site through the dispatcher (`chrome.ts`), the consent-gated `track()` buffer, the `scrub()` chokepoint, and out via DevTeam Analytics' `sendBeacon` transport.
-Every row additionally carries the `theme` state stamp and any sticky `$exp_*` stamps, which are merged in at the chokepoint rather than at the call site:
+Every row additionally carries the `event_id` and `visit_id` keys and the `theme` state stamp, plus any sticky `$exp_*` stamps, which are merged in at the chokepoint rather than at the call site:
 
 | Event | Real call site | Properties sent (post-scrub) |
 |---|---|---|
-| `Page Viewed` | `<body data-page-view>` from `BaseLayout` | `path`, `referrer` (both path-reduced), plus `screen`, `category`, `slug`, `brand` as declared per screen |
+| `Page Viewed` | `<body data-page-view>` from `BaseLayout`, dispatched once per document via `trackPageView()` | `path` (normalized), `referrer` (path-reduced), plus `screen`, `category`, `slug`, `brand` as declared per screen |
 | `Hero CTA Clicked` | `index.astro` hero buttons | `cta`, `href` (path-reduced) |
 | `Deal Card Clicked` | `DealCard.astro`, `DropPanel.astro` | `slug`, `brand`, `placement` (`drop-panel` on the drop card) |
 | `Affiliate Link Clicked` | `deals/[slug].astro`, `promos/[slug].astro`, `Verdict.astro`, `ProductCallout.astro` | `slug`, `brand`, `retailer`, `placement` |

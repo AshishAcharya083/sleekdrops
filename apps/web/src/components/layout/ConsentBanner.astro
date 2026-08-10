@@ -93,7 +93,7 @@ const policyDate = '28 June 2026';
     <div class="pref-row">
       <div class="pref-row__text">
         <span class="pref-row__title">Anonymous analytics</span>
-        <p class="pref-row__help">Aggregate, anonymized page views. Personal data is stripped in your browser before anything is sent — see below.</p>
+        <p class="pref-row__help">Aggregate, anonymized page views. Stores a randomly generated session identifier in your browser so page views from one visit are counted together - no advertising, no cross-site tracking. Personal data is stripped in your browser before anything is sent — see below.</p>
       </div>
       <label class="sd-switch">
         <input type="checkbox" data-analytics-switch aria-label="Anonymous analytics" />
@@ -136,6 +136,15 @@ const policyDate = '28 June 2026';
     border-radius: var(--r-lg);
     box-shadow: var(--shadow-lg);
     padding: var(--s-6);
+    /* The root is pinned to the bottom of a fixed viewport, so a surface taller
+       than the viewport grows upwards and pushes its own heading and close button
+       past the top edge, where nothing can scroll them back. The preferences
+       dialog does exactly that on a phone. Cap every surface at the viewport
+       instead and let it scroll itself. `dvh` where it is supported, so mobile
+       browser chrome sliding in or out cannot re-clip it. */
+    max-height: calc(100vh - 2 * var(--s-4));
+    max-height: calc(100dvh - 2 * var(--s-4));
+    overflow-y: auto;
   }
   .sd-consent[hidden] { display: none; }
 
