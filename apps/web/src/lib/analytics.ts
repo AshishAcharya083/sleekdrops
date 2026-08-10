@@ -31,6 +31,9 @@
 
 import { createAnalytics, type AnalyticsClient } from '@getdevteam/analytics-web';
 
+// Explicit .ts extensions: this module is loaded directly by the node --test
+// runner (see analytics.test.ts), which needs real specifiers.
+import { analyticsEnv } from './analytics-env.ts';
 import {
   analyticsScope,
   bufferEvent,
@@ -41,7 +44,7 @@ import {
   type AnalyticsScope,
   type QueuedEvent,
   type ScopeHost,
-} from './analytics-scope';
+} from './analytics-scope.ts';
 import {
   CONSENT_KEY,
   POLICY_VERSION,
@@ -49,23 +52,23 @@ import {
   resolveConsent,
   type ConsentPrompt,
   type ConsentStatus,
-} from './consent';
-import { whenDistinctIdRestored } from './distinct-id';
-import { scrub, urlToPath, CLIENT_ERROR_EVENT, type EventProps } from './pii';
-import { clearVisit, newEventId, normalizePath, touchVisit, type VisitStorage } from './visit';
+} from './consent.ts';
+import { whenDistinctIdRestored } from './distinct-id.ts';
+import { scrub, urlToPath, CLIENT_ERROR_EVENT, type EventProps } from './pii.ts';
+import { clearVisit, newEventId, normalizePath, touchVisit, type VisitStorage } from './visit.ts';
 import {
   ErrorDeduper,
   errorEventToProps,
   errorSignature,
   rejectionToProps,
   type ErrorProps,
-} from './error-capture';
+} from './error-capture.ts';
 import {
   clearStickyProps,
   restoreStickyProps,
   start as startExperiments,
   stickyProps,
-} from './experiments';
+} from './experiments.ts';
 
 export type { EventProps, ConsentPrompt };
 
@@ -116,12 +119,6 @@ export type TrackableEvent =
   | EventName
   | typeof EXPERIMENT_VIEWED_EVENT
   | typeof CLIENT_ERROR_EVENT;
-
-// DevTeam Analytics ingest key (dtp_...) and host. Host defaults to the local
-// analytics platform; set PUBLIC_DEVTEAM_ANALYTICS_HOST to https://ingest.getdevteam.ai in prod.
-// An empty key disables the DevTeam sink silently.
-const devteamKey = import.meta.env.PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY;
-const devteamHost = import.meta.env.PUBLIC_DEVTEAM_ANALYTICS_HOST ?? 'http://localhost:6080';
 
 declare global {
   interface Window {
@@ -206,14 +203,15 @@ function ensureGa(): void {
 function ensureDevteam(): void {
   const s = scope();
   if (s.client) return;
-  if (!devteamKey) {
+  const { key, host } = analyticsEnv();
+  if (!key) {
     serverLog('warn', 'DevTeam analytics NOT configured - PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY is empty');
     return;
   }
   ensureClient(s, () =>
     createAnalytics({
-      key: devteamKey,
-      host: devteamHost,
+      key,
+      host,
       // Page views are emitted explicitly (EVENTS.pageView), so the SDK's own
       // auto-pageview stays off to avoid double-counting.
       trackPageviews: false,
@@ -223,7 +221,7 @@ function ensureDevteam(): void {
       onError: (error) => console.error('[analytics] DevTeam SDK error:', error),
     }),
   );
-  serverLog('info', 'DevTeam analytics initialized -> ' + devteamHost);
+  serverLog('info', 'DevTeam analytics initialized -> ' + host);
 }
 
 /**
