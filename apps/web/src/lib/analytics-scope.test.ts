@@ -41,10 +41,25 @@ import {
   type ScopeHost,
 } from './analytics-scope.ts';
 import { scrub, type EventProps } from './pii.ts';
-import { VISIT_IDLE_MS, newEventId, normalizePath, touchVisit, type VisitStorage } from './visit.ts';
+import {
+  VISIT_IDLE_MS,
+  clearVisit,
+  newEventId,
+  normalizePath,
+  touchVisit,
+  type VisitStorage,
+} from './visit.ts';
 
 const PAGE_VIEW = 'Page Viewed';
 const SESSION_START = '$session_start';
+
+/**
+ * The SDK storage keys withdrawal clears, restated from analytics.ts (which is not
+ * importable here - see the header). `withdrawal clears every storage key the SDK
+ * actually writes` below checks this list against both analytics.ts and what a
+ * real client writes, so it cannot drift from either.
+ */
+const SDK_STORAGE_KEYS = ['devteam_analytics.distinct_id', 'devteam_analytics.queue'];
 
 interface WireEvent {
   event_id: string;
@@ -119,6 +134,21 @@ function analyticsModule(tab: BrowserTab, host: ScopeHost, url: string) {
     bufferEvent(scope, item);
   };
 
+  // Mirrors analytics.ts serverLog(): the line goes to the platform through
+  // whatever client the scope currently holds, which is what re-persists the
+  // SDK's queue if the deny path leaves one attached.
+  const serverLog = (message: string): void => {
+    scope.client?.log.info(message, visitStamp());
+  };
+
+  // Mirrors analytics.ts forgetAnalyticsStorage().
+  const forgetStorage = (): void => {
+    clearVisit(asStorage(tab.session));
+    SDK_STORAGE_KEYS.forEach((key) => tab.local.delete(key));
+  };
+
+  let stopped: Promise<void> = Promise.resolve();
+
   return {
     scope,
     clientsCreated: () => clientsCreated,
@@ -132,7 +162,23 @@ function analyticsModule(tab: BrowserTab, host: ScopeHost, url: string) {
       if (scope.decision === 'denied') return;
       scope.decision = 'denied';
       dropBuffer(scope);
+      // Mirrors analytics.ts stopAnalytics(): detach, clear, stop, clear again
+      // once the final flush settles - then log, with nothing left to log through.
+      const client = scope.client;
+      scope.client = null;
+      forgetStorage();
+      stopped = client
+        ? client
+            .shutdown()
+            .catch(() => {})
+            .then(() => {
+              if (scope.decision === 'denied') forgetStorage();
+            })
+        : Promise.resolve();
+      serverLog('consent denied - no events will be sent');
     },
+    /** Resolves once the detached client's final flush has settled. */
+    stopped: (): Promise<void> => stopped,
     track,
     /** What chrome.ts calls: the guarded, path-normalizing page-view dispatch. */
     trackPageView: (props?: EventProps): void => {
@@ -388,6 +434,68 @@ test('nothing is stored, and no visit opened, before the visitor consents', asyn
   assert.equal(tab.local.size, 0, 'the SDK must never have been created');
 });
 
+test('withdrawal leaves no analytics storage behind, not even from its own log line', async () => {
+  const tab = browserTab();
+  const load = analyticsModule(tab, {}, '/');
+  load.grant();
+  load.trackPageView({ referrer: '' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(tab.local.size > 0, 'expected the SDK to have persisted its queue and device id');
+
+  load.deny();
+  await load.stopped();
+
+  // Nothing on disk for a later load to restore: not the device id, not the
+  // undelivered batch, not the visit id - and the deny path's own log line cannot
+  // put the queue back, because the client it would go through is already gone.
+  assert.deepEqual([...tab.local.keys()], []);
+  assert.deepEqual([...tab.session.keys()], []);
+  // The batch queued while consent was live is delivered by the final flush
+  // rather than left on disk to be re-sent on some later page load.
+  assert.deepEqual(names(tab), [SESSION_START, PAGE_VIEW]);
+});
+
+test('opting back in after a withdrawal sends again, on a fresh client', async () => {
+  const tab = browserTab();
+  const load = analyticsModule(tab, {}, '/');
+  load.grant();
+  load.deny();
+  await load.stopped();
+  tab.received.length = 0;
+
+  // A stopped client accepts no further events, so re-consent has to build a new
+  // one - which detaching it on withdrawal is what makes possible.
+  load.grant();
+  load.track('Hero CTA Clicked', { cta: 'Read the latest' });
+  await load.flush();
+
+  assert.equal(load.clientsCreated(), 2);
+  assert.deepEqual(names(tab), [SESSION_START, 'Hero CTA Clicked']);
+});
+
+test('opting back in while the final flush is still in flight keeps the new client whole', async () => {
+  const tab = browserTab();
+  const load = analyticsModule(tab, {}, '/');
+  load.grant();
+  load.trackPageView({ referrer: '' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // Withdraw and immediately change your mind - inside the window where the
+  // stopped client's last flush has not settled yet. The cleanup that trails that
+  // flush must not delete the storage the new client has already written.
+  load.deny();
+  load.grant();
+  load.track('Hero CTA Clicked', { cta: 'Read the latest' });
+  await load.stopped();
+  await load.flush();
+
+  assert.ok(
+    tab.local.has('devteam_analytics.distinct_id'),
+    'the re-consented visitor must keep the device id their new client wrote',
+  );
+  assert.equal(countOf(tab, 'Hero CTA Clicked'), 1);
+});
+
 /* ---- Source parity ----------------------------------------------------------
  * analytics.ts cannot be imported under the bare node runner (see the header), so
  * these read it as text - the same approach, and for the same reason, as
@@ -422,6 +530,7 @@ test('withdrawal clears every storage key the SDK actually writes', async () => 
   const listed = /const SDK_STORAGE_KEYS = \[([^\]]*)\]/.exec(analyticsSource)?.[1];
   assert.ok(listed, 'no SDK_STORAGE_KEYS list in analytics.ts');
   const cleared = new Set([...listed.matchAll(/'([^']+)'/g)].map((match) => match[1]));
+  assert.deepEqual([...cleared].sort(), [...SDK_STORAGE_KEYS].sort(), 'the harness list has drifted');
 
   // ...against what a real client actually writes, so a rename or an addition
   // upstream fails here instead of silently leaving a withdrawn visitor's id behind.
@@ -447,8 +556,21 @@ test('analytics.ts routes client creation, the page view and withdrawal through 
   assert.match(between(/function ensureDevteam\(\): void \{/), /ensureClient\(/);
   assert.match(between(/export function trackPageView\(/), /claimOnce\(/);
   assert.match(between(/export function trackPageView\(/), /normalizePath\(/);
-  assert.match(between(/function applyDeny\(\): void \{/), /forgetAnalyticsStorage\(\)/);
+  assert.match(between(/function applyDeny\(\): void \{/), /stopAnalytics\(/);
   assert.match(between(/function forgetAnalyticsStorage\(\): void \{/), /clearVisit\(/);
+  // Withdrawal detaches the client before it clears, or the log line that follows
+  // hands the SDK a reason to write its queue straight back.
+  const stopBody = between(/function stopAnalytics\(/);
+  assert.ok(
+    stopBody.indexOf('s.client = null') < stopBody.indexOf('forgetAnalyticsStorage()'),
+    'the client must be detached before the storage is cleared',
+  );
+  assert.match(stopBody, /shutdown\(\)/, 'the detached client must be stopped, not left flushing');
+  assert.match(
+    stopBody,
+    /decision === 'denied'/,
+    'the cleanup trailing the final flush must not run once the visitor has opted back in',
+  );
   // Every outgoing event and log carries the visit id.
   assert.match(between(/function send\(/), /visitStamp\(\)/);
   assert.match(between(/export function serverLog\(/), /visitStamp\(\)/);

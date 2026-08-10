@@ -136,6 +136,15 @@ const policyDate = '28 June 2026';
     border-radius: var(--r-lg);
     box-shadow: var(--shadow-lg);
     padding: var(--s-6);
+    /* The root is pinned to the bottom of a fixed viewport, so a surface taller
+       than the viewport grows upwards and pushes its own heading and close button
+       past the top edge, where nothing can scroll them back. The preferences
+       dialog does exactly that on a phone. Cap every surface at the viewport
+       instead and let it scroll itself. `dvh` where it is supported, so mobile
+       browser chrome sliding in or out cannot re-clip it. */
+    max-height: calc(100vh - 2 * var(--s-4));
+    max-height: calc(100dvh - 2 * var(--s-4));
+    overflow-y: auto;
   }
   .sd-consent[hidden] { display: none; }
 

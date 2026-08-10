@@ -385,13 +385,46 @@ function forgetAnalyticsStorage(): void {
   }
 }
 
+/**
+ * Take the client off this document, stop it, and leave no analytics storage
+ * behind.
+ *
+ * The order is the whole point. The SDK re-persists its queue on every enqueue,
+ * so a client still reachable from the scope writes the storage straight back -
+ * the deny path's own `serverLog()` line is enough to do it, which would restore
+ * the granted-period events and the device id one statement after they were
+ * cleared. Detaching first closes that route for everything downstream, and
+ * `shutdown()` stops the flush timer so the SDK cannot write them back later
+ * either. That shutdown flushes what was already queued under consent and then
+ * settles asynchronously, re-persisting anything it could not deliver, so the
+ * storage is cleared once more when it does - unless the visitor has opted back
+ * in by then, because that second clear would take the new client's device id and
+ * queue with it.
+ *
+ * Detaching also means a visitor who withdraws and later opts in again gets a
+ * fresh client rather than the stopped one, which accepts no further events.
+ */
+function stopAnalytics(s: Scope): void {
+  const client = s.client;
+  s.client = null;
+  forgetAnalyticsStorage();
+  void client
+    ?.shutdown()
+    .catch(() => {
+      /* a failed final flush must not stop the storage from being cleared */
+    })
+    .then(() => {
+      if (s.decision === 'denied') forgetAnalyticsStorage();
+    });
+}
+
 function applyDeny(): void {
   const s = scope();
   if (s.decision === 'denied') return;
   s.decision = 'denied';
   dropBuffer(s);
   clearStickyProps();
-  forgetAnalyticsStorage();
+  stopAnalytics(s);
   serverLog('info', 'consent denied - no events will be sent');
 }
 
