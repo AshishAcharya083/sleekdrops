@@ -26,33 +26,16 @@ const meta = buildMeta({
 
   <div class="container">
     <div class="contact-layout">
-      <form class="contact-form" data-mock-form data-mock-label="✓ Message sent">
-        <div class="row2">
-          <div class="field">
-            <label for="name">Name</label>
-            <input id="name" type="text" placeholder="Your name" required />
-          </div>
-          <div class="field">
-            <label for="email">Email</label>
-            <input id="email" type="email" placeholder="you@inbox.com" required />
-          </div>
-        </div>
-        <div class="field">
-          <label for="subject">Subject</label>
-          <select id="subject">
-            <option>General feedback</option>
-            <option>Deal tip</option>
-            <option>Review pitch</option>
-            <option>Press</option>
-            <option>Correction</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="message">Message</label>
-          <textarea id="message" placeholder="Tell us what's on your mind." required />
-        </div>
-        <Button type="submit" variant="primary" arrow>Send message</Button>
-      </form>
+      {/* No form here on purpose: there is no endpoint behind this page yet, and a
+          form that accepts a message and answers "✓ Message sent" while nothing is
+          sent is a false claim rather than an unfinished feature (see the
+          conventions in AGENTS.md). Email is the honest route until the real one
+          exists, and the addresses beside this card are read by people. */}
+      <div class="contact-form">
+        <h3>Email is <em>the way</em>, for now.</h3>
+        <p>We haven't wired up a form yet, and we'd rather say so than take a message we can't deliver. Write to the desk instead: it reaches the same people.</p>
+        <Button href="mailto:desk@sleekdrops.com" variant="primary" arrow>Email the desk</Button>
+      </div>
 
       <aside class="contact-aside">
         <h3>Other <em>ways</em>.</h3>
@@ -111,51 +94,22 @@ const meta = buildMeta({
     border-radius: 24px;
     padding: 40px;
   }
-  .contact-form label {
-    display: block;
-    font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    color: var(--muted);
-    margin-bottom: 8px;
-  }
-  .contact-form .field { margin-bottom: 22px; }
-  .contact-form input,
-  .contact-form select,
-  .contact-form textarea {
-    width: 100%;
-    box-sizing: border-box;
-    font-family: var(--font-body);
-    font-size: 15px;
+  .contact-form h3 {
+    font-family: var(--font-display);
+    font-size: 32px;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    font-weight: 400;
     color: var(--ink);
-    background: transparent;
-    border: 0;
-    border-bottom: 1px solid var(--hairline-strong);
-    border-radius: 0;
-    padding: 12px 0;
-    outline: none;
-    transition: border-color var(--dur-fast);
+    margin: 0 0 16px;
   }
-  .contact-form input:focus,
-  .contact-form select:focus,
-  .contact-form textarea:focus {
-    border-bottom-color: var(--ink);
-  }
-  .contact-form textarea {
-    resize: vertical;
-    min-height: 120px;
-    line-height: 1.55;
-  }
-  .contact-form .row2 {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 24px;
-  }
-  .contact-form :global(.btn) {
-    width: 100%;
-    justify-content: center;
-    margin-top: 8px;
+  .contact-form h3 em { font-style: italic; }
+  .contact-form p {
+    font-size: 16px;
+    color: var(--muted);
+    line-height: 1.6;
+    margin: 0 0 28px;
+    max-width: 46ch;
   }
 
   .contact-aside h3 {

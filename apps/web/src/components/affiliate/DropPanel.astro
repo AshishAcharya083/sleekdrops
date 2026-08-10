@@ -91,8 +91,14 @@ const d = todaysDrop;
     height: 220px;
     background: radial-gradient(circle, rgba(228, 119, 87, 0.25), transparent 70%);
   }
+  /* The panel inverts with the theme (--ink background, --paper text), so its
+     muted text has to be --paper dimmed, never a literal grey: a fixed light
+     grey lands near-white on near-white in dark mode. Both labels need the
+     colour stated outright, because the .eyebrow and p rules in tokens.css set
+     one themselves and beat what .drop-panel passes down. */
   .drop-panel :global(.eyebrow) {
-    color: rgba(245, 244, 238, 0.6);
+    color: var(--paper);
+    opacity: 0.6;
     letter-spacing: 0.2em;
   }
   h3 {
@@ -107,6 +113,7 @@ const d = todaysDrop;
   .desc {
     font-size: 14px;
     line-height: 1.55;
+    color: var(--paper);
     opacity: 0.7;
     max-width: 32ch;
   }

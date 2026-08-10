@@ -205,17 +205,6 @@ if (!window.__sdChromeInit) {
     onScroll();
   }
 
-  document
-    .querySelectorAll<HTMLFormElement>('[data-mock-form]')
-    .forEach((form) => {
-      form.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const label = form.dataset.mockLabel ?? '✓ Done';
-        const button = form.querySelector('button');
-        if (button) button.textContent = label;
-      });
-    });
-
   /* ---- Self-clearing class flash ----------------------------------------
    * The acknowledgement mechanism for controls that act without navigating.
    * Re-firing restarts the window rather than letting the first timer strip the
