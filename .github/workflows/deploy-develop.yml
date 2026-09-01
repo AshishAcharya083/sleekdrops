@@ -67,6 +67,9 @@ jobs:
           # settings, so both apps always report into one project.
           PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY: ${{ secrets.DEVTEAM_ANALYTICS_INGEST_KEY }}
           PUBLIC_DEVTEAM_ANALYTICS_HOST: ${{ vars.DEVTEAM_ANALYTICS_HOST }}
+          # In-app feedback widget - develop only. It is a visible control on the
+          # page, so production stays without it until we have looked at it here.
+          PUBLIC_DEVTEAM_ANALYTICS_FEEDBACK: 'true'
           # DevTeam A/B Testing - flag-delivery host + per-environment client key.
           # Held in repo settings for the same reason as the ingest key above: the
           # key is minted per environment in the A/B Testing tab and a stale one

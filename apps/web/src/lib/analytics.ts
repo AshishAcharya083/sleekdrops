@@ -261,7 +261,7 @@ function ensureGa(): void {
 function ensureDevteam(): void {
   const s = scope();
   if (s.client) return;
-  const { key, host } = analyticsEnv();
+  const { key, host, feedback } = analyticsEnv();
   if (!key) {
     serverLog('warn', 'DevTeam analytics NOT configured - PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY is empty');
     return;
@@ -276,6 +276,11 @@ function ensureDevteam(): void {
       // Uncaught errors already route through track() as a $client_error event, so
       // the SDK's built-in error capture stays off to avoid duplicate reports.
       autoCaptureErrors: false,
+      // In-app feedback: a floating button that screenshots the page, lets the
+      // visitor circle what is wrong and sends it to the analytics project. It
+      // appears only after consent, because this is the only place a client is
+      // created and the grant path is the only caller.
+      allowUserFeedback: feedback,
       onError: (error) => console.error('[analytics] DevTeam SDK error:', error),
     }),
   );

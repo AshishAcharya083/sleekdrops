@@ -24,6 +24,17 @@ export interface AnalyticsEnv {
    * PUBLIC_DEVTEAM_ANALYTICS_HOST to https://ingest.getdevteam.ai in production.
    */
   host: string;
+  /**
+   * Whether the SDK renders its in-app feedback widget - a floating button that
+   * screenshots the page, lets the visitor annotate it and sends the report to
+   * the analytics project.
+   *
+   * Opted into per environment rather than following the ingest key, because
+   * unlike everything else here it is a visible control on the page, not a
+   * silent sink. Off unless the build sets the variable to the exact string
+   * `true`, which is also the SDK's own default.
+   */
+  feedback: boolean;
 }
 
 const env = import.meta.env as ImportMetaEnv | undefined;
@@ -33,5 +44,6 @@ export function analyticsEnv(): AnalyticsEnv {
   return {
     key: env?.PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY ?? '',
     host: env?.PUBLIC_DEVTEAM_ANALYTICS_HOST ?? 'http://localhost:6080',
+    feedback: env?.PUBLIC_DEVTEAM_ANALYTICS_FEEDBACK === 'true',
   };
 }
