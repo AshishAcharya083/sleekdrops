@@ -83,6 +83,20 @@ jobs:
           # back to its code-side default.
           PUBLIC_DEVTEAM_FLAGS_HOST: ${{ vars.DEVTEAM_FLAGS_HOST }}
           PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY: ${{ secrets.DEVTEAM_FLAGS_CLIENT_KEY }}
+          # Google AdSense - publisher id (ca-pub-...) + one slot id per placement.
+          # All public: they ship in the ad markup every visitor downloads, so they
+          # are repo *variables* rather than secrets. Held in repo settings for the
+          # same reason as the keys above - they are minted per environment in the
+          # AdSense console, and a value from the wrong environment reports its
+          # revenue against the wrong property while the page looks healthy.
+          #
+          # An empty publisher id disables ads silently: no partner script, no
+          # ads.txt, nothing to consent to.
+          PUBLIC_ADSENSE_CLIENT: ${{ vars.ADSENSE_CLIENT }}
+          PUBLIC_ADSENSE_SLOT_ARTICLE_MID: ${{ vars.ADSENSE_SLOT_ARTICLE_MID }}
+          PUBLIC_ADSENSE_SLOT_ARTICLE_END: ${{ vars.ADSENSE_SLOT_ARTICLE_END }}
+          PUBLIC_ADSENSE_SLOT_SIDEBAR: ${{ vars.ADSENSE_SLOT_SIDEBAR }}
+          PUBLIC_ADSENSE_SLOT_FEED: ${{ vars.ADSENSE_SLOT_FEED }}
           # Used by apps/web/scripts/fetch-content.mjs to read posts +
           # affiliate links from Cloudflare D1 during the prebuild step. The
           # database id is not a secret; CLOUDFLARE_D1_TOKEN needs

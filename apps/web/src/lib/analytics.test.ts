@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { createAnalytics, type AnalyticsClient } from '@getdevteam/analytics-web';
 
 import type { AnalyticsScope } from './analytics-scope.ts';
-import { CONSENT_KEY } from './consent.ts';
+import { CONSENT_KEY, POLICY_VERSION, parseConsent } from './consent.ts';
 
 /**
  * The one thing the real module cannot resolve outside a Vite build: the ingest
@@ -551,6 +551,58 @@ test('the preferences dialog reads back the decision in force, not the opt-in de
   loadPage(tab, '/deals');
   assert.equal(banner.boot(), 'none');
   assert.equal(banner.consentStatus(), 'granted');
+});
+
+test('the record the banner writes is the record the ads gate reads back', () => {
+  // The two categories live in one stored record written here and read by
+  // `./ads`, which never imports this module - so the shape they agree on is only
+  // asserted where both ends meet: what the real writer wrote, through the real
+  // parser the ads gate calls.
+  const tab = openTab();
+  loadPage(tab, '/');
+
+  // "Accept analytics" is exactly that: it must not hand the visitor's ads
+  // decision to the ad partner on the strength of an analytics opt-in.
+  chrome.grantConsent();
+  const accepted = parseConsent(tab.local.get(CONSENT_KEY) ?? null);
+  assert.equal(accepted?.v, POLICY_VERSION);
+  assert.deepEqual(accepted?.grants, { analytics: 'granted', ads: 'denied' });
+
+  // "Decline all" declines every category, including the ones added after it was
+  // written.
+  banner.denyConsent();
+  assert.deepEqual(parseConsent(tab.local.get(CONSENT_KEY) ?? null)?.grants, {
+    analytics: 'denied',
+    ads: 'denied',
+  });
+
+  // A per-category save - what the preferences dialog's switches resolve to.
+  chrome.setConsent({ analytics: 'denied', ads: 'granted' });
+  assert.deepEqual(parseConsent(tab.local.get(CONSENT_KEY) ?? null)?.grants, {
+    analytics: 'denied',
+    ads: 'granted',
+  });
+  assert.equal(chrome.consentStatus(), 'denied', 'an ads grant is not an analytics grant');
+});
+
+test('a consent record written under the previous policy re-prompts and keeps buffering', async () => {
+  // What every returning visitor hits on the deploy that adds the ads category:
+  // a `{ v: 1, status: 'granted' }` record, written before categories existed.
+  const tab = openTab();
+  tab.local.set(CONSENT_KEY, JSON.stringify({ v: 1, status: 'granted', ts: 1 }));
+  loadPage(tab, '/');
+
+  // Re-prompted rather than silently re-granted, and rather than shown the
+  // first-visit banner as if they had never decided.
+  assert.equal(banner.boot(), 'policy-update');
+  chrome.trackPageView({ referrer: '' });
+  await tick();
+  assert.deepEqual(tab.events, [], 'a stale record grants nothing until it is renewed');
+
+  // Renewing it flushes what was held, exactly as a first-visit grant does.
+  banner.grantConsent();
+  await flush();
+  assert.deepEqual(names(tab), [SESSION_START, PAGE_VIEW]);
 });
 
 test('withdrawing on a later page load stops analytics and holds on the one after it', async () => {

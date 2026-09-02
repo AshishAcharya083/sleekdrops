@@ -10,7 +10,13 @@
  * is hidden until the client script runs, so the static HTML never flashes a
  * prompt at a visitor who has already chosen.
  */
-const policyDate = '28 June 2026';
+/**
+ * The date the policy-update surface cites, which has to be the "Last updated"
+ * date `src/pages/privacy.astro` publishes: the surface exists to send the
+ * visitor there, and a date the page does not carry reads as the wrong policy.
+ * Move the two together whenever POLICY_VERSION is bumped.
+ */
+const policyDate = 'August 10, 2026';
 ---
 
 <div class="sd-consent-root" data-consent-root hidden>

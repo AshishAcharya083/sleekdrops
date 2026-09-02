@@ -63,6 +63,27 @@ A `http://` host on the (https) deployed site is refused with a single console w
 
 Leaving either unset is a supported state: the build ships with experiments disabled and every feature renders its code-side default.
 
+### Google AdSense (required for ads to serve)
+
+Both deploy workflows pass these into the web build as `PUBLIC_ADSENSE_CLIENT` and one `PUBLIC_ADSENSE_SLOT_*` per placement.
+All five are **variables**, not secrets: they are `PUBLIC_`-prefixed Astro values that ship in the markup every visitor downloads, and AdSense treats them as public identifiers.
+
+| Repo setting                | Kind         | What it is                                                                              |
+| --------------------------- | ------------ | ----------------------------------------------------------------------------------------- |
+| `ADSENSE_CLIENT`            | **variable** | The publisher id for this environment, `ca-pub-…`, from AdSense → Account → Settings.   |
+| `ADSENSE_SLOT_ARTICLE_MID`  | **variable** | Slot id of the mid-article unit, from AdSense → Ads → By ad unit.                        |
+| `ADSENSE_SLOT_ARTICLE_END`  | **variable** | Slot id of the end-of-article unit.                                                      |
+| `ADSENSE_SLOT_SIDEBAR`      | **variable** | Slot id of the sticky sidebar unit (desktop only).                                       |
+| `ADSENSE_SLOT_FEED`         | **variable** | Slot id of the in-feed card unit.                                                        |
+
+Scope them per GitHub Environment (`develop` / `production`), the way the DevTeam settings are scoped: a preview deploy serving impressions against the production property pollutes its reporting and can trip AdSense's invalid-traffic checks.
+
+Leaving `ADSENSE_CLIENT` unset is a supported state, and is how this ships until the ids are issued.
+The build then disables ads everywhere after a single `[ads]` console warning: no partner script is requested, and `public/ads.txt` - generated from that same value by `scripts/generate-ads-txt.mjs` during `prebuild` - is not written at all.
+An `ads.txt` naming no seller is worse than none, because that is the file a crawler reads as a domain that has revoked every seller it had.
+
+Note that `ads.txt` publishes the publisher id **without** the `ca-` prefix the ad tag carries: `ca-pub-123` in the repo setting becomes `google.com, pub-123, DIRECT, …` in the file. The generator does that conversion; nothing needs entering twice.
+
 ### Cloudflare R2 (only if you've enabled R2 for images)
 
 These are read by the publishing pipeline, **not** by the website build. Add them only when you wire R2 into the agent:

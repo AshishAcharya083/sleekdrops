@@ -16,6 +16,12 @@
  * version is older than the current one. The decision table itself lives in the
  * pure, unit-tested `./consent` module.
  *
+ * That record holds one decision per purpose category, and this module acts on
+ * exactly one of them - `analytics`. The advertising category is written here
+ * too, because a single record is what keeps the categories in step, but it is
+ * read and enforced by `./ads`, which has no dependency on this module or on the
+ * analytics SDKs.
+ *
  * A/B testing hangs off the same gate at both ends: `./experiments` is started
  * from the grant path with the DevTeam SDK's own distinct id and stopped from the
  * withdrawal path, and the sticky `$exp_*` stamps it hands back are merged into
@@ -54,9 +60,12 @@ import {
   POLICY_VERSION,
   parseConsent,
   resolveConsent,
+  uniformGrants,
+  type ConsentGrants,
   type ConsentPrompt,
   type ConsentStatus,
 } from './consent.ts';
+import { hasPrivacySignal } from './privacy-signal.ts';
 import { whenDistinctIdRestored } from './distinct-id.ts';
 import { scrub, urlToPath, CLIENT_ERROR_EVENT, type EventProps } from './pii.ts';
 import { clearVisit, newEventId, normalizePath, touchVisit, type VisitStorage } from './visit.ts';
@@ -148,19 +157,6 @@ function scope(): Scope {
   );
 }
 
-/** True when the browser is signalling Global Privacy Control or Do-Not-Track. */
-export function hasPrivacySignal(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  const nav = navigator as Navigator & { globalPrivacyControl?: boolean };
-  if (nav.globalPrivacyControl === true) return true;
-  const dnt =
-    nav.doNotTrack ??
-    (typeof window !== 'undefined'
-      ? (window as Window & { doNotTrack?: string }).doNotTrack
-      : undefined);
-  return dnt === '1' || dnt === 'yes';
-}
-
 function readConsent() {
   try {
     return parseConsent(localStorage.getItem(CONSENT_KEY));
@@ -169,9 +165,9 @@ function readConsent() {
   }
 }
 
-function writeConsent(status: ConsentStatus): void {
+function writeConsent(grants: ConsentGrants): void {
   try {
-    const record = { v: POLICY_VERSION, status, ts: Date.now() };
+    const record = { v: POLICY_VERSION, grants, ts: Date.now() };
     localStorage.setItem(CONSENT_KEY, JSON.stringify(record));
   } catch {
     /* storage unavailable (private mode, quota) - consent holds for the session */
@@ -544,25 +540,38 @@ export function trackPageView(props?: EventProps): void {
 }
 
 /**
- * The consent decision in force for this document, or null while the visitor has
- * not made one. Read by the preferences dialog so reopening it shows what is
- * actually in effect rather than the opt-in default.
+ * The analytics consent decision in force for this document, or null while the
+ * visitor has not made one. Read by the preferences dialog so reopening it shows
+ * what is actually in effect rather than the opt-in default. The advertising
+ * category has its own reader, `isAdsGranted` in `./ads`.
  */
 export function consentStatus(): ConsentStatus | null {
   const decision = scope().decision;
   return decision === 'unknown' ? null : decision;
 }
 
-/** Persist an explicit opt-in and start sending. */
-export function grantConsent(): void {
-  writeConsent('granted');
-  applyGrant();
+/**
+ * Persist an explicit per-category decision and enforce it.
+ *
+ * The record is the only place a category is decided, so this is the one writer:
+ * the advertising category has no runtime effect here (`./ads` reads the same
+ * record on the pages that carry a slot), but it is written in the same object
+ * as the analytics one so a save can never leave the two out of step.
+ */
+export function setConsent(grants: ConsentGrants): void {
+  writeConsent(grants);
+  if (grants.analytics === 'granted') applyGrant();
+  else applyDeny();
 }
 
-/** Persist an explicit opt-out and drop anything buffered. */
+/** Persist an explicit opt-in to analytics - and to analytics only - and start sending. */
+export function grantConsent(): void {
+  setConsent({ analytics: 'granted', ads: 'denied' });
+}
+
+/** Persist an explicit opt-out of every category and drop anything buffered. */
 export function denyConsent(): void {
-  writeConsent('denied');
-  applyDeny();
+  setConsent(uniformGrants('denied'));
 }
 
 /**
@@ -577,9 +586,9 @@ export function denyConsent(): void {
  * second session or re-flushing the buffer.
  */
 export function boot(): ConsentPrompt {
-  const { prompt, effect } = resolveConsent(readConsent(), hasPrivacySignal());
-  if (effect === 'grant') applyGrant();
-  else if (effect === 'deny') applyDeny();
+  const { prompt, effects } = resolveConsent(readConsent(), hasPrivacySignal());
+  if (effects.analytics === 'grant') applyGrant();
+  else if (effects.analytics === 'deny') applyDeny();
   return prompt;
 }
 
