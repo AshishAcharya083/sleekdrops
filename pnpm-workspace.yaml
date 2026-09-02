@@ -1,13 +1,6 @@
 packages:
   - apps/*
 
-# @getdevteam/analytics-web 0.3.0 imports `utf8ByteLength` from
-# @getdevteam/analytics-core, which the published core 0.2.0 does not export - the
-# symbol only exists in the platform repo's unreleased core. Without this override
-# the build fails at rollup on that missing export. See vendor/README.md.
-overrides:
-  '@getdevteam/analytics-core': file:./vendor/getdevteam-analytics-core-unpublished.tgz
-
 allowBuilds:
   esbuild: true
   sharp: true

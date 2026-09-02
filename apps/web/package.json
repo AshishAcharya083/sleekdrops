@@ -24,7 +24,7 @@
     "@astrojs/check": "^0.9.9",
     "@astrojs/rss": "^4.0.18",
     "@astrojs/sitemap": "3.2.1",
-    "@getdevteam/analytics-web": "file:../../vendor/getdevteam-analytics-web-0.3.0.tgz",
+    "@getdevteam/analytics-web": "0.3.1",
     "@growthbook/growthbook": "^1.6.5",
     "astro": "^4.16.19",
     "remark-gfm": "^4.0.1",
