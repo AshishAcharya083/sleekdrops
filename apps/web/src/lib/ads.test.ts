@@ -3,12 +3,12 @@
  * a real stored consent record, and the shipped `./ads` module deciding what -
  * if anything - to put on the page.
  *
- * Everything here asserts against the DOM the module actually produced rather
- * than against an interface of its own, because the things that matter are
- * observable only there: that no partner script is requested - and so no ad
- * cookie or device storage is placed - for a visitor who has not answered the
- * prompt or whose browser blocked the category outright, and that a visitor who
- * declined gets the partner with personalisation switched off rather than on.
+ * Everything here asserts against the DOM and the tag queues the module actually
+ * produced rather than against an interface of its own, because the things that
+ * matter are observable only there: that no partner script is requested for a
+ * visitor who has not answered the prompt or whose browser blocked the category
+ * outright, and that a visitor who declined gets the partner told - before it can
+ * run - that it may neither personalise nor store anything.
  *
  * The module needs two things the bare `node --test` runner cannot give it: the
  * publisher id Vite inlines from `import.meta.env` (substituted through the
@@ -56,14 +56,45 @@ interface FakeScript {
    * after injection is a flag that may never be honoured.
    */
   npaWhenInjected?: number;
+  /**
+   * The advertising consent state Google had been given when this script was
+   * injected. The same timing argument applies, and harder: a tag that has
+   * already started may have written storage before a later signal reaches it.
+   */
+  adStorageWhenInjected?: string;
 }
 
 interface FakeWindow {
   localStorage: unknown;
   doNotTrack?: string;
   adsbygoogle?: FakeQueue;
+  dataLayer?: unknown[];
+  gtag?: (...args: unknown[]) => void;
   __sdAds?: unknown;
 }
+
+/** One `gtag('consent', …)` command, as it was pushed onto the shared queue. */
+interface ConsentCommand {
+  command: unknown;
+  signals: Record<string, unknown>;
+}
+
+/** The advertising consent commands this page gave Google, oldest first. */
+function consentCommands(window: FakeWindow): ConsentCommand[] {
+  return (window.dataLayer ?? [])
+    .map((entry) => Array.from(entry as ArrayLike<unknown>))
+    .filter((args) => args[0] === 'consent')
+    .map((args) => ({ command: args[1], signals: args[2] as Record<string, unknown> }));
+}
+
+/** The `ad_storage` state in force, or undefined while Google has been told nothing. */
+function adStorage(window: FakeWindow): unknown {
+  return consentCommands(window).at(-1)?.signals.ad_storage;
+}
+
+/** The two things the partner is ever told: everything denied, or everything granted. */
+const DENIED = { ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied' };
+const GRANTED = { ad_storage: 'granted', ad_user_data: 'granted', ad_personalization: 'granted' };
 
 /** A stored consent record, as `./analytics` writes it. */
 const stored = (grants: ConsentGrants, v: number = POLICY_VERSION): string =>
@@ -93,6 +124,7 @@ function loadPage(consent?: string, browser: { doNotTrack?: string } = {}) {
     head: {
       appendChild: (node: FakeScript): void => {
         node.npaWhenInjected = window.adsbygoogle?.requestNonPersonalizedAds;
+        node.adStorageWhenInjected = adStorage(window) as string | undefined;
         scripts.push(node);
       },
     },
@@ -152,7 +184,7 @@ test('a record written before the ads category existed loads nothing', () => {
 });
 
 test('an ads opt-in loads the partner', () => {
-  const { scripts } = loadPage(stored(uniformGrants('granted')));
+  const { scripts, window } = loadPage(stored(uniformGrants('granted')));
   assert.equal(ads.loadAds(), true);
   assert.equal(ads.isAdsGranted(), true);
 
@@ -167,20 +199,31 @@ test('an ads opt-in loads the partner', () => {
   );
   assert.equal(ads.adsMode(), 'personalised');
   assert.equal(script.npaWhenInjected, undefined, 'personalisation is left on for a grant');
+  assert.deepEqual(
+    consentCommands(window),
+    [{ command: 'default', signals: GRANTED }],
+    'an opt-in is the consent the tag boots with',
+  );
+  assert.equal(script.adStorageWhenInjected, 'granted', 'told before the tag could run');
 });
 
 test('every unit on the page may ask, and the partner still loads once', () => {
-  const { scripts } = loadPage(stored(uniformGrants('granted')));
+  const { scripts, window } = loadPage(stored(uniformGrants('granted')));
   // Four placements, four calls, one document.
   const loaded = [ads.loadAds(), ads.loadAds(), ads.loadAds(), ads.loadAds()];
   assert.deepEqual(loaded, [true, true, true, true]);
   assert.equal(partnerScripts(scripts).length, 1);
+  assert.deepEqual(
+    consentCommands(window),
+    [{ command: 'default', signals: GRANTED }],
+    'and one unchanged decision is stated once, not once per unit',
+  );
 });
 
-test('a decline falls back to non-personalised ads', () => {
-  // "No" to advertising is not "no ads": the partner still loads, with
-  // personalisation switched off for the whole page, so the visitor sees
-  // contextual units and nothing is used to profile them.
+test('a decline falls back to non-personalised ads, and to no ad storage', () => {
+  // "No" to advertising is not "no ads": the partner still loads, but only after
+  // being told it may neither personalise nor store. The visitor sees contextual
+  // units, nothing profiles them, and nothing is written to their device.
   const { scripts, window } = loadPage(stored({ analytics: 'granted', ads: 'denied' }));
   assert.equal(ads.loadAds(), true);
   assert.equal(ads.isAdsGranted(), false, 'a decline is not an opt-in');
@@ -190,6 +233,16 @@ test('a decline falls back to non-personalised ads', () => {
   assert.deepEqual(rest, [], 'exactly one partner script');
   assert.equal(window.adsbygoogle?.requestNonPersonalizedAds, 1);
   assert.equal(script.npaWhenInjected, 1, 'set before the tag could drain its queue');
+  assert.deepEqual(
+    consentCommands(window),
+    [{ command: 'default', signals: DENIED }],
+    'a decline denies storage, not merely personalisation',
+  );
+  assert.equal(
+    script.adStorageWhenInjected,
+    'denied',
+    'and denies it before the tag exists to write anything',
+  );
 });
 
 test('a mid-page opt-in loads personalised, and a mid-page withdrawal does not', () => {
@@ -212,6 +265,14 @@ test('a mid-page opt-in loads personalised, and a mid-page withdrawal does not',
   assert.equal(ads.adsMode(), 'non-personalised');
   assert.equal(window.adsbygoogle?.requestNonPersonalizedAds, 1);
   assert.equal(partnerScripts(scripts).length, 1, 'and no second script is added');
+  assert.deepEqual(
+    consentCommands(window),
+    [
+      { command: 'default', signals: GRANTED },
+      { command: 'update', signals: DENIED },
+    ],
+    'a decision that moves after the tag started is an update, not a second default',
+  );
 });
 
 test('a privacy signal blocks ads outright, over a stored grant', () => {
@@ -224,6 +285,7 @@ test('a privacy signal blocks ads outright, over a stored grant', () => {
   assert.equal(ads.adsMode(), 'none');
   assert.deepEqual(scripts, []);
   assert.equal(window.adsbygoogle, undefined, 'not even the queue is created');
+  assert.deepEqual(consentCommands(window), [], 'and Google is not addressed at all');
 });
 
 test('a privacy signal blocks ads outright, over a stored decline', () => {
@@ -234,6 +296,7 @@ test('a privacy signal blocks ads outright, over a stored decline', () => {
   assert.equal(ads.adsMode(), 'none');
   assert.deepEqual(scripts, []);
   assert.equal(window.adsbygoogle, undefined, 'not even the queue is created');
+  assert.deepEqual(consentCommands(window), []);
 });
 
 test('an unconfigured build disables ads silently after a single warning', () => {
@@ -254,6 +317,7 @@ test('an unconfigured build disables the non-personalised path too', () => {
   assert.equal(ads.loadAds(), false, 'but there is no publisher to serve against');
   assert.deepEqual(scripts, []);
   assert.equal(window.adsbygoogle, undefined);
+  assert.deepEqual(consentCommands(window), [], 'nothing to consent to, nothing said');
   assert.equal(linesSaying('[ads]').length, 1);
 });
 

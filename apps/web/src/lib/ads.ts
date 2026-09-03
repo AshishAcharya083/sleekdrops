@@ -10,12 +10,19 @@
  * The gate has three outcomes, one per `AdsMode`:
  *
  *  - **granted** - personalised ads. The partner script loads as it ships.
- *  - **declined** - non-personalised ads. The partner script loads with
- *    personalisation switched off for the whole page (`requestNonPersonalizedAds`,
- *    the flag the partner reads off its own queue), so the visitor sees contextual
- *    ads only and nothing is used to profile them. This is the product decision
- *    for a visitor who answered the prompt with "no": ads still pay for the site,
- *    but not with their profile.
+ *  - **declined** - non-personalised ads, served without advertising storage. The
+ *    partner script loads only after this page has told Google, in the Consent
+ *    Mode v2 form its tags read, that advertising consent is denied
+ *    (`ad_storage`, `ad_user_data`, `ad_personalization`), which is what asks the
+ *    partner for its cookieless limited-ads serving; personalisation is switched
+ *    off for the whole page on top of that (`requestNonPersonalizedAds`, the flag
+ *    the partner reads off its own queue). A visitor who answered the prompt with
+ *    "no" therefore still sees ads chosen from the page they are reading, but
+ *    nothing is written to their device for advertising and nothing is used to
+ *    profile them. The personalisation flag alone would not achieve that: it
+ *    suppresses profiling while leaving the partner free to write its own
+ *    frequency-capping and fraud storage, which is storage a declining visitor
+ *    refused.
  *  - **blocked or unanswered** - nothing is fetched, injected or evaluated. A
  *    GPC/DNT signal is a legal opt-out of the whole category rather than a
  *    preference about personalisation, and an unanswered prompt is not a decision
@@ -52,9 +59,16 @@ const ADS_SCRIPT_SRC = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoo
  */
 export type AdsMode = 'personalised' | 'non-personalised' | 'none';
 
-/** What this document has already done: loaded the partner, and complained. */
+/** What Google has been told about the advertising purpose, in its own words. */
+type AdConsentState = 'granted' | 'denied';
+
+/**
+ * What this document has already done: loaded the partner, told Google what the
+ * visitor allows (null until it has been told anything), and complained.
+ */
 interface AdsState {
   loaded: boolean;
+  signalled: AdConsentState | null;
   warned: boolean;
 }
 
@@ -69,6 +83,17 @@ interface AdsHost {
  */
 interface AdsQueue extends Array<unknown> {
   requestNonPersonalizedAds?: number;
+}
+
+/**
+ * The queue every Google tag on the page reads its consent state off, and the
+ * shim that writes to it. Shared with `./analytics`, which builds the identical
+ * pair for GA4 - either module may be the one that creates them, so both create
+ * them the same way and neither replaces what it finds.
+ */
+interface GoogleTagHost {
+  dataLayer?: unknown[];
+  gtag?: (...args: unknown[]) => void;
 }
 
 declare global {
@@ -89,7 +114,7 @@ const buildHost: AdsHost = {};
  */
 function adsState(): AdsState {
   const host: AdsHost = typeof window === 'undefined' ? buildHost : window;
-  return (host.__sdAds ??= { loaded: false, warned: false });
+  return (host.__sdAds ??= { loaded: false, signalled: null, warned: false });
 }
 
 /** The stored consent record, or null when there is none or storage is blocked. */
@@ -151,6 +176,41 @@ function requestNonPersonalizedAds(): void {
 }
 
 /**
+ * Tell Google what this visitor allows the advertising purpose to do, in the
+ * Consent Mode v2 vocabulary its tags read.
+ *
+ * This is the storage gate, and it is why a decline can be served ads at all: a
+ * denied `ad_storage` is what asks the partner to serve without reading or
+ * writing cookies and device storage, where the personalisation flag next to it
+ * only governs what the ad is chosen from. Both are set before the tag is
+ * injected, because a tag that has already started may have written by the time a
+ * later signal reaches it.
+ *
+ * Said once per state rather than once per unit: the first signal in a document
+ * is the `default` the tag boots with, and a decision changed from the footer
+ * after that is an `update` - the command Google defines for a consent state that
+ * moves while a tag is running. Four units asking four times says nothing four
+ * times.
+ */
+function signalAdConsent(mode: AdsMode): void {
+  const state = adsState();
+  const consent: AdConsentState = mode === 'personalised' ? 'granted' : 'denied';
+  if (state.signalled === consent) return;
+
+  const host = window as Window & GoogleTagHost;
+  const gtag = (host.gtag ??= function gtag(): void {
+    (host.dataLayer ??= []).push(arguments);
+  });
+  const command = state.signalled === null ? 'default' : 'update';
+  state.signalled = consent;
+  gtag('consent', command, {
+    ad_storage: consent,
+    ad_user_data: consent,
+    ad_personalization: consent,
+  });
+}
+
+/**
  * Load the ad partner for this document, in the mode the visitor's decision
  * allows.
  *
@@ -180,8 +240,11 @@ export function loadAds(): boolean {
     return false;
   }
 
-  // Re-applied on every call, not just the first, so a grant withdrawn mid-page
-  // leaves the flag standing for anything that reads it later.
+  // Re-applied on every call, not just the first, so a decision changed mid-page
+  // reaches the tag - and, for a withdrawal, leaves the personalisation flag
+  // standing for anything that reads it later. Both are no-ops once they say what
+  // they already said.
+  signalAdConsent(mode);
   if (mode === 'non-personalised') requestNonPersonalizedAds();
 
   const state = adsState();

@@ -148,6 +148,25 @@ const ingestInto =
 /** The `<script>` elements a page load appended to `document.head`. */
 type AppendedScript = { src?: string; async?: boolean };
 
+/** The two queues Google's tags read from this page: the ad tag's, and gtag's. */
+interface GoogleTagWindow {
+  adsbygoogle?: { requestNonPersonalizedAds?: number };
+  dataLayer?: unknown[];
+}
+
+/**
+ * The advertising consent state this page last gave Google, in Consent Mode v2
+ * terms - `undefined` while it has said nothing. This is what decides whether the
+ * ad partner may write to the device, so it is what a decline has to move.
+ */
+function adConsent(window: GoogleTagWindow): unknown {
+  return (window.dataLayer ?? [])
+    .map((entry) => Array.from(entry as ArrayLike<unknown>))
+    .filter((args) => args[0] === 'consent')
+    .map((args) => args[2] as Record<string, unknown>)
+    .at(-1)?.ad_storage;
+}
+
 /**
  * Open a document on `path` in `tab`: a fresh `window` - and so, for a correctly
  * scoped module, a fresh analytics state - over the tab's storage, plus the
@@ -159,7 +178,7 @@ type AppendedScript = { src?: string; async?: boolean };
 function loadPage(
   tab: Tab,
   path: string,
-): { scripts: AppendedScript[]; window: { adsbygoogle?: { requestNonPersonalizedAds?: number } } } {
+): { scripts: AppendedScript[]; window: GoogleTagWindow } {
   const localStorage = storageOf(tab.local);
   const sessionStorage = storageOf(tab.session);
   const scripts: AppendedScript[] = [];
@@ -612,7 +631,8 @@ test('the ad partner is personalised only for a visitor who saved the advertisin
   // The consent dialog's own path, end to end: its Save writes through
   // setConsent() here, and a page unit then asks `./ads` - which never imports
   // this module - what it may show. Only an explicit advertising opt-in gets
-  // personalised ads; a decline still gets the partner, with personalisation off.
+  // personalised ads or the ad storage that goes with them; a decline still gets
+  // the partner, with personalisation and storage both denied.
   const tab = openTab();
   const first = loadPage(tab, '/');
 
@@ -623,6 +643,7 @@ test('the ad partner is personalised only for a visitor who saved the advertisin
   assert.equal(ads.loadAds(), true);
   assert.equal(adPartnerTags(first.scripts).length, 1);
   assert.equal(first.window.adsbygoogle?.requestNonPersonalizedAds, 1);
+  assert.equal(adConsent(first.window), 'denied', 'and store nothing on the device');
 
   // The dialog saved with the Advertising switch on, on the page after it.
   const opted = loadPage(tab, '/deals');
@@ -631,6 +652,7 @@ test('the ad partner is personalised only for a visitor who saved the advertisin
   assert.equal(ads.loadAds(), true);
   assert.equal(adPartnerTags(opted.scripts).length, 1, 'the opt-in is what personalises');
   assert.equal(opted.window.adsbygoogle?.requestNonPersonalizedAds, undefined);
+  assert.equal(adConsent(opted.window), 'granted');
 
   // The dialog saved with the Advertising switch turned back off: an explicit
   // decline written through the Save path rather than through Decline all, which
@@ -641,6 +663,7 @@ test('the ad partner is personalised only for a visitor who saved the advertisin
   assert.equal(ads.loadAds(), true);
   assert.equal(adPartnerTags(withdrawn.scripts).length, 1);
   assert.equal(withdrawn.window.adsbygoogle?.requestNonPersonalizedAds, 1);
+  assert.equal(adConsent(withdrawn.window), 'denied', 'the storage goes with it');
 
   // "Decline all", on the page after that: contextual again, never personalised.
   const declined = loadPage(tab, '/about');
@@ -648,6 +671,7 @@ test('the ad partner is personalised only for a visitor who saved the advertisin
   assert.equal(ads.isAdsGranted(), false);
   assert.equal(ads.loadAds(), true);
   assert.equal(declined.window.adsbygoogle?.requestNonPersonalizedAds, 1);
+  assert.equal(adConsent(declined.window), 'denied', 'Decline all denies ad storage too');
 });
 
 test('a consent record written under the previous policy re-prompts and keeps buffering', async () => {

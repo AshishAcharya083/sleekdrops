@@ -87,11 +87,12 @@ It also validates the value first - anything that is not `ca-pub-<digits>` fails
 The site build applies the same check to the same value (`publisherId()` in `src/lib/ads-env.ts`): a publisher id the generator refuses is one the page will not ask the partner to serve against either, so the two halves of the setting cannot disagree.
 
 Ads are additionally gated on consent at runtime, so a configured publisher id on its own serves nothing.
-The partner script is requested only once the visitor has answered the consent banner, and it is personalised only for one who switched **Advertising** on in the consent dialog: a decline loads it with personalisation off, and an unanswered banner or a GPC/DNT signal loads nothing at all.
+The partner script is requested only once the visitor has answered the consent banner, and it is personalised only for one who switched **Advertising** on in the consent dialog.
+A decline loads it with personalisation off *and* with advertising storage denied through Google Consent Mode v2 (`ad_storage`, `ad_user_data`, `ad_personalization`), which is what lets a declining visitor be served contextual ads without an advertising cookie being placed; an unanswered banner or a GPC/DNT signal loads nothing at all.
 
-### Content-Security-Policy
+### Response headers
 
-`apps/web/public/_headers` sets one Content-Security-Policy for every route Cloudflare Pages serves, and Astro copies it to the site root like the rest of `public/`.
+`apps/web/public/_headers` sets the response headers for every route Cloudflare Pages serves - a Content-Security-Policy, plus `X-Content-Type-Options`, `Referrer-Policy` and `Strict-Transport-Security` - and Astro copies the file to the site root like the rest of `public/`.
 It exists because the ad tag is the first third-party script this site executes: the `script-src` allowlist is what keeps a hijacked tag from pulling further code in from anywhere it likes.
 Adding a third-party script (a new analytics tool, another ad network) or an embed (a video, a map) means adding its origin there in the same change - the browser blocks anything not listed, and the feature then silently does nothing.
 

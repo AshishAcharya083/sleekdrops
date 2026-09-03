@@ -17,6 +17,17 @@
 #     AdSense (ads.ts) are the only two script origins today, and the ad units are
 #     the only frames.
 #
+# The three headers under the policy are the rest of the baseline, and are here
+# for the same reason the policy is - the ad tag puts a third-party frame on the
+# page: nosniff stops a response being executed as a type it did not declare,
+# Referrer-Policy keeps the path of the page a visitor is reading out of the
+# request that fetches an ad (the origin still goes, which is what the partner
+# needs), and HSTS keeps this site off plain HTTP for a year. The HSTS is
+# deliberately narrow: no `includeSubDomains`, because sibling hosts
+# (images.sleekdrops.com, go.sleekdrops.com) are served by other configs this
+# file knows nothing about and a year is a long time to break one, and no
+# `preload`, because that is a listing that cannot be withdrawn quickly.
+#
 # 'unsafe-inline' is in script-src because the theme bootstrap in SEOHead.astro
 # and the JSON-LD blocks in JsonLd.astro are inline, and a static host cannot
 # mint a per-response nonce. connect-src is left at any https origin because the
@@ -26,3 +37,6 @@
 # widened that way.
 /*
   Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://*.google-analytics.com https://pagead2.googlesyndication.com https://*.googlesyndication.com https://*.googleadservices.com https://*.googletagservices.com https://*.doubleclick.net https://adservice.google.com https://www.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; frame-src https://*.googlesyndication.com https://*.doubleclick.net https://www.google.com; connect-src 'self' https:
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=31536000
