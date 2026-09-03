@@ -155,16 +155,17 @@ interface GoogleTagWindow {
 }
 
 /**
- * The advertising consent state this page last gave Google, in Consent Mode v2
- * terms - `undefined` while it has said nothing. This is what decides whether the
- * ad partner may write to the device, so it is what a decline has to move.
+ * Every `gtag('consent', …)` command queued on this page. A Consent Mode signal
+ * is inert until a Google tag library drains `dataLayer`, and this site loads one
+ * only behind the analytics grant - so an ad-storage denial pushed there proves
+ * nothing about what the ad partner was allowed to do. The ads gate has to hold
+ * on which scripts it requested, and this is here to assert it never leaned on
+ * the queue instead.
  */
-function adConsent(window: GoogleTagWindow): unknown {
+function queuedConsentSignals(window: GoogleTagWindow): unknown[] {
   return (window.dataLayer ?? [])
     .map((entry) => Array.from(entry as ArrayLike<unknown>))
-    .filter((args) => args[0] === 'consent')
-    .map((args) => args[2] as Record<string, unknown>)
-    .at(-1)?.ad_storage;
+    .filter((args) => args[0] === 'consent');
 }
 
 /**
@@ -627,51 +628,53 @@ test('the record the banner writes is the record the ads gate reads back', () =>
   assert.equal(chrome.consentStatus(), 'denied', 'an ads grant is not an analytics grant');
 });
 
-test('the ad partner is personalised only for a visitor who saved the advertising opt-in', () => {
+test('the ad partner is loaded only for a visitor who saved the advertising opt-in', () => {
   // The consent dialog's own path, end to end: its Save writes through
   // setConsent() here, and a page unit then asks `./ads` - which never imports
-  // this module - what it may show. Only an explicit advertising opt-in gets
-  // personalised ads or the ad storage that goes with them; a decline still gets
-  // the partner, with personalisation and storage both denied.
+  // this module - what it may show. Only an explicit advertising opt-in gets the
+  // partner script at all: the tag writes its own cookies and device storage as
+  // soon as it runs, so no other state may fetch it.
   const tab = openTab();
   const first = loadPage(tab, '/');
 
   // "Accept analytics" on the banner: an analytics opt-in is not an ads opt-in,
-  // so the units on this page are contextual.
+  // so no ad tag is requested on this page - and the analytics grant, which is
+  // what loads gtag.js, does not turn one into the other.
   chrome.grantConsent();
   assert.equal(ads.isAdsGranted(), false);
-  assert.equal(ads.loadAds(), true);
-  assert.equal(adPartnerTags(first.scripts).length, 1);
+  assert.equal(ads.loadAds(), false);
+  assert.deepEqual(adPartnerTags(first.scripts), [], 'no ad tag on an analytics-only grant');
   assert.equal(first.window.adsbygoogle?.requestNonPersonalizedAds, 1);
-  assert.equal(adConsent(first.window), 'denied', 'and store nothing on the device');
+  assert.deepEqual(
+    queuedConsentSignals(first.window),
+    [],
+    'and the gate does not rest on a Consent Mode signal',
+  );
 
   // The dialog saved with the Advertising switch on, on the page after it.
   const opted = loadPage(tab, '/deals');
   chrome.setConsent({ analytics: 'granted', ads: 'granted' });
   assert.equal(ads.isAdsGranted(), true);
   assert.equal(ads.loadAds(), true);
-  assert.equal(adPartnerTags(opted.scripts).length, 1, 'the opt-in is what personalises');
+  assert.equal(adPartnerTags(opted.scripts).length, 1, 'the opt-in is what loads the partner');
   assert.equal(opted.window.adsbygoogle?.requestNonPersonalizedAds, undefined);
-  assert.equal(adConsent(opted.window), 'granted');
 
   // The dialog saved with the Advertising switch turned back off: an explicit
-  // decline written through the Save path rather than through Decline all, which
-  // takes personalisation away again without taking the ads.
+  // decline written through the Save path rather than through Decline all.
   const withdrawn = loadPage(tab, '/guides');
   chrome.setConsent({ analytics: 'granted', ads: 'denied' });
   assert.equal(ads.isAdsGranted(), false, 'a saved decline is a decline');
-  assert.equal(ads.loadAds(), true);
-  assert.equal(adPartnerTags(withdrawn.scripts).length, 1);
+  assert.equal(ads.loadAds(), false);
+  assert.deepEqual(adPartnerTags(withdrawn.scripts), [], 'the tag goes with the opt-in');
   assert.equal(withdrawn.window.adsbygoogle?.requestNonPersonalizedAds, 1);
-  assert.equal(adConsent(withdrawn.window), 'denied', 'the storage goes with it');
 
-  // "Decline all", on the page after that: contextual again, never personalised.
+  // "Decline all", on the page after that: no partner either way.
   const declined = loadPage(tab, '/about');
   banner.denyConsent();
   assert.equal(ads.isAdsGranted(), false);
-  assert.equal(ads.loadAds(), true);
-  assert.equal(declined.window.adsbygoogle?.requestNonPersonalizedAds, 1);
-  assert.equal(adConsent(declined.window), 'denied', 'Decline all denies ad storage too');
+  assert.equal(ads.loadAds(), false);
+  assert.deepEqual(adPartnerTags(declined.scripts), []);
+  assert.deepEqual(queuedConsentSignals(declined.window), []);
 });
 
 test('a consent record written under the previous policy re-prompts and keeps buffering', async () => {
