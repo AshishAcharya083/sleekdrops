@@ -10,7 +10,13 @@
  * is hidden until the client script runs, so the static HTML never flashes a
  * prompt at a visitor who has already chosen.
  */
-const policyDate = '28 June 2026';
+/**
+ * The date the policy-update surface cites, which has to be the "Last updated"
+ * date `src/pages/privacy.astro` publishes: the surface exists to send the
+ * visitor there, and a date the page does not carry reads as the wrong policy.
+ * Move the two together whenever POLICY_VERSION is bumped.
+ */
+const policyDate = 'September 3, 2026';
 ---
 
 <div class="sd-consent-root" data-consent-root hidden>
@@ -33,6 +39,11 @@ const policyDate = '28 June 2026';
       read, nothing more. No analytics run until you say yes, and we never
       collect your email address, your searches, or anything you type.
       <a href="/privacy">Read our Privacy Policy</a>.
+    </p>
+    <p class="sd-consent__body sd-consent__body--ads">
+      Advertising is a separate choice: ads from Google AdSense stay switched off,
+      and no ad script is loaded at all, unless you turn them on under
+      <strong>Customize</strong>.
     </p>
     <div class="sd-consent__actions">
       <button type="button" class="sd-link" data-action="customize">Customize</button>
@@ -57,7 +68,7 @@ const policyDate = '28 June 2026';
     </div>
     <p class="sd-consent__body">
       We saw a Global Privacy Control / Do-Not-Track signal from your browser, so
-      analytics stay off automatically — nothing to do.
+      analytics and advertising stay off automatically — nothing to do.
     </p>
     <div class="sd-consent__actions">
       <button type="button" class="sd-link" data-action="customize">Manage anyway</button>
@@ -79,7 +90,7 @@ const policyDate = '28 June 2026';
         <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
       </button>
     </div>
-    <p class="sd-prefs__sub">Choose what Sleekdrops may measure. You can change this any time from <strong>Privacy preferences</strong> in the footer.</p>
+    <p class="sd-prefs__sub">Choose what Sleekdrops may measure and what it may show you. You can change this any time from <strong>Privacy preferences</strong> in the footer.</p>
 
     <div class="pref-row">
       <div class="pref-row__text">
@@ -99,6 +110,17 @@ const policyDate = '28 June 2026';
       </div>
       <label class="sd-switch">
         <input type="checkbox" data-analytics-switch aria-label="Anonymous analytics" />
+        <span class="sd-switch__track"><span class="sd-switch__thumb"></span></span>
+      </label>
+    </div>
+
+    <div class="pref-row">
+      <div class="pref-row__text">
+        <span class="pref-row__title">Advertising</span>
+        <p class="pref-row__help">Lets <strong>Google AdSense</strong> show ads on this site, which sets its own cookies and browser storage and may personalise what you see using your activity here and on other sites. Off by default: with this switch off no ad script is requested at all. You can withdraw it here at any time.</p>
+      </div>
+      <label class="sd-switch">
+        <input type="checkbox" data-ads-switch aria-label="Advertising" />
         <span class="sd-switch__track"><span class="sd-switch__thumb"></span></span>
       </label>
     </div>
@@ -168,6 +190,7 @@ const policyDate = '28 June 2026';
     overflow-wrap: break-word;
   }
   .sd-consent__body[data-policy-note] { margin-bottom: var(--s-2); color: var(--muted); }
+  .sd-consent__body--ads { margin-top: var(--s-3); color: var(--muted); }
   .sd-consent__body[hidden] { display: none; }
 
   .sd-consent__actions {
@@ -387,13 +410,15 @@ const policyDate = '28 June 2026';
 </style>
 
 <script>
-  import { boot, consentStatus, grantConsent, denyConsent } from '@lib/analytics';
+  import { boot, consentStatus, grantConsent, denyConsent, setConsent } from '@lib/analytics';
+  import { isAdsGranted } from '@lib/ads';
   import { createConsentSurface } from '@lib/consent-surface';
 
   const root = document.querySelector<HTMLElement>('[data-consent-root]');
   if (root) {
     const prefsPanel = root.querySelector<HTMLElement>('[data-surface="prefs"]');
     const analyticsSwitch = root.querySelector<HTMLInputElement>('[data-analytics-switch]');
+    const adsSwitch = root.querySelector<HTMLInputElement>('[data-ads-switch]');
     const policyPill = root.querySelector<HTMLElement>('[data-policy-pill]');
     const policyNote = root.querySelector<HTMLElement>('[data-policy-note]');
 
@@ -434,9 +459,12 @@ const policyDate = '28 June 2026';
         gpc: root.querySelector<HTMLElement>('[data-surface="gpc"]'),
         prefs: prefsPanel,
       },
-      analyticsSwitch,
+      switches: { analytics: analyticsSwitch, ads: adsSwitch },
       channel: document,
-      consentStatus,
+      // Each category answers for itself: analytics from the decision this
+      // document is enforcing, advertising from the stored record @lib/ads reads.
+      isGranted: (category) =>
+        category === 'ads' ? isAdsGranted() : consentStatus() === 'granted',
       activeElement: () => document.activeElement as HTMLElement | null,
       onPrefsOpened: () => {
         document.addEventListener('keydown', onPrefsKey);
@@ -464,8 +492,10 @@ const policyDate = '28 June 2026';
           surface.closePrefs();
           break;
         case 'save':
-          if (analyticsSwitch?.checked) grantConsent();
-          else denyConsent();
+          setConsent({
+            analytics: analyticsSwitch?.checked ? 'granted' : 'denied',
+            ads: adsSwitch?.checked ? 'granted' : 'denied',
+          });
           surface.dismiss();
           break;
         case 'decline-all':

@@ -78,6 +78,20 @@ jobs:
           # feature falls back to its code-side default.
           PUBLIC_DEVTEAM_FLAGS_HOST: ${{ vars.DEVTEAM_FLAGS_HOST }}
           PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY: ${{ secrets.DEVTEAM_FLAGS_CLIENT_KEY }}
+          # Google AdSense - publisher id (ca-pub-...) + one slot id per placement.
+          # All public: they ship in the ad markup every visitor downloads, so they
+          # are repo *variables* rather than secrets. Held in repo settings for the
+          # same reason as the keys above - they are minted per environment in the
+          # AdSense console, and a value from the wrong environment reports its
+          # revenue against the wrong property while the page looks healthy.
+          #
+          # An empty publisher id disables ads silently: no partner script, no
+          # ads.txt, nothing to consent to.
+          PUBLIC_ADSENSE_CLIENT: ${{ vars.ADSENSE_CLIENT }}
+          PUBLIC_ADSENSE_SLOT_ARTICLE_MID: ${{ vars.ADSENSE_SLOT_ARTICLE_MID }}
+          PUBLIC_ADSENSE_SLOT_ARTICLE_END: ${{ vars.ADSENSE_SLOT_ARTICLE_END }}
+          PUBLIC_ADSENSE_SLOT_SIDEBAR: ${{ vars.ADSENSE_SLOT_SIDEBAR }}
+          PUBLIC_ADSENSE_SLOT_FEED: ${{ vars.ADSENSE_SLOT_FEED }}
           # Develop is a code-only preview rendered against the SAME live
           # editorial content as production. Content lives in Cloudflare D1,
           # so the build needs the same D1 env vars as prod.
