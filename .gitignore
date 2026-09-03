@@ -7,6 +7,9 @@ dist/
 .astro/
 *.tsbuildinfo
 
+# wrangler's local state (`wrangler pages dev`, used to serve dist as Pages does)
+.wrangler/
+
 # apps/web — generated at build time, never commit
 apps/web/public/_redirects
 apps/web/public/ads.txt

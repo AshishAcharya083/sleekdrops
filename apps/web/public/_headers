@@ -1,0 +1,28 @@
+# Response headers Cloudflare Pages adds to every route of this build.
+# Copied to the site root verbatim by Astro, like everything else in public/.
+#
+# The one policy here is the Content-Security-Policy, added with the ad partner:
+# the AdSense tag (src/lib/ads.ts) is the first third-party script this site
+# executes, and it runs in this document with full access to it. The allowlist
+# below is what stops a compromised or hijacked tag from pulling further code in
+# from anywhere it likes. Ad creatives themselves are cross-origin iframes with
+# documents - and policies - of their own, so widening this for them is neither
+# needed nor possible.
+#
+# Editing rules:
+#   - a NEW third-party script host has to be added to script-src here, and a new
+#     embed (a video, a map) to frame-src, or the browser blocks it and the
+#     feature silently does nothing;
+#   - keep it in step with what the code actually loads: GA4 (analytics.ts) and
+#     AdSense (ads.ts) are the only two script origins today, and the ad units are
+#     the only frames.
+#
+# 'unsafe-inline' is in script-src because the theme bootstrap in SEOHead.astro
+# and the JSON-LD blocks in JsonLd.astro are inline, and a static host cannot
+# mint a per-response nonce. connect-src is left at any https origin because the
+# analytics and flag-delivery hosts are per-environment build settings
+# (PUBLIC_DEVTEAM_ANALYTICS_HOST, PUBLIC_DEVTEAM_FLAGS_HOST) that this static
+# file cannot know; script-src, which is what governs code execution, is not
+# widened that way.
+/*
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://*.google-analytics.com https://pagead2.googlesyndication.com https://*.googlesyndication.com https://*.googleadservices.com https://*.googletagservices.com https://*.doubleclick.net https://adservice.google.com https://www.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; frame-src https://*.googlesyndication.com https://*.doubleclick.net https://www.google.com; connect-src 'self' https:

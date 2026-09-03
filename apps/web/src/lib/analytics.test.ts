@@ -156,10 +156,7 @@ type AppendedScript = { src?: string; async?: boolean };
  * Called again on the same tab to model the next page load: a redirect's
  * destination, a reload, a navigation to another page of the site.
  */
-function loadPage(
-  tab: Tab,
-  path: string,
-): { scripts: AppendedScript[]; window: { adsbygoogle?: { requestNonPersonalizedAds?: number } } } {
+function loadPage(tab: Tab, path: string): { scripts: AppendedScript[] } {
   const localStorage = storageOf(tab.local);
   const sessionStorage = storageOf(tab.session);
   const scripts: AppendedScript[] = [];
@@ -193,7 +190,7 @@ function loadPage(
     fetch: ingestInto(tab),
   });
   navigateTo(path);
-  return { scripts, window };
+  return { scripts };
 }
 
 /** Point `location` at `path` without replacing the document, as history.pushState does. */
@@ -608,36 +605,39 @@ test('the record the banner writes is the record the ads gate reads back', () =>
   assert.equal(chrome.consentStatus(), 'denied', 'an ads grant is not an analytics grant');
 });
 
-test('the ad partner is personalised only for a visitor who saved the advertising opt-in', () => {
+test('the ad partner loads only for a visitor who saved the advertising opt-in', () => {
   // The consent dialog's own path, end to end: its Save writes through
   // setConsent() here, and a page unit then asks `./ads` - which never imports
-  // this module - what it may show. Only an explicit advertising opt-in gets
-  // personalised ads; a decline still gets the partner, with personalisation off.
+  // this module - whether it may show anything. Nothing but an explicit
+  // advertising opt-in may put the partner script on the page, because that
+  // script reads and writes device storage of its own as soon as it runs.
   const tab = openTab();
-  const first = loadPage(tab, '/');
+  const { scripts } = loadPage(tab, '/');
 
-  // "Accept analytics" on the banner: an analytics opt-in is not an ads opt-in,
-  // so the units on this page are contextual.
+  // "Accept analytics" on the banner: an analytics opt-in is not an ads opt-in.
   chrome.grantConsent();
   assert.equal(ads.isAdsGranted(), false);
-  assert.equal(ads.loadAds(), true);
-  assert.equal(adPartnerTags(first.scripts).length, 1);
-  assert.equal(first.window.adsbygoogle?.requestNonPersonalizedAds, 1);
+  assert.equal(ads.loadAds(), false);
+  assert.deepEqual(adPartnerTags(scripts), []);
 
-  // The dialog saved with the Advertising switch on, on the page after it.
-  const opted = loadPage(tab, '/deals');
+  // The dialog saved with the Advertising switch left off: the Save path, which
+  // writes an explicit ads decline rather than going through Decline all.
+  chrome.setConsent({ analytics: 'granted', ads: 'denied' });
+  assert.equal(ads.isAdsGranted(), false);
+  assert.equal(ads.loadAds(), false, 'a saved decline is a decline');
+  assert.deepEqual(adPartnerTags(scripts), []);
+
+  // The dialog saved with the Advertising switch on.
   chrome.setConsent({ analytics: 'granted', ads: 'granted' });
   assert.equal(ads.isAdsGranted(), true);
   assert.equal(ads.loadAds(), true);
-  assert.equal(adPartnerTags(opted.scripts).length, 1, 'the opt-in is what personalises');
-  assert.equal(opted.window.adsbygoogle?.requestNonPersonalizedAds, undefined);
+  assert.equal(adPartnerTags(scripts).length, 1, 'the opt-in is what loads the partner');
 
-  // "Decline all", on the page after that: contextual again, never personalised.
-  const declined = loadPage(tab, '/guides');
+  // "Decline all", on the page after it: no partner script on that document.
+  const next = loadPage(tab, '/deals');
   banner.denyConsent();
-  assert.equal(ads.isAdsGranted(), false);
-  assert.equal(ads.loadAds(), true);
-  assert.equal(declined.window.adsbygoogle?.requestNonPersonalizedAds, 1);
+  assert.equal(ads.loadAds(), false);
+  assert.deepEqual(adPartnerTags(next.scripts), []);
 });
 
 test('a consent record written under the previous policy re-prompts and keeps buffering', async () => {
