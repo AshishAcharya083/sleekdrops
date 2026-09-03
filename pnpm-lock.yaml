@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@getdevteam/analytics-web@0.3.1':
-    hash: 6a7b3e1852a21b8edbb6befe96e036a5e99aea7ad8d8bf14ef5cc6511ac05233
+    hash: e245604e7d4588930426d120c817e34c51d41a60cb9103a9739d160aa24f22ee
     path: patches/@getdevteam__analytics-web@0.3.1.patch
 
 importers:
@@ -100,7 +100,7 @@ importers:
         version: 3.2.1
       '@getdevteam/analytics-web':
         specifier: 0.3.1
-        version: 0.3.1(patch_hash=6a7b3e1852a21b8edbb6befe96e036a5e99aea7ad8d8bf14ef5cc6511ac05233)
+        version: 0.3.1(patch_hash=e245604e7d4588930426d120c817e34c51d41a60cb9103a9739d160aa24f22ee)
       '@growthbook/growthbook':
         specifier: ^1.6.5
         version: 1.6.5
@@ -5744,7 +5744,7 @@ snapshots:
     dependencies:
       '@getdevteam/analytics-core': 0.2.0
 
-  '@getdevteam/analytics-web@0.3.1(patch_hash=6a7b3e1852a21b8edbb6befe96e036a5e99aea7ad8d8bf14ef5cc6511ac05233)':
+  '@getdevteam/analytics-web@0.3.1(patch_hash=e245604e7d4588930426d120c817e34c51d41a60cb9103a9739d160aa24f22ee)':
     dependencies:
       '@getdevteam/analytics-core': 0.3.1
       html-to-image: 1.11.13
