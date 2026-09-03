@@ -16,3 +16,6 @@ minimumReleaseAgeExclude:
   - wrangler@4.93.1
   - '@getdevteam/analytics-core@0.2.0'
   - '@getdevteam/analytics-web@0.2.0'
+
+patchedDependencies:
+  '@getdevteam/analytics-web@0.3.1': patches/@getdevteam__analytics-web@0.3.1.patch
