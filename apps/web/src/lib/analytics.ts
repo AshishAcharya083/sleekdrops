@@ -253,6 +253,14 @@ function ensureGa(): void {
 }
 
 /**
+ * The heading of the feedback dialog. It is site copy, so it lives here and
+ * reaches the widget through the SDK's own `feedback.title` option rather than
+ * through the layout patch in patches/: the patch goes away the day the SDK
+ * releases the wide modal, and the wording must not go with it.
+ */
+const FEEDBACK_TITLE = 'Send feedback by drawing or describing';
+
+/**
  * The document's DevTeam client, created on the first call and shared by every
  * later one. Creating a client is what opens a DevTeam session and so emits
  * `$session_start`, which is why the guard is document-scoped rather than
@@ -261,7 +269,7 @@ function ensureGa(): void {
 function ensureDevteam(): void {
   const s = scope();
   if (s.client) return;
-  const { key, host, feedback } = analyticsEnv();
+  const { key, host, feedback: allowUserFeedback } = analyticsEnv();
   if (!key) {
     serverLog('warn', 'DevTeam analytics NOT configured - PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY is empty');
     return;
@@ -280,7 +288,8 @@ function ensureDevteam(): void {
       // visitor circle what is wrong and sends it to the analytics project. It
       // appears only after consent, because this is the only place a client is
       // created and the grant path is the only caller.
-      allowUserFeedback: feedback,
+      allowUserFeedback,
+      feedback: { title: FEEDBACK_TITLE },
       onError: (error) => console.error('[analytics] DevTeam SDK error:', error),
     }),
   );

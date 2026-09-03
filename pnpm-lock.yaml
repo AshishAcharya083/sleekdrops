@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@getdevteam/analytics-web@0.3.1':
+    hash: 928ca701c591591c093b6357beea76df175306c6fbb017f79b415287dc574e50
+    path: patches/@getdevteam__analytics-web@0.3.1.patch
+
 importers:
 
   .: {}
@@ -95,7 +100,7 @@ importers:
         version: 3.2.1
       '@getdevteam/analytics-web':
         specifier: 0.3.1
-        version: 0.3.1
+        version: 0.3.1(patch_hash=928ca701c591591c093b6357beea76df175306c6fbb017f79b415287dc574e50)
       '@growthbook/growthbook':
         specifier: ^1.6.5
         version: 1.6.5
@@ -5739,7 +5744,7 @@ snapshots:
     dependencies:
       '@getdevteam/analytics-core': 0.2.0
 
-  '@getdevteam/analytics-web@0.3.1':
+  '@getdevteam/analytics-web@0.3.1(patch_hash=928ca701c591591c093b6357beea76df175306c6fbb017f79b415287dc574e50)':
     dependencies:
       '@getdevteam/analytics-core': 0.3.1
       html-to-image: 1.11.13

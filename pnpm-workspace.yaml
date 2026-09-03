@@ -16,3 +16,10 @@ minimumReleaseAgeExclude:
   - wrangler@4.93.1
   - '@getdevteam/analytics-core@0.2.0'
   - '@getdevteam/analytics-web@0.2.0'
+
+# The published @getdevteam/analytics-web 0.3.1 draws the feedback dialog as a
+# single 560 px column, which shrinks the page screenshot the visitor annotates to
+# a thumbnail on desktop. This patch carries the unreleased wide layout. See
+# patches/README.md.
+patchedDependencies:
+  '@getdevteam/analytics-web@0.3.1': patches/@getdevteam__analytics-web@0.3.1.patch

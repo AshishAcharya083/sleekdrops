@@ -17,6 +17,10 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/agent/package.json apps/agent/
 COPY apps/admin/package.json apps/admin/
 COPY apps/web/package.json apps/web/
+# pnpm hashes every patch registered in pnpm-workspace.yaml before it resolves
+# anything, so the file has to be here even though the agent's filtered graph
+# does not contain the patched package. See patches/README.md.
+COPY patches patches/
 RUN pnpm install --frozen-lockfile --filter @sleekdrops/agent...
 
 COPY apps/agent apps/agent
