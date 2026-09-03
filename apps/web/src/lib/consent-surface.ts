@@ -15,7 +15,7 @@
  */
 
 import { onOpenConsentPreferences } from './consent-preferences.ts';
-import type { ConsentPrompt, ConsentStatus } from './consent.ts';
+import { CONSENT_CATEGORIES, type ConsentCategory, type ConsentPrompt } from './consent.ts';
 
 export type SurfaceName = 'banner' | 'gpc' | 'prefs';
 
@@ -32,17 +32,26 @@ export interface Focusable {
   focus(): void;
 }
 
+/** A category toggle in the preferences dialog. */
+export interface Switchable {
+  checked: boolean;
+}
+
 export interface ConsentSurfaceDom {
   /** The island root, hidden whenever no surface is on screen. */
   root: Hidable & { contains(node: unknown): boolean };
   /** The surfaces the root holds; a missing one is simply never shown. */
   surfaces: Record<SurfaceName, Hidable | null>;
-  /** The analytics toggle in the preferences dialog, pre-filled on open. */
-  analyticsSwitch: { checked: boolean } | null;
+  /**
+   * One toggle per non-essential category, pre-filled on open. Keyed by category
+   * so a category added to `./consent` cannot be silently left off the dialog: a
+   * missing key is simply never shown, and the type says which ones exist.
+   */
+  switches: Partial<Record<ConsentCategory, Switchable | null>>;
   /** Where a request to reopen the dialog arrives - the document, in the browser. */
   channel: EventTarget;
-  /** The consent decision in force, or null while the visitor has not made one. */
-  consentStatus: () => ConsentStatus | null;
+  /** Whether one category is granted right now, for that pre-fill. */
+  isGranted: (category: ConsentCategory) => boolean;
   /** What holds focus right now, so the dialog can hand it back when it closes. */
   activeElement: () => Focusable | null;
   /** Focus trap and initial focus, which stay with the island that owns the DOM. */
@@ -60,7 +69,7 @@ export interface ConsentSurface {
 }
 
 export function createConsentSurface(dom: ConsentSurfaceDom): ConsentSurface {
-  const { root, surfaces, analyticsSwitch, channel, consentStatus, activeElement } = dom;
+  const { root, surfaces, switches, channel, isGranted, activeElement } = dom;
 
   /** The prompt waiting behind the dialog, or null once it has been answered. */
   let promptSurface: PromptSurface | null = null;
@@ -105,8 +114,11 @@ export function createConsentSurface(dom: ConsentSurfaceDom): ConsentSurface {
     returnFocusTo = activeElement();
     // Pre-filled from the decision actually in force, so a visitor reopening this
     // from the footer sees what they last saved rather than the opt-in default -
-    // and saving without touching the switch changes nothing.
-    if (analyticsSwitch) analyticsSwitch.checked = consentStatus() === 'granted';
+    // and saving without touching a switch changes nothing.
+    CONSENT_CATEGORIES.forEach((category) => {
+      const control = switches[category];
+      if (control) control.checked = isGranted(category);
+    });
     show('prefs');
     dom.onPrefsOpened?.();
   };

@@ -4,10 +4,10 @@
  * if anything - to put on the page.
  *
  * Everything here asserts against the DOM the module actually produced rather
- * than against an interface of its own, because the two things that matter are
- * both observable only there: that no partner script is requested before the
- * visitor has agreed to one, and that the non-personalised flag is in place
- * *before* the loader it applies to is appended.
+ * than against an interface of its own, because the thing that matters is
+ * observable only there: that no partner script is requested - and so no ad
+ * cookie or device storage is placed - for any visitor who has not switched
+ * advertising on.
  *
  * The module needs two things the bare `node --test` runner cannot give it: the
  * publisher id Vite inlines from `import.meta.env` (substituted through the
@@ -39,24 +39,17 @@ mock.module(new URL('./ads-env.ts', import.meta.url).href, {
 
 const ads = await import('./ads.ts');
 
-/** A `<script>` as the module built it, with the attributes it chose to set. */
+/** A `<script>` as the module built it, with the properties it chose to set. */
 interface FakeScript {
   src?: string;
   async?: boolean;
   crossOrigin?: string;
-  attributes: Record<string, string>;
-  /**
-   * The partner's non-personalised flag as it stood the instant this script was
-   * appended - which is the only moment that matters, because appending is what
-   * starts the request that reads it.
-   */
-  npaFlagOnAppend?: number;
 }
 
 interface FakeWindow {
   localStorage: unknown;
   doNotTrack?: string;
-  adsbygoogle?: { requestNonPersonalizedAds?: number };
+  adsbygoogle?: unknown;
   __sdAds?: unknown;
 }
 
@@ -84,18 +77,8 @@ function loadPage(consent?: string, browser: { doNotTrack?: string } = {}) {
   const scripts: FakeScript[] = [];
   const window: FakeWindow = { localStorage, doNotTrack: browser.doNotTrack };
   const document = {
-    createElement: (): FakeScript => ({
-      attributes: {},
-      setAttribute(this: FakeScript, name: string, value: string): void {
-        this.attributes[name] = value;
-      },
-    }),
-    head: {
-      appendChild: (node: FakeScript): void => {
-        node.npaFlagOnAppend = window.adsbygoogle?.requestNonPersonalizedAds;
-        scripts.push(node);
-      },
-    },
+    createElement: (): FakeScript => ({}),
+    head: { appendChild: (node: FakeScript): void => void scripts.push(node) },
   };
   Object.assign(globalThis, { window, document, localStorage });
   return { scripts, window };
@@ -136,7 +119,7 @@ beforeEach(() => {
 
 test('nothing is requested while the visitor has not answered the prompt', () => {
   const { scripts } = loadPage();
-  assert.equal(ads.loadAds(), null);
+  assert.equal(ads.loadAds(), false);
   assert.equal(ads.isAdsGranted(), false);
   assert.deepEqual(scripts, []);
 });
@@ -145,14 +128,14 @@ test('a record written before the ads category existed loads nothing', () => {
   // It re-prompts (the policy version moved), so it is not an ads decision - and
   // an undecided visitor gets no partner script.
   const { scripts } = loadPage(legacyStored('granted'));
-  assert.equal(ads.loadAds(), null);
+  assert.equal(ads.loadAds(), false);
   assert.equal(ads.isAdsGranted(), false);
   assert.deepEqual(scripts, []);
 });
 
-test('an ads grant loads the partner for personalised serving', () => {
-  const { scripts, window } = loadPage(stored(uniformGrants('granted')));
-  assert.equal(ads.loadAds(), 'personalized');
+test('an ads opt-in loads the partner', () => {
+  const { scripts } = loadPage(stored(uniformGrants('granted')));
+  assert.equal(ads.loadAds(), true);
   assert.equal(ads.isAdsGranted(), true);
 
   const [script, ...rest] = partnerScripts(scripts);
@@ -164,52 +147,49 @@ test('an ads grant loads the partner for personalised serving', () => {
     PUBLISHER,
     'the loader reads the publisher id off its own query string',
   );
-  assert.equal(script.attributes['data-npa'], undefined);
-  assert.equal(script.npaFlagOnAppend, undefined, 'a grant is never downgraded to contextual');
-  assert.equal(window.adsbygoogle?.requestNonPersonalizedAds, undefined);
 });
 
 test('every unit on the page may ask, and the partner still loads once', () => {
   const { scripts } = loadPage(stored(uniformGrants('granted')));
   // Four placements, four calls, one document.
-  const modes = [ads.loadAds(), ads.loadAds(), ads.loadAds(), ads.loadAds()];
-  assert.deepEqual(modes, ['personalized', 'personalized', 'personalized', 'personalized']);
+  const loaded = [ads.loadAds(), ads.loadAds(), ads.loadAds(), ads.loadAds()];
+  assert.deepEqual(loaded, [true, true, true, true]);
   assert.equal(partnerScripts(scripts).length, 1);
 });
 
-test('a decline serves non-personalised ads, flagged before the loader is appended', () => {
-  const { scripts } = loadPage(stored({ analytics: 'granted', ads: 'denied' }));
-  assert.equal(ads.loadAds(), 'non-personalized');
+test('a decline loads no ad partner at all', () => {
+  // The partner tag reads and writes device storage of its own as soon as it
+  // runs, whatever the personalisation flags say, so a declined visitor gets no
+  // ad script - not a contextual one.
+  const { scripts, window } = loadPage(stored({ analytics: 'granted', ads: 'denied' }));
+  assert.equal(ads.loadAds(), false);
   assert.equal(ads.isAdsGranted(), false);
-
-  const [script] = partnerScripts(scripts);
-  assert.ok(script, 'a declined visitor still sees contextual ads');
-  assert.equal(script.attributes['data-npa'], '1');
-  assert.equal(
-    script.npaFlagOnAppend,
-    1,
-    'the flag must be on the queue before the loader that reads it is appended',
-  );
+  assert.deepEqual(scripts, []);
+  assert.equal(window.adsbygoogle, undefined, 'not even the partner queue is created');
 });
 
-test('a mid-page consent change reports the mode actually in force', () => {
+test('a mid-page opt-in is honoured, and a mid-page withdrawal loads nothing more', () => {
   // The preferences dialog is reachable from the footer on every page, so the
-  // stored record can change under a document that has already loaded the
-  // partner. The script cannot be re-fetched in another mode, so saying so is the
-  // only honest answer - a unit that believed the upgrade would render a
-  // personalised slot against a non-personalised loader.
+  // stored record can change under a document that has already asked for ads.
   const { scripts } = loadPage(stored({ analytics: 'granted', ads: 'denied' }));
-  assert.equal(ads.loadAds(), 'non-personalized');
+  assert.equal(ads.loadAds(), false);
 
   localStorage.setItem(CONSENT_KEY, stored(uniformGrants('granted')));
   assert.equal(ads.isAdsGranted(), true, 'the new decision is readable straight away');
-  assert.equal(ads.loadAds(), 'non-personalized', 'but this document is already loaded');
-  assert.equal(partnerScripts(scripts).length, 1);
+  assert.equal(ads.loadAds(), true, 'and the opt-in is what finally loads the partner');
+
+  // Withdrawing cannot unsend the script this document already has, but it does
+  // withdraw permission to show anything more: a unit asking from here on is told
+  // no, so it renders nothing.
+  localStorage.setItem(CONSENT_KEY, stored({ analytics: 'granted', ads: 'denied' }));
+  assert.equal(ads.loadAds(), false);
+  assert.equal(ads.isAdsGranted(), false);
+  assert.equal(partnerScripts(scripts).length, 1, 'and no second script is added');
 });
 
 test('a privacy signal blocks ads outright, over a stored grant', () => {
   const { scripts, window } = loadPage(stored(uniformGrants('granted')), { doNotTrack: '1' });
-  assert.equal(ads.loadAds(), null);
+  assert.equal(ads.loadAds(), false);
   assert.equal(ads.isAdsGranted(), false);
   assert.deepEqual(scripts, []);
   assert.equal(window.adsbygoogle, undefined, 'not even the queue is created');
@@ -218,8 +198,8 @@ test('a privacy signal blocks ads outright, over a stored grant', () => {
 test('an unconfigured build disables ads silently after a single warning', () => {
   publisher = '';
   const { scripts } = loadPage(stored(uniformGrants('granted')));
-  assert.equal(ads.loadAds(), null);
-  assert.equal(ads.loadAds(), null);
+  assert.equal(ads.loadAds(), false);
+  assert.equal(ads.loadAds(), false);
   assert.deepEqual(scripts, []);
   assert.equal(linesSaying('[ads]').length, 1, 'one warning per document, not one per unit');
   assert.match(consoleLines[0], /PUBLIC_ADSENSE_CLIENT/);
@@ -227,6 +207,6 @@ test('an unconfigured build disables ads silently after a single warning', () =>
 
 test('the static build, which has no document, loads nothing and throws nothing', () => {
   closeDocument();
-  assert.equal(ads.loadAds(), null);
+  assert.equal(ads.loadAds(), false);
   assert.equal(ads.isAdsGranted(), false);
 });

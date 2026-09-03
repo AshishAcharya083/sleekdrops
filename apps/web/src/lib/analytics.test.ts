@@ -46,6 +46,23 @@ mock.module(new URL('./analytics-env.ts', import.meta.url).href, {
   },
 });
 
+/**
+ * The same for `./ads`, which is imported here for one thing only: the ad gate
+ * reads the record this module writes, so what the consent dialog saves and what
+ * the ad partner is loaded on are asserted end to end below rather than each
+ * against its own idea of the record.
+ */
+mock.module(new URL('./ads-env.ts', import.meta.url).href, {
+  namedExports: {
+    adsEnv: () => ({
+      client: 'ca-pub-1234567890123456',
+      slots: { articleMid: '1', articleEnd: '2', sidebar: '3', feed: '4' },
+    }),
+  },
+});
+
+const ads = await import('./ads.ts');
+
 type AnalyticsModule = typeof import('./analytics.ts');
 
 /**
@@ -230,6 +247,9 @@ const sdkKeys = (tab: Tab): string[] =>
 
 const ga4Tags = (scripts: AppendedScript[]): AppendedScript[] =>
   scripts.filter((script) => String(script.src).includes('googletagmanager.com'));
+
+const adPartnerTags = (scripts: AppendedScript[]): AppendedScript[] =>
+  scripts.filter((script) => String(script.src).includes('adsbygoogle.js'));
 
 /**
  * The measurement id the document's GA4 tag was actually loaded with, read off the
@@ -583,6 +603,34 @@ test('the record the banner writes is the record the ads gate reads back', () =>
     ads: 'granted',
   });
   assert.equal(chrome.consentStatus(), 'denied', 'an ads grant is not an analytics grant');
+});
+
+test('the ad partner loads only for a visitor who saved the advertising opt-in', () => {
+  // The consent dialog's own path, end to end: its Save writes through
+  // setConsent() here, and a page unit then asks `./ads` - which never imports
+  // this module - whether it may show anything. Nothing but an explicit
+  // advertising opt-in may put the partner script on the page, because that
+  // script reads and writes device storage of its own as soon as it runs.
+  const tab = openTab();
+  const { scripts } = loadPage(tab, '/');
+
+  // "Accept analytics" on the banner: an analytics opt-in is not an ads opt-in.
+  chrome.grantConsent();
+  assert.equal(ads.isAdsGranted(), false);
+  assert.equal(ads.loadAds(), false);
+  assert.deepEqual(adPartnerTags(scripts), []);
+
+  // The dialog saved with the Advertising switch on.
+  chrome.setConsent({ analytics: 'granted', ads: 'granted' });
+  assert.equal(ads.isAdsGranted(), true);
+  assert.equal(ads.loadAds(), true);
+  assert.equal(adPartnerTags(scripts).length, 1, 'the opt-in is what loads the partner');
+
+  // "Decline all", on the page after it: no partner script on that document.
+  const next = loadPage(tab, '/deals');
+  banner.denyConsent();
+  assert.equal(ads.loadAds(), false);
+  assert.deepEqual(adPartnerTags(next.scripts), []);
 });
 
 test('a consent record written under the previous policy re-prompts and keeps buffering', async () => {

@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { ConsentStatus } from './consent.ts';
+import type { ConsentCategory } from './consent.ts';
 import { openConsentPreferences } from './consent-preferences.ts';
 import { createConsentSurface, type ConsentSurface, type Focusable } from './consent-surface.ts';
 
@@ -26,11 +26,11 @@ interface Control extends Focusable {
 }
 
 /**
- * One rendered consent island: its root, its three surfaces, the analytics switch,
- * the document event the footer control dispatches on, and a record of every
- * `focus()` the module asked for, in order.
+ * One rendered consent island: its root, its three surfaces, the category
+ * switches, the document event the footer control dispatches on, and a record of
+ * every `focus()` the module asked for, in order.
  */
-function island(status: ConsentStatus | null = null) {
+function island(granted: Partial<Record<ConsentCategory, boolean>> = {}) {
   const root = {
     hidden: true,
     contains: (node: unknown): boolean => (node as Control | null)?.insideRoot === true,
@@ -41,6 +41,7 @@ function island(status: ConsentStatus | null = null) {
     prefs: { hidden: true },
   };
   const analyticsSwitch = { checked: false };
+  const adsSwitch = { checked: false };
   const channel = new EventTarget();
   const focused: string[] = [];
   let active: Control | null = null;
@@ -58,9 +59,9 @@ function island(status: ConsentStatus | null = null) {
   const surface: ConsentSurface = createConsentSurface({
     root,
     surfaces,
-    analyticsSwitch,
+    switches: { analytics: analyticsSwitch, ads: adsSwitch },
     channel,
-    consentStatus: () => status,
+    isGranted: (category) => granted[category] === true,
     activeElement: () => active,
   });
 
@@ -68,6 +69,7 @@ function island(status: ConsentStatus | null = null) {
     root,
     surfaces,
     analyticsSwitch,
+    adsSwitch,
     focused,
     footerControl,
     customizeControl,
@@ -90,7 +92,7 @@ function island(status: ConsentStatus | null = null) {
 }
 
 test('a visitor with a decision on file is shown nothing on load', () => {
-  const page = island('granted');
+  const page = island({ analytics: true });
   page.surface.start('none');
 
   assert.equal(page.root.hidden, true);
@@ -100,7 +102,7 @@ test('a visitor with a decision on file is shown nothing on load', () => {
 test('the footer request reopens the dialog for a visitor who has already decided', () => {
   // The defect: with a decision on file there is no prompt, so this request is the
   // only thing that can ever open the consent UI again.
-  const page = island('granted');
+  const page = island({ analytics: true });
   page.surface.start('none');
 
   page.clickFrom(page.footerControl, () => page.requestPreferences());
@@ -108,10 +110,23 @@ test('the footer request reopens the dialog for a visitor who has already decide
   assert.equal(page.root.hidden, false, 'the root the load left hidden has to reopen');
   assert.equal(page.visible(), 'prefs');
   assert.equal(page.analyticsSwitch.checked, true, 'pre-filled from the decision in force');
+  assert.equal(page.adsSwitch.checked, false, 'a category they did not grant stays off');
+});
+
+test('each category switch is pre-filled from its own decision', () => {
+  // The advertising opt-in is only reachable here, so a dialog that showed it as
+  // off to a visitor who turned it on would withdraw it on the next save.
+  const page = island({ ads: true });
+  page.surface.start('none');
+
+  page.requestPreferences();
+
+  assert.equal(page.adsSwitch.checked, true);
+  assert.equal(page.analyticsSwitch.checked, false);
 });
 
 test('the reopened dialog shows a withdrawal as withdrawn, not as the opt-in default', () => {
-  const page = island('denied');
+  const page = island({});
   page.surface.start('none');
 
   page.requestPreferences();
@@ -121,7 +136,7 @@ test('the reopened dialog shows a withdrawal as withdrawn, not as the opt-in def
 });
 
 test('the request works again and again, so a visitor can change their mind twice', () => {
-  const page = island('granted');
+  const page = island({ analytics: true });
   page.surface.start('none');
 
   page.requestPreferences();
@@ -132,7 +147,7 @@ test('the request works again and again, so a visitor can change their mind twic
 });
 
 test('closing a dialog reopened over a decided page puts the consent UI away', () => {
-  const page = island('granted');
+  const page = island({ analytics: true });
   page.surface.start('none');
   page.requestPreferences();
 
@@ -143,7 +158,7 @@ test('closing a dialog reopened over a decided page puts the consent UI away', (
 });
 
 test('closing the dialog hands focus back to the control that opened it', () => {
-  const page = island('granted');
+  const page = island({ analytics: true });
   page.surface.start('none');
   page.clickFrom(page.footerControl, () => page.requestPreferences());
 
@@ -153,7 +168,7 @@ test('closing the dialog hands focus back to the control that opened it', () => 
 });
 
 test('on a first visit the dialog opens over the banner and closes back onto it', () => {
-  const page = island(null);
+  const page = island();
   page.surface.start('banner');
   assert.equal(page.visible(), 'banner');
 
@@ -166,7 +181,7 @@ test('on a first visit the dialog opens over the banner and closes back onto it'
 });
 
 test('a policy-update re-prompt behaves as the first-visit banner does', () => {
-  const page = island('granted');
+  const page = island({ analytics: true });
   page.surface.start('policy-update');
   assert.equal(page.visible(), 'banner');
 
@@ -176,7 +191,7 @@ test('a policy-update re-prompt behaves as the first-visit banner does', () => {
 });
 
 test('the GPC card is what a dialog opened over it closes back onto', () => {
-  const page = island(null);
+  const page = island();
   page.surface.start('gpc');
 
   page.surface.openPrefs();
@@ -188,7 +203,7 @@ test('the GPC card is what a dialog opened over it closes back onto', () => {
 test('deciding on the banner spends it, so a later dialog does not resurrect it', () => {
   // Accept, then reopen preferences from the footer on the same page: closing that
   // dialog must not bring back a banner asking for a choice already made here.
-  const page = island(null);
+  const page = island();
   page.surface.start('banner');
   page.surface.dismiss();
 
@@ -205,7 +220,7 @@ test('the focus debt is paid once, so deciding on the banner does not jump the p
   // back to the pinned banner and accept. A focus() left owed here lands on the
   // footer control and takes the viewport with it, dumping the visitor at the
   // bottom of the page as their decision is recorded.
-  const page = island(null);
+  const page = island();
   page.surface.start('banner');
   page.clickFrom(page.footerControl, () => page.requestPreferences());
 
@@ -217,7 +232,7 @@ test('the focus debt is paid once, so deciding on the banner does not jump the p
 });
 
 test('focus is never handed back to a control the island has just hidden', () => {
-  const page = island(null);
+  const page = island();
   page.surface.start('banner');
   page.clickFrom(page.customizeControl, () => page.surface.openPrefs());
 

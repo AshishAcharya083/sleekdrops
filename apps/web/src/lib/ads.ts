@@ -7,21 +7,17 @@
  * and the network is not, so moving off AdSense later touches this module and
  * `./ads-env` rather than every page that carries a unit.
  *
- * Nothing is fetched, injected or evaluated before the visitor has answered the
- * consent prompt. What happens after depends on the answer:
+ * The gate is opt-in and nothing else. The partner script is fetched only for a
+ * visitor who has switched the advertising category on in the consent dialog:
  *
- *  - **granted** - the partner script loads and serves personalised ads.
- *  - **declined** - the script still loads, but with the partner's
- *    non-personalised flag set first, so the visitor sees contextual ads and no
- *    profile is built from them. This is the fallback the ad units are scoped
- *    around; it is not consent-by-another-name, because the personalisation the
- *    visitor refused is exactly what the flag turns off.
- *  - **a GPC/DNT signal** - nothing loads at all. A browser-level opt-out is a
- *    blanket refusal rather than a preference about personalisation, so it is
- *    honoured as a refusal of the whole category, matching how `./analytics`
- *    treats the same signal.
- *  - **undecided** - nothing loads; the prompt is still on screen and the answer
- *    applies from the next call (page components call this on load).
+ *  - **granted** - the partner script loads and serves ads.
+ *  - **anything else** - nothing is fetched, injected or evaluated. A decline, a
+ *    GPC/DNT signal and an unanswered prompt are all treated the same way,
+ *    because the partner tag reads and writes device storage of its own the
+ *    moment it runs (frequency capping, invalid-traffic checks) whatever the
+ *    personalisation flags say. Serving contextual ads to a visitor who declined
+ *    would place that storage without consent, so a decline means no ad partner
+ *    at all rather than a quieter one.
  *
  * The stored record is read through the same `./consent` decision table
  * `./analytics` uses, so the two categories can never drift apart, and this
@@ -40,37 +36,19 @@ import { hasPrivacySignal } from './privacy-signal.ts';
 /** The partner's loader, which reads the publisher id off its own query string. */
 const ADS_SCRIPT_SRC = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js';
 
-/** How ads may be served once the script is on the page. */
-export type AdsMode = 'personalized' | 'non-personalized';
-
-/** What the visitor's stored decision means for ads on this page load. */
-type AdsDecision = AdsMode | 'blocked' | 'pending';
-
-/**
- * The partner's queue object. It exists before the script does - the loader picks
- * up whatever was pushed onto it - which is what makes the non-personalised flag
- * settable ahead of the network request rather than after it.
- */
-interface AdsByGoogle extends Array<unknown> {
-  requestNonPersonalizedAds?: number;
-}
-
 /** What this document has already done: loaded the partner, and complained. */
 interface AdsState {
-  /** The mode the partner was loaded in, or null while it has not been loaded. */
-  mode: AdsMode | null;
+  loaded: boolean;
   warned: boolean;
 }
 
 interface AdsHost {
   __sdAds?: AdsState;
-  adsbygoogle?: AdsByGoogle;
 }
 
 declare global {
   interface Window {
     __sdAds?: AdsState;
-    adsbygoogle?: AdsByGoogle;
   }
 }
 
@@ -85,7 +63,7 @@ const buildHost: AdsHost = {};
  */
 function adsState(): AdsState {
   const host: AdsHost = typeof window === 'undefined' ? buildHost : window;
-  return (host.__sdAds ??= { mode: null, warned: false });
+  return (host.__sdAds ??= { loaded: false, warned: false });
 }
 
 /** The stored consent record, or null when there is none or storage is blocked. */
@@ -98,17 +76,12 @@ function readConsent() {
   }
 }
 
-/** What to do about ads right now, from the stored record and the privacy signal. */
-function adsDecision(): AdsDecision {
-  const { prompt, effects } = resolveConsent(readConsent(), hasPrivacySignal());
-  if (prompt === 'gpc') return 'blocked';
-  if (effects.ads === 'pending') return 'pending';
-  return effects.ads === 'grant' ? 'personalized' : 'non-personalized';
-}
-
-/** True when the visitor has explicitly opted in to personalised advertising. */
+/**
+ * True when the visitor has explicitly opted in to advertising. A GPC/DNT signal
+ * resolves the whole category to a denial, so it is answered here too.
+ */
 export function isAdsGranted(): boolean {
-  return adsDecision() === 'personalized';
+  return resolveConsent(readConsent(), hasPrivacySignal()).effects.ads === 'grant';
 }
 
 /** One `[ads]` warning per document, however many units asked for one. */
@@ -120,42 +93,37 @@ function warnOnce(message: string): void {
 }
 
 /**
- * Load the ad partner for this document, if the visitor's decision allows it.
+ * Load the ad partner for this document, if the visitor has opted in to ads.
  *
- * Returns the mode ads are being served in, or null when nothing was loaded - an
- * undecided or blanket-refusing visitor, an unconfigured build, or no DOM at all
- * (the static build). Safe to call from every unit on the page: the script is
- * injected at most once per document, and the call that injects it is the one
- * that fixes the mode - every later call reports the mode actually in force
- * rather than the one it would have chosen.
+ * Returns true when this caller may show a unit: the partner is on the page and
+ * the opt-in behind it still stands. Safe to call from every unit on the page -
+ * the script is injected at most once per document, so the second and every
+ * later caller gets true without a second request.
+ *
+ * False means show nothing: no opt-in on file, an unconfigured build, or no DOM
+ * at all (the static build). A withdrawal made from the footer mid-page reads as
+ * false from that moment on - the script already sent cannot be unsent, but no
+ * further unit is rendered against it.
  */
-export function loadAds(): AdsMode | null {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return null;
-  const decision = adsDecision();
-  if (decision === 'blocked' || decision === 'pending') return null;
+export function loadAds(): boolean {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return false;
+  if (!isAdsGranted()) return false;
 
   const { client } = adsEnv();
   if (!client) {
     warnOnce('ad partner NOT configured - PUBLIC_ADSENSE_CLIENT is empty');
-    return null;
+    return false;
   }
 
   const state = adsState();
-  if (state.mode) return state.mode;
-  state.mode = decision;
-
-  // Pushed onto the partner's queue before its script is requested: the flag has
-  // to be in place by the time the loader evaluates, or the first impression is
-  // served personalised to a visitor who declined that.
-  const queue: AdsByGoogle = (window.adsbygoogle ??= [] as AdsByGoogle);
-  if (decision === 'non-personalized') queue.requestNonPersonalizedAds = 1;
+  if (state.loaded) return true;
+  state.loaded = true;
 
   const script = document.createElement('script');
   script.async = true;
   script.crossOrigin = 'anonymous';
   script.src = `${ADS_SCRIPT_SRC}?client=${encodeURIComponent(client)}`;
-  if (decision === 'non-personalized') script.setAttribute('data-npa', '1');
   document.head.appendChild(script);
-  console.info(`[ads] partner loaded (${decision}) -> ${client}`);
-  return decision;
+  console.info(`[ads] partner loaded -> ${client}`);
+  return true;
 }

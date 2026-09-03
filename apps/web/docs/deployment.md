@@ -83,6 +83,9 @@ The build then disables ads everywhere after a single `[ads]` console warning: n
 An `ads.txt` naming no seller is worse than none, because that is the file a crawler reads as a domain that has revoked every seller it had.
 
 Note that `ads.txt` publishes the publisher id **without** the `ca-` prefix the ad tag carries: `ca-pub-123` in the repo setting becomes `google.com, pub-123, DIRECT, …` in the file. The generator does that conversion; nothing needs entering twice.
+It also validates the value first - anything that is not `ca-pub-<digits>` fails the build, because every line of that file authorises somebody to sell this domain's inventory and a stray character would publish a record naming the wrong seller.
+
+Ads are additionally gated on consent at runtime: the partner script is requested only for a visitor who switched **Advertising** on in the consent dialog, so a configured publisher id on its own serves nothing.
 
 ### Cloudflare R2 (only if you've enabled R2 for images)
 
