@@ -2,7 +2,7 @@ diff --git a/dist/feedback-SJHUYYJN.js b/dist/feedback-AIWYAAZ7.js
 similarity index 92%
 rename from dist/feedback-SJHUYYJN.js
 rename to dist/feedback-AIWYAAZ7.js
-index 6c9eff2e2f73ffd63b29c1a31bc227b1650ec95e..f7c852424de47971674218ea0341c58267c7a746 100644
+index 6c9eff2e2f73ffd63b29c1a31bc227b1650ec95e..8ca9b5821f1b5da16da2f187adca444390e19922 100644
 --- a/dist/feedback-SJHUYYJN.js
 +++ b/dist/feedback-AIWYAAZ7.js
 @@ -359,6 +359,7 @@ function mountFeedback(config, deps = defaultDeps) {
@@ -48,17 +48,15 @@ index 6c9eff2e2f73ffd63b29c1a31bc227b1650ec95e..f7c852424de47971674218ea0341c582
  .title { font-size: 16px; font-weight: 600; }
  .close {
    border: none;
-@@ -578,7 +591,9 @@ function buildStyles(options, accent) {
+@@ -578,6 +591,7 @@ function buildStyles(options, accent) {
    padding: 4px 8px;
  }
  .preview {
 +  grid-area: preview;
    position: relative;
-+  flex-shrink: 0;
    border: 1px solid #d3dce6;
    border-radius: 8px;
-   overflow: hidden;
-@@ -590,10 +605,16 @@ function buildStyles(options, accent) {
+@@ -590,10 +604,16 @@ function buildStyles(options, accent) {
    inset: 0;
    width: 100%;
    height: 100%;
@@ -77,17 +75,15 @@ index 6c9eff2e2f73ffd63b29c1a31bc227b1650ec95e..f7c852424de47971674218ea0341c582
  .swatch {
    width: 24px;
    height: 24px;
-@@ -612,17 +633,24 @@ function buildStyles(options, accent) {
+@@ -612,6 +632,7 @@ function buildStyles(options, accent) {
    cursor: pointer;
  }
  .comment {
 +  grid-area: comment;
    width: 100%;
--  min-height: 72px;
-+  min-height: 96px;
+   min-height: 72px;
    resize: vertical;
-   border: 1px solid #d3dce6;
-   border-radius: 8px;
+@@ -620,9 +641,15 @@ function buildStyles(options, accent) {
    padding: 8px 10px;
    font: inherit;
  }
@@ -106,7 +102,7 @@ index 6c9eff2e2f73ffd63b29c1a31bc227b1650ec95e..f7c852424de47971674218ea0341c582
  .cancel {
    border: 1px solid #d3dce6;
    background: #fff;
-@@ -642,6 +670,18 @@ function buildStyles(options, accent) {
+@@ -642,6 +669,18 @@ function buildStyles(options, accent) {
    cursor: pointer;
  }
  .submit:disabled { opacity: 0.6; cursor: default; }
@@ -125,7 +121,7 @@ index 6c9eff2e2f73ffd63b29c1a31bc227b1650ec95e..f7c852424de47971674218ea0341c582
  `;
  }
  export {
-@@ -650,4 +690,4 @@ export {
+@@ -650,4 +689,4 @@ export {
    mapToImagePoint,
    mountFeedback
  };
@@ -145,7 +141,7 @@ diff --git a/dist/feedback-SJHUYYJN.js.map b/dist/feedback-SJHUYYJN.js.map
 deleted file mode 100644
 index 988e7bcceabf69207decdb8e40e63c6c08d09a81..0000000000000000000000000000000000000000
 diff --git a/dist/index.cjs b/dist/index.cjs
-index fbaaa5d5a9dea954f410dc1cf9e13c7d6103ebed..27d468d48c6edf5f22bf4ecdf3084d7fe2b98d46 100644
+index fbaaa5d5a9dea954f410dc1cf9e13c7d6103ebed..20718537a5498e732fc690bb8dd34eaaa0715cf0 100644
 --- a/dist/index.cjs
 +++ b/dist/index.cjs
 @@ -390,6 +390,7 @@ function mountFeedback(config, deps = defaultDeps) {
@@ -191,17 +187,15 @@ index fbaaa5d5a9dea954f410dc1cf9e13c7d6103ebed..27d468d48c6edf5f22bf4ecdf3084d7f
  .title { font-size: 16px; font-weight: 600; }
  .close {
    border: none;
-@@ -609,7 +622,9 @@ function buildStyles(options, accent) {
+@@ -609,6 +622,7 @@ function buildStyles(options, accent) {
    padding: 4px 8px;
  }
  .preview {
 +  grid-area: preview;
    position: relative;
-+  flex-shrink: 0;
    border: 1px solid #d3dce6;
    border-radius: 8px;
-   overflow: hidden;
-@@ -621,10 +636,16 @@ function buildStyles(options, accent) {
+@@ -621,10 +635,16 @@ function buildStyles(options, accent) {
    inset: 0;
    width: 100%;
    height: 100%;
@@ -220,17 +214,15 @@ index fbaaa5d5a9dea954f410dc1cf9e13c7d6103ebed..27d468d48c6edf5f22bf4ecdf3084d7f
  .swatch {
    width: 24px;
    height: 24px;
-@@ -643,17 +664,24 @@ function buildStyles(options, accent) {
+@@ -643,6 +663,7 @@ function buildStyles(options, accent) {
    cursor: pointer;
  }
  .comment {
 +  grid-area: comment;
    width: 100%;
--  min-height: 72px;
-+  min-height: 96px;
+   min-height: 72px;
    resize: vertical;
-   border: 1px solid #d3dce6;
-   border-radius: 8px;
+@@ -651,9 +672,15 @@ function buildStyles(options, accent) {
    padding: 8px 10px;
    font: inherit;
  }
@@ -249,7 +241,7 @@ index fbaaa5d5a9dea954f410dc1cf9e13c7d6103ebed..27d468d48c6edf5f22bf4ecdf3084d7f
  .cancel {
    border: 1px solid #d3dce6;
    background: #fff;
-@@ -673,6 +701,18 @@ function buildStyles(options, accent) {
+@@ -673,6 +700,18 @@ function buildStyles(options, accent) {
    cursor: pointer;
  }
  .submit:disabled { opacity: 0.6; cursor: default; }

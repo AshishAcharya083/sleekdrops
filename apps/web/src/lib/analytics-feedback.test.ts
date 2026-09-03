@@ -11,7 +11,9 @@
  * through the SDK's own `feedback.title` option precisely so that it does *not*
  * ride on that patch, which is deleted the day the SDK releases the layout.
  * The tests below pin all three: the site's heading, the SDK default the site
- * overrides (so a heading baked back into the patch is caught), and the layout.
+ * overrides (so a heading baked back into the patch is caught), and the layout -
+ * both the wide grid where it fits and the released sizing of the flex column
+ * that stands in for it where it does not.
  *
  * The SDK builds the dialog with plain DOM calls, so `mountDom` below is a
  * document just complete enough to hold it - nothing about the widget or about
@@ -256,4 +258,33 @@ test('the feedback dialog is laid out wide, so the layout patch is applied', asy
   assert.match(styles, /\.panel\b[^}]*width: min\(1600px/, 'expected the wide desktop dialog');
   assert.match(styles, /\.panel\.compact\b[^}]*width: min\(560px/, 'expected the compact fallback');
   assert.match(styles, /@media \(max-width: 860px\)/, 'expected the single-column mobile layout');
+});
+
+/**
+ * The wide layout is a grid, so flex sizing in it is inert - but the fallbacks it
+ * keeps (`compact`, and 860 px and under) are still the released flex column, and
+ * flex sizing is anything but inert there. A `.preview` that may not shrink keeps
+ * the screenshot at its full height and pushes the comment box and Send off the
+ * bottom of a phone, behind a scroll inside the dialog that nothing signals; a
+ * taller `.comment` minimum adds to it. So the patch must leave both at the
+ * released values, which is what this pins.
+ */
+test('the feedback dialog keeps the released flex sizing its mobile fallback needs', async () => {
+  const body = mountDom();
+
+  grantConsent();
+  const styles = await feedbackStyles(body);
+
+  const preview = /\.preview \{([^}]*)\}/.exec(styles)?.[1];
+  assert.ok(preview, 'expected a .preview rule');
+  assert.doesNotMatch(
+    preview,
+    /flex-shrink/,
+    'the screenshot must stay shrinkable, or it pushes the comment box and Send off a phone screen',
+  );
+  assert.match(
+    styles,
+    /\.comment \{[^}]*min-height: 72px/,
+    'the comment box must keep the released minimum height the mobile column is sized around',
+  );
 });

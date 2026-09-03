@@ -24,8 +24,12 @@ here, so it survives this patch being dropped.
 `apps/web/src/lib/analytics-feedback.test.ts` asserts both halves against the installed SDK.
 
 The patch content is that build's `dist/`, dropped in through `pnpm patch`
-`@getdevteam/analytics-web@0.3.1`, with the one non-layout line it carried - its own default
-heading - left at the released wording.
+`@getdevteam/analytics-web@0.3.1`, with three of its lines left at the released values: the
+non-layout one it carried - its own default heading - and the two flex-sizing ones,
+`flex-shrink: 0` on `.preview` and a 96 px `.comment` minimum.
+Both of those are inert in the grid, and both still reach the flex fallbacks, where a preview that
+cannot shrink pushes the comment box and Send off the bottom of a phone's screen behind a scroll
+the dialog gives no sign of - so the fallbacks keep the released sizing that fits them on screen.
 The chunk rename is that build's too: tsup names `feedback-*.js` after its content hash, so a
 changed chunk is a renamed chunk, and `dist/index.js` and `dist/index.cjs` are in the patch only
 because they import it by that name.
