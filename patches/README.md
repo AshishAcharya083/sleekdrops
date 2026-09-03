@@ -41,6 +41,8 @@ Once the SDK releases a version that ships the wide modal:
 1. Bump `@getdevteam/analytics-web` in `apps/web/package.json`.
 2. Delete the `patchedDependencies` entry from `pnpm-workspace.yaml`.
 3. `pnpm install`, then delete this patch.
+4. Drop the `COPY patches patches/` line from the `Dockerfile`, which only exists so the agent
+   image's filtered install can hash this patch.
 
 A patch is pinned to one exact version, so a bump that forgets step 2 fails the install with
 `ERR_PNPM_UNUSED_PATCH` rather than quietly dropping the layout - none of this can outlive the
