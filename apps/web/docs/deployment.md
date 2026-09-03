@@ -86,7 +86,8 @@ Note that `ads.txt` publishes the publisher id **without** the `ca-` prefix the 
 It also validates the value first - anything that is not `ca-pub-<digits>` fails the build, because every line of that file authorises somebody to sell this domain's inventory and a stray character would publish a record naming the wrong seller.
 The site build applies the same check to the same value (`publisherId()` in `src/lib/ads-env.ts`): a publisher id the generator refuses is one the page will not ask the partner to serve against either, so the two halves of the setting cannot disagree.
 
-Ads are additionally gated on consent at runtime: the partner script is requested only for a visitor who switched **Advertising** on in the consent dialog, so a configured publisher id on its own serves nothing.
+Ads are additionally gated on consent at runtime, so a configured publisher id on its own serves nothing.
+The partner script is requested only once the visitor has answered the consent banner, and it is personalised only for one who switched **Advertising** on in the consent dialog: a decline loads it with personalisation off, and an unanswered banner or a GPC/DNT signal loads nothing at all.
 
 ### Content-Security-Policy
 
