@@ -48,6 +48,33 @@ const ALLOWED_PROPS = new Set<string>([
   'count',
   'experiment_key',
   'variant_key',
+  // Listing funnel: which rendered list a card belongs to, which page and
+  // lazily-loaded batch of it, and - on the card click - the card's zero-based
+  // slot. Together with `position` these are what make click-through rate per
+  // card and per slot position computable; pagination deliberately rides here
+  // as a property rather than as an event stream of its own.
+  'list_id',
+  'page',
+  'batch',
+  // Outbound-click join key. Minted per click, threaded into the affiliate
+  // network's sub-id slot by the /go Function, and reported by both the client
+  // click and the server-side redirect - which is what lets a network-reported
+  // sale find the deal, page, placement and position that earned it. Random per
+  // click and never derived from the visitor or the device.
+  'click_id',
+  // The analytics session's trace id, so a client error and the server-side log
+  // of the click that preceded it are findable under one key.
+  'trace_id',
+  // Reported by the /go Function: how the destination was built and which
+  // storefront region it resolved to. Enumerated, never free-form.
+  'network',
+  'region',
+  // Read completion: the active-time bucket (see ./read-completion). Bucketed
+  // rather than raw milliseconds so the dimension cannot explode in cardinality.
+  'active_time',
+  // The operation a handled failure came from ('web-share', 'clipboard', ...),
+  // so captured errors are groupable by the surface that broke.
+  'feature',
   // Idempotency and grouping keys minted in ./visit: a random per-event id the
   // platform can collapse duplicates on, and the random id of the visit that
   // produced the event. Neither is derived from the visitor or the device, and

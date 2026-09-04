@@ -10,8 +10,9 @@
  *  3. TOC active-link highlighting on scroll (uses any `[data-toc]` nav).
  *  4. Smooth-scroll for in-page anchor links, plus a highlight flash so the
  *     click is acknowledged even when the target is already on screen.
- *  5. Product-analytics dispatch (page view + funnel clicks) from `data-*`
- *     hooks, via the analytics wrapper (see docs/analytics-events.md).
+ *  5. Product-analytics dispatch (page view, list views, funnel clicks,
+ *     outbound-click decoration and read completion) from `data-*` hooks, via
+ *     the analytics wrapper (see docs/analytics-events.md).
  *  6. A/B experiment copy: swapping `[data-experiment-copy]` labels in place
  *     once the flag payload resolves, via the experiments wrapper.
  *  7. A/B experiment nav items: removing (and restoring) a
@@ -24,15 +25,25 @@
  */
 
 import {
+  captureError,
   track,
   trackPageView,
   EVENTS,
+  getTraceId,
   initErrorCapture,
   isEventName,
   serverLog,
   type EventProps,
 } from '@lib/analytics';
 import { resolveAnchorScrollTop } from '@lib/anchor-scroll';
+import { decorateGoHref, isGoLink } from '@lib/outbound';
+import {
+  ActiveTime,
+  ReadCompletionGate,
+  activeTimeBucket,
+  READ_ACTIVE_MS,
+} from '@lib/read-completion';
+import { newEventId } from '@lib/visit';
 import { getFeatureValue, subscribe as onExperimentsChanged } from '@lib/experiments';
 import {
   applyNavExperimentItems,
@@ -87,6 +98,44 @@ if (!window.__sdChromeInit) {
   const screenName = typeof pageView?.screen === 'string' ? pageView.screen : undefined;
   trackPageView({ referrer: document.referrer, ...pageView });
 
+  /* List views: one event per rendered deal or promo list, never one per card.
+     The list element carries the whole payload as JSON on `data-list-view`
+     (list id, cards rendered, page and batch) and the event name stays in code,
+     where the compiler checks it. Impressions are the highest-volume signal on
+     a deals site, so the per-list shape is what keeps the volume proportionate
+     to the pages rendered rather than to the cards on them. */
+  document.querySelectorAll<HTMLElement>('[data-list-view]').forEach((list) => {
+    const props = parseProps(list.dataset.listView);
+    if (props) track(EVENTS.listingViewed, props);
+  });
+
+  /* Outbound affiliate clicks: mint the per-click join key, put it on the event
+     and on the /go URL the browser is about to follow, and send this session's
+     trace id with it.
+
+     Rewriting the href inside the click handler is safe and is the point: the
+     listener runs before the browser reads the href to navigate, so the server
+     sees exactly the id this event reported. The Function counts the click again
+     when it serves the redirect - that count is the ad-block-proof one - and
+     threads the same id into the affiliate network's sub-id slot, which is what
+     joins a sale reported days later back to this deal, page and position. */
+  const decorateOutbound = (el: HTMLElement, props: EventProps | undefined): EventProps => {
+    const anchor = el.closest<HTMLAnchorElement>('a[href]');
+    const href = anchor?.getAttribute('href');
+    if (!anchor || !isGoLink(href)) return { ...props };
+    const clickId = newEventId();
+    anchor.setAttribute(
+      'href',
+      decorateGoHref(href, {
+        clickId,
+        traceId: getTraceId(),
+        placement: typeof props?.placement === 'string' ? props.placement : undefined,
+        position: typeof props?.position === 'number' ? props.position : undefined,
+      }),
+    );
+    return { ...props, click_id: clickId };
+  };
+
   /* Funnel-step clicks: hero CTAs, deal cards, affiliate "View deal" buttons.
      The event fires synchronously here, before the browser follows the link.
 
@@ -103,7 +152,8 @@ if (!window.__sdChromeInit) {
         serverLog('warn', `data-track name is not in the event taxonomy, dropped: ${event}`);
         return;
       }
-      track(event, parseProps(el.dataset.trackProps));
+      const props = parseProps(el.dataset.trackProps);
+      track(event, event === EVENTS.affiliateClick ? decorateOutbound(el, props) : props);
     });
   });
 
@@ -172,7 +222,12 @@ if (!window.__sdChromeInit) {
     else root.removeAttribute('data-theme');
     try {
       localStorage.setItem('sd-theme', next);
-    } catch {}
+    } catch (error) {
+      /* The mode applies to this page either way, but it will not survive the
+         next navigation - "dark mode keeps resetting" is a real complaint with
+         no other trace, so the write failure is reported rather than dropped. */
+      captureError(error, { feature: 'theme-storage', theme: next });
+    }
     track(EVENTS.themeToggled, { theme: next });
   }
 
@@ -311,6 +366,11 @@ if (!window.__sdChromeInit) {
   });
 
   /* ---- Share button (Web Share API w/ clipboard fallback) ---- */
+  /* A rejection the visitor caused rather than a failure: DOMException named
+     AbortError is what a dismissed share sheet or permission prompt produces. */
+  const isAbort = (error: unknown): boolean =>
+    error instanceof Error && error.name === 'AbortError';
+
   const flashLabel = (el: HTMLElement, label: string, ms = 1500): void => {
     const prev = el.dataset.flashTitle ?? el.getAttribute('title') ?? '';
     el.dataset.flashTitle = prev;
@@ -319,6 +379,29 @@ if (!window.__sdChromeInit) {
       el.setAttribute('title', prev);
       delete el.dataset.flashTitle;
     });
+  };
+
+  /* Copy `value`, acknowledge it on `btn`, and fall back to a prompt the visitor
+     can copy out of by hand when the clipboard is unavailable (an insecure
+     origin, a denied permission, a browser that has no clipboard API).
+
+     The fallback is the reason this is worth reporting: the visitor still gets
+     the value, so nothing looks broken from the outside, and without the capture
+     a permission policy that silently disables copying on a whole browser would
+     never show up anywhere. */
+  const copyToClipboard = async (
+    btn: HTMLElement,
+    value: string,
+    promptLabel: string,
+    flashedLabel: string,
+  ): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(value);
+      flashLabel(btn, flashedLabel);
+    } catch (error) {
+      captureError(error, { feature: 'clipboard', screen: screenName });
+      window.prompt(promptLabel, value);
+    }
   };
 
   document.querySelectorAll<HTMLElement>('[data-share]').forEach((btn) => {
@@ -335,16 +418,14 @@ if (!window.__sdChromeInit) {
         try {
           await nav.share({ title, text, url });
           return;
-        } catch {
-          /* user cancelled — fall through to copy */
+        } catch (error) {
+          /* A dismissed share sheet rejects with AbortError and is a choice, not
+             a fault - reporting it would bury the real failures under it. Every
+             other rejection is a broken share on this device and is reported. */
+          if (!isAbort(error)) captureError(error, { feature: 'web-share', screen: screenName });
         }
       }
-      try {
-        await navigator.clipboard.writeText(url);
-        flashLabel(btn, 'Link copied');
-      } catch {
-        window.prompt('Copy this link:', url);
-      }
+      await copyToClipboard(btn, url, 'Copy this link:', 'Link copied');
     });
   });
 
@@ -353,15 +434,96 @@ if (!window.__sdChromeInit) {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
       track(EVENTS.copyLinkClicked, screenName ? { screen: screenName } : undefined);
-      const url = window.location.href;
-      try {
-        await navigator.clipboard.writeText(url);
-        flashLabel(btn, 'Link copied');
-      } catch {
-        window.prompt('Copy this link:', url);
-      }
+      await copyToClipboard(btn, window.location.href, 'Copy this link:', 'Link copied');
     });
   });
+
+  /* ---- Copy-code button (promo detail) ----
+   * The same flash acknowledgement as the copy-link control above, over the
+   * promo code rather than the page URL: the code is what the visitor has to
+   * carry to the merchant's checkout, and a code that has to be selected by
+   * hand is the step the promo funnel was losing people on silently. */
+  document.querySelectorAll<HTMLElement>('[data-copy-code]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const code = btn.dataset.copyCode ?? '';
+      track(EVENTS.promoCodeCopied, parseProps(btn.dataset.trackProps));
+      await copyToClipboard(btn, code, 'Copy this code:', 'Code copied');
+    });
+  });
+
+  /* ---- Read completion -------------------------------------------------
+   * One engagement event per article page view, and only one. It fires when the
+   * reader crosses the sentinel at the end of the article body AND has accrued
+   * at least READ_ACTIVE_MS of *active* time - time the tab spent in front of
+   * them, paused while it is hidden. Either half alone is a poor proxy: a short
+   * page is fully scrolled the moment it loads, and a tab left open overnight
+   * accrues hours nobody read.
+   *
+   * Deliberately not a 25/50/75/90 scroll ladder: that is four events per page
+   * view measuring page length rather than reader interest.
+   *
+   * The active-time property is bucketed, never raw milliseconds - a
+   * millisecond count is unique per page view and unusable as a dimension. */
+  const readSentinel = document.querySelector<HTMLElement>('[data-read-sentinel]');
+  if (readSentinel && typeof IntersectionObserver === 'function') {
+    const gate = new ReadCompletionGate();
+    const activeTime = new ActiveTime(Date.now());
+    /* A document restored into a background tab is not being read - start the
+       stopwatch paused rather than waiting for the first visibility change. */
+    if (document.visibilityState === 'hidden') activeTime.pause(Date.now());
+    let reachedEnd = false;
+    let pendingCheck: number | null = null;
+
+    const emitIfRead = (): void => {
+      const elapsed = activeTime.elapsed(Date.now());
+      if (!gate.shouldEmit(elapsed)) return;
+      if (pendingCheck !== null) window.clearTimeout(pendingCheck);
+      pendingCheck = null;
+      track(EVENTS.articleRead, {
+        ...(screenName ? { screen: screenName } : {}),
+        ...(pageView?.slug ? { slug: pageView.slug } : {}),
+        active_time: activeTimeBucket(elapsed),
+      });
+    };
+
+    /* Reaching the end early is the common case on a short review, so the gate
+       is re-checked once the outstanding active time could have elapsed rather
+       than being polled. */
+    const scheduleCheck = (): void => {
+      if (!reachedEnd || pendingCheck !== null) return;
+      const remaining = READ_ACTIVE_MS - activeTime.elapsed(Date.now());
+      if (remaining <= 0) return;
+      pendingCheck = window.setTimeout(() => {
+        pendingCheck = null;
+        emitIfRead();
+        scheduleCheck();
+      }, remaining);
+    };
+
+    document.addEventListener('visibilitychange', () => {
+      const now = Date.now();
+      if (document.visibilityState === 'hidden') {
+        activeTime.pause(now);
+        if (pendingCheck !== null) {
+          window.clearTimeout(pendingCheck);
+          pendingCheck = null;
+        }
+      } else {
+        activeTime.resume(now);
+        scheduleCheck();
+      }
+    });
+
+    new IntersectionObserver((entries, observer) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      reachedEnd = true;
+      gate.reachEnd();
+      emitIfRead();
+      scheduleCheck();
+    }).observe(readSentinel);
+  }
 
   /* ---- Affiliate links in markdown content: open in new tab ---- */
   document
@@ -385,8 +547,11 @@ if (!window.__sdChromeInit) {
       lightboxTrigger.setAttribute('role', 'button');
       lightboxTrigger.setAttribute('aria-label', 'Open full-size image');
 
-      const open = (): void => {
-        track(EVENTS.lightboxOpened, screenName ? { screen: screenName } : undefined);
+      /* Building and mounting the overlay touches enough of the DOM - and locks
+         document scrolling while it is up - that a failure half way through
+         would leave the page unscrollable with nothing on screen to close. The
+         guard both reports it and lets the page carry on. */
+      const openLightbox = (): void => {
         const overlay = document.createElement('div');
         overlay.className = 'sd-lightbox';
         overlay.setAttribute('role', 'dialog');
@@ -417,6 +582,16 @@ if (!window.__sdChromeInit) {
         });
         document.addEventListener('keydown', onKey);
         requestAnimationFrame(() => overlay.classList.add('is-open'));
+      };
+
+      const open = (): void => {
+        track(EVENTS.lightboxOpened, screenName ? { screen: screenName } : undefined);
+        try {
+          openLightbox();
+        } catch (error) {
+          document.body.style.overflow = '';
+          captureError(error, { feature: 'lightbox', screen: screenName });
+        }
       };
 
       lightboxTrigger.addEventListener('click', open);

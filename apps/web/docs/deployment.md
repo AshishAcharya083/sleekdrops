@@ -43,6 +43,10 @@ Both deploy workflows pass the analytics pair into the web build as `PUBLIC_DEVT
 
 An empty key disables the DevTeam sink silently after one warning; GA4 is unaffected.
 
+The same pair is also uploaded to the Pages project as **runtime** variables, by a `wrangler pages secret put` step in each deploy workflow (`--env preview` on develop, `--env production` on production).
+That step exists because the `PUBLIC_` values above are inlined into the browser bundle by Vite and never reach a Pages Function, and `functions/go/[slug].js` — which counts the outbound affiliate click, the site's primary conversion — reads them from `context.env` at request time.
+Both go up as secrets because wrangler has no command for a plain-text Pages variable and a secret reads back through `context.env` identically; nothing is committed to `wrangler.toml` or to the repo, an empty value is skipped, and an empty key leaves the Function's sink off while the 302 is still served.
+
 ### DevTeam A/B Testing (required for experiments to run)
 
 Both deploy workflows pass these into the web build as `PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY` / `PUBLIC_DEVTEAM_FLAGS_HOST`.

@@ -7,6 +7,7 @@ import DealCard from '@components/affiliate/DealCard.astro';
 import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro';
 import { getActiveDeals, todaysDrop } from '@data/deals';
 import { buildCategorySchema, buildMeta } from '@lib/seo';
+import { listViewProps } from '@lib/listing';
 
 const deals = getActiveDeals().filter((d) => d.id !== todaysDrop?.id);
 
@@ -49,24 +50,29 @@ const meta = buildMeta({
       <DropPanel />
     </div>
 
-    {deals.length > 0 ? (
-      <>
-        <h2 class="rest-title">More this week</h2>
-        <div class="deals-grid">
-          {deals.map((deal) => <DealCard deal={deal} />)}
+    {/* The list-view hook sits on the region rather than on the grid, so the
+        event is emitted whichever branch renders: a listing that showed a
+        visitor nothing is a `count: 0` row, not a missing one. */}
+    <section data-list-view={JSON.stringify(listViewProps({ listId: 'deals-index', count: deals.length }))}>
+      {deals.length > 0 ? (
+        <>
+          <h2 class="rest-title">More this week</h2>
+          <div class="deals-grid">
+            {deals.map((deal, index) => <DealCard deal={deal} listId="deals-index" position={index} />)}
+          </div>
+        </>
+      ) : (
+        <div class="deals-empty">
+          <h2 class="rest-title">Nothing else live right now</h2>
+          <p>
+            We list a deal only while its price actually holds, so this page runs empty
+            between drops rather than padded with expired ones. The reviews behind the
+            picks are the better read in the meantime.
+          </p>
+          <a class="more" href="/reviews">Read the reviews →</a>
         </div>
-      </>
-    ) : (
-      <div class="deals-empty">
-        <h2 class="rest-title">Nothing else live right now</h2>
-        <p>
-          We list a deal only while its price actually holds, so this page runs empty
-          between drops rather than padded with expired ones. The reviews behind the
-          picks are the better read in the meantime.
-        </p>
-        <a class="more" href="/reviews">Read the reviews →</a>
-      </div>
-    )}
+      )}
+    </section>
 
     <div class="disclosure-wrap">
       <AffiliateDisclosure />

@@ -134,6 +134,24 @@ export function isAdsGranted(): boolean {
   return adsMode() === 'personalised';
 }
 
+/**
+ * Report a handled ad-loading failure with its stack trace.
+ *
+ * `./analytics` is imported dynamically rather than at the top of this module,
+ * and only on this path: a page carrying an ad unit must not pull the analytics
+ * SDK into its bundle just to find out whether it may show one (see the module
+ * comment). The chunk is fetched only when a load has actually failed, so the
+ * healthy path is unchanged - and the report is dropped silently if that fetch
+ * fails too, because an unreportable failure must still not break the page.
+ */
+function reportAdsFailure(error: unknown): void {
+  void import('./analytics.ts')
+    .then(({ captureError }) => captureError(error, { feature: 'ads-loader' }))
+    .catch(() => {
+      /* the reporter itself is unreachable - nothing left to report it with */
+    });
+}
+
 /** One `[ads]` warning per document, however many units asked for one. */
 function warnOnce(message: string): void {
   const state = adsState();
@@ -196,13 +214,29 @@ export function loadAds(): boolean {
 
   const state = adsState();
   if (state.loaded) return true;
-  state.loaded = true;
 
-  const script = document.createElement('script');
-  script.async = true;
-  script.crossOrigin = 'anonymous';
-  script.src = `${ADS_SCRIPT_SRC}?client=${encodeURIComponent(client)}`;
-  document.head.appendChild(script);
+  try {
+    const script = document.createElement('script');
+    script.async = true;
+    script.crossOrigin = 'anonymous';
+    script.src = `${ADS_SCRIPT_SRC}?client=${encodeURIComponent(client)}`;
+    // A blocked, offline or rejected partner script leaves every unit on the
+    // page permanently empty and says nothing at all in the console, so the
+    // load error is the only signal that the slots are dead.
+    script.onerror = (): void => {
+      console.warn('[ads] partner script failed to load');
+      reportAdsFailure(new Error(`ad partner script failed to load: ${ADS_SCRIPT_SRC}`));
+    };
+    document.head.appendChild(script);
+  } catch (error) {
+    // The flag is set only once the tag is actually on the page, so a failed
+    // injection leaves the next unit free to try rather than reporting a
+    // partner this document never got.
+    console.warn('[ads] partner script could not be injected');
+    reportAdsFailure(error);
+    return false;
+  }
+  state.loaded = true;
   console.info(`[ads] partner loaded -> ${client} (${mode})`);
   return true;
 }

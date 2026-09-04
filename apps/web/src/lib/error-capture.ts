@@ -68,6 +68,27 @@ export function rejectionToProps(event: PromiseRejectionEvent): ErrorProps {
   };
 }
 
+/**
+ * Shape a *handled* failure - one caught in a `catch` block, an API error
+ * handler or an error boundary - into a `$client_error` payload.
+ *
+ * `attributes` go in first so the diagnostic fields can never be shadowed by a
+ * caller: a `feature: 'clipboard'` tag is structural context, not a place to
+ * rewrite the message or the stack. Anything not on the scrub allowlist is
+ * dropped later at the chokepoint, so a caller cannot widen the payload here
+ * either.
+ */
+export function errorToProps(error: unknown, attributes?: EventProps): ErrorProps {
+  const message =
+    error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return {
+    ...attributes,
+    message: message || 'Unknown error',
+    handled: true,
+    stack: truncateStack(error instanceof Error ? error.stack : undefined),
+  };
+}
+
 /** Stable key identifying an error for de-duplication. */
 export function errorSignature(props: ErrorProps): string {
   return `${props.message}|${props.source ?? ''}|${props.lineno ?? ''}`;

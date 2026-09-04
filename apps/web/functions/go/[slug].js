@@ -6,35 +6,21 @@
 // Pages Functions take precedence over _redirects for matching routes, so this
 // is the single owner of /go/*.
 //
-// Data (functions/_data/affiliate-links.mjs) and credentials
-// (functions/_lib/affiliates.mjs) are generated/maintained elsewhere; this
-// handler just wires country -> destination -> 302.
+// It is also where the outbound affiliate click — this site's primary
+// conversion — is counted server-side, which is the only place the count is
+// ad-block-proof. All of that lives in functions/_lib/redirect.mjs so it can be
+// driven by a test with a real Request and a fixture link table; this file is
+// the wiring that hands it the generated table (functions/_data, built by
+// scripts/generate-redirects.mjs from the D1 affiliate_links rows).
+//
+// The analytics ingest key and host are read from context.env — the Pages
+// *runtime* environment, uploaded by the deploy workflows — and never from a
+// literal here. An empty or missing key disables the sink silently and the 302
+// is served exactly as before.
 
 import links from '../_data/affiliate-links.mjs';
-import { resolve } from '../_lib/affiliates.mjs';
+import { handleRedirect } from '../_lib/redirect.mjs';
 
 export function onRequest(context) {
-  const { params, request } = context;
-  const slug = params.slug;
-  const country = request.cf && request.cf.country; // ISO alpha-2, may be undefined locally
-
-  const dest = resolve(links[slug], country);
-
-  if (!dest) {
-    return new Response(`Unknown affiliate slug: ${slug}`, {
-      status: 404,
-      headers: { 'content-type': 'text/plain; charset=utf-8' },
-    });
-  }
-
-  // 302 (temporary) so search engines don't index the merchant target; the
-  // on-page <a rel="sponsored nofollow"> already tells crawlers not to follow.
-  return new Response(null, {
-    status: 302,
-    headers: {
-      Location: dest,
-      // Geo-dependent: don't let a CDN cache one country's answer for another.
-      'cache-control': 'private, no-store',
-    },
-  });
+  return handleRedirect(context, links);
 }

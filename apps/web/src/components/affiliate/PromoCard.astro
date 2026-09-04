@@ -1,14 +1,32 @@
 ---
+import { EVENTS } from '@lib/analytics';
+import { cardClickProps, type ListId } from '@lib/listing';
 import type { Promo } from '@data/promos';
 
 /**
  * PromoCard — variation of DealCard with the prominent code chip instead
  * of strike-through pricing.
+ *
+ * `listId` and `position` are required for the same reason they are on
+ * DealCard: they are what make the promo funnel's click-through rate per card
+ * and per slot readable.
  */
-export interface Props { promo: Promo; }
-const { promo } = Astro.props;
+export interface Props {
+  promo: Promo;
+  listId: ListId;
+  /** Zero-based slot in the rendered list. */
+  position: number;
+}
+const { promo, listId, position } = Astro.props;
 ---
-<a class="promo-card" href={`/promos/${promo.slug}`}>
+<a
+  class="promo-card"
+  href={`/promos/${promo.slug}`}
+  data-track={EVENTS.promoCardClick}
+  data-track-props={JSON.stringify(
+    cardClickProps({ listId, slug: promo.slug, brand: promo.brand, placement: 'promo-card', position }),
+  )}
+>
   <div class="head">
     <div class="logo" aria-hidden="true">{promo.brandMark}</div>
     <div>

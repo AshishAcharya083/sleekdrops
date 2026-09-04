@@ -6,6 +6,7 @@ import PromoCard from '@components/affiliate/PromoCard.astro';
 import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro';
 import { getActivePromos } from '@data/promos';
 import { buildCategorySchema, buildMeta } from '@lib/seo';
+import { listViewProps } from '@lib/listing';
 
 const promos = getActivePromos();
 
@@ -22,6 +23,7 @@ const meta = buildMeta({
   {...meta}
   schema={buildCategorySchema('Promo codes', '/promos', desc)}
   active="deals"
+  screen="promos-listing"
 >
   <div class="container">
     <Breadcrumbs
@@ -40,8 +42,11 @@ const meta = buildMeta({
   />
 
   <div class="container">
-    <div class="promo-grid">
-      {promos.map((promo) => <PromoCard promo={promo} />)}
+    <div
+      class="promo-grid"
+      data-list-view={JSON.stringify(listViewProps({ listId: 'promos-index', count: promos.length }))}
+    >
+      {promos.map((promo, index) => <PromoCard promo={promo} listId="promos-index" position={index} />)}
     </div>
 
     <div class="disclosure-wrap">
