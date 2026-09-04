@@ -67,6 +67,17 @@ export interface ExperimentHooks {
   onExposure(experimentKey: string, variantKey: string): void;
   /** Console + platform logging, injected so this module stays sink-agnostic. */
   log(level: ExperimentLogLevel, message: string): void;
+  /**
+   * Report a handled failure with its stack trace. Injected for the same reason
+   * as `log`: this module must stay sink-agnostic and importable by the bare
+   * `node --test` runner, which cannot resolve the analytics SDK.
+   *
+   * Every failure here is silent by design - a feature that cannot be read falls
+   * back to its code-side default and the page renders unchanged - which is
+   * exactly why it has to be reported: without this, an unreachable flag host
+   * looks identical to an experiment nobody converted on.
+   */
+  captureError(error: unknown, attributes?: EventProps): void;
 }
 
 /** localStorage key holding the sticky stamps, alongside `sd-consent`/`sd-theme`. */
@@ -96,6 +107,15 @@ export function isFlagHostAllowed(host: string, pageProtocol: string): boolean {
 
 let growthbook: GrowthBook | null = null;
 let started = false;
+/**
+ * The hooks of the current start()/stop() cycle. Held at module level because a
+ * feature read - and so a failure worth reporting - happens long after start()
+ * returns, from a subscriber in chrome.ts that has no reference to them. Named
+ * apart from `load`'s own `hooks` parameter so the two are never confused: this
+ * one is null before a grant and again after a withdrawal, which is exactly what
+ * keeps a post-withdrawal read from reporting anything.
+ */
+let activeHooks: ExperimentHooks | null = null;
 /** Handle on the staleness poll below, so a withdrawal can stop it. */
 let refreshTimer: number | null = null;
 /**
@@ -165,8 +185,11 @@ function notify(): void {
   subscribers.forEach((apply) => {
     try {
       apply();
-    } catch {
-      /* one bad subscriber must not stop the others re-rendering */
+    } catch (error) {
+      // One bad subscriber must not stop the others re-rendering - and a slot
+      // that silently keeps its control copy looks exactly like a variant that
+      // did not win, so the failure is reported rather than dropped.
+      activeHooks?.captureError(error, { feature: 'experiments-apply' });
     }
   });
 }
@@ -196,7 +219,8 @@ export function getFeatureValue<T extends string | number | boolean>(
   if (!growthbook) return defaultValue;
   try {
     return coerceFeatureValue(growthbook.getFeatureValue(key, defaultValue), defaultValue);
-  } catch {
+  } catch (error) {
+    activeHooks?.captureError(error, { feature: 'experiments-read' });
     return defaultValue;
   }
 }
@@ -210,8 +234,12 @@ export function subscribe(apply: () => void): void {
   subscribers.add(apply);
   try {
     apply();
-  } catch {
-    /* a subscriber that throws on its first run must not break page setup */
+  } catch (error) {
+    // A subscriber that throws on its first run must not break page setup. This
+    // one runs before the consent grant that calls start(), so there are no
+    // hooks yet and nothing is reported - which is the correct outcome: no
+    // telemetry may leave the browser before the visitor has opted in.
+    activeHooks?.captureError(error, { feature: 'experiments-apply' });
   }
 }
 
@@ -261,6 +289,11 @@ async function load(distinctId: string, hooks: ExperimentHooks, env: FlagsEnv): 
       'A/B testing payload unavailable - features fall back to their code-side defaults: ' +
         String(error ?? 'timed out'),
     );
+    // The fetch or the parse of the flag payload failed. It degrades silently on
+    // the page, so the stack trace is the only way the failure is ever seen.
+    hooks.captureError(error ?? new Error('A/B testing payload fetch timed out'), {
+      feature: 'experiments-payload',
+    });
   } else {
     hooks.log('info', 'A/B testing initialized -> ' + env.apiHost);
   }
@@ -269,8 +302,10 @@ async function load(distinctId: string, hooks: ExperimentHooks, env: FlagsEnv): 
   refreshTimer = window.setInterval(() => {
     // skipCache forces a network read, so the poll is a real upper bound on
     // staleness rather than a no-op against a still-fresh cache entry.
-    instance.refreshFeatures({ skipCache: true }).catch(() => {
-      /* offline or platform down - the last known payload (or the defaults) stands */
+    instance.refreshFeatures({ skipCache: true }).catch((error: unknown) => {
+      // Offline or platform down - the last known payload (or the defaults)
+      // stands, so the page is unaffected and only this report says so.
+      hooks.captureError(error, { feature: 'experiments-refresh' });
     });
   }, REFRESH_MS);
 }
@@ -296,29 +331,32 @@ function teardown(instance: GrowthBook): void {
  * `distinctId` must be the id the DevTeam analytics SDK reports, so exposure and
  * conversion join on the same key.
  */
-export function start(distinctId: string, hooks: ExperimentHooks): void {
+export function start(distinctId: string, startHooks: ExperimentHooks): void {
   if (started) return;
   started = true;
+  activeHooks = startHooks;
   const env = flagsEnv();
   if (!env.clientKey || !env.apiHost) {
-    hooks.log(
+    startHooks.log(
       'warn',
       'A/B testing NOT configured - PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY / PUBLIC_DEVTEAM_FLAGS_HOST are empty',
     );
     return;
   }
   if (!isFlagHostAllowed(env.apiHost, location.protocol)) {
-    hooks.log(
+    startHooks.log(
       'warn',
       'A/B testing disabled - PUBLIC_DEVTEAM_FLAGS_HOST must be a valid https:// URL on a secure page: ' +
         env.apiHost,
     );
     return;
   }
-  load(distinctId, hooks, env).catch((error: unknown) => {
+  load(distinctId, startHooks, env).catch((error: unknown) => {
     // Telemetry must never be able to break the site it measures: on any
-    // failure every feature simply keeps its code-side default.
-    hooks.log('warn', 'A/B testing disabled - SDK failed to initialise: ' + String(error));
+    // failure every feature simply keeps its code-side default - but the SDK
+    // chunk failing to load is invisible on the page, so it is reported.
+    startHooks.log('warn', 'A/B testing disabled - SDK failed to initialise: ' + String(error));
+    startHooks.captureError(error, { feature: 'experiments-init' });
   });
 }
 
@@ -351,6 +389,7 @@ export function stop(): void {
   }
   const instance = growthbook;
   growthbook = null;
+  activeHooks = null;
   if (instance) teardown(instance);
   clearStickyProps();
 }

@@ -8,6 +8,7 @@ import {
   stripUrlQueries,
   CLIENT_ERROR_EVENT,
   EXPERIMENT_PROP_PREFIX,
+  type EventProps,
 } from './pii.ts';
 
 test('drops free-text fields not on the allowlist', () => {
@@ -244,4 +245,78 @@ test('rejects mistyped $client_error fields without crashing', () => {
     CLIENT_ERROR_EVENT,
   );
   assert.deepEqual(out, { message: 'boom' });
+});
+
+/**
+ * The chokepoint drops anything it does not recognise, which is exactly what
+ * makes a new dimension fail silently: the event arrives, the property does
+ * not, and the code that built it looks correct. Every event added in this
+ * coverage pass therefore asserts its whole payload here rather than trusting
+ * that the allowlist was remembered.
+ */
+const NEW_EVENT_PAYLOADS: Record<string, EventProps> = {
+  'Listing Viewed': { list_id: 'deals-index', count: 12, page: 2, batch: 1 },
+  'Deal Card Clicked': {
+    slug: 'ninja-blast',
+    brand: 'Ninja',
+    placement: 'deal-card',
+    position: 2,
+    list_id: 'deals-index',
+  },
+  'Promo Card Clicked': {
+    slug: 'brand-15',
+    brand: 'Brand',
+    placement: 'promo-card',
+    position: 0,
+    list_id: 'promos-index',
+  },
+  'Promo Code Copied': { slug: 'brand-15', brand: 'Brand' },
+  'Affiliate Link Clicked': {
+    slug: 'ninja-blast',
+    brand: 'Ninja',
+    retailer: 'Amazon',
+    placement: 'deal-detail',
+    position: 2,
+    list_id: 'deals-index',
+    click_id: '3f6b1c22-9b1a-4f0e-8c2a-2b4f7d1e5a90',
+  },
+  // Built by the /go Pages Function, which posts to the ingest endpoints
+  // directly. It never passes through this scrub - the allowlist entries are
+  // here so one module remains the whole vocabulary, and so a dimension added
+  // on the server is reviewed under the same rule as one added in the browser.
+  'Affiliate Redirect Served': {
+    slug: 'ninja-blast',
+    network: 'amazon',
+    region: 'au',
+    placement: 'deal-detail',
+    position: 2,
+    click_id: '3f6b1c22-9b1a-4f0e-8c2a-2b4f7d1e5a90',
+    trace_id: 'aa11bb22cc33dd44ee55ff6600112233',
+  },
+  'Article Read': { screen: 'blog-post', slug: 'sony-wh-1000xm6', active_time: '60s+' },
+  'Page Viewed': {
+    path: '/promos/brand-15',
+    referrer: '',
+    screen: 'promo-detail',
+    category: 'home',
+    slug: 'brand-15',
+    brand: 'Brand',
+  },
+};
+
+for (const [event, props] of Object.entries(NEW_EVENT_PAYLOADS)) {
+  test(`every property of ${event} survives the scrub`, () => {
+    assert.deepEqual(scrub(props), props);
+  });
+}
+
+test('the handled-error attributes survive alongside the diagnostic fields', () => {
+  const props = {
+    feature: 'clipboard',
+    screen: 'promo-detail',
+    message: 'Write permission denied',
+    stack: 'NotAllowedError: Write permission denied\n  at copyToClipboard',
+    handled: true,
+  };
+  assert.deepEqual(scrub(props, CLIENT_ERROR_EVENT), props);
 });

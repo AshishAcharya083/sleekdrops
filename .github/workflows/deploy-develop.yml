@@ -104,6 +104,40 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm --filter @sleekdrops/web build
 
+      # The build-time PUBLIC_ values above are inlined into the browser bundle
+      # by Vite and never reach a Pages Function. functions/go/[slug].js counts
+      # the outbound affiliate click - the site's primary conversion - and reads
+      # its ingest key and host from context.env, which is the Pages *runtime*
+      # environment. That environment is set here, from the same repo secret and
+      # variable, so a re-provisioned analytics project rotates both halves at
+      # once and neither is ever committed.
+      #
+      # `pages secret put` for both: wrangler has no command for a plain-text
+      # Pages variable, and a secret reads back through context.env identically.
+      # An empty value is skipped rather than uploaded - the Function disables
+      # its sink silently on an empty key and still serves the 302.
+      - name: Publish the analytics runtime config to Pages Functions (develop)
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT_NAME: ${{ secrets.CLOUDFLARE_PROJECT_NAME }}
+          PAGES_ENV: preview
+          DEVTEAM_ANALYTICS_INGEST_KEY: ${{ secrets.DEVTEAM_ANALYTICS_INGEST_KEY }}
+          DEVTEAM_ANALYTICS_HOST: ${{ vars.DEVTEAM_ANALYTICS_HOST }}
+        run: |
+          set -euo pipefail
+          put() {
+            if [ -z "${2:-}" ]; then
+              echo "::notice::$1 is empty - the /go Function's analytics sink stays off"
+              return 0
+            fi
+            printf '%s' "$2" | pnpm exec wrangler pages secret put "$1" \
+              --project-name "$PROJECT_NAME" --env "$PAGES_ENV"
+          }
+          put DEVTEAM_ANALYTICS_INGEST_KEY "$DEVTEAM_ANALYTICS_INGEST_KEY"
+          put DEVTEAM_ANALYTICS_HOST "$DEVTEAM_ANALYTICS_HOST"
+
       - name: Deploy to Cloudflare Pages (develop)
         uses: cloudflare/wrangler-action@v3
         with:

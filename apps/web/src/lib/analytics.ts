@@ -73,6 +73,7 @@ import {
   ErrorDeduper,
   errorEventToProps,
   errorSignature,
+  errorToProps,
   rejectionToProps,
   type ErrorProps,
 } from './error-capture.ts';
@@ -101,8 +102,16 @@ const GA_COOKIE = /^_ga(_|$)/;
 export const EVENTS = {
   pageView: 'Page Viewed',
   heroCtaClick: 'Hero CTA Clicked',
+  listingViewed: 'Listing Viewed',
   dealCardClick: 'Deal Card Clicked',
+  promoCardClick: 'Promo Card Clicked',
+  promoCodeCopied: 'Promo Code Copied',
   affiliateClick: 'Affiliate Link Clicked',
+  // Emitted by the /go Pages Function, not by this module - it is the
+  // ad-block-proof count of redirects actually served, and it lives in the
+  // taxonomy here so the one vocabulary covers both halves of the click.
+  affiliateRedirect: 'Affiliate Redirect Served',
+  articleRead: 'Article Read',
   newsletterSignup: 'Newsletter Signup',
   themeToggled: 'Theme Toggled',
   shareClicked: 'Share Clicked',
@@ -169,8 +178,12 @@ function writeConsent(grants: ConsentGrants): void {
   try {
     const record = { v: POLICY_VERSION, grants, ts: Date.now() };
     localStorage.setItem(CONSENT_KEY, JSON.stringify(record));
-  } catch {
-    /* storage unavailable (private mode, quota) - consent holds for the session */
+  } catch (error) {
+    // Storage unavailable (private mode, quota). Consent still holds for this
+    // page load, but the visitor will be re-prompted on the next one, so the
+    // failure is reported rather than swallowed - it is the difference between
+    // "nobody accepts" and "everybody is asked twice".
+    captureError(error, { feature: 'consent-storage' });
   }
 }
 
@@ -401,6 +414,7 @@ function startExperimentsForVisitor(): void {
         });
       },
       log: serverLog,
+      captureError,
     });
   });
 }
@@ -618,6 +632,46 @@ function reportError(props: ErrorProps): void {
     scope().client?.log.error(String(props.message ?? 'client error'), scrub(props, CLIENT_ERROR_EVENT));
   } catch {
     /* error reporting is best-effort - never let it surface to the user */
+  }
+}
+
+/**
+ * Report a handled failure - one caught in a `catch` block, an API error
+ * handler or an error boundary - with its message and a truncated stack trace.
+ *
+ * Routes through exactly the same pipeline an uncaught error does: the consent
+ * gate (nothing is sent, stored or logged before the visitor opts in), the
+ * dedupe window (a fault firing in a loop reports once), and the scrub()
+ * chokepoint (URLs in the message and the stack are reduced to path, emails
+ * redacted, and any attribute not on the allowlist dropped). It emits both the
+ * `$client_error` event and an error-level log, so the failure is findable in
+ * the platform's Logs view beside the log lines around it - which is what makes
+ * a stack trace investigable rather than merely counted.
+ *
+ * `attributes` is for structural context - `{ feature: 'clipboard' }`, a screen,
+ * a slug - never for anything free-form.
+ *
+ * Never throws: a reporting failure must not surface to the user or break
+ * rendering, which is what lets a call site use it in place of an empty catch.
+ */
+export function captureError(error: unknown, attributes?: EventProps): void {
+  reportError(errorToProps(error, attributes));
+}
+
+/**
+ * This session's analytics trace id, or an empty string before consent (there
+ * is no client, and so no session, until then).
+ *
+ * Every log line the SDK sends already carries it. Sending it on to the site's
+ * own backend - here, on the `/go` redirect URL - is what puts a client-side
+ * error and the server-side log of the request that preceded it under one key.
+ */
+export function getTraceId(): string {
+  try {
+    return scope().client?.getTraceId() ?? '';
+  } catch {
+    /* the SDK reports its own failures through onError - never break a caller */
+    return '';
   }
 }
 

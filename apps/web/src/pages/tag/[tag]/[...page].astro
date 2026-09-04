@@ -49,6 +49,8 @@ const meta = buildMeta({
   {...meta}
   schema={buildCategorySchema(`#${tag}`, `/tag/${slug}`, desc)}
   active="blog"
+  screen="tag-listing"
+  pageProps={{ slug }}
 >
   <div class="container">
     <Breadcrumbs

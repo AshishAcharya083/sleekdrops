@@ -1,5 +1,6 @@
 ---
 import { EVENTS } from '@lib/analytics';
+import { cardClickProps, type ListId } from '@lib/listing';
 import type { Deal } from '@data/deals';
 
 /**
@@ -7,15 +8,28 @@ import type { Deal } from '@data/deals';
  * grid on the homepage and the deals index. Links to the deal detail
  * page, not the external retailer (so we can show the disclosure + terms
  * before the click-out).
+ *
+ * `listId` and `position` are required rather than optional: the click-through
+ * rate of a card is only meaningful against the list it was rendered in and the
+ * slot it occupied, so a card that cannot say where it sat is a card whose
+ * clicks cannot be read. They carry the same `list_id` the enclosing list's
+ * `Listing Viewed` event reports.
  */
-export interface Props { deal: Deal; }
-const { deal } = Astro.props;
+export interface Props {
+  deal: Deal;
+  listId: ListId;
+  /** Zero-based slot in the rendered list. */
+  position: number;
+}
+const { deal, listId, position } = Astro.props;
 ---
 <a
   class="deal-mini"
   href={`/deals/${deal.slug}`}
   data-track={EVENTS.dealCardClick}
-  data-track-props={JSON.stringify({ slug: deal.slug, brand: deal.brand })}
+  data-track-props={JSON.stringify(
+    cardClickProps({ listId, slug: deal.slug, brand: deal.brand, placement: 'deal-card', position }),
+  )}
 >
   <div class="deal-mini-head">
     <div class="logo" aria-hidden="true">{deal.brandMark}</div>

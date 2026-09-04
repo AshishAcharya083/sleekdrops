@@ -4,6 +4,7 @@ import BaseLayout from '@layouts/BaseLayout.astro';
 import Breadcrumbs from '@components/seo/Breadcrumbs.astro';
 import Eyebrow from '@components/ui/Eyebrow.astro';
 import Button from '@components/ui/Button.astro';
+import IconButton from '@components/ui/IconButton.astro';
 import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro';
 import { promos, type Promo } from '@data/promos';
 import { getCategoryBySlug } from '@data/categories';
@@ -28,7 +29,13 @@ const meta = buildMeta({
 });
 const schema = buildOfferSchema(promo, `/promos/${promo.slug}`, promo.title);
 ---
-<BaseLayout {...meta} schema={schema} active="deals">
+<BaseLayout
+  {...meta}
+  schema={schema}
+  active="deals"
+  screen="promo-detail"
+  pageProps={{ category: promo.category, slug: promo.slug, brand: promo.brand }}
+>
   <div class="container">
     <Breadcrumbs
       items={[
@@ -49,8 +56,23 @@ const schema = buildOfferSchema(promo, `/promos/${promo.slug}`, promo.title);
 
     <section class="card">
       <div class="code-row">
-        <span class="code-label">Copy code at checkout</span>
-        <code>{promo.code}</code>
+        <div class="code-text">
+          <span class="code-label">Copy code at checkout</span>
+          <code>{promo.code}</code>
+        </div>
+        {/* The code is the one thing the visitor has to carry to the merchant's
+            checkout, so it gets a control rather than asking them to select it
+            by hand. Same flash acknowledgement as the article copy-link button;
+            chrome.ts owns both. */}
+        <IconButton
+          title="Copy code"
+          data={{
+            'copy-code': promo.code,
+            'track-props': JSON.stringify({ slug: promo.slug, brand: promo.brand }),
+          }}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </IconButton>
       </div>
       <p class="disc-label">{promo.discountLabel}</p>
       <Button
@@ -115,11 +137,18 @@ const schema = buildOfferSchema(promo, `/promos/${promo.slug}`, promo.title);
   }
   .code-row {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
     padding: 18px 22px;
     background: var(--surface-2);
     border-radius: var(--r-md);
+  }
+  .code-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
   }
   .code-label {
     font-size: 11px;

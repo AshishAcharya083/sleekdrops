@@ -25,7 +25,12 @@ const meta = buildMeta({
   pathname: `/author/${author.id}`,
 });
 ---
-<BaseLayout {...meta} schema={buildAuthorSchema(author)}>
+<BaseLayout
+  {...meta}
+  schema={buildAuthorSchema(author)}
+  screen="author"
+  pageProps={{ slug: author.id }}
+>
   <div class="container">
     <Breadcrumbs
       items={[

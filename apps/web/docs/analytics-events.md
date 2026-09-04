@@ -20,8 +20,16 @@ Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../sr
 - **Funnel clicks** - an element carries `data-track="<Event Name>"` and an optional JSON `data-track-props`.
   `chrome.ts` fires the event synchronously on click, before the browser follows the link.
   The attribute value is the one event name that reaches `track()` as a runtime string, so the dispatcher checks it against the `EVENTS` values first and drops an unknown name with a single `serverLog('warn', ...)` line instead of sending it.
+- **List views** - a rendered deal or promo list carries the whole payload as JSON on `data-list-view` (built by [`src/lib/listing.ts`](../src/lib/listing.ts)) and `chrome.ts` fires `Listing Viewed` for it on load.
+  The event name stays in code here rather than in the attribute, because nothing about a list view arrives as a runtime string.
+  One event per rendered list, never one per card.
+- **Outbound clicks** - when the dispatched event is `Affiliate Link Clicked`, `chrome.ts` mints a click id, puts it on the event, and rewrites the anchor's `/go/<slug>` href with it, this session's trace id, the placement and the position before the browser follows the link.
+  The rules live in the pure [`src/lib/outbound.ts`](../src/lib/outbound.ts); the Function on the other end reads them back with [`functions/_lib/click.mjs`](../functions/_lib/click.mjs).
+- **Server-side redirects** - [`functions/_lib/redirect.mjs`](../functions/_lib/redirect.mjs), behind the `/go/<slug>` Pages Function, posts `Affiliate Redirect Served` straight to the DevTeam ingest endpoints.
+  It is the only event on this site that does not go through `src/lib/analytics.ts`, because it is emitted by a Worker rather than by a browser.
+- **Read completion** - `ArticleBody.astro` ends with a `[data-read-sentinel]`; `chrome.ts` watches it with an `IntersectionObserver` and an active-time stopwatch, and fires `Article Read` once when both halves of the gate hold ([`src/lib/read-completion.ts`](../src/lib/read-completion.ts)).
 - **Newsletter signups** - not currently emitted. There is no mailing list behind the site yet, so the newsletter band and the footer subscribe block carry no form at all; firing a conversion for a submission that stores nothing would report a signup that never happened. The event stays in the taxonomy for the capture that replaces them.
-- **Chrome UI interactions** - the dark-mode toggle, share button, copy-link button, image lightbox, and TOC nav links already have dedicated event listeners in `chrome.ts` for their own behaviour; each fires its analytics event directly from that handler rather than through a `data-track` attribute.
+- **Chrome UI interactions** - the dark-mode toggle, share button, copy-link button, copy-code button, image lightbox, and TOC nav links already have dedicated event listeners in `chrome.ts` for their own behaviour; each fires its analytics event directly from that handler rather than through a `data-track` attribute.
 - **Experiment copy** - an element carries `data-experiment-copy="<feature key>"`; its default copy renders in the static HTML and `chrome.ts` swaps it in place once the flag payload resolves, rewriting the enclosing `data-track` element's `cta` prop so the funnel event reports the label the visitor actually saw.
 - **Experiment nav items** - a primary-nav anchor carries `data-experiment-nav-item="<feature key>"`; the item renders in the static HTML for every visitor and `chrome.ts` removes it from the DOM once a boolean flag resolves true, restoring it in its original slot if the value flips back.
   The decision layer is the pure [`src/lib/nav-experiment.ts`](../src/lib/nav-experiment.ts), which also owns the rule that the flag is read **only** while the primary nav is displayed (wider than the `(max-width: 900px)` breakpoint that hides `.site-nav`) - reading a feature is what buckets a visitor, so a narrow-viewport read would count an exposure for a treatment that visitor can never see.
@@ -41,6 +49,14 @@ Together with the dispatcher's runtime check they close every path an unnamed ev
 A/B testing follows the same chokepoint discipline: [`src/lib/experiments.ts`](../src/lib/experiments.ts) is the only module that touches the GrowthBook SDK, it is started only from the consent-grant path and stopped from the withdrawal path, and every feature read falls back to the caller's code-side default.
 The flag payload is treated as data, never as code: it is read over `https` only (a plaintext host on a secure page is refused with one warning), and GrowthBook's auto-experiments — DOM mutations, JS injection and URL redirects — are disabled, so a flag can change only a value the site itself asked for.
 
+## No identity
+
+`analytics.identify()` and `analytics.reset()` are deliberately **not** called anywhere in this app, and their absence is a decision rather than an omission.
+The public website has no accounts, no login and no session restore, so there is no user id to identify a visitor by and nothing for a logout to reset.
+The only identifiers on an event are the SDK's own device-scoped distinct id and the two random ids this site mints (`event_id`, `visit_id`), all of which are cleared on a decline or a withdrawal.
+
+The admin panel does hold an operator token and reports into the same DevTeam project; its identity handling is documented in [`apps/admin/docs/analytics-events.md`](../../admin/docs/analytics-events.md) and nothing here applies to it.
+
 ## No PII
 
 Properties carry only non-identifying context (screen names, deal slugs, brands, CTA labels).
@@ -51,8 +67,8 @@ Consent and PII enforcement are handled separately by the consent/PII gate.
 
 ### Page Viewed
 
-Fired **exactly once per document per path**, on the key screens.
-The deal-detail page view doubles as the "deal detail viewed" funnel step (it carries the deal `slug` and `brand`).
+Fired **exactly once per document per path**, on every route the site serves.
+The deal-detail and promo-detail page views double as the "detail viewed" funnel step (they carry the `slug` and `brand`).
 
 "Exactly once" is a guarantee, not a convention: `chrome.ts` dispatches through `trackPageView()` in [`src/lib/analytics.ts`](../src/lib/analytics.ts), which claims a document-scoped key of `Page Viewed` plus the normalized path and drops any repeat.
 So a second script entry point reaching the dispatch, a bfcache restore or a re-run of the dispatch path cannot report a second view, while a same-document navigation to a different path still can.
@@ -62,12 +78,35 @@ So a second script entry point reaching the dispatch, a bfcache restore or a re-
 |---|---|---|
 | `path` | string | The normalized path, stamped by the dispatcher. |
 | `referrer` | string | Reduced to path by `scrub()`, and empty on a direct visit. |
-| `screen` | string | One of `home`, `blog-listing`, `blog-post`, `deals-listing`, `deal-detail`. |
-| `category` | string | Category slug. Present on `blog-post` and `deal-detail`. |
-| `slug` | string | Post or deal slug. Present on `blog-post` and `deal-detail`. |
-| `brand` | string | Deal brand. Present on `deal-detail`. |
+| `screen` | string | The screen name. Every route the site serves declares one - see the table below. |
+| `category` | string | Category slug. Present on `blog-post`, `deal-detail`, `promo-detail` and `category-listing`. |
+| `slug` | string | Post, deal, promo, tag or author slug. Present on `blog-post`, `deal-detail`, `promo-detail`, `tag-listing` and `author`. |
+| `brand` | string | Deal or promo brand. Present on `deal-detail` and `promo-detail`. |
 
-Owning screens: homepage, blog listing, blog post, deals listing, deal detail.
+Every page under `src/pages` passes a `screen`, so no `Page Viewed` arrives unnamed:
+
+| Screen | Route |
+|---|---|
+| `home` | `/` |
+| `blog-listing` | `/blog`, `/blog/<n>` |
+| `blog-post` | `/blog/<slug>` |
+| `deals-listing` | `/deals` |
+| `deal-detail` | `/deals/<slug>` |
+| `promos-listing` | `/promos` |
+| `promo-detail` | `/promos/<slug>` |
+| `categories` | `/categories` |
+| `category-listing` | `/category/<slug>`, `/category/<slug>/<n>` |
+| `tag-listing` | `/tag/<tag>`, `/tag/<tag>/<n>` |
+| `author` | `/author/<id>` |
+| `guides-listing` | `/guides`, `/guides/<n>` |
+| `reviews-listing` | `/reviews`, `/reviews/<n>` |
+| `about` | `/about` |
+| `contact` | `/contact` |
+| `privacy` | `/privacy` |
+| `disclaimer` | `/disclaimer` |
+| `not-found` | the 404 page |
+
+The five names in use before this pass (`home`, `blog-listing`, `blog-post`, `deals-listing`, `deal-detail`) are unchanged, so their history is continuous.
 
 ### Hero CTA Clicked
 
@@ -80,6 +119,28 @@ A click on a primary call-to-action in the homepage hero.
 
 Owning screen: homepage (`Hero` section of `src/pages/index.astro`).
 
+### Listing Viewed
+
+One event per **rendered list** of deal or promo cards - never one per card.
+
+Impressions are the highest-volume signal on a deals site, so the per-list shape is what keeps the event volume proportionate to the pages rendered rather than to the cards on them.
+It is the denominator of click-through rate per card and per slot position: divide the `Deal Card Clicked` / `Promo Card Clicked` rows sharing a `list_id` by the `count` this event reports.
+
+Pagination and load-more ride here as properties rather than as an event stream of their own, so "do people go past page 1" is answerable without a second noisy stream.
+Neither listing is paginated today, so `page` is `1` and `batch` is `0` on every row.
+
+An empty listing still reports, with `count: 0` - a visitor shown an empty deals page is a fact worth having, and on a site whose deal and promo tables are currently empty it is the only fact these two screens have.
+The homepage module is the exception: it is omitted from the page entirely when there is nothing to show, so no list was rendered and none is reported.
+
+| Property | Type | Notes |
+|---|---|---|
+| `list_id` | string | `home-deals`, `deals-index`, or `promos-index`. Closed set in [`src/lib/listing.ts`](../src/lib/listing.ts). |
+| `count` | number | Cards actually rendered in this list. |
+| `page` | number | 1-based listing page number. |
+| `batch` | number | 0-based index of the lazily-loaded batch. |
+
+Owning screens: `home` (`home-deals`), `deals-listing` (`deals-index`), `promos-listing` (`promos-index`).
+
 ### Deal Card Clicked
 
 A click on a deal tile that enters the deal funnel by navigating to a deal-detail page.
@@ -88,14 +149,48 @@ A click on a deal tile that enters the deal funnel by navigating to a deal-detai
 |---|---|---|
 | `slug` | string | Deal slug. |
 | `brand` | string | Deal brand. |
-| `placement` | string | `drop-panel` for the hero drop card; absent for the standard `DealCard` grid tile. |
+| `placement` | string | `deal-card` for a grid tile, `drop-panel` for the hero drop card. |
+| `position` | number | Zero-based slot in the rendered list. Absent for `drop-panel`, which is not a list. |
+| `list_id` | string | The `list_id` of the `Listing Viewed` event for the same list. Absent for `drop-panel`. |
 
 Owning components: `DealCard.astro`, `DropPanel.astro` (homepage and deals listing).
 
+### Promo Card Clicked
+
+The promo half of `Deal Card Clicked`: a click on a promo tile that navigates to a promo-detail page.
+
+Kept as its own name rather than folded into `Deal Card Clicked` because the two surfaces convert differently - a promo click carries a code to a checkout, a deal click carries a price - and a blended card-click rate would hide which of them is worth the slot.
+
+| Property | Type | Notes |
+|---|---|---|
+| `slug` | string | Promo slug. |
+| `brand` | string | Promo brand. |
+| `placement` | string | Always `promo-card`. |
+| `position` | number | Zero-based slot in the rendered list. |
+| `list_id` | string | Always `promos-index` today. |
+
+Owning component: `PromoCard.astro` (promos listing).
+
+### Promo Code Copied
+
+The copy-to-clipboard control on the code shown on a promo-detail page.
+
+It is the one step the promo funnel had no signal for at all: between the page view and the click-out, the visitor has to take the code with them, and a code they never copied is a click-out that will not convert.
+Fires on click, before the clipboard write - so it captures the intent even where the clipboard API is unavailable and the visitor copies out of the fallback prompt.
+
+| Property | Type | Notes |
+|---|---|---|
+| `slug` | string | Promo slug. |
+| `brand` | string | Promo brand. |
+
+Owning component: `chrome.ts` (`[data-copy-code]` handler), on `promos/[slug].astro`.
+
 ### Affiliate Link Clicked
 
-The primary conversion: a click on an outbound affiliate "View deal" / "View price" button.
-Fires before the `/go/<slug>` (or direct merchant) navigation.
+A click on an outbound affiliate "View deal" / "View price" button, as the **browser** saw it.
+Fires before the `/go/<slug>` (or direct merchant) navigation, and carries the page context the server never sees.
+
+This is the rich, lossy half of the click. It is dropped by ad blockers and can lose the race with the navigation, so the number reported as the primary conversion is `Affiliate Redirect Served` below; the two join on `click_id`.
 
 | Property | Type | Notes |
 |---|---|---|
@@ -103,8 +198,60 @@ Fires before the `/go/<slug>` (or direct merchant) navigation.
 | `brand` | string | Product / deal brand. |
 | `retailer` | string | Merchant name. Present for the in-article product callout. |
 | `placement` | string | `deal-detail`, `verdict`, `product-callout`, or `promo-detail`. |
+| `position` | number | Zero-based slot, when the link sits in a list. |
+| `list_id` | string | The list the link sat in, when it sat in one. |
+| `click_id` | string | The per-click join key minted here and appended to the `/go` URL. Present only for a `/go/<slug>` link - a link straight to a merchant is left exactly as the editorial row wrote it. |
 
 Owning components: `deals/[slug].astro`, `promos/[slug].astro`, `Verdict.astro`, `ProductCallout.astro`.
+
+### Affiliate Redirect Served
+
+**The primary conversion**, counted server-side by the `/go/<slug>` Pages Function once a destination has actually been resolved.
+
+Server-side because the publisher owns nothing after the click and every affiliate network defines publisher performance with clicks as the denominator (EPC = commissions / clicks; network conversion rate = orders / clicks).
+A count taken on the anchor is lost to ad blockers and to the unload race; a redirect the edge actually served is not.
+Emitted for successfully resolved redirects only - an unknown slug or an unresolvable destination produces an error-level log and no event, so the count is never inflated by 404s.
+
+It is a **different name** from `Affiliate Link Clicked` on purpose: one says a visitor clicked, the other says the redirect was served, and emitting one name for both would make the ad-block gap invisible. Join them on `click_id`.
+
+The same `click_id` is threaded into the affiliate network's sub-id slot by [`functions/_lib/affiliates.mjs`](../functions/_lib/affiliates.mjs) - Amazon `ascsubtag`, Awin `clickref`, Commission Factory `UniqueId` - which is what makes a sale reported by the network 24-72 hours later joinable back to the deal, page, placement and position that earned it.
+Networks with no sub-id slot, and rows falling back to the direct builder, resolve exactly as they did before.
+
+| Property | Type | Notes |
+|---|---|---|
+| `slug` | string | Affiliate slug from the route. |
+| `network` | string | The builder that produced the destination: `amazon`, `awin`, `commissionfactory`, `direct`. |
+| `region` | string | The storefront region the visitor's country resolved to (`us`, `au`, ...). Never the country itself. |
+| `placement` | string | From the query string, when the browser supplied one. |
+| `position` | number | From the query string, when the browser supplied one. |
+| `click_id` | string | The per-click join key. Supplied by the browser, or minted here for a `/go` link followed without one. |
+| `trace_id` | string | The client session's trace id when supplied, else derived from the click id. |
+
+Emitting surfaces: every `/go/<slug>` request, wherever the link was rendered - the in-article `Verdict` and `ProductCallout` buttons (which always build `/go/<post slug>`), the deal-detail and promo-detail CTAs whenever the editorial row's `href` is a `/go` link, and any `/go` link written directly into markdown.
+A row whose `href` points straight at a merchant bypasses the redirect entirely: it still reports `Affiliate Link Clicked` from the browser, but with no `click_id` and no server-side row, because there is no request of ours to count.
+
+No cookie, IP, user agent, device identifier or visitor identifier is sent with it.
+`distinct_id` on the wire is the constant `go-redirect`, naming the surface rather than a person, and `session_id` is the per-click random click id.
+The ingest key and host come from `context.env` (Pages *runtime* variables, uploaded by the deploy workflows) and never from a literal in the repo; an empty or missing key disables the sink silently and the 302 is served unchanged.
+Delivery is handed to `context.waitUntil` after the Response is built and cannot reject, so a slow or broken ingest host cannot change the redirect's status, its `Location` header or its latency.
+
+### Article Read
+
+One read-completion event per article page view, emitted when the reader crosses the sentinel at the end of the article body **and** has accrued at least 30 seconds of active time.
+
+Active time pauses while the tab is hidden, which is what separates reading from a tab left open.
+Both halves are required: a short page is fully scrolled the moment it loads, and time alone counts background tabs.
+
+There is deliberately **no** 25/50/75/90 scroll-depth ladder.
+That is four events per page view measuring page length rather than reader interest, and this single event supersedes it.
+
+| Property | Type | Notes |
+|---|---|---|
+| `screen` | string | Always `blog-post` today - `ArticleBody.astro` is used only there. |
+| `slug` | string | Post slug, from the page-view payload. |
+| `active_time` | string | Bucketed: `0-15s`, `15-60s`, `60s+`. Never raw milliseconds - a millisecond count is unique per page view and unusable as a dimension. The 30-second gate means only the upper two buckets can appear on this event. |
+
+Owning component: `chrome.ts` (`[data-read-sentinel]` observer), on `blog/[slug].astro`.
 
 ### Newsletter Signup
 
@@ -192,6 +339,35 @@ Fires once per experiment, at the moment a feature covered by an experiment rule
 | `variant_key` | string | The assigned variation's key (`0`, `1`, ... unless the experiment names them). |
 
 Bucketing uses `attributes.id` = the DevTeam analytics SDK's own distinct id, so exposure and conversion join on the same key.
+
+### $client_error
+
+Platform event: a runtime failure in the browser, with a stack trace.
+Its name and its diagnostic properties are a contract with the platform rather than part of the Title Case product taxonomy - like `$experiment_viewed`.
+
+Two sources feed it, both through the same pipeline:
+
+- **Uncaught** - the `window` `error` and `unhandledrejection` listeners registered by `initErrorCapture()`.
+- **Handled** - `captureError(error, attributes)` in [`src/lib/analytics.ts`](../src/lib/analytics.ts), called from every catch block that would otherwise swallow a user-visible failure: the Web Share and clipboard fallbacks, the image lightbox and the theme write in `chrome.ts`, the flag payload fetch, refresh and apply in `experiments.ts`, the ad partner loader in `ads.ts`, and the consent storage write in `analytics.ts` itself.
+
+Catches that are *not* wired to it are the ones where nothing was lost: a storage read that already degrades to "no decision on file", a JSON parse with a defined fallback, and the reporter's own guard - which has to stay silent, since it is what keeps a reporting failure from reaching the visitor.
+
+Both route through the consent gate (nothing is sent, stored or logged before the visitor opts in), the dedupe window (an identical signature reports at most once per 10 seconds, so a fault in a tight loop cannot flood the endpoint) and the `scrub()` chokepoint.
+Each report also emits an **error-level log** carrying the session's trace id, so the failure is findable in the platform's Logs view beside the lines around it rather than only as an event.
+A reporting failure is swallowed: it can never surface to the visitor or break rendering.
+
+| Property | Type | Notes |
+|---|---|---|
+| `message` | string | URLs reduced to path, emails redacted. |
+| `stack` | string | Truncated to 2000 characters. Same scrub as `message`. |
+| `source` | string | Script filename, for an uncaught error. |
+| `lineno` / `colno` | number | Location, for an uncaught error. |
+| `handled` | boolean | `true` for a `captureError()` report, `false` for an unhandled rejection. |
+| `feature` | string | The operation that failed, for a handled report: `web-share`, `clipboard`, `lightbox`, `theme-storage`, `ads-loader`, `consent-storage`, `experiments-payload`, `experiments-refresh`, `experiments-init`, `experiments-read`, `experiments-apply`. |
+
+A share sheet the visitor dismisses rejects with `AbortError` and is **not** reported: it is a choice, not a fault, and reporting it would bury the real failures under it.
+
+The `/go` Pages Function has no `captureError` of its own - it is not a browser and has no consent gate to route through - and reports its failures as error-level logs with a `stack` attribute instead. See `Affiliate Redirect Served` above.
 
 ### `$exp_<experimentKey>` (sticky property)
 

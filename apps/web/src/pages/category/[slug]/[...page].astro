@@ -43,6 +43,8 @@ const meta = buildMeta({
   {...meta}
   schema={buildCategorySchema(category.name, `/category/${category.slug}`, category.intro)}
   active="categories"
+  screen="category-listing"
+  pageProps={{ category: category.slug }}
 >
   <div class="container">
     <Breadcrumbs
