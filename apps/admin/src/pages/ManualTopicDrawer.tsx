@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
 import type { ManualTopicPayload, ReferenceMaterial, Topic } from '../api';
-import { api, TOPIC_CATEGORIES, TOPIC_POST_TYPES } from '../api';
+import { api, apiUpload, TOPIC_CATEGORIES, TOPIC_POST_TYPES } from '../api';
+import { HeroImageField } from '../HeroImageField';
 
 const MAX_REFERENCES = 5;
 const MAX_REFERENCE_BYTES = 2 * 1024 * 1024;
@@ -31,6 +32,11 @@ export function ManualTopicDrawer({
   const [postType, setPostType] = useState<string>(TOPIC_POST_TYPES[0]);
   const [files, setFiles] = useState<FileRef[]>([]);
   const [pastes, setPastes] = useState<string[]>([]);
+  // Hero image: picked now, uploaded once the draft row exists to hang it off.
+  const [heroFile, setHeroFile] = useState<File | null>(null);
+  const [heroUrl, setHeroUrl] = useState<string | null>(null);
+  const [heroAlt, setHeroAlt] = useState('');
+  const [heroRemoved, setHeroRemoved] = useState(false);
   const [showPaste, setShowPaste] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [titleTouched, setTitleTouched] = useState(false);
@@ -57,6 +63,10 @@ export function ManualTopicDrawer({
         size: new Blob([r.content]).size,
       })),
     );
+    setHeroUrl(editing.hero_image_url);
+    setHeroAlt(editing.hero_alt ?? '');
+    setHeroFile(null);
+    setHeroRemoved(false);
     setSavedId(editing.id);
   }, [editing]);
 
@@ -118,6 +128,10 @@ export function ManualTopicDrawer({
     setFiles([]);
     setPastes([]);
     setShowPaste(false);
+    setHeroFile(null);
+    setHeroUrl(null);
+    setHeroAlt('');
+    setHeroRemoved(false);
     setFileError(null);
     setTitleTouched(false);
     setError(null);
@@ -132,7 +146,30 @@ export function ManualTopicDrawer({
     post_type: postType,
     reference_count: referenceCount,
     instructions_provided: instructions.trim() !== '',
+    hero_image_provided: Boolean(heroFile ?? heroUrl),
   });
+
+  /**
+   * Put the picked image on the saved row, or drop the one that was there. The
+   * upload needs a topic id, which is why it can't happen at drop time - and
+   * why a failure here is worded so the operator knows the brief itself landed.
+   */
+  const syncHeroImage = async (topicId: string): Promise<void> => {
+    try {
+      if (heroFile) {
+        const { topic } = await apiUpload<{ topic: Topic }>(`/api/topics/${topicId}/hero-image`, {
+          file: heroFile,
+        });
+        setHeroUrl(topic.hero_image_url);
+        setHeroFile(null);
+      } else if (heroRemoved) {
+        await api(`/api/topics/${topicId}/hero-image`, { method: 'DELETE' });
+        setHeroRemoved(false);
+      }
+    } catch (e) {
+      throw new Error(`Topic saved, but the hero image did not: ${(e as Error).message}`);
+    }
+  };
 
   /** Create or update the draft; returns its id, or null on failure. */
   const saveDraft = async (): Promise<string | null> => {
@@ -142,6 +179,7 @@ export function ManualTopicDrawer({
       instructions: instructions.trim(),
       category,
       post_type: postType,
+      hero_alt: heroAlt.trim(),
       references: buildReferences(),
     };
     const { topic } = await api<{ topic: Topic }>('/api/topics/manual', {
@@ -149,6 +187,7 @@ export function ManualTopicDrawer({
       body: JSON.stringify(payload),
     });
     setSavedId(topic.id);
+    await syncHeroImage(topic.id);
     return topic.id;
   };
 
@@ -317,6 +356,24 @@ export function ManualTopicDrawer({
                   </select>
                 </div>
               </div>
+
+              <HeroImageField
+                url={heroUrl}
+                file={heroFile}
+                alt={heroAlt}
+                busy={busy}
+                onPick={(picked) => {
+                  setHeroFile(picked);
+                  setHeroRemoved(false);
+                }}
+                onRemove={() => {
+                  if (heroUrl) setHeroRemoved(true);
+                  setHeroUrl(null);
+                  setHeroFile(null);
+                }}
+                onAltChange={setHeroAlt}
+                hint="Uploaded when you save the draft and carried onto the article on approval. With one attached the image agent stands down - it only goes looking when you haven't supplied a photo."
+              />
 
               <div className="field">
                 <label>

@@ -54,6 +54,7 @@ const ALLOWED_PROPS = new Set<string>([
   'removed_links',
   'feedback_length',
   'instructions_provided',
+  'hero_image_provided',
   'value_present',
   // settings dimensions (enums, counts and set/not-set flags only)
   'publish_mode',

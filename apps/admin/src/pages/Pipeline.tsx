@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
 import type { ArticleDetail, ArticleSummary } from '../api';
-import { api, duration, fmtCost, fmtTime } from '../api';
+import { api, apiUpload, duration, fmtCost, fmtTime } from '../api';
 import { Badge } from '../components';
+import { HeroImageField } from '../HeroImageField';
 import { usePoll } from '../hooks';
 
 const LANES: Array<{ title: string; stages: string[] }> = [
@@ -35,6 +36,7 @@ export function Pipeline() {
                     <Badge value={a.stage} />
                     <Badge value={a.status} />
                     {a.seo_score && <span className="badge">SEO {a.seo_score}</span>}
+                    {a.hero_image_url && <span className="badge violet">🖼️ hero</span>}
                   </div>
                   {a.error && (
                     <div className="muted" style={{ color: 'var(--red)', marginTop: 6, fontSize: 12 }}>
@@ -140,6 +142,11 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                   Retry stage
                 </button>
               )}
+              {detail.article.stage === 'done' && detail.article.status === 'done' && (
+                <button className="btn secondary" onClick={() => action('republish')}>
+                  ♻️ Publish again
+                </button>
+              )}
               {['queued', 'failed', 'waiting_approval'].includes(detail.article.status) && (
                 <button className="btn danger" onClick={() => action('cancel')}>
                   Cancel
@@ -152,6 +159,15 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                 {detail.article.error}
               </div>
             )}
+
+            <HeroImageSection
+              key={detail.article.id}
+              article={detail.article}
+              onSaved={() => {
+                load();
+                onChanged();
+              }}
+            />
 
             {detail.article.draft_md && detail.article.status !== 'running' && (
               <div className="section">
@@ -259,6 +275,116 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
               </div>
             </div>
           </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Hero image for one article. The image agent misses often enough that the
+ * operator needs a way in: drop a file here and it becomes the hero, outranking
+ * anything the agent found. On a published article the change reaches the site
+ * on the next publish - the "Publish again" action above, which is free.
+ */
+function HeroImageSection({
+  article,
+  onSaved,
+}: {
+  article: ArticleDetail['article'];
+  onSaved: () => void;
+}) {
+  const frontmatter = (article.frontmatter ?? {}) as { heroImage?: string; heroAlt?: string };
+  const attached = article.hero_image_url ?? frontmatter.heroImage ?? null;
+  const storedAlt = article.hero_alt ?? frontmatter.heroAlt ?? '';
+  const fromOperator = Boolean(article.hero_image_url);
+
+  const [alt, setAlt] = useState(storedAlt);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  /** Attach a file, or (file omitted) re-label the image already attached. */
+  const save = async (file: File | null) => {
+    setBusy(true);
+    setError(null);
+    setStatus(file ? 'uploading…' : 'saving alt text…');
+    const action = file ? 'hero_image_attached' : 'hero_alt_saved';
+    try {
+      await apiUpload(`/api/articles/${article.id}/hero-image`, {
+        file,
+        fields: { alt: alt.trim() },
+      });
+      track(EVENTS.articleActioned, {
+        action,
+        article_id: article.id,
+        stage: article.stage,
+        status: article.status,
+      });
+      setStatus(file ? '✓ attached' : '✓ alt text saved');
+      onSaved();
+    } catch (e) {
+      captureError(e, { action, article_id: article.id, surface: 'pipeline' });
+      setError((e as Error).message);
+      setStatus(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/api/articles/${article.id}/hero-image`, { method: 'DELETE' });
+      track(EVENTS.articleActioned, {
+        action: 'hero_image_removed',
+        article_id: article.id,
+        stage: article.stage,
+        status: article.status,
+      });
+      setAlt('');
+      setStatus(null);
+      onSaved();
+    } catch (e) {
+      captureError(e, { action: 'hero_image_removed', article_id: article.id, surface: 'pipeline' });
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="section">
+      <h2>
+        Hero image{' '}
+        {attached && (
+          <span className={`badge ${fromOperator ? 'violet' : ''}`}>
+            {fromOperator ? 'yours' : 'found by the image agent'}
+          </span>
+        )}
+      </h2>
+      <div className="card">
+        <HeroImageField
+          label={null}
+          url={attached}
+          alt={alt}
+          busy={busy || article.status === 'running'}
+          status={status}
+          error={error}
+          onPick={(file) => void save(file)}
+          onRemove={() => void remove()}
+          onAltChange={setAlt}
+          hint={
+            article.published_at
+              ? 'Already published — hit “Publish again” above to push the new image to the live site (deterministic, no LLM cost).'
+              : 'Used as the hero when the article publishes. With one attached the image agent stands down.'
+          }
+        />
+        {attached && alt.trim() !== storedAlt && (
+          <button className="btn secondary small" disabled={busy} onClick={() => void save(null)}>
+            Save alt text
+          </button>
         )}
       </div>
     </div>

@@ -140,7 +140,7 @@ button.btn.approve-inline {
 /* Manual draft topics: 3px violet left border sets them apart from scouted rows. */
 .draft-topic-row { border-left: 3px solid var(--violet); }
 .draft-attach-note {
-  display: flex; align-items: center; gap: 4px; color: var(--violet);
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--violet);
   font-size: 11px; margin-top: 5px; font-family: var(--mono);
 }
 td .title-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -222,8 +222,10 @@ td .title-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; 
   background: var(--panel-2); padding: 20px 16px; text-align: center; cursor: pointer;
   color: var(--text); font: inherit;
 }
-.dropzone:hover { border-color: var(--violet); background: rgba(167, 139, 250, 0.05); }
+.dropzone:hover, .dropzone.dragging { border-color: var(--violet); background: rgba(167, 139, 250, 0.05); }
+.dropzone.dragging { border-style: solid; }
 .dropzone.invalid { border-color: var(--red); background: var(--red-soft); }
+.dropzone:disabled { opacity: 0.55; cursor: default; }
 .dropzone .dz-icon { font-size: 22px; }
 .dropzone .dz-main { font-size: 13px; margin-top: 6px; }
 .dropzone .dz-main b { color: var(--violet); }
@@ -247,6 +249,22 @@ td .title-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; 
 .file-chip .fc-remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; flex: none; }
 .file-chip .fc-remove:hover { color: var(--red); }
 .add-file-row { margin-top: 8px; }
+
+/* ── Hero image drop (manual topic drawer + pipeline article panel) ────── */
+.hero-field:last-child { margin-bottom: 0; }
+.hero-card {
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--panel-2); padding: 10px;
+}
+.hero-preview {
+  display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover;
+  border-radius: 8px; background: var(--bg); border: 1px solid var(--border);
+}
+.hero-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.hero-meta { color: var(--muted); font-size: 11px; font-family: var(--mono); overflow-wrap: anywhere; }
+.hero-alt { margin-top: 10px; }
+.hero-alt > label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+.hero-alt .hint { margin-top: 5px; }
 
 .or-row { display: flex; align-items: center; gap: 12px; margin: 12px 0 8px; }
 .or-row::before, .or-row::after { content: ''; flex: 1; height: 1px; background: var(--border); }

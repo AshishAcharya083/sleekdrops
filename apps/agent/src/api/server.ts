@@ -5,7 +5,7 @@ import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { config } from '../config.js';
 import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
@@ -14,7 +14,14 @@ import { createLogger, runWithTrace } from '../lib/log.js';
 import { isScoutRunning, startScoutRun } from '../pipeline/scout.js';
 import type { ReferenceMaterial } from '../pipeline/types.js';
 import { deleteD1Post, listD1Posts } from '../tools/d1.js';
+import { gcsConfigured } from '../tools/gcs.js';
 import { dispatchContentUpdated } from '../tools/github.js';
+import {
+  MAX_HERO_IMAGE_BYTES,
+  readHeroImageUpload,
+  storeHeroImage,
+  type HeroImageUpload,
+} from '../tools/heroImages.js';
 import { TRACE_HEADER, traceMiddleware, type TraceEnv } from './trace.js';
 
 const log = createLogger('api');
@@ -25,6 +32,16 @@ const MAX_REFERENCES = 5;
 const MAX_REFERENCE_BYTES = 2 * 1024 * 1024;
 
 type Validated<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** What an approval reads off the topic to seed the article it creates. */
+interface ApprovedTopic {
+  id: string;
+  title: string;
+  category: string;
+  post_type: string;
+  hero_image_url: string | null;
+  hero_alt: string | null;
+}
 
 function validateReferences(input: unknown): Validated<ReferenceMaterial[]> {
   if (input === undefined || input === null) return { ok: true, value: [] };
@@ -49,6 +66,58 @@ function validateReferences(input: unknown): Validated<ReferenceMaterial[]> {
     value.push({ name: safeName, content });
   }
   return { ok: true, value };
+}
+
+/** Alt text is a caption, not prose - the site falls back to the title anyway. */
+const MAX_ALT_CHARS = 300;
+
+/** Room for the multipart envelope on top of the image itself. */
+const MULTIPART_OVERHEAD = 64 * 1024;
+
+const NO_IMAGE_STORAGE =
+  'hero-image storage is not configured - set GCS_IMAGES_BUCKET on the agent platform';
+
+interface HeroImageBody {
+  /** Absent when the request is an alt-text-only edit. */
+  upload: HeroImageUpload | null;
+  alt: string | null;
+}
+
+type HeroImageParse =
+  | { ok: true; value: HeroImageBody }
+  | { ok: false; error: string; status: 400 | 413 };
+
+/**
+ * Read a hero-image drop off a multipart request: the `file` part (vetted for
+ * format, magic bytes and size) plus an optional `alt` part. The file is
+ * optional so the same route also carries an alt-text-only edit.
+ */
+async function readHeroImageBody(c: Context<TraceEnv>): Promise<HeroImageParse> {
+  const limitMb = MAX_HERO_IMAGE_BYTES / 1024 / 1024;
+  // Bound the read before it happens - parseBody() buffers the whole body.
+  if (Number(c.req.header('Content-Length') ?? 0) > MAX_HERO_IMAGE_BYTES + MULTIPART_OVERHEAD) {
+    return { ok: false, status: 413, error: `image too large - the limit is ${limitMb} MB` };
+  }
+
+  let body: Awaited<ReturnType<typeof c.req.parseBody>>;
+  try {
+    body = await c.req.parseBody();
+  } catch {
+    return { ok: false, status: 400, error: 'expected a multipart/form-data body' };
+  }
+
+  const alt = typeof body.alt === 'string' ? body.alt.trim().slice(0, MAX_ALT_CHARS) : '';
+  const file = body.file;
+  if (file === undefined || file === null || file === '') {
+    return { ok: true, value: { upload: null, alt: alt || null } };
+  }
+  if (typeof file === 'string' || Array.isArray(file)) {
+    return { ok: false, status: 400, error: 'the "file" part must be a single uploaded file' };
+  }
+
+  const checked = readHeroImageUpload(file.type, Buffer.from(await file.arrayBuffer()));
+  if (!checked.ok) return { ok: false, status: 400, error: checked.error };
+  return { ok: true, value: { upload: checked.value, alt: alt || null } };
 }
 
 const ADMIN_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../../admin/dist');
@@ -169,15 +238,17 @@ export function createApp(): Hono<TraceEnv> {
     if (!Array.isArray(ids) || ids.length === 0) return c.json({ error: 'ids required' }, 400);
     const created: unknown[] = [];
     for (const id of ids) {
-      const [topic] = await q<{ id: string; title: string; category: string; post_type: string }>(
-        "UPDATE topics SET status = 'approved', updated_at = now() WHERE id = $1 AND status = 'suggested' RETURNING id, title, category, post_type",
+      const [topic] = await q<ApprovedTopic>(
+        `UPDATE topics SET status = 'approved', updated_at = now()
+         WHERE id = $1 AND status = 'suggested'
+         RETURNING id, title, category, post_type, hero_image_url, hero_alt`,
         [id],
       );
       if (!topic) continue;
       const [article] = await q<{ id: string }>(
-        `INSERT INTO articles (topic_id, title, category, post_type)
-         VALUES ($1, $2, $3, $4) RETURNING id, title, stage, status`,
-        [topic.id, topic.title, topic.category, topic.post_type],
+        `INSERT INTO articles (topic_id, title, category, post_type, hero_image_url, hero_alt)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, title, stage, status`,
+        [topic.id, topic.title, topic.category, topic.post_type, topic.hero_image_url, topic.hero_alt],
       );
       // Pipeline work is picked up later by the worker's database poll, so the
       // entity ids logged here are what join those [pipeline] lines back to
@@ -199,6 +270,7 @@ export function createApp(): Hono<TraceEnv> {
       instructions?: string;
       category?: string;
       post_type?: string;
+      hero_alt?: string;
       references?: unknown;
     } | null;
     if (!body) return c.json({ error: 'invalid JSON body' }, 400);
@@ -222,26 +294,31 @@ export function createApp(): Hono<TraceEnv> {
 
     const instructions = body.instructions?.trim() || null;
     const notes = JSON.stringify(refs.value);
+    // The hero image itself is uploaded separately (it needs a row to hang
+    // off); its alt text rides along with the rest of the brief so editing it
+    // never means re-uploading the file.
+    const heroAlt = body.hero_alt?.trim().slice(0, MAX_ALT_CHARS) || null;
 
     try {
       if (body.id) {
         const [updated] = await q(
           `UPDATE topics
              SET title = $2, norm_title = $3, category = $4, post_type = $5,
-                 instructions = $6, research_notes = $7::jsonb, updated_at = now()
+                 instructions = $6, research_notes = $7::jsonb, hero_alt = $8, updated_at = now()
            WHERE id = $1 AND source = 'manual' AND status = 'draft'
            RETURNING *`,
-          [body.id, title, normTitle, category, postType, instructions, notes],
+          [body.id, title, normTitle, category, postType, instructions, notes, heroAlt],
         );
         if (!updated) return c.json({ error: 'draft topic not found' }, 404);
         return c.json({ topic: updated });
       }
       const [topic] = await q(
         `INSERT INTO topics
-           (title, norm_title, category, post_type, source, status, instructions, research_notes)
-         VALUES ($1, $2, $3, $4, 'manual', 'draft', $5, $6::jsonb)
+           (title, norm_title, category, post_type, source, status, instructions,
+            research_notes, hero_alt)
+         VALUES ($1, $2, $3, $4, 'manual', 'draft', $5, $6::jsonb, $7)
          RETURNING *`,
-        [title, normTitle, category, postType, instructions, notes],
+        [title, normTitle, category, postType, instructions, notes, heroAlt],
       );
       return c.json({ topic }, 201);
     } catch (err) {
@@ -255,23 +332,59 @@ export function createApp(): Hono<TraceEnv> {
   // Approve a single draft manual topic → create its article at stage=research.
   // The costly generation run only ever fires here, never on topic capture.
   app.post('/api/topics/:id/approve', async (c) => {
-    const [topic] = await q<{ id: string; title: string; category: string; post_type: string }>(
+    const [topic] = await q<ApprovedTopic>(
       `UPDATE topics SET status = 'approved', updated_at = now()
        WHERE id = $1 AND status = 'draft'
-       RETURNING id, title, category, post_type`,
+       RETURNING id, title, category, post_type, hero_image_url, hero_alt`,
       [c.req.param('id')],
     );
     if (!topic) return c.json({ error: 'draft topic not found or already approved' }, 409);
     const [article] = await q<{ id: string }>(
-      `INSERT INTO articles (topic_id, title, category, post_type)
-       VALUES ($1, $2, $3, $4) RETURNING id, title, stage, status`,
-      [topic.id, topic.title, topic.category, topic.post_type],
+      `INSERT INTO articles (topic_id, title, category, post_type, hero_image_url, hero_alt)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, title, stage, status`,
+      [topic.id, topic.title, topic.category, topic.post_type, topic.hero_image_url, topic.hero_alt],
     );
     log.info('article queued from manual topic approval', {
       topic_id: topic.id,
       article_id: article.id,
     });
     return c.json({ article });
+  });
+
+  // Hero image for a draft manual topic - the operator drops the photo while
+  // briefing the piece, and approval copies it onto the article. Alt text is
+  // part of the brief payload above, not of this upload.
+  app.post('/api/topics/:id/hero-image', async (c) => {
+    const parsed = await readHeroImageBody(c);
+    if (!parsed.ok) return c.json({ error: parsed.error }, parsed.status);
+    if (!parsed.value.upload) return c.json({ error: 'expected an image in the "file" part' }, 400);
+    if (!gcsConfigured()) return c.json({ error: NO_IMAGE_STORAGE }, 503);
+
+    const id = c.req.param('id');
+    const [topic] = await q<{ id: string }>(
+      "SELECT id FROM topics WHERE id = $1 AND source = 'manual' AND status = 'draft'",
+      [id],
+    );
+    if (!topic) return c.json({ error: 'draft topic not found' }, 404);
+
+    const url = await storeHeroImage('topic', id, parsed.value.upload);
+    const [updated] = await q(
+      'UPDATE topics SET hero_image_url = $2, updated_at = now() WHERE id = $1 RETURNING *',
+      [id, url],
+    );
+    log.info('hero image attached to topic', { topic_id: id });
+    return c.json({ topic: updated });
+  });
+
+  app.delete('/api/topics/:id/hero-image', async (c) => {
+    const [updated] = await q<{ id: string }>(
+      `UPDATE topics SET hero_image_url = NULL, hero_alt = NULL, updated_at = now()
+       WHERE id = $1 AND source = 'manual' AND status = 'draft'
+       RETURNING id`,
+      [c.req.param('id')],
+    );
+    if (!updated) return c.json({ error: 'draft topic not found' }, 404);
+    return c.json({ ok: true });
   });
 
   app.post('/api/topics/reject', async (c) => {
@@ -302,7 +415,7 @@ export function createApp(): Hono<TraceEnv> {
     const rows = await q(
       `SELECT id, topic_id, title, slug, category, post_type, stage, status,
               revision_round, error, published_at, created_at, updated_at,
-              (seo_review ->> 'score') seo_score
+              hero_image_url, (seo_review ->> 'score') seo_score
        FROM articles ORDER BY updated_at DESC LIMIT 200`,
     );
     return c.json({ articles: rows });
@@ -366,6 +479,100 @@ export function createApp(): Hono<TraceEnv> {
       return c.json({ error: 'article has no draft yet or is currently running' }, 409);
     }
     log.info('article re-queued for an editor pass', { article_id: rows[0].id });
+    return c.json({ ok: true });
+  });
+
+  // ── Hero image (operator drop) ───────────────────────────────────────────
+  // The image agent can't always find a photo worth publishing, so the panel
+  // lets an operator attach one by hand at any point before (or after) the
+  // publish. It lands in its own column as well as in frontmatter, so a
+  // re-assembly can't lose it and the image stage knows to stand down.
+  //
+  // The file part is optional: posting alt text alone re-labels the image
+  // that is already attached.
+  app.post('/api/articles/:id/hero-image', async (c) => {
+    const parsed = await readHeroImageBody(c);
+    if (!parsed.ok) return c.json({ error: parsed.error }, parsed.status);
+    if (parsed.value.upload && !gcsConfigured()) {
+      return c.json({ error: NO_IMAGE_STORAGE }, 503);
+    }
+
+    const id = c.req.param('id');
+    const [article] = await q<{ id: string; status: string; hero_image_url: string | null }>(
+      'SELECT id, status, hero_image_url FROM articles WHERE id = $1',
+      [id],
+    );
+    if (!article) return c.json({ error: 'article not found' }, 404);
+    if (article.status === 'running') {
+      return c.json({ error: 'the article is mid-stage - try again when it finishes' }, 409);
+    }
+
+    const url = parsed.value.upload
+      ? await storeHeroImage('article', id, parsed.value.upload)
+      : article.hero_image_url;
+    if (!url) return c.json({ error: 'attach an image file first' }, 400);
+
+    const { alt } = parsed.value;
+    // One statement, so a stage that starts mid-request can't have its own
+    // frontmatter write clobbered by a stale read-modify-write here. heroAlt is
+    // dropped before the merge because a JSON null would fail the site's
+    // frontmatter schema, where the key is optional-but-string.
+    const [updated] = await q(
+      `UPDATE articles
+          SET hero_image_url = $2,
+              hero_alt       = $3,
+              frontmatter    = CASE WHEN frontmatter IS NULL THEN NULL
+                                    ELSE (frontmatter - 'heroAlt') || $4::jsonb END,
+              updated_at     = now()
+        WHERE id = $1 AND status <> 'running'
+        RETURNING id, hero_image_url, hero_alt, stage, status, published_at`,
+      [id, url, alt, JSON.stringify({ heroImage: url, ...(alt ? { heroAlt: alt } : {}) })],
+    );
+    if (!updated) {
+      return c.json({ error: 'the article just started running - try again when it finishes' }, 409);
+    }
+    log.info('hero image set on article', {
+      article_id: id,
+      action: parsed.value.upload ? 'upload' : 'alt_only',
+    });
+    return c.json({ article: updated });
+  });
+
+  // Detach: the piece falls back to whatever the image agent finds on its next
+  // pass, or to the generated cover fill.
+  app.delete('/api/articles/:id/hero-image', async (c) => {
+    const [updated] = await q<{ id: string }>(
+      `UPDATE articles
+          SET hero_image_url = NULL,
+              hero_alt       = NULL,
+              frontmatter    = CASE WHEN frontmatter IS NULL THEN NULL
+                                    ELSE frontmatter - 'heroImage' - 'heroAlt' END,
+              updated_at     = now()
+        WHERE id = $1 AND status <> 'running'
+        RETURNING id`,
+      [c.req.param('id')],
+    );
+    if (!updated) return c.json({ error: 'article not found, or mid-stage' }, 409);
+    log.info('hero image removed from article', { article_id: c.req.param('id') });
+    return c.json({ ok: true });
+  });
+
+  // Re-run the publish stage for an already-published article. It is
+  // deterministic and LLM-free, so this is the cheap way to push a hero image
+  // dropped after publication out to the live site (unlike the feedback loop,
+  // which pays for an editor pass).
+  app.post('/api/articles/:id/republish', async (c) => {
+    const rows = await q<{ id: string }>(
+      `UPDATE articles SET stage = 'publish', status = 'queued', error = NULL, updated_at = now()
+       WHERE id = $1 AND stage = 'done' AND status = 'done'
+         AND slug IS NOT NULL AND draft_md IS NOT NULL AND frontmatter IS NOT NULL
+       RETURNING id`,
+      [c.req.param('id')],
+    );
+    if (rows.length === 0) {
+      return c.json({ error: 'only a finished, published article can be republished' }, 409);
+    }
+    log.info('article re-queued for publish', { article_id: rows[0].id });
     return c.json({ ok: true });
   });
 

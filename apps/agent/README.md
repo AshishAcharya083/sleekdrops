@@ -16,7 +16,7 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 | 5 | `seo_reviewer` | seo_review | Strict scored review (0–100) against the brief + SEO checklist → pass/fail verdict |
 | 6 | `editor` | edit | Surgical revision resolving the reviewer's issues and any admin feedback (loops with #5, bounded by `max_revision_rounds`) |
 | 7 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
-| 8 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter (skips itself when `GCS_IMAGES_BUCKET` is unset) |
+| 8 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter. Stands down entirely when the operator attached their own image, and skips itself when `GCS_IMAGES_BUCKET` is unset |
 | 9 | `publisher` | publish | Upserts D1 `posts` + `affiliate_links`, fires the `content-updated` dispatch → site rebuilds |
 
 Flow: `research → outline → write → seo_review ⇄ edit → assemble → image → publish`.
@@ -30,6 +30,18 @@ post (plus its orphaned pipeline-authored affiliate links) with an automatic
 site rebuild; the article panel has a **feedback box** that requeues the piece
 through `edit → seo_review → assemble → image → publish` with your notes
 applied (original pubDate is kept, `updatedDate` is stamped).
+
+**Hero images by hand.** The image agent's automatic pick is often not good
+enough, so both the manual-topic drawer and the article panel take a dropped
+image file (JPEG/PNG/WebP, ≤ 10 MB). It is vetted by magic bytes — not by the
+content type the browser claims — uploaded to the same public bucket, and
+stored in `articles.hero_image_url` / `hero_alt` as well as in frontmatter.
+The dedicated column is what makes it stick: the assembler stamps it in on
+every pass, so an image attached while briefing a topic survives assembly and
+the feedback loop, and the image stage skips its search. Removing it hands the
+piece back to the agent (or to the generated cover fill). For an article that
+is already live, **Publish again** re-runs the deterministic publish stage —
+no LLM cost — and the new hero reaches the site with the next build.
 
 ## Two engines, routed by model id
 

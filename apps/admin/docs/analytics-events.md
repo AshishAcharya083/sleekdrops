@@ -99,6 +99,7 @@ The manual-topic drawer submitted a brief - as a draft, or on the way to an imme
 | `post_type` | string | `article`, `guide` or `roundup`. |
 | `reference_count` | number | Reference materials attached. Never their contents. |
 | `instructions_provided` | boolean | Whether the operator wrote instructions. Never the text. |
+| `hero_image_provided` | boolean | Whether a hero image is attached to the brief. Never the file or its URL. |
 | `topic_id` | string | Present on the approve path. |
 
 Owning screen: `pages/ManualTopicDrawer.tsx`.
@@ -109,12 +110,13 @@ A pipeline-board action on one article: one name, with the action in a property.
 
 | Property | Type | Notes |
 |---|---|---|
-| `action` | string | `retry`, `approve_publish` or `cancel`. |
+| `action` | string | `retry`, `approve_publish`, `cancel`, `republish`, `hero_image_attached`, `hero_alt_saved` or `hero_image_removed`. |
 | `article_id` | string | The article acted on. |
 | `stage` | string | The stage it was in. |
 | `status` | string | The status it was in. |
 
 Owning screen: `pages/Pipeline.tsx` (article detail panel).
+The hero-image actions report only that an image was attached, re-labelled or removed - never the file, its name or its URL.
 
 ### Article Feedback Submitted
 

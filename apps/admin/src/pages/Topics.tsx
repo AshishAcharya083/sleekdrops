@@ -131,10 +131,15 @@ export function Topics() {
                     <Badge value="draft" />
                   </div>
                   {t.instructions && <div className="why clamp-2">{t.instructions}</div>}
-                  {t.research_notes.length > 0 && (
+                  {(t.research_notes.length > 0 || t.hero_image_url) && (
                     <div className="draft-attach-note">
-                      📎 {t.research_notes.length} reference
-                      {t.research_notes.length > 1 ? 's' : ''}
+                      {t.research_notes.length > 0 && (
+                        <span>
+                          📎 {t.research_notes.length} reference
+                          {t.research_notes.length > 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {t.hero_image_url && <span>🖼️ hero image</span>}
                     </div>
                   )}
                 </div>
