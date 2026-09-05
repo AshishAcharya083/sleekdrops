@@ -13,7 +13,7 @@ import { getSetting, q, setSetting } from '../db/pool.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { isScoutRunning, startScoutRun } from '../pipeline/scout.js';
 import type { ReferenceMaterial } from '../pipeline/types.js';
-import { deleteD1Post, listD1Posts } from '../tools/d1.js';
+import { deleteD1Post, getD1PostHero, listD1Posts, setD1PostHero } from '../tools/d1.js';
 import { gcsConfigured } from '../tools/gcs.js';
 import { dispatchContentUpdated } from '../tools/github.js';
 import {
@@ -118,6 +118,54 @@ async function readHeroImageBody(c: Context<TraceEnv>): Promise<HeroImageParse> 
   const checked = readHeroImageUpload(file.type, Buffer.from(await file.arrayBuffer()));
   if (!checked.ok) return { ok: false, status: 400, error: checked.error };
   return { ok: true, value: { upload: checked.value, alt: alt || null } };
+}
+
+/**
+ * Mirror a live post's new hero onto the pipeline article that wrote it, when
+ * there is one. Without this, re-publishing that article (or one more editor
+ * pass) would quietly restore the image the operator just replaced.
+ */
+async function syncArticleHero(
+  slug: string,
+  heroImage: string | null,
+  heroAlt: string | null,
+): Promise<void> {
+  const patch = heroImage
+    ? JSON.stringify({ heroImage, ...(heroAlt ? { heroAlt } : {}) })
+    : null;
+  await q(
+    `UPDATE articles
+        SET hero_image_url = $2,
+            hero_alt       = $3,
+            frontmatter    = CASE
+                               WHEN frontmatter IS NULL THEN NULL
+                               WHEN $4::jsonb IS NULL THEN frontmatter - 'heroImage' - 'heroAlt'
+                               ELSE (frontmatter - 'heroAlt') || $4::jsonb
+                             END,
+            updated_at     = now()
+      WHERE slug = $1`,
+    [slug, heroImage, heroAlt, patch],
+  );
+}
+
+/**
+ * Ask GitHub to rebuild the site. The D1 write has already happened by the time
+ * this runs, so a failed dispatch is reported rather than thrown - the operator
+ * needs to know the change is saved but not yet live.
+ */
+async function requestRebuild(): Promise<{
+  body: { dispatched: boolean; dispatchError: string | null };
+  logged: { dispatched: boolean };
+}> {
+  try {
+    await dispatchContentUpdated();
+    return { body: { dispatched: true, dispatchError: null }, logged: { dispatched: true } };
+  } catch (err) {
+    return {
+      body: { dispatched: false, dispatchError: err instanceof Error ? err.message : String(err) },
+      logged: { dispatched: false },
+    };
+  }
 }
 
 const ADMIN_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../../admin/dist');
@@ -580,6 +628,51 @@ export function createApp(): Hono<TraceEnv> {
   app.get('/api/published', async (c) => {
     const posts = await listD1Posts();
     return c.json({ posts });
+  });
+
+  // Hero image on a post that is already live. The pipeline only knows about
+  // articles it wrote itself; most of what is on the site predates it and has
+  // no articles row at all, so this route edits the published D1 row directly -
+  // it is the only way to re-image an older post. When a pipeline article does
+  // exist for the slug, its copy is updated too, so a later re-publish can't
+  // push the old image back over this one.
+  //
+  // As with the article route, the file part is optional: alt text on its own
+  // re-labels the hero already there.
+  app.post('/api/published/:slug/hero-image', async (c) => {
+    const parsed = await readHeroImageBody(c);
+    if (!parsed.ok) return c.json({ error: parsed.error }, parsed.status);
+    if (parsed.value.upload && !gcsConfigured()) return c.json({ error: NO_IMAGE_STORAGE }, 503);
+
+    const slug = c.req.param('slug');
+    const current = await getD1PostHero(slug);
+    if (!current) return c.json({ error: 'no live post with that slug' }, 404);
+
+    const heroImage = parsed.value.upload
+      ? await storeHeroImage('post', slug, parsed.value.upload)
+      : current.heroImage;
+    if (!heroImage) return c.json({ error: 'attach an image file first' }, 400);
+    const heroAlt = parsed.value.alt;
+
+    await setD1PostHero(slug, { heroImage, heroAlt });
+    await syncArticleHero(slug, heroImage, heroAlt);
+    const rebuild = await requestRebuild();
+    log.info('hero image set on a live post', {
+      slug,
+      action: parsed.value.upload ? 'upload' : 'alt_only',
+      ...rebuild.logged,
+    });
+    return c.json({ post: { slug, hero_image: heroImage, hero_alt: heroAlt }, ...rebuild.body });
+  });
+
+  app.delete('/api/published/:slug/hero-image', async (c) => {
+    const slug = c.req.param('slug');
+    const removed = await setD1PostHero(slug, { heroImage: null, heroAlt: null });
+    if (!removed) return c.json({ error: 'no live post with that slug' }, 404);
+    await syncArticleHero(slug, null, null);
+    const rebuild = await requestRebuild();
+    log.info('hero image removed from a live post', { slug, ...rebuild.logged });
+    return c.json({ ok: true, ...rebuild.body });
   });
 
   app.delete('/api/published/:slug', async (c) => {

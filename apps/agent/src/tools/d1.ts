@@ -44,14 +44,82 @@ export interface PublishedPostRow {
   author: string;
   pub_date: string;
   updated_at: string;
+  /** Pulled out of frontmatter_json so the admin list can show the hero. */
+  hero_image: string | null;
+  hero_alt: string | null;
 }
 
 /** Every post row in D1 (published and draft) — the admin "Published" list. */
 export async function listD1Posts(): Promise<PublishedPostRow[]> {
   return d1Query<PublishedPostRow>(
-    `SELECT slug, status, title, category, post_type, author, pub_date, updated_at
+    `SELECT slug, status, title, category, post_type, author, pub_date, updated_at,
+            json_extract(frontmatter_json, '$.heroImage') hero_image,
+            json_extract(frontmatter_json, '$.heroAlt') hero_alt
      FROM posts ORDER BY pub_date DESC, slug`,
   );
+}
+
+export interface PostHero {
+  heroImage: string | null;
+  heroAlt: string | null;
+}
+
+/**
+ * Set (or clear) the hero fields inside a post's frontmatter JSON, leaving
+ * every other key untouched. heroAlt is deleted rather than set to null: the
+ * website's frontmatter schema takes an optional string, and a null would fail
+ * the site build. Malformed JSON throws instead of being overwritten — the rest
+ * of that frontmatter is the only copy of the post's title, dek and tags.
+ */
+export function patchHeroFrontmatter(frontmatterJson: string, hero: PostHero): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(frontmatterJson);
+  } catch {
+    throw new Error('the post\'s frontmatter is not valid JSON — refusing to overwrite it');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('the post\'s frontmatter is not an object — refusing to overwrite it');
+  }
+  const frontmatter = { ...(parsed as Record<string, unknown>) };
+  delete frontmatter.heroAlt;
+  if (hero.heroImage) {
+    frontmatter.heroImage = hero.heroImage;
+    if (hero.heroAlt) frontmatter.heroAlt = hero.heroAlt;
+  } else {
+    delete frontmatter.heroImage;
+  }
+  return frontmatter;
+}
+
+/** The hero a live post currently carries, or null when there is no such post. */
+export async function getD1PostHero(slug: string): Promise<PostHero | null> {
+  const [post] = await d1Query<{ hero_image: string | null; hero_alt: string | null }>(
+    `SELECT json_extract(frontmatter_json, '$.heroImage') hero_image,
+            json_extract(frontmatter_json, '$.heroAlt') hero_alt
+     FROM posts WHERE slug = ?1`,
+    [slug],
+  );
+  return post ? { heroImage: post.hero_image, heroAlt: post.hero_alt } : null;
+}
+
+/**
+ * Rewrite a live post's hero image in place. Deliberately does NOT stamp
+ * `updatedDate`: swapping a photo is not an editorial revision, and the site
+ * shows that date to readers.
+ */
+export async function setD1PostHero(slug: string, hero: PostHero): Promise<boolean> {
+  const [post] = await d1Query<{ frontmatter_json: string }>(
+    'SELECT frontmatter_json FROM posts WHERE slug = ?1',
+    [slug],
+  );
+  if (!post) return false;
+  const frontmatter = patchHeroFrontmatter(post.frontmatter_json, hero);
+  await d1Query("UPDATE posts SET frontmatter_json = ?2, updated_at = datetime('now') WHERE slug = ?1", [
+    slug,
+    JSON.stringify(frontmatter),
+  ]);
+  return true;
 }
 
 /**

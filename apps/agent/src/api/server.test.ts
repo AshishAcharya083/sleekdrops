@@ -181,6 +181,17 @@ test('a topic hero-image drop with no file part is refused', async () => {
   assert.match(((await res.json()) as { error: string }).error, /"file" part/);
 });
 
+test('a live post cannot be re-imaged with something that is not an image', async () => {
+  const { res } = await call('/api/published/best-budget-mattress-australia/hero-image', {
+    method: 'POST',
+    headers: AUTH,
+    body: heroForm({ file: { bytes: new TextEncoder().encode('%PDF-1.4'), name: 'hero.jpg', type: 'image/jpeg' } }),
+  });
+
+  assert.equal(res.status, 400);
+  assert.match(((await res.json()) as { error: string }).error, /JPEG, PNG or WebP/);
+});
+
 test('a hero-image drop without a token is rejected like every other route', async () => {
   const { res } = await call(`/api/articles/${ARTICLE_ID}/hero-image`, {
     method: 'POST',

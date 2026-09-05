@@ -144,6 +144,23 @@ A live post was removed from Cloudflare D1.
 
 Owning screen: `pages/Published.tsx`.
 
+### Published Post Hero Updated
+
+The hero image of a post that is already live was replaced, re-labelled or removed.
+This edits the Cloudflare D1 row directly, so it also covers posts written before the agent platform, which have no pipeline article behind them.
+
+| Property | Type | Notes |
+|---|---|---|
+| `action` | string | `hero_image_attached`, `hero_alt_saved` or `hero_image_removed`. |
+| `slug` | string | The post that was re-imaged. |
+| `category` | string | Its category. |
+| `post_type` | string | Its post type. |
+| `status` | string | `rebuild_dispatched` or `rebuild_failed` - whether the site was asked to rebuild. |
+
+Never the image, its file name or its URL.
+
+Owning screen: `pages/Published.tsx`.
+
 ### Settings Saved
 
 Platform settings were written. Shape only - which engines are configured and which enums are chosen.

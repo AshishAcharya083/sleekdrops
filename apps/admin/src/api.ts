@@ -115,6 +115,15 @@ export interface PublishedPost {
   author: string;
   pub_date: string;
   updated_at: string;
+  /** Read out of the live post's frontmatter — null when it has no hero. */
+  hero_image: string | null;
+  hero_alt: string | null;
+}
+
+/** What the hero routes report back about the site rebuild they asked for. */
+export interface RebuildResult {
+  dispatched: boolean;
+  dispatchError?: string | null;
 }
 
 export interface Settings {

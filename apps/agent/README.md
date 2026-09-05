@@ -32,16 +32,28 @@ through `edit → seo_review → assemble → image → publish` with your notes
 applied (original pubDate is kept, `updatedDate` is stamped).
 
 **Hero images by hand.** The image agent's automatic pick is often not good
-enough, so both the manual-topic drawer and the article panel take a dropped
-image file (JPEG/PNG/WebP, ≤ 10 MB). It is vetted by magic bytes — not by the
-content type the browser claims — uploaded to the same public bucket, and
-stored in `articles.hero_image_url` / `hero_alt` as well as in frontmatter.
-The dedicated column is what makes it stick: the assembler stamps it in on
-every pass, so an image attached while briefing a topic survives assembly and
-the feedback loop, and the image stage skips its search. Removing it hands the
-piece back to the agent (or to the generated cover fill). For an article that
-is already live, **Publish again** re-runs the deterministic publish stage —
-no LLM cost — and the new hero reaches the site with the next build.
+enough, so three admin surfaces take a dropped image file (JPEG/PNG/WebP,
+≤ 10 MB), vetted by magic bytes — not by the content type the browser claims —
+and uploaded to the same public bucket:
+
+| Surface | Attaches to | Reaches the site |
+| --- | --- | --- |
+| Manual-topic drawer | the draft topic; copied onto the article on approval | with the article's first publish |
+| Pipeline article panel | `articles.hero_image_url` / `hero_alt` + frontmatter | at publish, or **Publish again** for one already live |
+| **Published** tab | the D1 `posts` row itself | immediately, with a site rebuild |
+
+The dedicated `articles` columns are what make an operator image stick: the
+assembler stamps them into frontmatter on every pass, so an image attached
+while briefing a topic survives assembly and the feedback loop, and the image
+stage skips its search instead of paying for one. Removing it hands the piece
+back to the agent (or to the generated cover fill).
+
+The **Published** tab is the one that reaches *older* posts. Most of what is
+live was written before this platform and has no article row at all, so that
+surface edits the published D1 row directly — and when a pipeline article does
+exist for the slug, its copy is updated too, so a later re-publish can't push
+the old image back over the new one. `updatedDate` is deliberately not stamped:
+swapping a photo is not an editorial revision.
 
 ## Two engines, routed by model id
 

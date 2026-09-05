@@ -26,6 +26,10 @@ export interface HeroImageUpload {
   mimeType: HeroImageMime;
 }
 
+/** What the image is being attached to — an article in the pipeline, a topic
+ *  brief, or a post that is already live on the site. */
+export type HeroImageScope = 'article' | 'topic' | 'post';
+
 export type HeroImageCheck =
   | { ok: true; value: HeroImageUpload }
   | { ok: false; error: string };
@@ -83,7 +87,7 @@ export function readHeroImageUpload(declaredType: string, data: Buffer): HeroIma
  * The owner id is sanitised because it arrives from a URL path segment.
  */
 export function heroImageObjectName(
-  scope: 'article' | 'topic',
+  scope: HeroImageScope,
   ownerId: string,
   mimeType: HeroImageMime,
 ): string {
@@ -93,7 +97,7 @@ export function heroImageObjectName(
 
 /** Upload a vetted image and return the public URL to store on the row. */
 export async function storeHeroImage(
-  scope: 'article' | 'topic',
+  scope: HeroImageScope,
   ownerId: string,
   upload: HeroImageUpload,
 ): Promise<string> {
