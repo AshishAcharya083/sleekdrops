@@ -14,6 +14,7 @@ import {
 import { runAssembler } from '../agents/assembler.js';
 import { runEditor } from '../agents/editor.js';
 import { runImageAgent } from '../agents/imageAgent.js';
+import { runKeywordStrategist } from '../agents/keywordStrategist.js';
 import { runOutliner } from '../agents/outliner.js';
 import { runPublisher } from '../agents/publisher.js';
 import { runResearcher } from '../agents/researcher.js';
@@ -23,6 +24,7 @@ import type { ArticleRow, Stage, TopicRow } from './types.js';
 
 const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
   research: 'researcher',
+  keyword: 'keyword_strategist',
   outline: 'outliner',
   write: 'writer',
   seo_review: 'seo_reviewer',
@@ -35,15 +37,35 @@ const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
 /** Stages that run deterministic code — no LLM chat, no model to pick. */
 const NO_LLM_AGENTS = new Set(['assembler', 'publisher']);
 
-/** Writer + editor follow the admin "prose engine" toggle; the rest is Gemini. */
-const PROSE_AGENTS = new Set(['writer', 'editor']);
+/**
+ * Agents that do the article writing — every stage whose judgement lands in the
+ * published piece. All of them follow the admin engine toggle, which defaults
+ * to Claude (Opus 5).
+ *
+ * This used to be writer + editor only, with research, keyword strategy and
+ * review left on the cheap model. That was the wrong split: a draft is capped
+ * by the quality of the brief behind it, so a weaker researcher or reviewer
+ * costs more than a weaker writer does.
+ *
+ * `topic_scout` stays on Gemini — it is high-volume discovery, not writing, and
+ * a human triages everything it produces. `image_agent` stays on Gemini too
+ * because it needs that engine's vision and image generation.
+ */
+const ARTICLE_AGENTS = new Set([
+  'researcher',
+  'keyword_strategist',
+  'outliner',
+  'writer',
+  'seo_reviewer',
+  'editor',
+]);
 
 export async function modelFor(agent: string): Promise<string> {
   const settings = await llmSettings();
   const overrides = await getSetting<Record<string, string>>('models', {});
   const pick =
     overrides[agent] ||
-    (PROSE_AGENTS.has(agent) && (settings.prose_engine ?? 'claude') === 'claude'
+    (ARTICLE_AGENTS.has(agent) && (settings.prose_engine ?? 'claude') === 'claude'
       ? defaultClaudeModel(settings)
       : defaultGeminiModel(settings));
   // A Claude pick without a credential degrades to Gemini instead of failing
@@ -123,6 +145,16 @@ export async function runStage(article: ArticleRow): Promise<void> {
         const dossier = await runResearcher(article, topic, model!, tracker);
         await updateArticle(article.id, { research: JSON.stringify(dossier) });
         summary = `${dossier.facts?.length ?? 0} facts, ${dossier.products?.length ?? 0} products, primary keyword "${dossier.keywords?.primary}"`;
+        next = { stage: 'keyword', status: 'queued' };
+        break;
+      }
+      case 'keyword': {
+        const topic = article.topic_id
+          ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
+          : null;
+        const plan = await runKeywordStrategist(article, topic, model!, tracker);
+        await updateArticle(article.id, { keyword_plan: JSON.stringify(plan) });
+        summary = `"${plan.primaryKeyword}" — ${plan.intent}, ${plan.difficulty} difficulty, ${plan.zeroClickRisk} zero-click risk, ${plan.wordCountTarget} words, ${plan.contentGaps.length} gap(s) to exploit`;
         next = { stage: 'outline', status: 'queued' };
         break;
       }
@@ -155,7 +187,11 @@ export async function runStage(article: ArticleRow): Promise<void> {
           review.forcedThrough = true;
         }
         await updateArticle(article.id, { seo_review: JSON.stringify(review) });
-        summary = `score ${review.score}/100, ${review.pass ? 'PASS' : 'FAIL'} (${review.issues.length} issues)${review.forcedThrough ? ' — max revisions reached, proceeding' : ''}`;
+        const dims = review.dimensions
+          ? ` [seo ${review.dimensions.seo} · geo ${review.dimensions.geo} · voice ${review.dimensions.voice} · eeat ${review.dimensions.eeat} · links ${review.dimensions.links}]`
+          : '';
+        const slop = review.slop ? `, slop scan ${review.slop.score}/100 (${review.slop.findings} finding(s))` : '';
+        summary = `score ${review.score}/100${dims}, ${review.pass ? 'PASS' : 'FAIL'} (${review.issues.length} issues)${slop}${review.forcedThrough ? ' — max revisions reached, proceeding' : ''}`;
         next =
           review.pass || review.forcedThrough
             ? { stage: 'assemble', status: 'queued' }

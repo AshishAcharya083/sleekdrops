@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
-import type { ArticleDetail, ArticleSummary } from '../api';
+import type { ArticleDetail, ArticleSummary, KeywordPlan } from '../api';
 import { api, apiUpload, duration, fmtCost, fmtTime } from '../api';
 import { Badge } from '../components';
 import { HeroImageField } from '../HeroImageField';
 import { usePoll } from '../hooks';
 
 const LANES: Array<{ title: string; stages: string[] }> = [
-  { title: 'Research & Brief', stages: ['research', 'outline'] },
+  { title: 'Research & Brief', stages: ['research', 'keyword', 'outline'] },
   { title: 'Write & Optimize', stages: ['write', 'seo_review', 'edit'] },
   { title: 'Assemble & Publish', stages: ['assemble', 'image', 'publish'] },
   { title: 'Done', stages: ['done'] },
@@ -51,6 +51,108 @@ export function Pipeline() {
         })}
       </div>
       {openId && <ArticlePanel id={openId} onClose={() => setOpenId(null)} onChanged={refresh} />}
+    </>
+  );
+}
+
+const DIMENSION_HELP: Record<string, string> = {
+  seo: 'Classic search: keyword placement, headings, intent match, depth.',
+  geo: 'Generative-engine citability: extractable answers, named sources, entities, FAQ schema.',
+  voice: 'Reads as a person. Capped by the deterministic anti-slop scan.',
+  eeat: 'Experience, expertise, authority, trust — methodology, evidence, honest trade-offs.',
+  links: 'The /go/ affiliate contract and the placement rules.',
+};
+
+/**
+ * What the piece is built to win, and why. Shown above the review because it
+ * is the thing the review scores against: a low SEO dimension usually means
+ * the draft drifted off this plan rather than that the plan was wrong.
+ */
+function KeywordPlanSection({ plan }: { plan: KeywordPlan }) {
+  const [open, setOpen] = useState(false);
+  const chips: Array<[string, string]> = [
+    ['intent', plan.intent],
+    ['difficulty', plan.difficulty],
+    ['zero-click', plan.zeroClickRisk],
+    ['format', plan.winningFormat],
+    ['target', `${plan.wordCountTarget} words`],
+  ];
+  return (
+    <div className="section">
+      <h2>
+        Keyword plan{' '}
+        <button className="btn secondary small" onClick={() => setOpen(!open)}>
+          {open ? 'hide' : 'show'} detail
+        </button>
+      </h2>
+      <div className="card">
+        <p className="mono" style={{ marginTop: 0, fontSize: 15 }}>
+          {plan.primaryKeyword}
+        </p>
+        <div className="row" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
+          {chips
+            .filter(([, value]) => value)
+            .map(([label, value]) => (
+              <span className="badge" key={label}>
+                {label}: {value}
+              </span>
+            ))}
+        </div>
+        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+          {plan.rationale}
+        </p>
+        {open && (
+          <>
+            <PlanList label="Gaps we're exploiting" items={plan.contentGaps} />
+            <PlanList label="People Also Ask" items={plan.paaQuestions} />
+            <PlanList label="Entities to name (GEO)" items={plan.entities} />
+            <PlanList label="Secondary keywords" items={plan.secondaryKeywords} />
+            <PlanList label="SERP features" items={plan.serpFeatures} />
+            {plan.snippetTarget?.question && (
+              <>
+                <h4 style={{ marginBottom: 4 }}>
+                  Snippet target ({plan.snippetTarget.format})
+                </h4>
+                <p style={{ marginTop: 0, fontSize: 13 }}>
+                  <strong>{plan.snippetTarget.question}</strong>
+                  <br />
+                  <span className="muted">{plan.snippetTarget.answer}</span>
+                </p>
+              </>
+            )}
+            {plan.currentAiAnswer && (
+              <>
+                <h4 style={{ marginBottom: 4 }}>What AI answers today</h4>
+                <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+                  {plan.currentAiAnswer}
+                </p>
+              </>
+            )}
+            <PlanList
+              label="Top results to beat"
+              items={(plan.competitors ?? []).map((c) => `${c.url} — ${c.format}: ${c.angle}`)}
+            />
+            <PlanList
+              label="Candidates rejected"
+              items={(plan.rejected ?? []).map((r) => `${r.keyword} — ${r.reason}`)}
+            />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PlanList({ label, items }: { label: string; items: string[] }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <>
+      <h4 style={{ marginBottom: 4 }}>{label}</h4>
+      <ul style={{ marginTop: 0, fontSize: 13 }}>
+        {items.map((item, i) => (
+          <li key={i}>{item}</li>
+        ))}
+      </ul>
     </>
   );
 }
@@ -193,10 +295,35 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
               </div>
             )}
 
+            {detail.article.keyword_plan && (
+              <KeywordPlanSection plan={detail.article.keyword_plan} />
+            )}
+
             {detail.article.seo_review && (
               <div className="section">
                 <h2>SEO review — {detail.article.seo_review.score}/100</h2>
                 <div className="card">
+                  {detail.article.seo_review.dimensions && (
+                    <div className="row" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
+                      {Object.entries(detail.article.seo_review.dimensions).map(([name, value]) => (
+                        <span
+                          key={name}
+                          className={`badge${value >= 80 ? ' green' : value >= 60 ? ' amber' : ' red'}`}
+                          title={DIMENSION_HELP[name] ?? name}
+                        >
+                          {name} {value}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {detail.article.seo_review.slop && (
+                    <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+                      Anti-slop scan: {detail.article.seo_review.slop.score}/100 over{' '}
+                      {detail.article.seo_review.slop.words} words,{' '}
+                      {detail.article.seo_review.slop.findings} finding(s). Run in code before
+                      the reviewer saw the draft — banned vocabulary blocks a pass on its own.
+                    </p>
+                  )}
                   <p style={{ marginTop: 0 }}>{detail.article.seo_review.summary}</p>
                   {(detail.article.seo_review.issues ?? []).map((issue, i) => (
                     <p key={i} style={{ fontSize: 13 }}>

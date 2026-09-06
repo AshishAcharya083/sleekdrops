@@ -15,7 +15,7 @@ import RelatedPosts from '@components/blog/RelatedPosts.astro';
 import { getAllPosts, getRelatedPosts, type BlogPost } from '@lib/posts';
 import { getAuthor } from '@data/authors';
 import { getCategory } from '@data/categories';
-import { buildArticleSchema, buildMeta, buildReviewSchema } from '@lib/seo';
+import { buildArticleSchema, buildFaqSchema, buildMeta, buildReviewSchema, extractFaq } from '@lib/seo';
 import { emphasiseLastWord, formatLong } from '@lib/format';
 
 export const getStaticPaths = (async () => {
@@ -44,9 +44,14 @@ const meta = buildMeta({
   image: post.data.heroImage,
   type: 'article',
 });
-const schema = product
-  ? buildReviewSchema(post, author)
-  : buildArticleSchema(post, author);
+// FAQPage markup is the strongest generative-engine citation signal we ship,
+// and it costs nothing extra: the pipeline already ends every article with an
+// "## FAQ" section, so the entries are read back out of the body. Posts
+// without one (most of the older hand-written pieces) emit no FAQ block.
+const schema = [
+  product ? buildReviewSchema(post, author) : buildArticleSchema(post, author),
+  buildFaqSchema(extractFaq(post.body)),
+];
 ---
 <BaseLayout
   {...meta}

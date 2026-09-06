@@ -6,6 +6,7 @@ import { api } from '../api';
 const AGENTS = [
   'topic_scout',
   'researcher',
+  'keyword_strategist',
   'outliner',
   'writer',
   'seo_reviewer',
@@ -69,8 +70,8 @@ export function SettingsPage() {
       <div className="section" style={{ marginTop: 0 }}>
         <h2>Gemini engine</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Runs topic scout, researcher, outliner and SEO reviewer (and writer/editor
-          when the toggle below says so) through Google ADK. Empty fields fall back
+          Runs the topic scout and the image agent (plus every article stage when
+          the toggle below says so) through Google ADK. Empty fields fall back
           to apps/agent/.env; on Cloud Run the key is optional — the service account
           bills Vertex AI directly. Values are stored in the platform database —
           set ADMIN_TOKEN if the API is reachable by others.
@@ -99,9 +100,11 @@ export function SettingsPage() {
       <div className="section">
         <h2>Claude subscription engine</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Writes prose on your Claude plan — $0 marginal cost. Mint a one-year token
-          on any machine with <code>claude setup-token</code> (Pro/Max/Team/Enterprise)
-          and paste it here; no restart needed. Without a token, writer and editor
+          Runs every article stage on your Claude plan at $0 marginal cost:
+          researcher, keyword strategist, outliner, writer, SEO reviewer and
+          editor. Opus 5 is the default model. Mint a one-year token on any
+          machine with <code>claude setup-token</code> (Pro/Max/Team/Enterprise)
+          and paste it here; no restart needed. Without a token, those stages
           quietly fall back to the Gemini engine.
         </p>
         <div className="settings-grid">
@@ -116,13 +119,13 @@ export function SettingsPage() {
           />
           <label>Claude model</label>
           <input
-            placeholder="claude-sonnet-4-5 (default)"
+            placeholder="claude-opus-5 (default)"
             value={llm.claude_model ?? ''}
             onChange={(e) =>
               setSettings({ ...settings, llm: { ...llm, claude_model: e.target.value } })
             }
           />
-          <label>Writer &amp; editor use</label>
+          <label>Article stages use</label>
           <select
             value={llm.prose_engine ?? 'claude'}
             onChange={(e) =>
@@ -132,8 +135,10 @@ export function SettingsPage() {
               })
             }
           >
-            <option value="claude">Claude subscription — best prose, uses your plan quota</option>
-            <option value="gemini">Gemini — same engine as the rest of the pipeline</option>
+            <option value="claude">
+              Claude subscription — best judgement and prose, uses your plan quota
+            </option>
+            <option value="gemini">Gemini — same engine as the scout and image agent</option>
           </select>
         </div>
       </div>

@@ -93,13 +93,47 @@ export interface Overview {
   workerEnabled: boolean;
 }
 
+/** Keyword strategist output — mirrors KeywordPlan in the agent app. */
+export interface KeywordPlan {
+  primaryKeyword: string;
+  rationale: string;
+  intent: string;
+  difficulty: string;
+  zeroClickRisk: string;
+  serpFeatures: string[];
+  winningFormat: string;
+  wordCountTarget: number;
+  secondaryKeywords: string[];
+  paaQuestions: string[];
+  entities: string[];
+  competitors: Array<{ url: string; format: string; angle: string; strength: string }>;
+  contentGaps: string[];
+  snippetTarget: { question: string; format: string; answer: string };
+  currentAiAnswer: string;
+  titleOptions: string[];
+  metaDescription: string;
+  rejected: Array<{ keyword: string; reason: string }>;
+}
+
+export interface SeoReviewDetail {
+  score: number;
+  pass: boolean;
+  issues: Array<{ severity: string; issue: string; fix: string }>;
+  summary: string;
+  /** Per-axis scores. Absent on reviews written before dimensional scoring. */
+  dimensions?: { seo: number; geo: number; voice: number; eeat: number; links: number };
+  /** Deterministic anti-slop scan that ran before the model saw the draft. */
+  slop?: { score: number; words: number; findings: number };
+}
+
 export interface ArticleDetail {
   article: ArticleSummary & {
     hero_alt: string | null;
     research: unknown;
+    keyword_plan: KeywordPlan | null;
     outline: unknown;
     draft_md: string | null;
-    seo_review: { score: number; pass: boolean; issues: Array<{ severity: string; issue: string; fix: string }>; summary: string } | null;
+    seo_review: SeoReviewDetail | null;
     frontmatter: Record<string, unknown> | null;
     affiliate_links: Array<{ slug: string; default_url: string; note?: string }> | null;
   };
