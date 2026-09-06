@@ -20,7 +20,8 @@ import type { ComponentProps } from 'astro/types';
 type HeaderActive = ComponentProps<typeof Header>['active'];
 
 export interface Props extends MetaPayload {
-  schema?: WithContext<Thing>;
+  /** One schema object, or several — see SEOHead. Nulls are dropped. */
+  schema?: WithContext<Thing> | Array<WithContext<Thing> | null | undefined> | null;
   active?: HeaderActive;
   /** Show the 2px reading progress bar. */
   progress?: boolean;

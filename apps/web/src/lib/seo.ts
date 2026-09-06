@@ -8,6 +8,7 @@ import type {
   Article,
   BreadcrumbList,
   CollectionPage,
+  FAQPage,
   Offer,
   Organization,
   Person,
@@ -23,8 +24,13 @@ import type { Deal } from '@data/deals';
 import type { Promo } from '@data/promos';
 import type { BlogPost } from './posts';
 
+// Same defensive read as ads-env / analytics-env / flags-env: Vite inlines
+// `import.meta.env` at build time and the bare `node --test` runner has no such
+// object, so reading a property off it directly makes the whole module
+// unimportable from a test. The FAQ helpers at the bottom of this file are
+// covered by one.
 const siteUrl = (
-  import.meta.env.SITE_URL ?? 'https://sleekdrops.com'
+  (import.meta.env as ImportMetaEnv | undefined)?.SITE_URL ?? 'https://sleekdrops.com'
 ).replace(/\/$/, '');
 
 const defaultImage = `${siteUrl}/og-default.png`;
@@ -241,5 +247,121 @@ export function buildAuthorSchema(author: Author): WithContext<ProfilePage> {
       jobTitle: author.role,
       sameAs: author.url ? [author.url] : [],
     } as Person,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// FAQ structured data
+//
+// Generative engines (AI Overviews, ChatGPT, Perplexity) cite pages that hand
+// them a clean question/answer pair far more often than pages that bury the
+// same answer in prose, and FAQPage markup is the strongest single signal we
+// can ship for it. The pipeline already ends every article with an "## FAQ"
+// section of "### Question?" headings, so the schema is derived from the body
+// rather than carried as another frontmatter field nobody would keep in sync.
+// ---------------------------------------------------------------------------
+
+export interface FaqEntry {
+  question: string;
+  answer: string;
+}
+
+/** Answers longer than this are truncated at a sentence boundary. */
+const MAX_ANSWER_CHARS = 500;
+
+/** Strip the markdown an answer may carry so the schema holds plain text. */
+function plainText(markdown: string): string {
+  return markdown
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    // Keep the anchor text of a link, drop the target.
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_`>]/g, '')
+    .replace(/^\s*[-+*]\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function clampAnswer(text: string): string {
+  if (text.length <= MAX_ANSWER_CHARS) return text;
+  const cut = text.slice(0, MAX_ANSWER_CHARS);
+  const lastStop = cut.lastIndexOf('. ');
+  return lastStop > MAX_ANSWER_CHARS / 2 ? cut.slice(0, lastStop + 1) : `${cut.trimEnd()}...`;
+}
+
+/**
+ * Pull the Q&A pairs out of an article's markdown body.
+ *
+ * Looks for an H2 whose text starts with "FAQ" (or "Frequently asked..."),
+ * then takes each H3 under it as a question and the prose that follows as its
+ * answer, up to the next heading. Returns an empty array when the article has
+ * no FAQ section, which is the common case for the older hand-written posts.
+ */
+export function extractFaq(body: string): FaqEntry[] {
+  const lines = (body ?? '').split('\n');
+  const entries: FaqEntry[] = [];
+
+  let inFaq = false;
+  let inFence = false;
+  let question: string | null = null;
+  let answer: string[] = [];
+
+  const flush = (): void => {
+    if (!question) return;
+    const text = clampAnswer(plainText(answer.join('\n')));
+    // A heading with nothing under it is not an answer, and Google rejects
+    // FAQPage entries with an empty acceptedAnswer.
+    if (text.length > 0) entries.push({ question, answer: text });
+    question = null;
+    answer = [];
+  };
+
+  for (const line of lines) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence;
+      if (inFaq && question) answer.push(line);
+      continue;
+    }
+    if (inFence) {
+      if (inFaq && question) answer.push(line);
+      continue;
+    }
+
+    const h2 = line.match(/^##\s+(.*)$/);
+    if (h2) {
+      flush();
+      inFaq = /^(?:faqs?\b|frequently\s+asked)/i.test(h2[1].trim());
+      continue;
+    }
+    if (!inFaq) continue;
+
+    const h3 = line.match(/^###\s+(.*)$/);
+    if (h3) {
+      flush();
+      question = plainText(h3[1]);
+      continue;
+    }
+    // An H4+ inside an answer stays part of the answer text.
+    if (question) answer.push(line.replace(/^#{4,}\s+/, ''));
+  }
+  flush();
+
+  return entries;
+}
+
+/**
+ * FAQPage JSON-LD. Returns null below two entries: a one-question FAQPage is
+ * not eligible for the rich result and is not worth the markup.
+ */
+export function buildFaqSchema(entries: FaqEntry[]): WithContext<FAQPage> | null {
+  if (entries.length < 2) return null;
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: entries.map((entry) => ({
+      '@type': 'Question',
+      name: entry.question,
+      acceptedAnswer: { '@type': 'Answer', text: entry.answer },
+    })),
   };
 }

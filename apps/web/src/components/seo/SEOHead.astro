@@ -7,10 +7,16 @@ import type { MetaPayload } from '@lib/seo';
  * SEOHead — every meta tag we ship on every page. Pass the MetaPayload
  * from buildMeta() plus an optional structured-data `schema`.
  *
+ * `schema` takes one object or several: an article page ships Article plus
+ * FAQPage, and separate <script> blocks are what Google's own docs recommend
+ * over cramming unrelated types into one @graph. Nulls are dropped, so a
+ * builder that declines to emit (buildFaqSchema on a post with no FAQ) can be
+ * passed straight through.
+ *
  * Also bootstraps dark mode before paint so the theme never flashes.
  */
 export interface Props extends MetaPayload {
-  schema?: WithContext<Thing>;
+  schema?: WithContext<Thing> | Array<WithContext<Thing> | null | undefined> | null;
 }
 
 const {
@@ -24,6 +30,12 @@ const {
   nextUrl,
   schema,
 } = Astro.props;
+
+// Normalized here rather than in the template: the markup body is plain JS,
+// so the type predicate that narrows away the nulls cannot live there.
+const schemas = (Array.isArray(schema) ? schema : [schema]).filter(
+  (entry): entry is WithContext<Thing> => Boolean(entry),
+);
 ---
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -51,7 +63,7 @@ const {
 <link rel="alternate" type="application/rss+xml" title="SleekDrops RSS Feed" href="/rss.xml" />
 {prevUrl && <link rel="prev" href={prevUrl} />}
 {nextUrl && <link rel="next" href={nextUrl} />}
-{schema && <JsonLd schema={schema} />}
+{schemas.map((entry) => <JsonLd schema={entry} />)}
 
 <script is:inline>
   (function () {
