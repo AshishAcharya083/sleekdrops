@@ -30,6 +30,19 @@ import type { ChatOptions, LlmResult, LlmSettings } from './index.js';
  */
 const SEARCH_MAX_TURNS = 24;
 
+/**
+ * Turn budget without tools. Not 1, which is what this was and what broke the
+ * outline stage the first time a real token was configured: a turn is one
+ * assistant response, Opus 5 runs adaptive thinking by default, and a reply
+ * that arrives as thinking-then-answer spends two. At 1 that failed outright
+ * with `error_max_turns`, intermittently — the same call succeeded on a retry,
+ * which is the worst kind of bug to read off a dashboard.
+ *
+ * Headroom is close to free here: with `tools: []` there is nothing to call,
+ * so the only thing extra turns buy is the model finishing its sentence.
+ */
+const SINGLE_SHOT_MAX_TURNS = 6;
+
 const TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface ClaudeCredential {
@@ -63,7 +76,7 @@ export function queryOptions(
   return {
     systemPrompt: opts.system ?? '',
     model,
-    maxTurns: opts.search ? SEARCH_MAX_TURNS : 1,
+    maxTurns: opts.search ? SEARCH_MAX_TURNS : SINGLE_SHOT_MAX_TURNS,
     // No built-in tools in either shape: no Bash, no file access, no network
     // beyond the search server below.
     tools: [],
@@ -89,6 +102,9 @@ export async function claudeChat(opts: ChatOptions, settings: LlmSettings): Prom
   }
   env[credential.envName] = credential.value;
 
+  // Note: opts.maxTokens has no effect here. The Agent SDK exposes no output
+  // budget, so the model's own default cap (64K on Opus 5) applies. It is a
+  // Gemini-engine hint only — don't rely on it to bound a Claude reply.
   const model = opts.model.replace(/^anthropic\//, '');
   const prompt = opts.jsonMode
     ? `${opts.prompt}\n\nReply with ONLY the JSON value — no prose, no code fences.`
@@ -104,9 +120,10 @@ export async function claudeChat(opts: ChatOptions, settings: LlmSettings): Prom
     for await (const message of run) {
       if (message.type !== 'result') continue;
       if (message.subtype !== 'success') {
+        const budget = opts.search ? SEARCH_MAX_TURNS : SINGLE_SHOT_MAX_TURNS;
         throw new Error(
           message.subtype === 'error_max_turns'
-            ? `Claude engine hit its ${SEARCH_MAX_TURNS}-turn budget before answering`
+            ? `Claude engine hit its ${budget}-turn budget before answering`
             : `Claude engine failed (${message.subtype})`,
         );
       }

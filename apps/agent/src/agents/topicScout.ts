@@ -2,7 +2,7 @@
 // live web via Tavily, cross-checks against published D1 posts and every
 // previous suggestion, and writes new suggestions for the admin to approve.
 import { q } from '../db/pool.js';
-import { chatJson, UsageTracker } from '../llm/index.js';
+import { chatJson, requireKeys, UsageTracker } from '../llm/index.js';
 import { fetchPublishedPosts } from '../tools/d1.js';
 import { formatSearches, tavilySearchMany } from '../tools/tavily.js';
 import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
@@ -73,6 +73,9 @@ Return JSON: {"topics": [{"title": string, "category": string, "postType": strin
 "sources": string[] (2-4 URLs from the evidence)}]}`,
     },
     tracker,
+    // Without this a fragment reply inserts nothing and the sweep reports
+    // "0 new topics" — indistinguishable from a genuinely quiet week.
+    requireKeys<{ topics: TopicSuggestion[] }>('topics'),
   );
 
   // Deterministic dedupe on normalized title against the whole topics table;

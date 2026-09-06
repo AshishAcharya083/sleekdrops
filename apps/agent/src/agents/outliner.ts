@@ -5,7 +5,7 @@
 // which gaps); this stage owns the shape of the article that executes it. When
 // the plan is missing (an article queued before the keyword stage existed) it
 // falls back to the dossier's own keywords.
-import { chatJson, UsageTracker } from '../llm/index.js';
+import { chatJson, requireKeys, UsageTracker } from '../llm/index.js';
 import { AUTHORS, slugify } from '../content/contract.js';
 import { GEO_RULES, keywordPlanBrief, SEO_RULES, siteContext, SOURCE_DISCIPLINE } from './context.js';
 import type { ArticleRow, ContentBrief } from '../pipeline/types.js';
@@ -62,6 +62,9 @@ Return JSON:
  "faq": [{"question": string}] (3-5 long-tail questions — prefer the plan's PAA list)}`,
     },
     tracker,
+    // The slug and title are written straight onto the article row; a brief
+    // missing either leaves an untitled, unroutable piece in the pipeline.
+    requireKeys<ContentBrief>('seoTitle', 'slug', 'sections'),
   );
 
   brief.slug = slugify(brief.slug || brief.seoTitle || article.title);

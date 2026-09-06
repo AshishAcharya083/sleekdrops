@@ -9,12 +9,21 @@ import { READ_PAGE_TOOL, VERIFY_TOOLS, WEB_SEARCH_TOOL } from './searchTools.js'
 
 const env = { PATH: '/usr/bin' };
 
-test('a stage that does not verify gets one turn and no tools at all', () => {
+test('a stage that does not verify gets no tools at all', () => {
   const options = queryOptions({ system: 'you are a writer' }, 'claude-opus-5', env);
-  assert.equal(options.maxTurns, 1);
   assert.deepEqual(options.tools, []);
   assert.deepEqual(options.allowedTools, []);
   assert.equal('mcpServers' in options, false);
+});
+
+test('even a single-shot stage gets more than one turn', () => {
+  // At maxTurns 1 the outline stage failed with error_max_turns the first time
+  // a real token was configured: Opus 5 thinks by default, and a reply that
+  // arrives as thinking-then-answer spends two turns. With no tools attached
+  // the headroom cannot be spent on anything but finishing the answer.
+  const options = queryOptions({}, 'claude-opus-5', env);
+  assert.ok(options.maxTurns > 1, `single-shot budget was ${options.maxTurns}`);
+  assert.ok(options.maxTurns < queryOptions({ search: true }, 'claude-opus-5', env).maxTurns);
 });
 
 test('a verifying stage gets the search tools and room to use them', () => {

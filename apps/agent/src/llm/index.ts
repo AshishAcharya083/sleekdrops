@@ -200,8 +200,16 @@ export async function chat(opts: ChatOptions): Promise<LlmResult> {
 
 /**
  * Extract a JSON value from an LLM response that may wrap it in prose or a
- * ```json fence. Tries the whole string first, then the largest balanced
- * {...} or [...] block.
+ * ```json fence.
+ *
+ * The balanced scan starts at whichever structural character comes FIRST and
+ * only ever returns a COMPLETE outer value. That is deliberate and it is the
+ * whole point of this function: the earlier version tried `{` and then fell
+ * back to `[`, so a reply cut off mid-object would skip past the unterminated
+ * `{` and return the first complete array nested inside it. A truncated
+ * research dossier came back as its own `facts` array — valid JSON, plausible
+ * shape, silently missing every product — and the pipeline published from it.
+ * A truncated value must fail here so chatJson can reprompt.
  */
 export function extractJson<T>(text: string): T {
   const stripped = text
@@ -211,49 +219,90 @@ export function extractJson<T>(text: string): T {
   try {
     return JSON.parse(stripped) as T;
   } catch {
-    /* fall through to block scan */
+    /* fall through to the balanced scan */
   }
-  for (const open of ['{', '[']) {
-    const close = open === '{' ? '}' : ']';
-    const start = text.indexOf(open);
-    if (start === -1) continue;
-    let depth = 0;
-    let inString = false;
-    for (let i = start; i < text.length; i++) {
-      const ch = text[i];
-      if (inString) {
-        if (ch === '\\') i++;
-        else if (ch === '"') inString = false;
-      } else if (ch === '"') inString = true;
-      else if (ch === open) depth++;
-      else if (ch === close) {
-        depth--;
-        if (depth === 0) {
-          try {
-            return JSON.parse(text.slice(start, i + 1)) as T;
-          } catch {
-            break;
-          }
-        }
-      }
+
+  const objectAt = text.indexOf('{');
+  const arrayAt = text.indexOf('[');
+  const candidates = [objectAt, arrayAt].filter((i) => i !== -1);
+  if (candidates.length === 0) {
+    throw new Error(`No JSON value in LLM response: ${text.slice(0, 200)}...`);
+  }
+  const start = Math.min(...candidates);
+  const open = text[start];
+  const close = open === '{' ? '}' : ']';
+
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === '\\') i++;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return JSON.parse(text.slice(start, i + 1)) as T;
     }
   }
-  throw new Error(`Could not parse JSON from LLM response: ${text.slice(0, 200)}...`);
+  // Unbalanced: the value was cut off. Never reach inside it for a fragment.
+  throw new Error(
+    `Truncated JSON in LLM response — the outer ${open}...${close} never closes: ${text.slice(0, 200)}...`,
+  );
 }
 
-/** chat() + extractJson() with one automatic reprompt on parse failure. */
-export async function chatJson<T>(opts: ChatOptions, tracker?: UsageTracker): Promise<T> {
-  const first = await chat({ ...opts, jsonMode: true });
-  tracker?.add(first);
-  try {
-    return extractJson<T>(first.text);
-  } catch {
-    const retry = await chat({
+/**
+ * A shape check for a JSON stage. Returns null when the value is usable, or a
+ * complaint that is fed back to the model verbatim on the reprompt.
+ *
+ * Valid JSON of the wrong shape is the failure mode worth guarding: it flows
+ * through `?? []` and `?.field` defaults all the way to a published article
+ * with nothing in it, and every stage in between reports success.
+ */
+export type ShapeCheck<T> = (value: unknown) => string | null;
+
+/** The common case: a JSON object (not an array) carrying these keys. */
+export function requireKeys<T>(...keys: Array<keyof T & string>): ShapeCheck<T> {
+  return (value) => {
+    if (value === null || typeof value !== 'object') return `Expected a JSON object, got ${value === null ? 'null' : typeof value}.`;
+    if (Array.isArray(value)) {
+      return 'Expected a JSON object, got an array — return the whole object, not one of its fields.';
+    }
+    const missing = keys.filter((k) => (value as Record<string, unknown>)[k] === undefined);
+    return missing.length > 0 ? `Missing required field(s): ${missing.join(', ')}.` : null;
+  };
+}
+
+/**
+ * chat() + extractJson() with one automatic reprompt, on a parse failure OR a
+ * shape failure. `check` is what stops a well-formed reply of the wrong shape
+ * reaching the database — pass one for any stage whose output is load-bearing.
+ */
+export async function chatJson<T>(
+  opts: ChatOptions,
+  tracker?: UsageTracker,
+  check?: ShapeCheck<T>,
+): Promise<T> {
+  const attempt = async (complaint?: string): Promise<T> => {
+    const result = await chat({
       ...opts,
       jsonMode: true,
-      prompt: `${opts.prompt}\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON value — no prose, no code fences.`,
+      prompt: complaint ? `${opts.prompt}\n\n${complaint}` : opts.prompt,
     });
-    tracker?.add(retry);
-    return extractJson<T>(retry.text);
+    tracker?.add(result);
+    const value = extractJson<T>(result.text);
+    const problem = check?.(value);
+    if (problem) throw new Error(problem);
+    return value;
+  };
+
+  try {
+    return await attempt();
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    return attempt(
+      `Your previous reply could not be used: ${why}\nReply with ONLY the complete JSON value — no prose, no code fences, and do not omit any field.`,
+    );
   }
 }

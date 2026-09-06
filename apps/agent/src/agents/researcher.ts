@@ -7,7 +7,7 @@
 // The Tavily sweep still runs first and unconditionally. It is the evidence
 // floor — breadth the model does not have to think to ask for — and the search
 // tool is what the model uses on top of it to check the specifics that matter.
-import { chatJson, UsageTracker } from '../llm/index.js';
+import { chatJson, type ShapeCheck, UsageTracker } from '../llm/index.js';
 import { formatSearches, tavilySearchMany } from '../tools/tavily.js';
 import { parseAmazonUrl, slugify } from '../content/contract.js';
 import { operatorBrief, siteContext, SOURCE_DISCIPLINE, VERIFICATION_RULES } from './context.js';
@@ -90,6 +90,7 @@ Return JSON:
  "faqIdeas": [{"question": string, "answerHint": string}] (3-6)}`,
     },
     tracker,
+    dossierCheck(article.post_type),
   );
 
   // Normalize goSlugs defensively — downstream link integrity depends on them.
@@ -105,4 +106,34 @@ Return JSON:
     }
   }
   return dossier;
+}
+
+/**
+ * The dossier contract, enforced rather than hoped for.
+ *
+ * A truncated reply once reached the database as its own `facts` array: valid
+ * JSON, 14 real facts, and no `products` at all. Every stage downstream read
+ * it through `?? []`, reported success, and would have published a guide whose
+ * affiliate table was empty — the one defect that costs money rather than
+ * quality. `products` is required for a guide or roundup for exactly that
+ * reason; a plain article may legitimately have none.
+ */
+export function dossierCheck(postType: string): ShapeCheck<ResearchDossier> {
+  const needsProducts = postType === 'guide' || postType === 'roundup';
+  return (value) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return `Expected the whole dossier as a JSON object, got ${
+        Array.isArray(value) ? 'an array — you returned one field instead of the object' : typeof value
+      }.`;
+    }
+    const d = value as Partial<ResearchDossier>;
+    const problems: string[] = [];
+    if (!Array.isArray(d.facts) || d.facts.length === 0) problems.push('"facts" must be a non-empty array');
+    if (!d.keywords?.primary?.trim()) problems.push('"keywords.primary" is required');
+    if (!d.summary?.trim()) problems.push('"summary" is required');
+    if (needsProducts && (!Array.isArray(d.products) || d.products.length === 0)) {
+      problems.push(`"products" must list 3-6 contenders for a ${postType} — the piece cannot be linked without them`);
+    }
+    return problems.length > 0 ? `The dossier is incomplete: ${problems.join('; ')}.` : null;
+  };
 }
