@@ -1,6 +1,6 @@
 /**
  * The reopen-preferences channel - how a control anywhere on the page asks the
- * ConsentBanner island to bring its preferences dialog back.
+ * PrivacyPreferences island to open its preferences dialog.
  *
  * The banner keeps its surfaces and its show/hide helpers module-local to its own
  * island script, and the footer control is a separate script in a separate

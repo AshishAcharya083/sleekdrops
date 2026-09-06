@@ -35,12 +35,22 @@ const siteUrl = (
 
 const defaultImage = `${siteUrl}/og-default.png`;
 
+/** Every page is written for Australian readers; the schema says so. */
+const LANGUAGE = 'en-AU';
+
 const PUBLISHER: Organization = {
   '@type': 'Organization',
   name: 'SleekDrops',
   url: siteUrl,
-  logo: defaultImage,
+  // The square mark, not the 1200x630 social card: Google's Article guidance
+  // wants `publisher.logo` to be a logo, and reads it as an ImageObject.
+  logo: { '@type': 'ImageObject', url: `${siteUrl}/mark.svg` },
 };
+
+/** The byline as structured data, pointing at the author's own page on this site. */
+function personSchema(author: Author): Person {
+  return { '@type': 'Person', name: author.name, url: absoluteUrl(`/author/${author.id}`) };
+}
 
 export interface BreadcrumbItem {
   name: string;
@@ -120,18 +130,21 @@ export function buildArticleSchema(
   post: BlogPost,
   author: Author,
 ): WithContext<Article> {
+  const url = absoluteUrl(`/blog/${post.slug}`);
   return {
     '@context': 'https://schema.org',
     '@type': 'Article',
     headline: post.data.title,
     description: post.data.dek,
+    url,
+    inLanguage: LANGUAGE,
     datePublished: post.data.pubDate.toISOString(),
     dateModified: (post.data.updatedDate ?? post.data.pubDate).toISOString(),
-    author: { '@type': 'Person', name: author.name },
+    author: personSchema(author),
     articleSection: post.data.category,
     keywords: post.data.tags.join(', '),
     image: [post.data.heroImage ?? defaultImage],
-    mainEntityOfPage: absoluteUrl(`/blog/${post.slug}`),
+    mainEntityOfPage: { '@type': 'WebPage', '@id': url },
     publisher: PUBLISHER,
   };
 }
@@ -166,25 +179,22 @@ export function buildReviewSchema(
     description: product.tagline,
     offers: {
       '@type': 'Offer',
-      priceCurrency: 'USD',
+      // The audience and the frontmatter price are Australian.
+      priceCurrency: 'AUD',
       price: product.price.replace(/[^0-9.]/g, ''),
       availability: 'https://schema.org/InStock',
       url: absoluteUrl(`/go/${post.slug}`),
     },
-    aggregateRating: {
-      '@type': 'AggregateRating',
-      ratingValue: product.rating,
-      reviewCount: 1,
-      bestRating: 5,
-      worstRating: 1,
-    },
+    // No AggregateRating: schema.org defines it as "the average rating based on
+    // multiple ratings or reviews", and one editorial review is not that. The
+    // single Review below is the honest shape and is enough for a product snippet.
   };
 
   const review: Review = {
     '@type': 'Review',
     name: post.data.title,
     reviewBody: post.data.dek,
-    author: { '@type': 'Person', name: author.name },
+    author: personSchema(author),
     itemReviewed: reviewedProduct,
     reviewRating: {
       '@type': 'Rating',
@@ -255,10 +265,14 @@ export function buildAuthorSchema(author: Author): WithContext<ProfilePage> {
 //
 // Generative engines (AI Overviews, ChatGPT, Perplexity) cite pages that hand
 // them a clean question/answer pair far more often than pages that bury the
-// same answer in prose, and FAQPage markup is the strongest single signal we
-// can ship for it. The pipeline already ends every article with an "## FAQ"
-// section of "### Question?" headings, so the schema is derived from the body
-// rather than carried as another frontmatter field nobody would keep in sync.
+// same answer in prose. That is what the visible "## FAQ" section every
+// pipeline article ends with is for. The FAQPage markup derived from it here is
+// valid schema.org and harmless, but it is no longer a Google lever: Google
+// stopped showing FAQ rich results on 7 May 2026 and removed the feature's
+// documentation in June, and its AI guidance says no special markup is needed
+// for AI Overviews or AI Mode. Keep the section; do not expect the markup to
+// do the work. The schema is derived from the body rather than carried as
+// another frontmatter field nobody would keep in sync.
 // ---------------------------------------------------------------------------
 
 export interface FaqEntry {

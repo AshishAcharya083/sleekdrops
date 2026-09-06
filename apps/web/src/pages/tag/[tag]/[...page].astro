@@ -8,6 +8,7 @@ import Pagination from '@components/blog/Pagination.astro';
 import { getAllPosts, getPostsByTag, type BlogPost } from '@lib/posts';
 import { buildCategorySchema, buildMeta } from '@lib/seo';
 import { slugify } from '@lib/format';
+import { isIndexableTag } from '@lib/sitemap-policy.mjs';
 
 export const getStaticPaths = (async ({ paginate }) => {
   const posts = await getAllPosts();
@@ -43,6 +44,10 @@ const meta = buildMeta({
   pathname: page.url.current,
   prevUrl: page.url.prev ?? undefined,
   nextUrl: page.url.next ?? undefined,
+  // Most tags hold one post, and a one-post archive is a near-duplicate of that
+  // post: noindex (still followed) until the tag has enough behind it. The
+  // sitemap leaves the same pages out, from the same threshold.
+  noindex: !isIndexableTag(page.total),
 });
 ---
 <BaseLayout

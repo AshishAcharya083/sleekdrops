@@ -37,6 +37,10 @@ const product = post.data.product;
 const related = await getRelatedPosts(post, 3);
 const headlineHtml = emphasiseLastWord(post.data.title);
 const stampYear = new Date(post.data.pubDate).getFullYear();
+// The disclosure has to be visible alongside the links it disclosed, so it goes
+// under the byline on any page that carries one - which is every pipeline post,
+// and any hand-written one with a /go/ link in the body.
+const hasAffiliateLinks = product !== undefined || /\/go\//.test(post.body);
 
 const meta = buildMeta({
   title: post.data.title,
@@ -45,10 +49,10 @@ const meta = buildMeta({
   image: post.data.heroImage,
   type: 'article',
 });
-// FAQPage markup is the strongest generative-engine citation signal we ship,
-// and it costs nothing extra: the pipeline already ends every article with an
-// "## FAQ" section, so the entries are read back out of the body. Posts
-// without one (most of the older hand-written pieces) emit no FAQ block.
+// The visible FAQ section is what answer engines quote; the FAQPage markup
+// read back out of it is valid and harmless but no longer a Google rich result
+// (removed May 2026), so it ships as-is rather than being relied on. Posts
+// without an FAQ section (most of the older hand-written pieces) emit no block.
 const schema = [
   product ? buildReviewSchema(post, author) : buildArticleSchema(post, author),
   buildFaqSchema(extractFaq(post.body)),
@@ -108,6 +112,8 @@ const schema = [
         </div>
       </div>
 
+      {hasAffiliateLinks && <AffiliateDisclosure variant="inline" />}
+
       <div
         class:list={['hero-image', !post.data.heroImage && 'fill', !post.data.heroImage && post.data.cover, post.data.heroImage && 'is-zoomable']}
         {...post.data.heroImage ? { 'data-lightbox': 'true' } : {}}
@@ -124,7 +130,7 @@ const schema = [
         <Content />
         {product && <ProductCallout product={product} postSlug={post.slug} />}
         {product && <ProsConsList pros={product.pros} cons={product.cons} />}
-        <AffiliateDisclosure />
+        {hasAffiliateLinks && <AffiliateDisclosure />}
       </ArticleBody>
 
       <aside class="article-aside">

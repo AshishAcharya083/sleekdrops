@@ -6,7 +6,7 @@ import { buildCategorySchema, buildMeta } from '@lib/seo';
 const meta = buildMeta({
   title: 'Affiliate disclaimer',
   description:
-    "SleekDrops earns a commission when you click affiliate links. We test products before linking them, never accept paid placements, and disclose every commercial relationship.",
+    'SleekDrops earns a commission when you click affiliate links. We research every pick independently, never accept paid placements, and disclose every commercial relationship.',
   pathname: '/disclaimer',
 });
 ---
@@ -18,12 +18,12 @@ const meta = buildMeta({
   <LegalLayout
     eyebrow="Legal"
     titleHtml="Affiliate <em>disclaimer</em>."
-    updated="November 1, 2025"
+    updated="September 6, 2026"
     toc={[
       { href: '#summary',    label: 'Plain summary' },
       { href: '#how',        label: 'How affiliate links work' },
       { href: '#independence', label: 'Editorial independence' },
-      { href: '#testing',    label: 'Our testing standard' },
+      { href: '#testing',    label: 'How we research' },
       { href: '#labelling',  label: 'How links are labelled' },
       { href: '#corrections', label: 'Corrections' },
     ]}
@@ -38,18 +38,21 @@ const meta = buildMeta({
 
     <h2 id="independence">Editorial <em>independence</em></h2>
     <p>We don't take sponsorships. We don't run "promoted" or "sponsored" posts. No brand or PR agency pays us to publish, and no brand has approval or pre-view rights over a SleekDrops review. The recommendation comes first; the affiliate link is bolted on after we've decided what to recommend.</p>
-    <p>If a brand sends us a loaner unit for testing, we say so in the review. We return the unit when the test is complete unless the brand explicitly tells us to keep it; in that case we either donate it or disclose ongoing access in the byline.</p>
+    <p>No brand has supplied us with a product. If one ever does, the piece will say so, and we will return the unit or disclose ongoing access in the byline.</p>
 
-    <h2 id="testing">Our testing <em>standard</em></h2>
+    <h2 id="testing">How we <em>research</em></h2>
+    <p>We research; we do not lab-test every product, and we don't claim to. Here is what a recommendation rests on:</p>
     <ul>
-      <li><strong>Reviews</strong> require at least two weeks of real-world use against the nearest competitor.</li>
-      <li><strong>Buying guides</strong> require side-by-side testing across at least three contenders.</li>
-      <li><strong>Roundups</strong> are scored against a published rubric — we'll always tell you what we weighted and why.</li>
-      <li><strong>Pros and cons</strong> are honest: 3–5 genuine advantages, 2–4 genuine disadvantages. If we can't find any cons, we haven't tested long enough yet.</li>
+      <li><strong>Reviews</strong> compare a product against its nearest competitors on manufacturer specifications, owner reviews and expert coverage, with Australian availability checked on the date the piece shows.</li>
+      <li><strong>Buying guides</strong> compare at least three contenders side by side on the same criteria.</li>
+      <li><strong>Roundups</strong> are ranked against stated criteria — we'll always tell you what we weighted and why.</li>
+      <li><strong>Hands-on use</strong> is called out where it exists. Where a pick rests on research rather than our own use, the piece says so.</li>
+      <li><strong>Pros and cons</strong> are honest: 3–5 genuine advantages, 2–4 genuine disadvantages. If we can't find any cons, we haven't looked hard enough yet.</li>
+      <li><strong>Prices</strong> are not quoted from Amazon. Amazon's programme only allows prices drawn live from its own systems, so we point you to the current price instead; where a figure matters we give the manufacturer's RRP with its year.</li>
     </ul>
 
     <h2 id="labelling">How links are <em>labelled</em></h2>
-    <p>Affiliate links carry <code>rel="sponsored nofollow"</code> in the HTML, per Google's guidance. Outbound product CTAs (the orange "View deal" button) are always affiliate; in-body text links may or may not be — when they aren't, we don't dress them up to look like they are.</p>
+    <p>Every affiliate link carries <code>rel="sponsored"</code> in the HTML, per Google's guidance, and every page with one opens with a disclosure under the byline. Buttons and links that say "Check price on Amazon", "See it on Amazon" or similar are always affiliate and always go to Amazon; in-body text links to manufacturers, standards bodies and other sources are not.</p>
 
     <h2 id="corrections">Corrections</h2>
     <p>Spotted a mistake — a stale price, an old promo code, or a claim that no longer holds? Tell us at <a href="mailto:corrections@sleekdrops.com">corrections@sleekdrops.com</a> and we'll update the post (and credit you in the footer if you'd like).</p>

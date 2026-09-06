@@ -2,19 +2,20 @@
  * Analytics - the single entry point for product tracking, and the wiring that
  * gates it behind the visitor's consent choice.
  *
- * Nothing reaches DevTeam analytics or GA4 until the visitor has opted in. Every
- * event is queued in an in-memory buffer while consent is unknown; on grant the
- * buffer flushes and subsequent events send live, on deny (including a GPC/DNT
- * signal) the buffer is dropped and nothing is ever sent. Every outgoing payload
- * - buffered or live - runs through the central PII scrub() first. A withdrawal
+ * Anonymous analytics is on by default and can be switched off; nothing is ever
+ * prompted for. `boot()` reads the decision in force - the stored record, or the
+ * site default when there is none - and applies it. Every event is queued in an
+ * in-memory buffer until that has happened; on grant the buffer flushes and
+ * subsequent events send live, on deny (a stored opt-out, or a GPC/DNT signal)
+ * the buffer is dropped and nothing is ever sent. Every outgoing payload -
+ * buffered or live - runs through the central PII scrub() first. A withdrawal
  * arriving after a grant - the footer's preferences control makes that reachable on
  * any page - stops both sinks and the A/B testing SDK where they stand and clears
  * what each of them stored.
  *
- * The consent choice persists to localStorage under `sd-consent`, mirroring the
- * `sd-theme` handling in chrome.ts; we re-prompt only when the stored policy
- * version is older than the current one. The decision table itself lives in the
- * pure, unit-tested `./consent` module.
+ * The visitor's choice persists to localStorage under `sd-consent`, mirroring the
+ * `sd-theme` handling in chrome.ts. The decision table itself lives in the pure,
+ * unit-tested `./consent` module.
  *
  * That record holds one decision per purpose category, and this module acts on
  * exactly one of them - `analytics`. The advertising category is written here
@@ -70,7 +71,6 @@ import {
   resolveConsent,
   uniformGrants,
   type ConsentGrants,
-  type ConsentPrompt,
   type ConsentStatus,
 } from './consent.ts';
 import { sendGa, setGaOptOut, startGa, stopGa } from './ga.ts';
@@ -93,7 +93,7 @@ import {
   stop as stopExperiments,
 } from './experiments.ts';
 
-export type { EventProps, ConsentPrompt };
+export type { EventProps };
 
 /**
  * The product event taxonomy. Every track call uses one of these names so the
@@ -553,21 +553,21 @@ export function denyConsent(): void {
 }
 
 /**
- * Resolve the consent state on page load and report which surface (if any) the
- * UI should show. The page-view event and any funnel events are dispatched by
+ * Resolve the decision in force on page load - the stored record, the site
+ * default when there is none, or a blanket denial for a GPC/DNT signal - and
+ * apply it. The page-view event and any funnel events are dispatched by
  * chrome.ts through the same buffered, consent-gated track() pipeline, so they
- * flush on a silent grant and are dropped on any denial regardless of which
- * script ran first.
+ * flush on a grant and are dropped on any denial regardless of which script ran
+ * first. Nothing is shown to the visitor.
  *
  * Safe to call more than once per document: the effect it applies is idempotent,
  * so a second entry point calling boot() re-reads the decision without opening a
  * second session or re-flushing the buffer.
  */
-export function boot(): ConsentPrompt {
-  const { prompt, effects } = resolveConsent(readConsent(), hasPrivacySignal());
+export function boot(): void {
+  const { effects } = resolveConsent(readConsent(), hasPrivacySignal());
   if (effects.analytics === 'grant') applyGrant();
-  else if (effects.analytics === 'deny') applyDeny();
-  return prompt;
+  else applyDeny();
 }
 
 const deduper = new ErrorDeduper();

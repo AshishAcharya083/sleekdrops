@@ -53,7 +53,7 @@ export const authors = {
     id: 'beatriz',
     name: 'Beatriz Lima',
     role: 'Travel & gear',
-    bio: 'Forty flights a year. Tests bags on real airports, not on a kitchen scale.',
+    bio: 'Forty flights a year. Cares about what survives a real airport, not what a kitchen scale says.',
   },
 } as const satisfies Record<string, Author>;
 

@@ -83,9 +83,10 @@ Requirements:
   heading implies, then expands. This is what gets cited by AI systems.
 ${plan?.snippetTarget?.question ? `- The snippet target is "${plan.snippetTarget.question}" as a ${plan.snippetTarget.format}. Write that block to be quoted verbatim.` : ''}
 ${plan?.paaQuestions?.length ? `- Answer these directly, as headings or FAQ entries: ${plan.paaQuestions.join(' / ')}` : ''}
-- Attribute every spec, price and claim to its source with a year, from the
-  dossier. Prices are AUD unless the source says otherwise, and say when the
-  price was checked.
+- Attribute every spec and claim to its source with a year, from the dossier.
+  Never print a marketplace price (see the editorial rules): if a figure is
+  essential, it is the manufacturer's RRP in AUD, labelled "RRP" with the year.
+  Point readers to the /go/ link for what it costs today.
 - GitHub-flavored markdown: ## H2 / ### H3, a comparison table for
   multi-product pieces, bold sparingly. No emoji.
 - Follow the affiliate link placement rules exactly: first mention per section,
@@ -94,8 +95,8 @@ ${plan?.paaQuestions?.length ? `- Answer these directly, as headings or FAQ entr
 - Include the honesty disclaimer (editorial synthesis, not lab-tested) early.
 - Include a "How we picked" style section for guides/roundups.
 - End with an FAQ section — "## FAQ", then one "### Question?" per entry with a
-  40-60 word answer under each. The site turns this into FAQPage structured
-  data, so the heading must be a real question ending in "?".
+  40-60 word answer under each. Answer engines quote these pairs directly, so
+  the heading must be a real question ending in "?".
 - Close with a short honest conclusion that links each named pick once.
 
 Before you reply, reread your draft against the voice rules and fix what you

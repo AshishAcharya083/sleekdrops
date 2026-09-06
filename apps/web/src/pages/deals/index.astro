@@ -18,6 +18,8 @@ const meta = buildMeta({
   title: "Today's drops & deals",
   description: desc,
   pathname: '/deals',
+  // Nothing to list yet: a thin page, kept out of the index until there is.
+  noindex: deals.length === 0 && !todaysDrop,
 });
 ---
 <BaseLayout
