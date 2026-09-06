@@ -12,14 +12,22 @@
 //             bearer, which is why this engine exists at all.
 //
 // Which agents use which engine is decided in pipeline/runner.ts (modelFor):
-// every article-writing stage (researcher, keyword strategist, outliner,
-// writer, SEO reviewer, editor) follows the admin engine toggle, which
-// defaults to Claude Opus 5. The topic scout and the image agent stay on
-// Gemini. A per-agent model override may name any model from either engine.
+// every stage that runs a prompt — topic scout, researcher, keyword
+// strategist, outliner, writer, SEO reviewer, editor — follows the admin
+// engine toggle, which defaults to Claude Opus 5. The image agent is the one
+// exception and is pinned to Gemini, because vision checking and image
+// generation are that engine's capabilities, not a preference. A per-agent
+// model override may name any model from either engine.
+//
+// Both engines can be given live web search (`search: true`) so a stage can
+// check a fact instead of trusting its context: Gemini uses Google Search
+// grounding, Claude uses the in-process tools in ./searchTools.ts.
 import { config } from '../config.js';
 import { getSetting } from '../db/pool.js';
 import { geminiChat } from './gemini.js';
-import { claudeChat, resolveClaudeCredential } from './claude.js';
+import { claudeChat, CLAUDE_NOT_CONFIGURED, resolveClaudeCredential } from './claude.js';
+
+export { CLAUDE_NOT_CONFIGURED };
 
 export interface LlmSettings {
   /** Google AI Studio key. Empty = Vertex ADC (Cloud Run) or GEMINI_API_KEY. */
@@ -49,6 +57,15 @@ export async function llmSettings(): Promise<LlmSettings> {
   return value;
 }
 
+/**
+ * Drop the cache after an admin save. Without this, pasting a Claude token
+ * leaves the engine reporting itself unconfigured — and the pipeline refusing
+ * to start on it — for up to another 30 seconds.
+ */
+export function clearLlmSettingsCache(): void {
+  llmCache = null;
+}
+
 export function defaultGeminiModel(s: LlmSettings): string {
   // Tolerate the old OpenRouter-style "google/gemini-*" ids in stale settings.
   return (s.gemini_model || config.geminiModelDefault).replace(/^google\//, '');
@@ -64,6 +81,57 @@ export const isClaudeModel = (model: string): boolean =>
 /** True when the Claude engine has a usable credential (token or API key). */
 export async function claudeConfigured(): Promise<boolean> {
   return (await resolveClaudeCredential(await llmSettings())) !== null;
+}
+
+/** Where an engine's credential came from — reported, never the value itself. */
+export type CredentialSource =
+  | 'admin-settings'
+  | 'env-oauth-token'
+  | 'env-api-key'
+  | 'vertex-adc'
+  | null;
+
+export interface EngineReadiness {
+  configured: boolean;
+  source: CredentialSource;
+}
+
+export interface EngineStatus {
+  claude: EngineReadiness;
+  gemini: EngineReadiness;
+}
+
+/**
+ * Which engines can actually run, for the admin panel.
+ *
+ * This exists because the failure it reports used to be invisible: the toggle
+ * said Claude, no token was set anywhere, and every stage quietly ran on
+ * Gemini and wrote `gemini-2.5-flash` into its session row. The panel now says
+ * so before a single article is queued.
+ */
+export async function engineStatus(): Promise<EngineStatus> {
+  const settings = await llmSettings();
+  const credential = resolveClaudeCredential(settings);
+  return {
+    claude: {
+      configured: credential !== null,
+      source:
+        credential === null
+          ? null
+          : settings.claude_token
+            ? 'admin-settings'
+            : credential.envName === 'CLAUDE_CODE_OAUTH_TOKEN'
+              ? 'env-oauth-token'
+              : 'env-api-key',
+    },
+    gemini: settings.gemini_api_key
+      ? { configured: true, source: 'admin-settings' }
+      : config.vertex.enabled
+        ? { configured: true, source: 'vertex-adc' }
+        : config.geminiApiKey
+          ? { configured: true, source: 'env-api-key' }
+          : { configured: false, source: null },
+  };
 }
 
 export interface LlmUsage {
@@ -86,6 +154,13 @@ export interface ChatOptions {
   maxTokens?: number;
   /** Ask the engine for a JSON object response (best effort). */
   jsonMode?: boolean;
+  /**
+   * Give the model live web search so it can verify what it is about to say.
+   * Only the stages that check facts turn this on — the writer and the editor
+   * work from the dossier alone, so a draft can never quietly acquire a source
+   * nobody reviewed.
+   */
+  search?: boolean;
 }
 
 /** Accumulates usage across the several LLM calls one agent run makes. */
@@ -125,8 +200,16 @@ export async function chat(opts: ChatOptions): Promise<LlmResult> {
 
 /**
  * Extract a JSON value from an LLM response that may wrap it in prose or a
- * ```json fence. Tries the whole string first, then the largest balanced
- * {...} or [...] block.
+ * ```json fence.
+ *
+ * The balanced scan starts at whichever structural character comes FIRST and
+ * only ever returns a COMPLETE outer value. That is deliberate and it is the
+ * whole point of this function: the earlier version tried `{` and then fell
+ * back to `[`, so a reply cut off mid-object would skip past the unterminated
+ * `{` and return the first complete array nested inside it. A truncated
+ * research dossier came back as its own `facts` array — valid JSON, plausible
+ * shape, silently missing every product — and the pipeline published from it.
+ * A truncated value must fail here so chatJson can reprompt.
  */
 export function extractJson<T>(text: string): T {
   const stripped = text
@@ -136,49 +219,90 @@ export function extractJson<T>(text: string): T {
   try {
     return JSON.parse(stripped) as T;
   } catch {
-    /* fall through to block scan */
+    /* fall through to the balanced scan */
   }
-  for (const open of ['{', '[']) {
-    const close = open === '{' ? '}' : ']';
-    const start = text.indexOf(open);
-    if (start === -1) continue;
-    let depth = 0;
-    let inString = false;
-    for (let i = start; i < text.length; i++) {
-      const ch = text[i];
-      if (inString) {
-        if (ch === '\\') i++;
-        else if (ch === '"') inString = false;
-      } else if (ch === '"') inString = true;
-      else if (ch === open) depth++;
-      else if (ch === close) {
-        depth--;
-        if (depth === 0) {
-          try {
-            return JSON.parse(text.slice(start, i + 1)) as T;
-          } catch {
-            break;
-          }
-        }
-      }
+
+  const objectAt = text.indexOf('{');
+  const arrayAt = text.indexOf('[');
+  const candidates = [objectAt, arrayAt].filter((i) => i !== -1);
+  if (candidates.length === 0) {
+    throw new Error(`No JSON value in LLM response: ${text.slice(0, 200)}...`);
+  }
+  const start = Math.min(...candidates);
+  const open = text[start];
+  const close = open === '{' ? '}' : ']';
+
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === '\\') i++;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return JSON.parse(text.slice(start, i + 1)) as T;
     }
   }
-  throw new Error(`Could not parse JSON from LLM response: ${text.slice(0, 200)}...`);
+  // Unbalanced: the value was cut off. Never reach inside it for a fragment.
+  throw new Error(
+    `Truncated JSON in LLM response — the outer ${open}...${close} never closes: ${text.slice(0, 200)}...`,
+  );
 }
 
-/** chat() + extractJson() with one automatic reprompt on parse failure. */
-export async function chatJson<T>(opts: ChatOptions, tracker?: UsageTracker): Promise<T> {
-  const first = await chat({ ...opts, jsonMode: true });
-  tracker?.add(first);
-  try {
-    return extractJson<T>(first.text);
-  } catch {
-    const retry = await chat({
+/**
+ * A shape check for a JSON stage. Returns null when the value is usable, or a
+ * complaint that is fed back to the model verbatim on the reprompt.
+ *
+ * Valid JSON of the wrong shape is the failure mode worth guarding: it flows
+ * through `?? []` and `?.field` defaults all the way to a published article
+ * with nothing in it, and every stage in between reports success.
+ */
+export type ShapeCheck<T> = (value: unknown) => string | null;
+
+/** The common case: a JSON object (not an array) carrying these keys. */
+export function requireKeys<T>(...keys: Array<keyof T & string>): ShapeCheck<T> {
+  return (value) => {
+    if (value === null || typeof value !== 'object') return `Expected a JSON object, got ${value === null ? 'null' : typeof value}.`;
+    if (Array.isArray(value)) {
+      return 'Expected a JSON object, got an array — return the whole object, not one of its fields.';
+    }
+    const missing = keys.filter((k) => (value as Record<string, unknown>)[k] === undefined);
+    return missing.length > 0 ? `Missing required field(s): ${missing.join(', ')}.` : null;
+  };
+}
+
+/**
+ * chat() + extractJson() with one automatic reprompt, on a parse failure OR a
+ * shape failure. `check` is what stops a well-formed reply of the wrong shape
+ * reaching the database — pass one for any stage whose output is load-bearing.
+ */
+export async function chatJson<T>(
+  opts: ChatOptions,
+  tracker?: UsageTracker,
+  check?: ShapeCheck<T>,
+): Promise<T> {
+  const attempt = async (complaint?: string): Promise<T> => {
+    const result = await chat({
       ...opts,
       jsonMode: true,
-      prompt: `${opts.prompt}\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON value — no prose, no code fences.`,
+      prompt: complaint ? `${opts.prompt}\n\n${complaint}` : opts.prompt,
     });
-    tracker?.add(retry);
-    return extractJson<T>(retry.text);
+    tracker?.add(result);
+    const value = extractJson<T>(result.text);
+    const problem = check?.(value);
+    if (problem) throw new Error(problem);
+    return value;
+  };
+
+  try {
+    return await attempt();
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    return attempt(
+      `Your previous reply could not be used: ${why}\nReply with ONLY the complete JSON value — no prose, no code fences, and do not omit any field.`,
+    );
   }
 }

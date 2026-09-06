@@ -26,6 +26,7 @@ The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archive
 │           gemini-*  → Google ADK → Vertex AI (service-account ADC)       │
 │           claude-*  → Claude Agent SDK → your Claude subscription        │
 │                        (CLAUDE_CODE_OAUTH_TOKEN, pasted in Settings)     │
+│           verifying stages also get live web search + a page reader      │
 └──────────────┬───────────────────────────────────────────┬──────────────┘
                │ posts + affiliate_links                    │ repository_dispatch
                ▼                                            ▼ (content-updated)
@@ -35,10 +36,18 @@ The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archive
                                               apps/web → Cloudflare Pages
 ```
 
-- **Two LLM engines.** Gemini (through Google ADK) runs the high-volume
-  structured stages; the writer and editor run on your Claude plan through the
-  Claude Agent SDK — $0 marginal cost — with an admin toggle to put them on
-  Gemini instead. See [`apps/agent/README.md`](apps/agent/README.md).
+- **Two LLM engines.** Every stage that runs a prompt — scout, researcher,
+  keyword strategist, outliner, writer, SEO reviewer, editor — runs on your
+  Claude plan through the Claude Agent SDK at $0 marginal cost, Opus 5 by
+  default, with an admin toggle to put them on Gemini instead. Only the image
+  agent is pinned to Gemini, for its vision and image generation. Without a
+  Claude credential those stages fail with that message rather than silently
+  downgrading. See [`apps/agent/README.md`](apps/agent/README.md).
+- **The fact-checking stages can search.** The scout, the researcher and the
+  SEO reviewer get live web search and a page reader so specifics get verified
+  against primary sources. The writer and editor deliberately do not: they work
+  from what those stages confirmed, and no competing article is ever cited,
+  quoted or mirrored.
 - **PostgreSQL** holds pipeline/operational state (atomic job claims, JSONB
   dossiers, usage aggregation) — Cloud SQL in the cloud, Docker locally.
 - **Cloudflare D1** stays the publish target — the website's build reads it,
@@ -54,7 +63,8 @@ The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archive
 
 First run creates `apps/agent/.env` from the example — add `GEMINI_API_KEY`
 (aistudio.google.com) and `TAVILY_API_KEY`, plus `CLAUDE_CODE_OAUTH_TOKEN`
-(from `claude setup-token`) if the writer/editor should use your Claude plan.
+(from `claude setup-token`), which every article stage needs unless you switch
+the engine toggle to Gemini in admin Settings.
 All three can also be pasted straight into admin **Settings**, no restart.
 Logs live in `.run/`.
 

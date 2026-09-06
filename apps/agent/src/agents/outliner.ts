@@ -5,9 +5,9 @@
 // which gaps); this stage owns the shape of the article that executes it. When
 // the plan is missing (an article queued before the keyword stage existed) it
 // falls back to the dossier's own keywords.
-import { chatJson, UsageTracker } from '../llm/index.js';
+import { chatJson, requireKeys, UsageTracker } from '../llm/index.js';
 import { AUTHORS, slugify } from '../content/contract.js';
-import { GEO_RULES, keywordPlanBrief, SEO_RULES, siteContext } from './context.js';
+import { GEO_RULES, keywordPlanBrief, SEO_RULES, siteContext, SOURCE_DISCIPLINE } from './context.js';
 import type { ArticleRow, ContentBrief } from '../pipeline/types.js';
 
 export async function runOutliner(
@@ -21,7 +21,7 @@ export async function runOutliner(
   const brief = await chatJson<ContentBrief>(
     {
       model,
-      system: `${siteContext()}\n\n${SEO_RULES}\n\n${GEO_RULES}`,
+      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}\n\n${SEO_RULES}\n\n${GEO_RULES}`,
       temperature: 0.5,
       maxTokens: 8000,
       prompt: `Create the SEO content brief for this piece.
@@ -38,7 +38,9 @@ Build the outline to execute the keyword plan:
   piece can outrank the pages already there.
 - The section that answers the primary keyword's core question comes first,
   and its "points" must include the 40-60 word extractable answer block.
-- Order sections by the reader's decision path, not by what is easiest to write.
+- Order sections by the reader's decision path, not by what is easiest to write,
+  and never by copying the shape of a competing page. The gaps are what we have
+  that they don't; leading with their running order buries it.
 ${plan ? `- seoTitle: use one of the plan's title options, or a better one under 60 chars.
 - dek: use the plan's meta description, or a better one in 140-160 chars.
 - wordCountTarget: ${plan.wordCountTarget}, from the live SERP read. Do not raise it to pad.` : ''}
@@ -60,6 +62,9 @@ Return JSON:
  "faq": [{"question": string}] (3-5 long-tail questions — prefer the plan's PAA list)}`,
     },
     tracker,
+    // The slug and title are written straight onto the article row; a brief
+    // missing either leaves an untitled, unroutable piece in the pipeline.
+    requireKeys<ContentBrief>('seoTitle', 'slug', 'sections'),
   );
 
   brief.slug = slugify(brief.slug || brief.seoTitle || article.title);

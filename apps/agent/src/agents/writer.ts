@@ -6,6 +6,12 @@
 // ruleset because a first draft written against it needs far fewer revision
 // rounds than one cleaned up afterwards — but content/slop.ts is what actually
 // enforces it at review time.
+//
+// This is the one stage with no web access, deliberately. Research and review
+// verify; the writer writes what they verified. A writer that could search
+// would pull in sources nobody checked and reach for the competing articles
+// sitting at the top of every result page — which is exactly the material this
+// piece has to beat, not echo.
 import { chat, UsageTracker } from '../llm/index.js';
 import {
   ANTI_SLOP_RULES,
@@ -16,6 +22,7 @@ import {
   operatorBrief,
   SEO_RULES,
   siteContext,
+  SOURCE_DISCIPLINE,
 } from './context.js';
 import type { ArticleRow, TopicRow } from '../pipeline/types.js';
 
@@ -38,6 +45,7 @@ export async function runWriter(
     system: [
       siteContext(),
       EDITORIAL_RULES,
+      SOURCE_DISCIPLINE,
       ANTI_SLOP_RULES,
       LINK_PLACEMENT_RULES,
       SEO_RULES,
@@ -50,8 +58,14 @@ ${operator ? `\n${operator}\n` : ''}${planBrief ? `\n${planBrief}\n` : ''}
 Brief:
 ${JSON.stringify(brief, null, 2)}
 
-Research dossier (your ONLY source of facts — never invent beyond it):
+Research dossier (your ONLY source of facts — every one of these has been
+checked against a primary source already, so use it and never reach past it):
 ${JSON.stringify(article.research, null, 2)}
+
+The dossier's competitorNotes tell you what the pages you are outranking cover.
+They are there so you can be better, not so you can borrow: no competing
+article gets named, quoted, linked or paraphrased in the body, and none of them
+decides your section order.
 
 Product link slugs — when you link a product, use EXACTLY these (markdown links
 to /go/<slug>, e.g. [Sony WH-1000XM6](/go/sony-wh-1000xm6)):

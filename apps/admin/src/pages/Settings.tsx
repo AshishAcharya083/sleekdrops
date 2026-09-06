@@ -3,6 +3,10 @@ import { EVENTS, captureError, log, track } from '../analytics';
 import type { Settings } from '../api';
 import { api } from '../api';
 
+// Every agent that runs a prompt, and therefore has a model worth overriding.
+// `assembler` and `publisher` run deterministic code; `image_agent` is pinned
+// to Gemini for vision and hero generation. An override on any of the three
+// would either do nothing or break the stage, so none of them is offered.
 const AGENTS = [
   'topic_scout',
   'researcher',
@@ -11,8 +15,14 @@ const AGENTS = [
   'writer',
   'seo_reviewer',
   'editor',
-  'assembler',
 ] as const;
+
+const SOURCE_LABEL: Record<string, string> = {
+  'admin-settings': 'set here in Settings',
+  'env-oauth-token': 'from CLAUDE_CODE_OAUTH_TOKEN',
+  'env-api-key': 'from an API key in the environment',
+  'vertex-adc': 'via the Cloud Run service account (Vertex ADC)',
+};
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -48,9 +58,12 @@ export function SettingsPage() {
     };
     log('info', 'saving platform settings', shape);
     try {
+      // `engines` is derived server-side and read-only; the API ignores it, but
+      // sending back a field we were handed invites a round-trip bug later.
+      const { engines: _derived, ...writable } = settings;
       const next = await api<Settings>('/api/settings', {
         method: 'PUT',
-        body: JSON.stringify(settings),
+        body: JSON.stringify(writable),
       });
       setSettings(next);
       setSaved(true);
@@ -64,17 +77,56 @@ export function SettingsPage() {
   };
 
   const llm = settings.llm ?? {};
+  const engines = settings.engines;
+  const engine = llm.prose_engine ?? 'claude';
+  // The engine the pipeline is about to use, and whether it can actually run.
+  // This is the warning that was missing: the toggle said Claude, no token was
+  // set anywhere, and every stage quietly ran on Gemini instead.
+  const selected = engine === 'claude' ? engines?.claude : engines?.gemini;
+  const engineBroken = engines !== undefined && selected?.configured === false;
 
   return (
     <div className="card">
+      {engineBroken && (
+        <div className="warn-banner">
+          {engine === 'claude' ? (
+            <>
+              <strong>Claude is selected but has no credential.</strong> Every stage
+              will refuse to start until you paste a subscription token below (mint
+              one with <code>claude setup-token</code>) or set{' '}
+              <code>CLAUDE_CODE_OAUTH_TOKEN</code> on the agent service. Stages no
+              longer downgrade themselves — a silent fallback is how a run ends up on{' '}
+              <code>gemini-2.5-flash</code> while this page says Opus 5.
+            </>
+          ) : (
+            <>
+              <strong>Gemini is selected but has no credential.</strong> Add an AI
+              Studio key below, or run the agent with{' '}
+              <code>GOOGLE_GENAI_USE_VERTEXAI=true</code> so the service account
+              bills Vertex AI directly.
+            </>
+          )}
+        </div>
+      )}
+
       <div className="section" style={{ marginTop: 0 }}>
         <h2>Gemini engine</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Runs the topic scout and the image agent (plus every article stage when
-          the toggle below says so) through Google ADK. Empty fields fall back
-          to apps/agent/.env; on Cloud Run the key is optional — the service account
-          bills Vertex AI directly. Values are stored in the platform database —
-          set ADMIN_TOKEN if the API is reachable by others.
+          Runs the image agent — vision-checking candidate photos and generating a
+          hero when none is usable, which is why that one stage is pinned here —
+          plus every other stage when the toggle below says so. Goes through Google
+          ADK, with Google Search grounding on the stages that verify facts. Empty
+          fields fall back to apps/agent/.env; on Cloud Run the key is optional —
+          the service account bills Vertex AI directly. Values are stored in the
+          platform database — set ADMIN_TOKEN if the API is reachable by others.
+          {engines?.gemini.configured && (
+            <>
+              {' '}
+              <span style={{ color: 'var(--green)' }}>
+                Ready ({SOURCE_LABEL[engines.gemini.source ?? ''] ?? 'configured'}).
+              </span>
+            </>
+          )}
         </p>
         <div className="settings-grid">
           <label>AI Studio API key</label>
@@ -100,12 +152,21 @@ export function SettingsPage() {
       <div className="section">
         <h2>Claude subscription engine</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Runs every article stage on your Claude plan at $0 marginal cost:
-          researcher, keyword strategist, outliner, writer, SEO reviewer and
-          editor. Opus 5 is the default model. Mint a one-year token on any
-          machine with <code>claude setup-token</code> (Pro/Max/Team/Enterprise)
-          and paste it here; no restart needed. Without a token, those stages
-          quietly fall back to the Gemini engine.
+          Runs every stage that writes or judges the article on your Claude plan at
+          $0 marginal cost: topic scout, researcher, keyword strategist, outliner,
+          writer, SEO reviewer and editor. Opus 5 is the default model. Mint a
+          one-year token on any machine with <code>claude setup-token</code>{' '}
+          (Pro/Max/Team/Enterprise) and paste it here; no restart needed. Without
+          one, those stages fail with that message rather than falling back to
+          Gemini behind your back.
+          {engines?.claude.configured && (
+            <>
+              {' '}
+              <span style={{ color: 'var(--green)' }}>
+                Ready ({SOURCE_LABEL[engines.claude.source ?? ''] ?? 'configured'}).
+              </span>
+            </>
+          )}
         </p>
         <div className="settings-grid">
           <label>Subscription token</label>
@@ -125,7 +186,7 @@ export function SettingsPage() {
               setSettings({ ...settings, llm: { ...llm, claude_model: e.target.value } })
             }
           />
-          <label>Article stages use</label>
+          <label>Every article stage uses</label>
           <select
             value={llm.prose_engine ?? 'claude'}
             onChange={(e) =>
@@ -138,7 +199,7 @@ export function SettingsPage() {
             <option value="claude">
               Claude subscription — best judgement and prose, uses your plan quota
             </option>
-            <option value="gemini">Gemini — same engine as the scout and image agent</option>
+            <option value="gemini">Gemini — same engine as the image agent</option>
           </select>
         </div>
       </div>
@@ -196,7 +257,9 @@ export function SettingsPage() {
         <p className="muted" style={{ marginTop: 0 }}>
           Empty = the engine defaults above. Model ids route the engine too:
           gemini-* runs on Gemini, claude-* on the Claude subscription — so you can
-          put any single agent on either engine here.
+          put any single agent on either engine here. The image agent is not
+          listed: it needs Gemini's vision and image generation and always runs
+          there.
         </p>
         <div className="settings-grid">
           {AGENTS.map((agent) => (

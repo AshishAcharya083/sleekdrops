@@ -85,6 +85,58 @@ Editorial rules (non-negotiable):
   comparison tables for multi-product pieces, a "how we picked" section.
 `.trim();
 
+/**
+ * Where a fact is allowed to come from. Every agent gets this, whether or not
+ * it can search.
+ *
+ * The rule that matters is the second one. Competing articles are the easiest
+ * thing to find and the worst thing to source from: their numbers are
+ * second-hand, often a year stale, and copying them is how a whole niche ends
+ * up repeating one original error. They are also the pages we are trying to
+ * outrank, so mirroring their structure is the one guaranteed way not to.
+ */
+export const SOURCE_DISCIPLINE = `
+Sources — non-negotiable:
+- Primary sources only. The manufacturer's spec sheet, the retailer's own
+  listing, the standards body, a hands-on owner review, or the research dossier
+  built from those. A number is publishable when you can name who published it
+  and when.
+- Competing articles are competitive intelligence, never source material. Read
+  one to see what it misses; never take a fact, a figure, a phrase, a section
+  order or an angle from it. If a claim exists only in another site's roundup,
+  it is not a fact — chase it to the primary source or leave it out.
+- Never cite, quote, link, name or paraphrase another publisher's article in
+  the body. No "according to [blog]", no borrowed table columns, no rewritten
+  version of someone else's paragraph. The reader chose this page over that one.
+- A claim you cannot trace to a primary source is either cut or hedged in plain
+  words — "Sony has not published a figure" beats a borrowed number.
+`.trim();
+
+/**
+ * How the search-enabled stages use the tool. Only the fact-checking agents
+ * get this — the writer and the editor work from the dossier, so nothing can
+ * enter a draft that the research and review stages never saw.
+ */
+export const VERIFICATION_RULES = `
+You have live web access: \`web_search\` for ranked results, \`read_page\` to read
+one page's text. Use it to check, not to browse.
+
+- Verify the specifics the piece rests on: prices, model numbers, spec figures,
+  release dates, and whether a product is still sold in Australia. Your
+  training data is stale by a year or more; a search result is not.
+- Check what is most likely to be wrong first — anything priced, anything
+  called "latest" or "new", anything carrying a year, anything discontinued.
+- Open the source when the number matters. A snippet proves somebody said it;
+  read_page shows whether the source says it.
+- Prefer the primary source: the maker's spec page or the retailer's listing
+  over any article about them. If search only turns up other people's
+  roundups, treat the claim as unverified — see the source rules above.
+- Budget: at most 8 searches and 5 page reads. Spend them on the claims that
+  would embarrass us if wrong, not on things you already have evidence for.
+- State the outcome, never the process. Correct what the search contradicts,
+  drop or hedge what it cannot confirm, and never write "I searched for".
+`.trim();
+
 export const LINK_PLACEMENT_RULES = `
 Affiliate link placement (the article earns nothing without these — but never
 link a product that has no /go/ slug in the provided list):

@@ -11,6 +11,7 @@ import { config } from '../config.js';
 import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
+import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
 import { isScoutRunning, startScoutRun } from '../pipeline/scout.js';
 import type { ReferenceMaterial } from '../pipeline/types.js';
 import { deleteD1Post, getD1PostHero, listD1Posts, setD1PostHero } from '../tools/d1.js';
@@ -727,9 +728,16 @@ export function createApp(): Hono<TraceEnv> {
   });
 
   // ── Settings ─────────────────────────────────────────────────────────────
+  // `engines` is derived, not stored: whether each engine actually has a
+  // credential and where it came from (never the value). The panel needs it to
+  // warn that the selected engine cannot run — the failure that used to show
+  // up only as an unexplained gemini-2.5-flash in the Sessions table.
   app.get('/api/settings', async (c) => {
-    const rows = await q<{ key: string; value: unknown }>('SELECT key, value FROM settings');
-    return c.json(Object.fromEntries(rows.map((r) => [r.key, r.value])));
+    const [rows, engines] = await Promise.all([
+      q<{ key: string; value: unknown }>('SELECT key, value FROM settings'),
+      engineStatus(),
+    ]);
+    return c.json({ ...Object.fromEntries(rows.map((r) => [r.key, r.value])), engines });
   });
 
   app.put('/api/settings', async (c) => {
@@ -749,8 +757,14 @@ export function createApp(): Hono<TraceEnv> {
       }
       await setSetting(key, body[key]);
     }
-    const rows = await q<{ key: string; value: unknown }>('SELECT key, value FROM settings');
-    return c.json(Object.fromEntries(rows.map((r) => [r.key, r.value])));
+    clearLlmSettingsCache();
+    // Same shape as the GET: saving a token must refresh the readiness the
+    // panel just warned about, without a reload.
+    const [rows, engines] = await Promise.all([
+      q<{ key: string; value: unknown }>('SELECT key, value FROM settings'),
+      engineStatus(),
+    ]);
+    return c.json({ ...Object.fromEntries(rows.map((r) => [r.key, r.value])), engines });
   });
 
   // ── Admin SPA (built apps/admin) ─────────────────────────────────────────

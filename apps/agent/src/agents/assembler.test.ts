@@ -105,3 +105,76 @@ test('no hero image at all still assembles — the site renders its cover fill',
   assert.equal('heroImage' in frontmatter, false);
   assert.match(String(frontmatter.cover), /^fill-[1-8]$/);
 });
+
+// ── The monetisation gate ────────────────────────────────────────────────────
+// A "which should I buy" piece that ships with nothing to click earns nothing,
+// and post_type does not catch it: a plain `article` is allowed to carry no
+// products (a trend piece has nothing to link), so the only signal is the
+// intent the keyword strategist read off the SERP. Production produced exactly
+// this shape — post_type "article", intent "Commercial Investigation", a
+// dossier with no products at all.
+
+const plan = (intent: string) => ({ intent, primaryKeyword: 'k', wordCountTarget: 1500 }) as never;
+
+const oneProduct = {
+  summary: 's',
+  facts: [],
+  products: [
+    { name: 'Ninja Air Fryer', brand: 'Ninja', approxPrice: 'A$199',
+      amazonUrl: null, goSlug: 'ninja-air-fryer', notes: '' },
+  ],
+  keywords: { primary: 'air fryer', secondary: [] },
+  competitorNotes: '',
+  faqIdeas: [],
+} as never;
+
+test('a commercial piece whose draft linked nothing is refused', async () => {
+  await assert.rejects(
+    runAssembler(
+      article({
+        post_type: 'article',
+        research: oneProduct,
+        keyword_plan: plan('Commercial Investigation'),
+        draft_md: '## Our pick\n\nThe Ninja is the one to buy, but here is no link.',
+      }),
+    ),
+    /no affiliate links for a Commercial Investigation piece/,
+  );
+});
+
+test('a transactional piece is held to the same bar', async () => {
+  await assert.rejects(
+    runAssembler(
+      article({ research: oneProduct, keyword_plan: plan('Transactional'), draft_md: '## Pick\n\nBuy it.' }),
+    ),
+    /no affiliate links/,
+  );
+});
+
+test('an informational piece may legitimately have no links', async () => {
+  // A trend or explainer piece has nothing to sell. Gating on post_type alone
+  // would either block this or wave the commercial case through.
+  const { affiliateLinks } = await runAssembler(
+    article({ post_type: 'article', research: oneProduct, keyword_plan: plan('Informational'),
+              draft_md: '## What changed\n\nFoldables got cheaper.' }),
+  );
+  assert.deepEqual(affiliateLinks, []);
+});
+
+test('a commercial piece that did link its product passes', async () => {
+  const { affiliateLinks } = await runAssembler(
+    article({
+      research: oneProduct,
+      keyword_plan: plan('Commercial Investigation'),
+      draft_md: '## Our pick\n\n[Ninja Air Fryer](/go/ninja-air-fryer) is the one to buy.',
+    }),
+  );
+  assert.equal(affiliateLinks.length, 1);
+  assert.equal(affiliateLinks[0].slug, 'ninja-air-fryer');
+});
+
+test('an article with no keyword plan is not gated', async () => {
+  // Rows queued before the keyword stage existed have no intent to judge.
+  const { affiliateLinks } = await runAssembler(article({ research: oneProduct, keyword_plan: null }));
+  assert.deepEqual(affiliateLinks, []);
+});
