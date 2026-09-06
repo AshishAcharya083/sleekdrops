@@ -10,10 +10,16 @@ import { siteEnv } from '@lib/site-env';
  * from buildMeta() plus an optional structured-data `schema`.
  *
  * `schema` takes one object or several: an article page ships Article plus
- * FAQPage, and separate <script> blocks are what Google's own docs recommend
- * over cramming unrelated types into one @graph. Nulls are dropped, so a
- * builder that declines to emit (buildFaqSchema on a post with no FAQ) can be
- * passed straight through.
+ * FAQPage, and separate ld+json script blocks are what Google's own docs
+ * recommend over cramming unrelated types into one @graph. Nulls are dropped,
+ * so a builder that declines to emit (buildFaqSchema on a post with no FAQ)
+ * can be passed straight through.
+ *
+ * Script tags are spelled without angle brackets anywhere in this frontmatter:
+ * Vite's dependency scanner lifts script blocks straight out of the raw file,
+ * comments included, so one written in prose swallows everything down to the
+ * next real closing tag and hands esbuild something it cannot parse.
+ * `src/lib/astro-frontmatter-scripts.ts` guards every component against it.
  *
  * Also bootstraps dark mode before paint so the theme never flashes.
  */
