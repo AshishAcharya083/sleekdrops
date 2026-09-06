@@ -464,11 +464,10 @@ test('two module copies in one document share one client, and so open one sessio
   const tab = openTab();
   loadPage(tab, '/');
 
-  // The banner island boots and the visitor opts in; the chrome bundle boots too
-  // and reads the same decision back.
-  assert.equal(banner.boot(), 'banner');
-  banner.grantConsent();
-  assert.equal(chrome.boot(), 'none');
+  // The preferences island boots and applies the default (analytics on); the
+  // chrome bundle boots too and reads the same decision back.
+  banner.boot();
+  chrome.boot();
   chrome.trackPageView({ referrer: '' });
   banner.track(HERO_CTA, { cta: 'Read the latest' });
   await flush();
@@ -486,16 +485,16 @@ test('a page view buffered by one module copy is flushed by the other, once', as
   const tab = openTab();
   loadPage(tab, '/');
 
-  // chrome.ts dispatches before the visitor has chosen, so the page view waits in
-  // the consent buffer - the one both copies have to be looking at.
-  chrome.boot();
+  // chrome.ts can dispatch before either copy has booted, so the page view waits
+  // in the consent buffer - the one both copies have to be looking at.
   chrome.trackPageView({ referrer: '' });
   const buffered = documentScope()?.buffer ?? [];
-  assert.equal(buffered.length, 1, 'the page view must be buffered until consent is known');
+  assert.equal(buffered.length, 1, 'the page view must be buffered until the decision is applied');
   const bufferedId = buffered[0]?.props?.event_id;
 
-  banner.grantConsent();
-  // A second grant - the visitor re-saving their preferences - must not re-flush it.
+  banner.boot();
+  // A second boot - the other entry point, or the visitor re-saving their
+  // preferences - must not re-flush it.
   banner.grantConsent();
   chrome.boot();
   await flush();
@@ -570,7 +569,7 @@ test('a slash-suffixed entry URL is one page and one visit across the redirect',
   // Load 2: the redirect's destination - a new document in the same tab, which
   // resolves the stored decision rather than asking again.
   loadPage(tab, '/deals/foo');
-  assert.equal(chrome.boot(), 'none');
+  chrome.boot();
   chrome.trackPageView({ referrer: '' });
   await flush();
 
@@ -605,13 +604,13 @@ test('every event carries its own idempotency key, through the scrub', async () 
   assert.equal(distinct(ids).length, ids.length);
 });
 
-test('nothing is stored, and no visit opened, before the visitor consents', async () => {
+test('a visitor who switched analytics off has nothing stored and no visit opened', async () => {
   const tab = openTab();
+  tab.local.set(CONSENT_KEY, JSON.stringify({ v: POLICY_VERSION, grants: { analytics: 'denied', ads: 'denied' }, ts: 1 }));
   loadPage(tab, '/');
 
   chrome.boot();
   chrome.trackPageView({ referrer: '' });
-  banner.denyConsent();
   chrome.track(HERO_CTA, { cta: 'Read the latest' });
   await tick();
 
@@ -653,7 +652,7 @@ test('the preferences dialog reads back the decision in force, not the opt-in de
   // applies the stored record silently and the banner stays hidden, so the switch
   // the dialog reopens with can only be filled from here.
   loadPage(tab, '/deals');
-  assert.equal(banner.boot(), 'none');
+  banner.boot();
   assert.equal(banner.consentStatus(), 'granted');
 });
 
@@ -738,24 +737,20 @@ test('the ad partner is loaded only for a visitor who saved the advertising opt-
   assert.deepEqual(queuedConsentSignals(declined.window), []);
 });
 
-test('a consent record written under the previous policy re-prompts and keeps buffering', async () => {
-  // What every returning visitor hits on the deploy that adds the ads category:
-  // a `{ v: 1, status: 'granted' }` record, written before categories existed.
+test('a record written under the previous policy is honoured for what it decided', async () => {
+  // A `{ v: 1, status: 'granted' }` record, written before categories existed:
+  // the one status it carries was the analytics decision, and it stands. There
+  // is no re-prompt any more - there is nothing to prompt with.
   const tab = openTab();
   tab.local.set(CONSENT_KEY, JSON.stringify({ v: 1, status: 'granted', ts: 1 }));
   loadPage(tab, '/');
 
-  // Re-prompted rather than silently re-granted, and rather than shown the
-  // first-visit banner as if they had never decided.
-  assert.equal(banner.boot(), 'policy-update');
+  banner.boot();
   chrome.trackPageView({ referrer: '' });
-  await tick();
-  assert.deepEqual(tab.events, [], 'a stale record grants nothing until it is renewed');
-
-  // Renewing it flushes what was held, exactly as a first-visit grant does.
-  banner.grantConsent();
   await flush();
   assert.deepEqual(names(tab), [SESSION_START, PAGE_VIEW]);
+  // The category that record never mentioned takes the default, which is off.
+  assert.equal(ads.isAdsGranted(), false);
 });
 
 test('withdrawing on a later page load stops analytics and holds on the one after it', async () => {
@@ -777,7 +772,7 @@ test('withdrawing on a later page load stops analytics and holds on the one afte
   assert.equal(chrome.consentStatus(), 'denied');
 
   loadPage(tab, '/contact');
-  assert.equal(chrome.boot(), 'none');
+  chrome.boot();
   assert.equal(chrome.consentStatus(), 'denied');
   chrome.trackPageView({ referrer: '' });
   await tick();
@@ -978,17 +973,17 @@ test('the page view reaches GA4 once, as GA4 own page_view', async () => {
 });
 
 test('a page view buffered before consent still reaches GA4 when it is granted', async () => {
-  // The banner-accept path: the view is recorded before the tag exists, and the
-  // grant loads the tag and then drains the buffer. An order that drained first
-  // would lose the site's only page view for that document in GA4.
+  // The first-load path: chrome.ts records the view before the preferences island
+  // has booted, and the boot (the default grant) loads the tag and then drains the
+  // buffer. An order that drained first would lose the site's only page view for
+  // that document in GA4.
   const tab = openTab();
   const { window } = loadPage(tab, '/');
 
-  chrome.boot();
   chrome.trackPageView({ referrer: '', screen: 'home' });
-  assert.deepEqual(gtagEventNames(window), [], 'nothing may reach GA4 before consent');
+  assert.deepEqual(gtagEventNames(window), [], 'nothing may reach GA4 before the decision is applied');
 
-  banner.grantConsent();
+  banner.boot();
   await flush();
 
   assert.deepEqual(gtagEventNames(window), ['page_view']);

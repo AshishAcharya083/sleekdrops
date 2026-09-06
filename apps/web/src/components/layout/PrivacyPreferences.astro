@@ -1,0 +1,359 @@
+---
+/**
+ * PrivacyPreferences — the privacy-preferences dialog, rendered once per page
+ * from BaseLayout and pinned to the bottom of the viewport above the footer.
+ *
+ * It replaces the first-visit consent banner. Nothing here opens by itself: the
+ * island's script boots the consent state machine in `@lib/analytics` (which
+ * applies the stored decision, or the site default - anonymous analytics on,
+ * advertising off - silently), and the dialog appears only when the footer's
+ * Privacy preferences control asks for it through `@lib/consent-preferences`.
+ * Everything is hidden until then, so the static HTML never flashes a prompt.
+ */
+---
+
+<div class="sd-consent-root" data-consent-root hidden>
+  <section
+    class="sd-consent sd-prefs"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="sd-prefs-title"
+    data-surface="prefs"
+    hidden
+  >
+    <div class="sd-prefs__head">
+      <h2 id="sd-prefs-title">Privacy preferences</h2>
+      <button type="button" class="icon-btn" aria-label="Close preferences" title="Close" data-action="close-prefs">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+      </button>
+    </div>
+    <p class="sd-prefs__sub">Choose what SleekDrops may measure and what it may show you. Anonymous analytics is on unless you switch it off here; advertising is off unless you switch it on. Changes apply straight away, and you can come back to this any time from <strong>Privacy preferences</strong> in the footer.</p>
+
+    <div class="pref-row">
+      <div class="pref-row__text">
+        <span class="pref-row__title">Essential <span class="tag">Always on</span></span>
+        <p class="pref-row__help">Keeps the site working — your theme choice and this privacy setting. Never used for tracking and never leaves your browser.</p>
+      </div>
+      <label class="sd-switch" title="Always on">
+        <input type="checkbox" checked disabled aria-label="Essential — always on" />
+        <span class="sd-switch__track"><span class="sd-switch__thumb"></span></span>
+      </label>
+    </div>
+
+    <div class="pref-row">
+      <div class="pref-row__text">
+        <span class="pref-row__title">Anonymous analytics <span class="tag">On by default</span></span>
+        <p class="pref-row__help">Aggregate, anonymised page views — which guides get read, nothing more. Stores a randomly generated session identifier in your browser so page views from one visit are counted together; no advertising, no cross-site tracking. Personal data is stripped in your browser before anything is sent — see below. Switch it off and it stops immediately.</p>
+      </div>
+      <label class="sd-switch">
+        <input type="checkbox" data-analytics-switch aria-label="Anonymous analytics" />
+        <span class="sd-switch__track"><span class="sd-switch__thumb"></span></span>
+      </label>
+    </div>
+
+    <div class="pref-row">
+      <div class="pref-row__text">
+        <span class="pref-row__title">Advertising <span class="tag">Off by default</span></span>
+        <p class="pref-row__help">Lets <strong>Google AdSense</strong> show ads on this site, which sets its own cookies and browser storage and may personalise what you see using your activity here and on other sites. With this switch off no ad script is requested at all. You can withdraw it here at any time.</p>
+      </div>
+      <label class="sd-switch">
+        <input type="checkbox" data-ads-switch aria-label="Advertising" />
+        <span class="sd-switch__track"><span class="sd-switch__thumb"></span></span>
+      </label>
+    </div>
+
+    <div class="reassure">
+      <p class="reassure__label">What never leaves your browser</p>
+      <ul>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg><span>Your email address</span></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg><span>Full search &amp; query strings from the address bar</span></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg><span>Anything you type — search boxes, forms, comments</span></li>
+      </ul>
+    </div>
+
+    <div class="sd-prefs__actions">
+      <button type="button" class="btn btn-outline" data-action="decline-all">Switch everything off</button>
+      <button type="button" class="btn btn-primary" data-action="save">Save preferences</button>
+    </div>
+  </section>
+</div>
+
+<style>
+  .sd-consent-root {
+    position: fixed;
+    left: var(--s-4);
+    right: var(--s-4);
+    bottom: var(--s-4);
+    margin-inline: auto;
+    max-width: 560px;
+    z-index: 1000;
+  }
+  .sd-consent-root[hidden] { display: none; }
+
+  .sd-consent {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-lg);
+    padding: var(--s-6);
+    /* The root is pinned to the bottom of a fixed viewport, so a dialog taller
+       than the viewport grows upwards and pushes its own heading and close button
+       past the top edge, where nothing can scroll them back - which it does on a
+       phone. Cap it at the viewport instead and let it scroll itself. `dvh` where
+       it is supported, so mobile browser chrome sliding in or out cannot re-clip it. */
+    max-height: calc(100vh - 2 * var(--s-4));
+    max-height: calc(100dvh - 2 * var(--s-4));
+    overflow-y: auto;
+  }
+  .sd-consent[hidden] { display: none; }
+
+  /* Buttons — the dialog composes the .btn tokens directly so it does not
+     depend on the scoped styles of the Button component. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-family: var(--font-body);
+    font-weight: 600;
+    border: 0;
+    cursor: pointer;
+    text-decoration: none;
+    padding: 12px 22px;
+    border-radius: var(--r-full);
+    font-size: 14px;
+    transition: all var(--dur-base) var(--ease-out);
+  }
+  .btn-primary { background: var(--ink); color: var(--paper); }
+  .btn-primary:hover { background: var(--ink-2); transform: translateY(-1px); }
+  .btn-outline {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--hairline-strong);
+    padding: 11px 21px;
+  }
+  .btn-outline:hover { border-color: var(--ink); transform: translateY(-1px); }
+
+  .sd-prefs__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--s-4);
+    margin-bottom: var(--s-2);
+  }
+  .sd-prefs__head h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.015em;
+    font-size: 24px;
+    line-height: var(--lh-snug);
+    margin: 0;
+    color: var(--ink);
+    min-width: 0;
+  }
+  .sd-prefs__sub {
+    font-size: var(--t-body-sm);
+    color: var(--muted);
+    margin: 0 0 var(--s-5);
+    line-height: var(--lh-base);
+  }
+  .icon-btn {
+    flex: none;
+    width: 38px;
+    height: 38px;
+    border-radius: var(--r-full);
+    border: 1px solid var(--hairline);
+    background: var(--surface);
+    color: var(--ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+  .icon-btn:hover { border-color: var(--hairline-strong); }
+  .icon-btn svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2; fill: none; }
+
+  .pref-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s-4);
+    padding: var(--s-4) 0;
+    border-top: 1px solid var(--hairline);
+  }
+  .pref-row__text { min-width: 0; flex: 1; }
+  .pref-row__title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--s-2);
+    font-size: var(--t-body);
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .tag {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--hairline);
+    padding: 1px 7px;
+    border-radius: var(--r-full);
+  }
+  .pref-row__help {
+    margin: var(--s-1) 0 0;
+    font-size: var(--t-caption);
+    color: var(--muted);
+    line-height: var(--lh-base);
+    overflow-wrap: break-word;
+  }
+
+  .sd-switch { display: inline-flex; flex: none; cursor: pointer; margin-top: 2px; }
+  .sd-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .sd-switch__track {
+    width: 44px;
+    height: 26px;
+    border-radius: var(--r-full);
+    background: var(--hairline-strong);
+    position: relative;
+    transition: background var(--dur-base) var(--ease-out);
+  }
+  .sd-switch__thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--r-full);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--dur-base) var(--ease-out);
+  }
+  .sd-switch input:checked + .sd-switch__track { background: var(--accent); }
+  .sd-switch input:checked + .sd-switch__track .sd-switch__thumb { transform: translateX(18px); }
+  .sd-switch input:focus-visible + .sd-switch__track { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sd-switch input:disabled + .sd-switch__track { opacity: 0.55; cursor: not-allowed; }
+
+  .reassure {
+    margin-top: var(--s-5);
+    background: var(--surface-2);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    padding: var(--s-4);
+  }
+  .reassure__label {
+    font-size: var(--t-eyebrow);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    margin: 0 0 var(--s-3);
+  }
+  .reassure ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+  .reassure li {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s-2);
+    font-size: var(--t-body-sm);
+    color: var(--ink-2);
+    line-height: var(--lh-base);
+  }
+  .reassure svg { flex: none; width: 16px; height: 16px; margin-top: 2px; stroke: var(--success); stroke-width: 2; fill: none; }
+
+  .sd-prefs__actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-6); }
+
+  @media (max-width: 480px) {
+    .sd-prefs__actions .btn { flex: 1 1 100%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sd-switch__track, .sd-switch__thumb, .btn { transition: none; }
+  }
+</style>
+
+<script>
+  import { boot, consentStatus, denyConsent, setConsent } from '@lib/analytics';
+  import { isAdsGranted } from '@lib/ads';
+  import { createPreferencesSurface } from '@lib/consent-surface';
+
+  const root = document.querySelector<HTMLElement>('[data-consent-root]');
+  if (root) {
+    const dialog = root.querySelector<HTMLElement>('[data-surface="prefs"]');
+    const analyticsSwitch = root.querySelector<HTMLInputElement>('[data-analytics-switch]');
+    const adsSwitch = root.querySelector<HTMLInputElement>('[data-ads-switch]');
+
+    const focusable = (el: HTMLElement): HTMLElement[] =>
+      [...el.querySelectorAll<HTMLElement>('button, [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter(
+        (n) => !n.hasAttribute('disabled') && n.offsetParent !== null,
+      );
+
+    function onDialogKey(ev: KeyboardEvent): void {
+      if (!dialog || dialog.hidden) return;
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        surface.close();
+        return;
+      }
+      if (ev.key !== 'Tab') return;
+      const items = focusable(dialog);
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (ev.shiftKey && document.activeElement === first) {
+        ev.preventDefault();
+        last.focus();
+      } else if (!ev.shiftKey && document.activeElement === last) {
+        ev.preventDefault();
+        first.focus();
+      }
+    }
+
+    // What the dialog shows and where focus goes live in @lib/consent-surface, where
+    // they are testable; everything below is the DOM this page happens to hold them
+    // in. The document is the channel the footer control's request arrives on.
+    const surface = createPreferencesSurface({
+      root,
+      dialog,
+      switches: { analytics: analyticsSwitch, ads: adsSwitch },
+      channel: document,
+      // Each category answers for itself: analytics from the decision this
+      // document is enforcing, advertising from the stored record @lib/ads reads.
+      isGranted: (category) =>
+        category === 'ads' ? isAdsGranted() : consentStatus() === 'granted',
+      activeElement: () => document.activeElement as HTMLElement | null,
+      onOpened: () => {
+        document.addEventListener('keydown', onDialogKey);
+        if (dialog) focusable(dialog)[0]?.focus();
+      },
+      onClosed: () => document.removeEventListener('keydown', onDialogKey),
+    });
+
+    root.addEventListener('click', (ev) => {
+      const action = (ev.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
+      if (!action) return;
+      switch (action) {
+        case 'close-prefs':
+          surface.close();
+          break;
+        case 'save':
+          setConsent({
+            analytics: analyticsSwitch?.checked ? 'granted' : 'denied',
+            ads: adsSwitch?.checked ? 'granted' : 'denied',
+          });
+          surface.close();
+          break;
+        case 'decline-all':
+          denyConsent();
+          surface.close();
+          break;
+      }
+    });
+
+    // Apply the decision in force - stored, or the site default - and start (or
+    // not) the analytics sinks. Nothing is shown.
+    boot();
+  }
+</script>

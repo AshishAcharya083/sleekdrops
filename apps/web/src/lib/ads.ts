@@ -8,8 +8,8 @@
  * `./ads-env` rather than every page that carries a unit.
  *
  * The partner script is requested for one state and one only: an explicit
- * advertising opt-in. Everything else - a decline, an unanswered prompt, a
- * GPC/DNT signal - leaves it unrequested, because the tag writes cookies and
+ * advertising opt-in. Everything else - a decline, the default (no decision on
+ * file), a GPC/DNT signal - leaves it unrequested, because the tag writes cookies and
  * device storage for itself (frequency capping, reporting, fraud) the moment it
  * runs, and ePrivacy Art. 5(3) conditions that storage on consent whether or not
  * the ads are personalised.
@@ -51,9 +51,10 @@ const ADS_SCRIPT_SRC = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoo
 /**
  * What the visitor's decision allows on this page:
  *  - `personalised`     - ads, targeted, on an explicit advertising opt-in
- *  - `non-personalised` - a decline: nothing may be fetched for it, and anything
- *                         already fetched serves contextually from here on
- *  - `none`             - no ad partner at all: blocked, or not yet answered
+ *  - `non-personalised` - a decline, explicit or the default: nothing may be
+ *                         fetched for it, and anything already fetched serves
+ *                         contextually from here on
+ *  - `none`             - no ad partner at all: a privacy signal, or no document
  */
 export type AdsMode = 'personalised' | 'non-personalised' | 'none';
 
@@ -117,10 +118,13 @@ function readConsent() {
  * touches nothing at all for it - not even the partner's queue.
  */
 export function adsMode(): AdsMode {
+  // The static build and the test runner's bare module have no document, and
+  // so no visitor to have decided anything.
+  if (typeof window === 'undefined') return 'none';
   const privacySignal = hasPrivacySignal();
   const { effects } = resolveConsent(readConsent(), privacySignal);
   if (effects.ads === 'grant') return 'personalised';
-  if (privacySignal || effects.ads === 'pending') return 'none';
+  if (privacySignal) return 'none';
   return 'non-personalised';
 }
 
@@ -184,8 +188,8 @@ function requestNonPersonalizedAds(): void {
  * request.
  *
  * False means show nothing, and covers every state that is not an opt-in: a
- * decline, an unanswered prompt, a GPC/DNT signal, an unconfigured build, or no
- * DOM at all (the static build). A withdrawal made from the footer mid-page
+ * decline, the default, a GPC/DNT signal, an unconfigured build, or no DOM at
+ * all (the static build). A withdrawal made from the footer mid-page
  * cannot unsend the script this document already has, nor un-render a unit
  * already on screen, but it does switch this off for every unit built after it -
  * and switches personalisation off for the tag already running.

@@ -6,7 +6,7 @@
  * one instance for as long as the bundler gives every importer the same copy of
  * the module. This site has two client entry points that import it - the
  * `src/scripts/chrome` bundle wired from `BaseLayout.astro` and the
- * `ConsentBanner.astro` island script - and if a build ever inlines a copy per
+ * `PrivacyPreferences.astro` island script - and if a build ever inlines a copy per
  * entry point, module-local state silently becomes two clients, two consent
  * decisions and two buffers in one document: two `$session_start`s, and a page
  * view stranded in a buffer that nothing will ever flush.
