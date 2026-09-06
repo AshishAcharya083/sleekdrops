@@ -35,6 +35,29 @@ The build runs `pnpm prebuild` (which generates `public/_redirects` from `src/da
 
 ---
 
+### Canonical URLs, the sitemap and IndexNow
+
+`astro.config.mjs` sets `build.format: 'file'`, so a page is written as
+`blog/<slug>.html` and Cloudflare Pages serves it at `/blog/<slug>` - the form the
+canonical tag, the sitemap, the RSS feed and the JSON-LD all name. With Astro's
+default directory layout Pages 308-redirected every one of those URLs to the
+trailing-slash form, and Google indexed the slash form. After a deploy,
+`curl -I https://sleekdrops.com/blog/<slug>` must return 200 and the slash form
+must redirect back to it.
+
+The sitemap carries a `lastmod` per URL, derived from post dates by
+`src/lib/sitemap-policy.mjs` (a post's `updatedDate ?? pubDate`; the newest post a
+listing holds). The same module leaves out tag pages with fewer than three posts
+and the empty reviews hub, and the pages `noindex` themselves from the same rule.
+
+After the production deploy, `scripts/indexnow-submit.mjs` POSTs the URLs whose
+lastmod changed in the last 36 hours to IndexNow, which fans out to Bing,
+Yandex, Naver, Seznam, Yep and Amazon (Google does not take part). The key it
+presents is `public/indexnow-key.txt`, served at the site root; rotate it by
+writing a new 32-character value into that file. The step is best-effort and
+never fails the deploy. Bing Webmaster Tools shows what was received under
+IndexNow.
+
 ## Required GitHub repository secrets
 
 Add these in **Settings → Secrets and variables → Actions → Repository secrets**. Production-only values can be scoped via GitHub Environments if you want stricter separation (see the `environment:` block in each workflow).
@@ -150,7 +173,7 @@ An empty slot id disables that one placement and leaves the others running, so t
 
 Two rules decide whether a slot is used at all, and both live in the pure [`src/lib/ad-placement.ts`](../src/lib/ad-placement.ts): a post shorter than 8 top-level blocks gets no mid-article unit, and a grid of fewer than 4 cards gives no cell away. Thin content beside ads is the shape of an AdSense policy action, and a unit in a three-card grid reads as an ad-first listing.
 
-Nothing is requested until the visitor switches **Advertising** on in the consent dialog — a decline, an unanswered banner and a GPC/DNT signal all load no partner script at all (see [`src/lib/ads.ts`](../src/lib/ads.ts)). Units ship `hidden` and are removed outright for anyone who has not opted in, so no reserved "Advertisement" box is ever shown to a visitor who will not see an ad. Each unit is requested only once it comes within 300px of the viewport, because viewable CPM is what an impression is priced on, and a slot that has no box on the current viewport is dropped rather than filled. A slot the auction cannot fill reports `data-ad-status="unfilled"` and the wrapper collapses, so an unsold slot leaves no hole in the page.
+Nothing is requested until the visitor switches **Advertising** on under **Privacy preferences** in the footer — a decline, the default (no decision on file) and a GPC/DNT signal all load no partner script at all (see [`src/lib/ads.ts`](../src/lib/ads.ts)). Units ship `hidden` and are removed outright for anyone who has not opted in, so no reserved "Advertisement" box is ever shown to a visitor who will not see an ad. Each unit is requested only once it comes within 300px of the viewport, because viewable CPM is what an impression is priced on, and a slot that has no box on the current viewport is dropped rather than filled. A slot the auction cannot fill reports `data-ad-status="unfilled"` and the wrapper collapses, so an unsold slot leaves no hole in the page.
 
 The `Content-Security-Policy` in [`public/_headers`](../public/_headers) already allowlists the partner's script and frame hosts. A **new** ad host would be blocked by it — add it to `script-src` / `frame-src` there, or the units silently stay empty.
 
@@ -173,7 +196,7 @@ It also validates the value first - anything that is not `ca-pub-<digits>` fails
 The site build applies the same check to the same value (`publisherId()` in `src/lib/ads-env.ts`): a publisher id the generator refuses is one the page will not ask the partner to serve against either, so the two halves of the setting cannot disagree.
 
 Ads are additionally gated on consent at runtime, so a configured publisher id on its own serves nothing.
-The partner script is requested only for a visitor who switched **Advertising** on in the consent dialog; a decline, an unanswered banner and a GPC/DNT signal all leave it unrequested.
+The partner script is requested only for a visitor who switched **Advertising** on under **Privacy preferences**; a decline, the default and a GPC/DNT signal all leave it unrequested.
 That is stricter than serving non-personalised ads to a decline, and deliberately so: the ad tag writes cookies and device storage of its own (frequency capping, reporting, fraud) as soon as it runs, which ePrivacy Art. 5(3) conditions on consent whether or not the ads are personalised.
 
 ### Response headers

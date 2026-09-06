@@ -1,7 +1,41 @@
 # Search and AI discoverability review — 6 September 2026
 
-Status: **research, for review**. Nothing here is implemented. Each item is
-marked Do / Later / Ignore so the list can be turned into tickets.
+Status: **research, partly implemented**. Each item is marked Do / Later /
+Ignore so the rest can be turned into tickets.
+
+Implemented on `feat/seo-structured-data-research` (6 September 2026):
+
+- §3.1 `build.format: 'file'` and `trailingSlash: false` in the RSS feed, so the
+  canonical URL is the one Cloudflare Pages serves. Verify after deploy with
+  `curl -I https://sleekdrops.com/blog/<slug>` (expect 200) and
+  `curl -I https://sleekdrops.com/blog/<slug>/` (expect 308 back), then request
+  re-indexing in Search Console.
+- §3.2 `rel="sponsored noopener"` on every body `/go/` link (rehype plugin); CTA
+  components drop `noreferrer`; the agent's link rules now require a CTA to name
+  Amazon.
+- §3.3 The agent no longer prints Amazon prices (RRP with source and year only).
+  Articles already published keep their prices until they are re-published.
+- §3.4 Every claim of hands-on or lab testing removed from the about, reviews,
+  guides, disclaimer, home and category copy; the about page's invented numbers
+  replaced with the real article count.
+- §3.5 Disclosure carries the Amazon Associates sentence and appears under the
+  byline of every page with affiliate links, as well as at the end.
+- §3.6 FAQPage kept as harmless markup; comments and agent rules no longer call
+  it a Google lever.
+- §3.7 Sitemap `lastmod` from post dates; tag pages with fewer than three posts
+  and the empty reviews/deals/promos hubs are `noindex` and, for tags and
+  reviews, left out of the sitemap.
+- §5 IndexNow: `public/indexnow-key.txt` plus a post-deploy step in
+  `deploy-production.yml` that submits the URLs whose lastmod changed.
+- Article JSON-LD: `author.url`, `publisher.logo` as an ImageObject, `url`,
+  `inLanguage`, `mainEntityOfPage` as a WebPage.
+- Also in the same change, at the owner's request: the first-visit consent banner
+  is gone. Anonymous analytics is on by default and can be switched off from the
+  footer's Privacy preferences; advertising stays opt-in; GPC/DNT still switches
+  everything off.
+
+Still manual: the Cloudflare "Block AI bots" check (§3.8) and Bing Webmaster
+Tools verification. Google Search Console is already done.
 
 Scope: validate the suggestions a Gemini session made about SleekDrops
 ("shopping" structured data, robots.txt for AI bots, sitemap, canonicals,
