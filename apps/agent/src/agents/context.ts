@@ -76,6 +76,12 @@ Editorial rules (non-negotiable):
 - Plain, direct voice. No emoji, no hype, no urgency copy ("HURRY!", "act now").
 - Evidence only: never invent specs, prices, or Amazon URLs. If a fact isn't in
   the research dossier, leave it out or hedge explicitly.
+- Prices: never print an Amazon price. Amazon's Associates policies only allow
+  prices pulled live from Amazon's own API, which we do not have, so a number
+  we type is a policy breach the day the price moves. Write "check the current
+  price on Amazon" instead. Where a figure is essential to the argument, use
+  the manufacturer's RRP, labelled "RRP" with its source and year — never a
+  marketplace price, never "$X on Amazon", never "priced in AUD and checked on".
 - Affiliate links: NEVER write a raw merchant URL in the body. Every product
   link is written as /go/<kebab-product-slug> (e.g. /go/sony-wh-1000xm6).
   The same product always reuses the same /go/ slug.
@@ -141,13 +147,17 @@ export const LINK_PLACEMENT_RULES = `
 Affiliate link placement (the article earns nothing without these — but never
 link a product that has no /go/ slug in the provided list):
 1. First mention of a product inside each major section links its /go/ slug.
-2. Comparison tables get a final column ("Price" or "Where to buy") whose cells
-   are links, e.g. [Check price](/go/<slug>).
+2. Comparison tables get a final column ("Where to buy") whose cells are
+   links, e.g. [Check price on Amazon](/go/<slug>).
 3. Every recommended product's own section/subsection ends with a one-line CTA
    on its own paragraph, e.g. [See today's price on Amazon](/go/<slug>).
 4. The verdict/conclusion links each named pick once more.
-5. Vary anchor text naturally: the product name, "check the current price",
-   "see it on Amazon" — never the bare URL, never "click here".
+5. A CTA always says where it goes. Amazon's Associates policies forbid a
+   button or link that leaves it unclear the reader is being sent to Amazon,
+   so vary the wording but keep the destination: "check the price on Amazon",
+   "see it on Amazon", "view at Amazon AU" — never "find out more", "buy now",
+   "check the current price", the bare URL or "click here". The product name
+   on its own is fine for the in-sentence first mention (rule 1).
 6. Beyond those spots, don't spam: one link per product per section is plenty.
 `.trim();
 
@@ -193,16 +203,19 @@ Perplexity and AI Overviews — not only a Google ranking):
 - CLAIM + EVIDENCE, always paired. "Battery life runs to 30 hours with ANC on
   (Sony, 2026 spec sheet)" is citable. "Battery life is excellent" is not.
   Attribute by name and year — "according to research" is worthless.
-- NAME ENTITIES. Specific products, brands, chipsets, standards, prices,
+- NAME ENTITIES. Specific products, brands, chipsets, standards, RRPs,
   retailers. "Coolblue, Bol.com and Zalando" beats "many retailers". Generative
   engines build knowledge graphs out of named entities; unnamed ones vanish.
 - QUESTION-SHAPED HEADINGS where natural, each answered immediately in an
   extractable block. Cover the who/what/when/where/why/how variants that matter.
-- FAQ section with 3-5 real questions, each answered in 40-60 words. The site
-  emits FAQPage schema from that section, which is the single highest-leverage
-  citation signal available to us — so the FAQ is mandatory, not optional.
-- RECENCY. State when a price, spec or availability claim was checked. Engines
-  weight freshness heavily, and a dated claim is more citable than a vague one.
+- FAQ section with 3-5 real questions, each answered in 40-60 words. Answer
+  engines quote a clean question/answer pair far more readily than the same
+  answer buried in prose, so the FAQ is mandatory, not optional. (Google
+  stopped showing FAQ rich results in May 2026; the section earns citations,
+  not a rich result, and the site's FAQPage markup is incidental.)
+- RECENCY. State when a spec or availability claim was checked, and the year of
+  any RRP. Engines weight freshness heavily, and a dated claim is more citable
+  than a vague one.
 - Never invent a number, source, or date to satisfy any of the above. An
   invented specific is worse than a general sentence: it is the one failure
   mode that destroys citability permanently. If the dossier does not have it,

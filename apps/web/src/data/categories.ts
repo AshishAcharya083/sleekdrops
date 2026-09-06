@@ -25,7 +25,7 @@ export const categories: Category[] = [
     slug: 'tech',
     blurb: 'Headphones, speakers, the gadgets we keep on the desk.',
     intro:
-      'Headphones, e-readers, smart-home gear, and the laptops worth replacing yours for. Reviewed by people who use this stuff for a living.',
+      'Headphones, e-readers, smart-home gear, and the laptops worth replacing yours for. Compared on the specs and owner reviews that matter, not the launch hype.',
   },
   {
     id: 'home',
@@ -33,7 +33,7 @@ export const categories: Category[] = [
     slug: 'home',
     blurb: 'Kitchens, desks, the long, quiet half of the house.',
     intro:
-      'Kettles, desks, lighting, and the unglamorous infrastructure that makes a room better. Tested in real rooms, not studio sets.',
+      'Kettles, desks, lighting, and the unglamorous infrastructure that makes a room better. Picked for real rooms, not studio sets.',
   },
   {
     id: 'fashion',
@@ -65,7 +65,7 @@ export const categories: Category[] = [
     slug: 'travel',
     blurb: 'Bags, gear, and the routines of frequent flyers.',
     intro:
-      'Carry-on bags, packing cubes, and the gear that survives forty flights a year. Tested in real airports, not on a kitchen scale.',
+      'Carry-on bags, packing cubes, and the gear that survives forty flights a year. Chosen for real airports, not for a kitchen scale.',
   },
 ];
 

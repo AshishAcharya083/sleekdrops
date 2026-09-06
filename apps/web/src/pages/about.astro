@@ -2,14 +2,17 @@
 import BaseLayout from '@layouts/BaseLayout.astro';
 import Eyebrow from '@components/ui/Eyebrow.astro';
 import { listAuthors, authorInitials } from '@data/authors';
+import { getAllPosts } from '@lib/posts';
 import { buildCategorySchema, buildMeta } from '@lib/seo';
 
 const team = listAuthors();
+// The one number on this page we can stand behind: it is counted, not claimed.
+const published = (await getAllPosts()).length;
 
 const meta = buildMeta({
   title: 'About SleekDrops',
   description:
-    "SleekDrops publishes honest product reviews, side-by-side comparisons, and one daily deal worth your inbox. Independent, ad-free, and quietly opinionated since 2023.",
+    'SleekDrops publishes independent product reviews, side-by-side comparisons and buying guides for Australian shoppers. No paid placements, and quietly opinionated.',
   pathname: '/about',
 });
 ---
@@ -34,17 +37,17 @@ const meta = buildMeta({
         <div class="principle">
           <span class="num">01 / Independence</span>
           <h3>No <em>paid</em> placements. Ever.</h3>
-          <p>Every product on this site was either bought with our own money or borrowed for testing. We don't take sponsorships, we don't run "promoted" posts, and we will tell you when we're wrong.</p>
+          <p>No brand pays for a place on this site. We don't take sponsorships, we don't run "promoted" posts, and no brand sees a piece before it's published. We earn a commission when you buy through our links, and that never decides what we recommend.</p>
         </div>
         <div class="principle">
           <span class="num">02 / Method</span>
-          <h3>If we couldn't <em>test</em> it, we don't review it.</h3>
-          <p>Reviews require at least two weeks of real-world use against the nearest competitor. Buying guides require side-by-side testing across at least three contenders. No spec sheet reviews, no hot takes.</p>
+          <h3>If we can't <em>source</em> it, we don't say it.</h3>
+          <p>We research, we don't lab-test. Every pick is an editorial synthesis of manufacturer specs, owner reviews and expert coverage, compared against its nearest competitors, with Australian availability checked on the date shown. Where we haven't used a product ourselves, we say so.</p>
         </div>
         <div class="principle">
           <span class="num">03 / Honesty</span>
           <h3>The <em>cons</em> column is always full.</h3>
-          <p>Every product has flaws. Our reviews surface them — 2 to 4 honest disadvantages, always. If we can't think of any, we haven't tested it long enough yet.</p>
+          <p>Every product has flaws. Our reviews surface them — 2 to 4 honest disadvantages, always. If we can't find any, we haven't looked hard enough yet.</p>
         </div>
       </div>
     </div>
@@ -72,12 +75,11 @@ const meta = buildMeta({
   <section class="stats-band">
     <div class="container">
       <Eyebrow accent dot>The numbers</Eyebrow>
-      <h2>Two years, 320 reviews, <em>zero</em> sponsored posts.</h2>
+      <h2>Independent, and paid only when <em>you</em> buy.</h2>
       <div class="row">
-        <div><div class="num">320</div><div class="lbl">Reviews published</div></div>
+        <div><div class="num">{published}</div><div class="lbl">Articles published</div></div>
         <div><div class="num"><em>0</em></div><div class="lbl">Paid placements</div></div>
-        <div><div class="num">38k</div><div class="lbl">Newsletter readers</div></div>
-        <div><div class="num">4.7</div><div class="lbl">Average rating given</div></div>
+        <div><div class="num"><em>0</em></div><div class="lbl">Brand-supplied products</div></div>
       </div>
     </div>
   </section>
