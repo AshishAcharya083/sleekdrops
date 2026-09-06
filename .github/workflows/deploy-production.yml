@@ -63,6 +63,16 @@ jobs:
       - name: Build (production)
         env:
           SITE_URL: https://sleekdrops.com
+          # The one build that may be indexed. `production` is the only value
+          # that means it: every other deployment - develop, a future preview, a
+          # local `pnpm dev` - noindexes itself by default rather than by
+          # remembering to.
+          #
+          # This line is therefore load-bearing for the whole site's search
+          # presence. Removing it does not break the build, it silently
+          # de-lists sleekdrops.com, so a test over both deploy workflows
+          # (apps/web/src/lib/site-env.test.ts) fails CI if it goes missing.
+          PUBLIC_SITE_ENV: production
           NODE_ENV: production
           # DevTeam Analytics - public ingest key (dtp_) + ingest host. The key is
           # ingest-only and safe to expose; PUBLIC_ hands it to the Astro build so

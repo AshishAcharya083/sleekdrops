@@ -3,6 +3,7 @@ import JsonLd from './JsonLd.astro';
 import type { Thing, WithContext } from 'schema-dts';
 import type { MetaPayload } from '@lib/seo';
 import { adsEnv } from '@lib/ads-env';
+import { siteEnv } from '@lib/site-env';
 
 /**
  * SEOHead — every meta tag we ship on every page. Pass the MetaPayload
@@ -41,6 +42,27 @@ export interface Props extends MetaPayload {
  */
 const { client: adsenseAccount } = adsEnv();
 
+/**
+ * The crawl directive for this page.
+ *
+ * A preview deploy noindexes everything it serves, whatever the page asked for.
+ * `develop` and `main` are held at the same code level and render the same pages
+ * from the same live content, so an indexable preview is a complete second copy
+ * of the site competing with the real one for its own rankings - and, to an
+ * AdSense reviewer, duplicated content on a domain the account does not own.
+ *
+ * `nofollow` rides along on a preview and not on production's own `noindex`
+ * pages: there the intent is "do not list this, but do follow it" (the 404 and
+ * the legal pages still pass link equity), whereas on a preview nothing about
+ * the crawl should propagate at all.
+ *
+ * This is the rule, not robots.txt - a page a crawler cannot fetch is a page
+ * whose noindex it cannot see, so `scripts/generate-robots.mjs` deliberately
+ * leaves preview crawlable for this tag to be found. The two halves are written
+ * to agree; see that script.
+ */
+const { indexable } = siteEnv();
+
 const {
   title,
   description,
@@ -52,6 +74,8 @@ const {
   nextUrl,
   schema,
 } = Astro.props;
+
+const robots = !indexable ? 'noindex, nofollow' : noindex ? 'noindex, follow' : 'index, follow';
 
 // Normalized here rather than in the template: the markup body is plain JS,
 // so the type predicate that narrows away the nulls cannot live there.
@@ -69,7 +93,7 @@ const schemas = (Array.isArray(schema) ? schema : [schema]).filter(
 <title>{title} | SleekDrops</title>
 <meta name="description" content={description} />
 <link rel="canonical" href={canonicalUrl} />
-<meta name="robots" content={noindex ? 'noindex, follow' : 'index, follow'} />
+<meta name="robots" content={robots} />
 
 <meta property="og:type" content={type} />
 <meta property="og:url" content={canonicalUrl} />
