@@ -2,6 +2,7 @@
 import JsonLd from './JsonLd.astro';
 import type { Thing, WithContext } from 'schema-dts';
 import type { MetaPayload } from '@lib/seo';
+import { adsEnv } from '@lib/ads-env';
 
 /**
  * SEOHead — every meta tag we ship on every page. Pass the MetaPayload
@@ -12,6 +13,27 @@ import type { MetaPayload } from '@lib/seo';
 export interface Props extends MetaPayload {
   schema?: WithContext<Thing>;
 }
+
+/**
+ * AdSense site verification, and the one piece of the ad integration that is
+ * deliberately *not* behind the consent gate.
+ *
+ * It has to be ungated to work at all: `src/lib/ads.ts` requests the partner
+ * script only for a visitor who switched Advertising on, and neither AdSense's
+ * site-verification crawler nor its policy reviewer accepts a consent banner —
+ * so on a consent-gated site the script is never what they find, and the site
+ * is never approved. Google publishes this tag for exactly that case.
+ *
+ * Ungating it costs the visitor nothing, which is why it is allowed to be the
+ * exception: it is an inert `<meta>` element carrying an account id that already
+ * ships publicly in `/ads.txt`. It loads no script, sets no cookie, writes no
+ * device storage and makes no request, so ePrivacy Art. 5(3) — the rule the
+ * consent gate exists to satisfy — does not reach it.
+ *
+ * Empty when the build has no publisher id, so an unconfigured build (develop,
+ * and every local `pnpm dev`) still claims nothing.
+ */
+const { client: adsenseAccount } = adsEnv();
 
 const {
   title,
@@ -30,6 +52,7 @@ const {
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <meta name="generator" content={Astro.generator} />
 <meta name="commission-factory-verification" content="68622d36d11b400e94e31681bc8224a8" />
+{adsenseAccount && <meta name="google-adsense-account" content={adsenseAccount} />}
 
 <title>{title} | SleekDrops</title>
 <meta name="description" content={description} />

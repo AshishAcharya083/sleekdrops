@@ -101,6 +101,16 @@ Nothing is requested until the visitor switches **Advertising** on in the consen
 
 The `Content-Security-Policy` in [`public/_headers`](../public/_headers) already allowlists the partner's script and frame hosts. A **new** ad host would be blocked by it — add it to `script-src` / `frame-src` there, or the units silently stay empty.
 
+#### Site verification, and why one tag is not consent-gated
+
+Setting `ADSENSE_CLIENT` also emits `<meta name="google-adsense-account">` on every page (from [`SEOHead.astro`](../src/components/seo/SEOHead.astro)), alongside the `/ads.txt` the same value generates. Those two are what AdSense verifies the site with.
+
+They exist because **the ad script alone cannot verify a consent-gated site**. `src/lib/ads.ts` requests `adsbygoogle.js` only for a visitor who switched Advertising on, and neither AdSense's verification crawler nor its policy reviewer accepts a consent banner — so the snippet AdSense hands you on onboarding is never what they find here, and the review stalls on "ad code not found". Google publishes the meta tag for exactly this case.
+
+That tag is the one part of the ad integration deliberately outside the consent gate, and it is allowed to be because it costs the visitor nothing: an inert `<meta>` carrying an account id that already ships publicly in `/ads.txt`. No script, no cookie, no device storage, no request — so ePrivacy Art. 5(3), the rule the gate exists to satisfy, does not reach it. Everything that *does* set storage stays behind the opt-in.
+
+Both signals appear only on a build that has a publisher id, so an unconfigured environment still claims nothing.
+
 Leaving `ADSENSE_CLIENT` unset is a supported state, and is how this ships until the ids are issued.
 The build then disables ads everywhere after a single `[ads]` console warning: no partner script is requested, and `public/ads.txt` - generated from that same value by `scripts/generate-ads-txt.mjs` during `prebuild` - is not written at all.
 An `ads.txt` naming no seller is worse than none, because that is the file a crawler reads as a domain that has revoked every seller it had.
