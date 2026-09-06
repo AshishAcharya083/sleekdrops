@@ -718,7 +718,7 @@ export function createApp(): Hono<TraceEnv> {
          FROM agent_sessions GROUP BY model ORDER BY cost_usd DESC`,
       ),
       q(
-        `SELECT date_trunc('day', started_at)::date day, count(*) runs,
+        `SELECT date_trunc('day', started_at)::date AS day, count(*) runs,
                 COALESCE(sum(cost_usd), 0) cost_usd
          FROM agent_sessions WHERE started_at > now() - interval '30 days'
          GROUP BY day ORDER BY day DESC`,

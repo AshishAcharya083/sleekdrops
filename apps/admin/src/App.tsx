@@ -61,20 +61,21 @@ export function App() {
             </button>
           ))}
         </nav>
-        <div className="spacer" />
-        <input
-          style={{ width: 190 }}
-          placeholder="API base (empty = this host)"
-          value={apiBase}
-          onChange={(e) => onApiBaseChange(e.target.value)}
-        />
-        <input
-          type="password"
-          style={{ width: 170 }}
-          placeholder="admin token (if set)"
-          value={token}
-          onChange={(e) => onTokenChange(e.target.value)}
-        />
+        <div className="conn">
+          <input
+            aria-label="API base"
+            placeholder="API base (empty = this host)"
+            value={apiBase}
+            onChange={(e) => onApiBaseChange(e.target.value)}
+          />
+          <input
+            type="password"
+            aria-label="Admin token"
+            placeholder="admin token (if set)"
+            value={token}
+            onChange={(e) => onTokenChange(e.target.value)}
+          />
+        </div>
       </div>
 
       {tab === 'Overview' && <Overview />}

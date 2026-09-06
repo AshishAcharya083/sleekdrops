@@ -9,8 +9,8 @@ const { href = '/', compact = false } = Astro.props;
 <a class="brand" href={href}>
   <span class="mark">
     <svg viewBox="0 0 32 32" aria-hidden="true">
-      <path d="M16 6 C 11 12, 7.5 17, 7.5 21.5 C 7.5 26, 11 28.5, 16 28.5 C 21 28.5, 24.5 26, 24.5 21.5 C 24.5 17, 21 12, 16 6 Z" fill="#FAFAF7"/>
-      <circle cx="13" cy="20" r="1.5" fill="#0F0F0E"/>
+      <path d="M16 6 C 11 12, 7.5 17, 7.5 21.5 C 7.5 26, 11 28.5, 16 28.5 C 21 28.5, 24.5 26, 24.5 21.5 C 24.5 17, 21 12, 16 6 Z" fill="var(--paper)"/>
+      <circle cx="13" cy="20" r="1.5" fill="var(--ink)"/>
     </svg>
   </span>
   {!compact && <span class="wordmark">SleekDrops</span>}
