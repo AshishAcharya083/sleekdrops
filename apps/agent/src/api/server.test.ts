@@ -6,6 +6,9 @@ import assert from 'node:assert/strict';
 
 process.env.DATABASE_URL = 'postgres://unused:unused@127.0.0.1:1/unreachable';
 process.env.ADMIN_TOKEN = 'test-admin-token';
+// Declared (empty) so a developer's own .env can't switch hero-image storage on
+// mid-test - dotenv leaves keys that already exist in the environment alone.
+process.env.GCS_IMAGES_BUCKET = '';
 
 const { createApp } = await import('./server.js');
 const { TRACE_HEADER } = await import('./trace.js');
@@ -126,4 +129,74 @@ test('the CORS preflight lets X-Trace-Id through and back', async () => {
   assert.match(allowed, new RegExp(TRACE_HEADER, 'i'));
   assert.match(allowed, /Authorization/i);
   assert.match(exposed, new RegExp(TRACE_HEADER, 'i'));
+});
+
+// ── Hero image drop ─────────────────────────────────────────────────────────
+// Every rejection below happens before the route reaches the database, which is
+// what makes them assertable here (and what keeps a bad upload cheap).
+
+const ARTICLE_ID = '0d1c8f5a-3c2b-4a5e-9f10-2b3c4d5e6f70';
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Array(64).fill(0)]);
+
+/** A multipart body shaped exactly like the panel's upload. */
+function heroForm(parts: { file?: { bytes: Uint8Array; name: string; type: string }; alt?: string }): FormData {
+  const form = new FormData();
+  if (parts.file) {
+    form.set('file', new Blob([parts.file.bytes], { type: parts.file.type }), parts.file.name);
+  }
+  if (parts.alt !== undefined) form.set('alt', parts.alt);
+  return form;
+}
+
+test('a hero-image drop that is not really an image is refused, not stored', async () => {
+  const { res } = await call(`/api/articles/${ARTICLE_ID}/hero-image`, {
+    method: 'POST',
+    headers: AUTH,
+    body: heroForm({ file: { bytes: new TextEncoder().encode('<html>gotcha</html>'), name: 'hero.png', type: 'image/png' } }),
+  });
+
+  assert.equal(res.status, 400);
+  assert.match(((await res.json()) as { error: string }).error, /JPEG, PNG or WebP/);
+});
+
+test('a real image is refused with an actionable message when storage is unconfigured', async () => {
+  const { res } = await call(`/api/articles/${ARTICLE_ID}/hero-image`, {
+    method: 'POST',
+    headers: AUTH,
+    body: heroForm({ file: { bytes: PNG_BYTES, name: 'hero.png', type: 'image/png' }, alt: 'A hero' }),
+  });
+
+  assert.equal(res.status, 503);
+  assert.match(((await res.json()) as { error: string }).error, /GCS_IMAGES_BUCKET/);
+});
+
+test('a topic hero-image drop with no file part is refused', async () => {
+  const { res } = await call(`/api/topics/${ARTICLE_ID}/hero-image`, {
+    method: 'POST',
+    headers: AUTH,
+    body: heroForm({ alt: 'alt only' }),
+  });
+
+  assert.equal(res.status, 400);
+  assert.match(((await res.json()) as { error: string }).error, /"file" part/);
+});
+
+test('a live post cannot be re-imaged with something that is not an image', async () => {
+  const { res } = await call('/api/published/best-budget-mattress-australia/hero-image', {
+    method: 'POST',
+    headers: AUTH,
+    body: heroForm({ file: { bytes: new TextEncoder().encode('%PDF-1.4'), name: 'hero.jpg', type: 'image/jpeg' } }),
+  });
+
+  assert.equal(res.status, 400);
+  assert.match(((await res.json()) as { error: string }).error, /JPEG, PNG or WebP/);
+});
+
+test('a hero-image drop without a token is rejected like every other route', async () => {
+  const { res } = await call(`/api/articles/${ARTICLE_ID}/hero-image`, {
+    method: 'POST',
+    body: heroForm({ file: { bytes: PNG_BYTES, name: 'hero.png', type: 'image/png' } }),
+  });
+
+  assert.equal(res.status, 401);
 });

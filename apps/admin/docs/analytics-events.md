@@ -99,6 +99,7 @@ The manual-topic drawer submitted a brief - as a draft, or on the way to an imme
 | `post_type` | string | `article`, `guide` or `roundup`. |
 | `reference_count` | number | Reference materials attached. Never their contents. |
 | `instructions_provided` | boolean | Whether the operator wrote instructions. Never the text. |
+| `hero_image_provided` | boolean | Whether a hero image is attached to the brief. Never the file or its URL. |
 | `topic_id` | string | Present on the approve path. |
 
 Owning screen: `pages/ManualTopicDrawer.tsx`.
@@ -109,12 +110,13 @@ A pipeline-board action on one article: one name, with the action in a property.
 
 | Property | Type | Notes |
 |---|---|---|
-| `action` | string | `retry`, `approve_publish` or `cancel`. |
+| `action` | string | `retry`, `approve_publish`, `cancel`, `republish`, `hero_image_attached`, `hero_alt_saved` or `hero_image_removed`. |
 | `article_id` | string | The article acted on. |
 | `stage` | string | The stage it was in. |
 | `status` | string | The status it was in. |
 
 Owning screen: `pages/Pipeline.tsx` (article detail panel).
+The hero-image actions report only that an image was attached, re-labelled or removed - never the file, its name or its URL.
 
 ### Article Feedback Submitted
 
@@ -139,6 +141,23 @@ A live post was removed from Cloudflare D1.
 | `post_type` | string | Its post type. |
 | `removed_links` | number | Orphaned affiliate links cleaned up with it. |
 | `status` | string | `rebuild_dispatched` or `rebuild_failed`. |
+
+Owning screen: `pages/Published.tsx`.
+
+### Published Post Hero Updated
+
+The hero image of a post that is already live was replaced, re-labelled or removed.
+This edits the Cloudflare D1 row directly, so it also covers posts written before the agent platform, which have no pipeline article behind them.
+
+| Property | Type | Notes |
+|---|---|---|
+| `action` | string | `hero_image_attached`, `hero_alt_saved` or `hero_image_removed`. |
+| `slug` | string | The post that was re-imaged. |
+| `category` | string | Its category. |
+| `post_type` | string | Its post type. |
+| `status` | string | `rebuild_dispatched` or `rebuild_failed` - whether the site was asked to rebuild. |
+
+Never the image, its file name or its URL.
 
 Owning screen: `pages/Published.tsx`.
 

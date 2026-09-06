@@ -35,6 +35,13 @@ export interface ArticleRow {
   seo_review: SeoReview | null;
   frontmatter: Record<string, unknown> | null;
   affiliate_links: AffiliateLinkRow[] | null;
+  /**
+   * Operator-supplied hero image (dropped in the admin panel). Set, it wins
+   * over anything the image agent finds or generates: the assembler stamps it
+   * into frontmatter on every pass and the image stage skips itself.
+   */
+  hero_image_url: string | null;
+  hero_alt: string | null;
   /** Admin feedback awaiting application — consumed (cleared) by the editor stage. */
   feedback: string | null;
   error: string | null;
@@ -65,6 +72,9 @@ export interface TopicRow {
   instructions: string | null;
   /** Operator-supplied markdown references, treated as authoritative context. */
   research_notes: ReferenceMaterial[];
+  /** Hero image attached at brief time — copied onto the article on approval. */
+  hero_image_url: string | null;
+  hero_alt: string | null;
 }
 
 export interface TopicSuggestion {

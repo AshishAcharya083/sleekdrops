@@ -16,7 +16,7 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 | 5 | `seo_reviewer` | seo_review | Strict scored review (0–100) against the brief + SEO checklist → pass/fail verdict |
 | 6 | `editor` | edit | Surgical revision resolving the reviewer's issues and any admin feedback (loops with #5, bounded by `max_revision_rounds`) |
 | 7 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
-| 8 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter (skips itself when `GCS_IMAGES_BUCKET` is unset) |
+| 8 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter. Stands down entirely when the operator attached their own image, and skips itself when `GCS_IMAGES_BUCKET` is unset |
 | 9 | `publisher` | publish | Upserts D1 `posts` + `affiliate_links`, fires the `content-updated` dispatch → site rebuilds |
 
 Flow: `research → outline → write → seo_review ⇄ edit → assemble → image → publish`.
@@ -30,6 +30,30 @@ post (plus its orphaned pipeline-authored affiliate links) with an automatic
 site rebuild; the article panel has a **feedback box** that requeues the piece
 through `edit → seo_review → assemble → image → publish` with your notes
 applied (original pubDate is kept, `updatedDate` is stamped).
+
+**Hero images by hand.** The image agent's automatic pick is often not good
+enough, so three admin surfaces take a dropped image file (JPEG/PNG/WebP,
+≤ 10 MB), vetted by magic bytes — not by the content type the browser claims —
+and uploaded to the same public bucket:
+
+| Surface | Attaches to | Reaches the site |
+| --- | --- | --- |
+| Manual-topic drawer | the draft topic; copied onto the article on approval | with the article's first publish |
+| Pipeline article panel | `articles.hero_image_url` / `hero_alt` + frontmatter | at publish, or **Publish again** for one already live |
+| **Published** tab | the D1 `posts` row itself | immediately, with a site rebuild |
+
+The dedicated `articles` columns are what make an operator image stick: the
+assembler stamps them into frontmatter on every pass, so an image attached
+while briefing a topic survives assembly and the feedback loop, and the image
+stage skips its search instead of paying for one. Removing it hands the piece
+back to the agent (or to the generated cover fill).
+
+The **Published** tab is the one that reaches *older* posts. Most of what is
+live was written before this platform and has no article row at all, so that
+surface edits the published D1 row directly — and when a pipeline article does
+exist for the slug, its copy is updated too, so a later re-publish can't push
+the old image back over the new one. `updatedDate` is deliberately not stamped:
+swapping a photo is not an editorial revision.
 
 ## Two engines, routed by model id
 

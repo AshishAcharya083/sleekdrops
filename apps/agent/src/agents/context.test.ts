@@ -16,6 +16,8 @@ const baseTopic: TopicRow = {
   source: 'manual',
   instructions: null,
   research_notes: [],
+  hero_image_url: null,
+  hero_alt: null,
 };
 
 test('operatorBrief is empty for scouted topics', () => {

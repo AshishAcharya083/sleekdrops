@@ -191,7 +191,11 @@ export async function runStage(article: ArticleRow): Promise<void> {
       }
       case 'image': {
         const existing = article.frontmatter ?? {};
-        if (existing.heroImage) {
+        if (article.hero_image_url) {
+          // The operator dropped a file in the admin panel; the assembler has
+          // already stamped it into frontmatter. Searching would be waste.
+          summary = 'operator-supplied hero image — image search skipped';
+        } else if (existing.heroImage) {
           summary = 'hero image already set — keeping it';
         } else {
           const image = await runImageAgent(article, model!);

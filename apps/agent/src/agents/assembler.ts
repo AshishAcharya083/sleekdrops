@@ -49,9 +49,20 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
     featured: false,
     draft: false,
   };
-  if (prior.heroImage) {
-    frontmatter.heroImage = prior.heroImage;
-    if (prior.heroAlt) frontmatter.heroAlt = prior.heroAlt;
+  // An operator-dropped hero image outranks whatever the image agent found on
+  // an earlier pass — that's the whole point of dropping one. Stamping it here
+  // (not only in the image stage) is what lets an image attached at brief time
+  // survive every re-assembly.
+  const heroImage =
+    article.hero_image_url ?? (typeof prior.heroImage === 'string' ? prior.heroImage : null);
+  const heroAlt = article.hero_image_url
+    ? article.hero_alt
+    : typeof prior.heroAlt === 'string'
+      ? prior.heroAlt
+      : null;
+  if (heroImage) {
+    frontmatter.heroImage = heroImage;
+    if (heroAlt) frontmatter.heroAlt = heroAlt;
   }
 
   // One affiliate row per /go/ slug in the body, straight from the dossier.

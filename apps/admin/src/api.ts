@@ -27,6 +27,9 @@ export interface Topic {
   source: string;
   instructions: string | null;
   research_notes: ReferenceMaterial[];
+  /** Operator-dropped hero image, attached while briefing the piece. */
+  hero_image_url: string | null;
+  hero_alt: string | null;
   created_at: string;
 }
 
@@ -37,6 +40,8 @@ export interface ManualTopicPayload {
   instructions: string;
   category: string;
   post_type: string;
+  /** The image file itself is uploaded separately; only its alt text is here. */
+  hero_alt: string;
   references: ReferenceMaterial[];
 }
 
@@ -53,6 +58,7 @@ export interface ArticleSummary {
   status: string;
   revision_round: number;
   seo_score: string | null;
+  hero_image_url: string | null;
   error: string | null;
   published_at: string | null;
   created_at: string;
@@ -89,6 +95,7 @@ export interface Overview {
 
 export interface ArticleDetail {
   article: ArticleSummary & {
+    hero_alt: string | null;
     research: unknown;
     outline: unknown;
     draft_md: string | null;
@@ -108,6 +115,15 @@ export interface PublishedPost {
   author: string;
   pub_date: string;
   updated_at: string;
+  /** Read out of the live post's frontmatter — null when it has no hero. */
+  hero_image: string | null;
+  hero_alt: string | null;
+}
+
+/** What the hero routes report back about the site rebuild they asked for. */
+export interface RebuildResult {
+  dispatched: boolean;
+  dispatchError?: string | null;
 }
 
 export interface Settings {
@@ -151,14 +167,17 @@ export function setApiBase(base: string): void {
 
 const elapsed = (startedAt: number): number => Math.round(performance.now() - startedAt);
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+/**
+ * The one place a request leaves the panel: auth, trace header, failure logging
+ * and error reporting all live here, whether the body is JSON or a file.
+ */
+async function request<T>(path: string, init: RequestInit, headers: Record<string, string>): Promise<T> {
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   const traceId = getTraceId();
   if (traceId) headers[TRACE_HEADER] = traceId;
 
-  const method = init?.method ?? 'GET';
+  const method = init.method ?? 'GET';
   const started = performance.now();
   log('info', `api request ${method} ${path}`, { route: path, method });
 
@@ -190,6 +209,25 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw error;
   }
   return (await res.json()) as T;
+}
+
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  return request<T>(path, init ?? {}, { 'Content-Type': 'application/json' });
+}
+
+/**
+ * Multipart POST for the hero-image drop. The Content-Type header is
+ * deliberately left unset: the browser has to add it itself, together with the
+ * multipart boundary it generated.
+ */
+export async function apiUpload<T>(
+  path: string,
+  { file, fields }: { file?: File | null; fields?: Record<string, string> } = {},
+): Promise<T> {
+  const body = new FormData();
+  if (file) body.set('file', file, file.name);
+  for (const [key, value] of Object.entries(fields ?? {})) body.set(key, value);
+  return request<T>(path, { method: 'POST', body }, {});
 }
 
 export const fmtCost = (v: number | string): string => `$${Number(v).toFixed(4)}`;
