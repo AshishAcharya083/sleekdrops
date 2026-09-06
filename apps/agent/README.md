@@ -225,6 +225,22 @@ Required env: `GEMINI_API_KEY` (or Vertex on GCP) and `TAVILY_API_KEY`; add
 `GITHUB_TOKEN` (repo dispatch). Optional: `ADMIN_TOKEN` to protect the API —
 required in practice when the API is deployed on Cloud Run.
 
+## Tests
+
+```bash
+pnpm --filter @sleekdrops/agent test
+```
+
+Most suites are pure logic and need nothing running.
+The two API suites are contract tests over the real Hono app:
+`server.test.ts` points at an unreachable database on purpose (tracing, auth and
+the upload guards all answer before a query), while `usage.db.test.ts` needs a
+live one - SQL that reads fine in review still only fails on a server - and
+skips itself when no `DATABASE_URL` answers.
+Give it one with `pnpm db:up` (then
+`DATABASE_URL=postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent`);
+CI runs it against a Postgres service container.
+
 ## Typical day
 
 1. Topics tab → **Find new trending topics** (or curl `POST /api/scout` from cron).
