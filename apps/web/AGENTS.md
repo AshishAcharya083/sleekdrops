@@ -28,7 +28,9 @@ The technical handbook for the **sleekdrops** Astro site. Read this before editi
 └──────────────────────────────────────────────┘
 ```
 
-**Build flow:** `pnpm build` → `prebuild` runs `fetch-content.mjs` (queries D1 for published posts → `src/content/blog/`, affiliate links → `.d1-cache/affiliate-links.json`, and enforces body guardrails: no raw merchant URLs, every `/go/<slug>` must exist in `affiliate_links`) → `generate-redirects.mjs` (writes `public/_redirects`) → `astro check && astro build` → `check-anchors.mjs` (fails the build on any in-page anchor in `dist/` with no matching element).
+**Build flow:** `pnpm build` → `prebuild` runs `fetch-content.mjs` (queries D1 for published posts → `src/content/blog/`, affiliate links → `.d1-cache/affiliate-links.json`, and enforces body guardrails: no raw merchant URLs, every `/go/<slug>` must exist in `affiliate_links`) → `generate-redirects.mjs` (writes `public/_redirects`) → `generate-ads-txt.mjs` (writes `public/ads.txt` from `PUBLIC_ADSENSE_CLIENT`) → `generate-robots.mjs` (writes `public/robots.txt`; only a `PUBLIC_SITE_ENV=production` build gets the sitemap line, every other build noindexes itself) → `astro check && astro build` → `check-anchors.mjs` (fails the build on any in-page anchor in `dist/` with no matching element).
+
+All three generated files live in `public/` and are gitignored — they are per-environment build output, not source.
 
 **Trigger flow:** after writing to D1, fire `repository_dispatch` type `content-updated` at this repo (POST /repos/AshishAcharya083/sleekdrops/dispatches) → CI rebuilds → Cloudflare Pages deploys. Live in ~90s.
 

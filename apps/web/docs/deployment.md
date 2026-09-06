@@ -14,6 +14,23 @@ A push to `main` triggers the production build, type-check, and deploy. A push t
 
 Note that develop's build still sets `SITE_URL` to the **production** host on purpose: canonical links, `og:url` and the sitemap are built from it, so pointing it at the preview would make develop a self-canonicalising second copy competing with the real site in the index.
 
+### Only production is indexable
+
+Both deploy workflows set `PUBLIC_SITE_ENV` — `production` on production, `preview` on develop. It is a plain workflow value, not a repo variable, because it is a property of the deployment rather than a setting anyone tunes.
+
+| Value | robots meta on every page | `robots.txt` |
+| --- | --- | --- |
+| `production` | `index, follow` (a page asking for `noindex` still gets `noindex, follow`) | crawl rules **plus** the `Sitemap:` line, built from `SITE_URL` |
+| anything else | `noindex, nofollow` | the same crawl rules, **no** sitemap, and a header saying it is a preview |
+
+**Only the exact string `production` is indexable.** Unset, empty, misspelled or `Production` all read as a preview, so a preview environment added later is safe because it did nothing rather than because someone remembered this page.
+
+That direction is deliberate. `develop` is held at the same code level as `main` and renders the same pages from the same live editorial content, so an indexable preview is a complete second copy of the site competing with the real one for its own rankings — and, to an AdSense reviewer, duplicated content on a domain the account does not own.
+
+The failure in the other direction — production's line going missing and silently de-listing the live site — does not break a build and would be invisible for weeks, so [`src/lib/site-env.test.ts`](../src/lib/site-env.test.ts) asserts both halves and fails CI instead.
+
+**The preview `robots.txt` deliberately does not `Disallow: /`.** What keeps a preview out of the index is the `noindex` on every page, and Google is explicit that a page blocked by `robots.txt` cannot be crawled and therefore cannot have its `noindex` seen — a blanket disallow would *preserve* anything already indexed rather than remove it. Blocking discovery and blocking indexing are different jobs; `noindex` is the one that does the second.
+
 The build runs `pnpm prebuild` (which generates `public/_redirects` from `src/data/affiliate-links.json`) → `astro check` → `astro build`. Output goes to `dist/`. `wrangler-action@v3` pushes `dist/` to the matching Cloudflare Pages project.
 
 ---

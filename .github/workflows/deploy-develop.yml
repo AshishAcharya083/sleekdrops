@@ -65,6 +65,20 @@ jobs:
           # Aimed at the production host instead, every develop page tells a
           # crawler that the canonical version of it lives there.
           SITE_URL: https://sleekdrops.pages.dev
+          # Marks this build a preview, which noindexes every page it renders and
+          # publishes a robots.txt that advertises no sitemap.
+          #
+          # Develop is held at the same code level as main and renders the same
+          # pages from the same live editorial content, so left indexable it is a
+          # complete second copy of the site competing with the real one for its
+          # own rankings - and, to an AdSense reviewer, duplicated content on a
+          # domain the account does not own.
+          #
+          # Only the exact string `production` is indexable, so this line going
+          # missing fails safe. The reverse - production's line going missing and
+          # de-listing the live site - is caught by a test over both workflows
+          # (apps/web/src/lib/site-env.test.ts) rather than by hoping.
+          PUBLIC_SITE_ENV: preview
           NODE_ENV: production
           # DevTeam Analytics - public ingest key (dtp_) + ingest host. The key is
           # ingest-only and safe to expose; PUBLIC_ hands it to the Astro build so

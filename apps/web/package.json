@@ -11,7 +11,7 @@
     "fetch-content": "node scripts/fetch-content.mjs",
     "dev": "node scripts/fetch-content.mjs && astro dev",
     "start": "node scripts/fetch-content.mjs && astro dev",
-    "prebuild": "node scripts/fetch-content.mjs && node scripts/generate-redirects.mjs && node scripts/generate-ads-txt.mjs",
+    "prebuild": "node scripts/fetch-content.mjs && node scripts/generate-redirects.mjs && node scripts/generate-ads-txt.mjs && node scripts/generate-robots.mjs",
     "build": "astro check && astro build && node --experimental-strip-types scripts/check-anchors.mjs",
     "check:anchors": "node --experimental-strip-types scripts/check-anchors.mjs",
     "preview": "astro preview",
