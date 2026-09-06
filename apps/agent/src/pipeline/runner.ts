@@ -2,6 +2,7 @@
 // records an agent_session (model, tokens, cost, duration), and routes the
 // article to its next stage. Verdict-driven, bounded revision loop —
 // a light version of devteam-platform's card lane pattern.
+import { MONETISED_INTENTS } from '../content/contract.js';
 import { getSetting, q } from '../db/pool.js';
 import {
   claudeConfigured,
@@ -187,6 +188,18 @@ export async function runStage(article: ArticleRow): Promise<void> {
           : null;
         const plan = await runKeywordStrategist(article, topic, model!, tracker);
         await updateArticle(article.id, { keyword_plan: JSON.stringify(plan) });
+        // Earliest point at which "this piece earns nothing" is knowable: the
+        // dossier is built, and the SERP read has just named the intent. Fail
+        // here rather than at assemble — outline, write, review and up to two
+        // edit rounds all run on Opus 5 before the missing links would show up.
+        const products = article.research?.products?.length ?? 0;
+        if (products === 0 && MONETISED_INTENTS.has(plan.intent)) {
+          throw new Error(
+            `the dossier has no products but the SERP read says this is a ${plan.intent} query — ` +
+              `the piece would publish with nothing to click. Re-run research (a "${article.post_type}" ` +
+              `is not required to find products, so it did not) or add them to the topic brief by hand.`,
+          );
+        }
         summary = `"${plan.primaryKeyword}" — ${plan.intent}, ${plan.difficulty} difficulty, ${plan.zeroClickRisk} zero-click risk, ${plan.wordCountTarget} words, ${plan.contentGaps.length} gap(s) to exploit`;
         next = { stage: 'outline', status: 'queued' };
         break;
