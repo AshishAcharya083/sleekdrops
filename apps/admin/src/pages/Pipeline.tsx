@@ -339,7 +339,7 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
             {detail.article.affiliate_links && detail.article.affiliate_links.length > 0 && (
               <div className="section">
                 <h2>Affiliate links</h2>
-                <div className="card" style={{ padding: 0 }}>
+                <div className="card table-scroll" tabIndex={0} role="region" aria-label="Affiliate links">
                   <table>
                     <tbody>
                       {detail.article.affiliate_links.map((l) => (
@@ -370,7 +370,7 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
 
             <div className="section">
               <h2>Agent sessions</h2>
-              <div className="card" style={{ padding: 0 }}>
+              <div className="card table-scroll" tabIndex={0} role="region" aria-label="Agent sessions for this article">
                 <table>
                   <thead>
                     <tr>

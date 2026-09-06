@@ -39,7 +39,7 @@ export function Overview() {
 
       <div className="section">
         <h2>Recent agent sessions</h2>
-        <div className="card" style={{ padding: 0 }}>
+        <div className="card table-scroll" tabIndex={0} role="region" aria-label="Recent agent sessions">
           <table>
             <thead>
               <tr>

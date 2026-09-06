@@ -70,6 +70,12 @@ body {
 .card .big { font-size: 26px; font-weight: 650; }
 .card .sub { color: var(--muted); font-size: 12px; }
 
+/* A card holding a table: the table keeps its natural column widths and
+   scrolls inside the card, instead of an 8-column session list pushing the
+   whole panel sideways on a phone. */
+.card.table-scroll { padding: 0; overflow-x: auto; }
+.card.table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
 .section { margin-top: 22px; }
 .section > h2 { font-size: 14px; color: var(--muted); font-weight: 600; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.6px; }
 
