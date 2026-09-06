@@ -104,11 +104,26 @@ jobs:
           #
           # An empty publisher id disables ads silently: no partner script, no
           # ads.txt, nothing to consent to.
-          PUBLIC_ADSENSE_CLIENT: ${{ vars.ADSENSE_CLIENT }}
-          PUBLIC_ADSENSE_SLOT_ARTICLE_MID: ${{ vars.ADSENSE_SLOT_ARTICLE_MID }}
-          PUBLIC_ADSENSE_SLOT_ARTICLE_END: ${{ vars.ADSENSE_SLOT_ARTICLE_END }}
-          PUBLIC_ADSENSE_SLOT_SIDEBAR: ${{ vars.ADSENSE_SLOT_SIDEBAR }}
-          PUBLIC_ADSENSE_SLOT_FEED: ${{ vars.ADSENSE_SLOT_FEED }}
+          #
+          # Develop is pinned EMPTY, and deliberately does not read
+          # `vars.ADSENSE_CLIENT`. Read through a variable, this environment
+          # inherits any repo-level or org-level `ADSENSE_CLIENT` that anyone
+          # ever adds - and adding one is the natural mistake, because the
+          # publisher id really is the same for the whole account, so scoping it
+          # per environment looks redundant until you know why it is not.
+          #
+          # Why it is not: sleekdrops.pages.dev is a different domain from
+          # sleekdrops.com and is not in the AdSense account's Sites list.
+          # Publishing the publisher id there puts a /ads.txt and a
+          # google-adsense-account tag on an unlisted domain claiming the
+          # account, which is exactly the shape of a review failure - and
+          # develop tracks main closely enough that the code is otherwise
+          # identical, so this line is the entire difference between the two.
+          #
+          # An empty value disables ads, ads.txt and the verification tag
+          # together, which is what a preview deploy should publish: nothing.
+          # Turning ads on here means changing this line and knowing why.
+          PUBLIC_ADSENSE_CLIENT: ''
           # Develop is a code-only preview rendered against the SAME live
           # editorial content as production. Content lives in Cloudflare D1,
           # so the build needs the same D1 env vars as prod.

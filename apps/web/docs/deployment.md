@@ -104,7 +104,15 @@ All five are **variables**, not secrets: they are `PUBLIC_`-prefixed Astro value
 | `ADSENSE_SLOT_SIDEBAR`      | **variable** | Slot id of the sticky sidebar unit (desktop only).                                       |
 | `ADSENSE_SLOT_FEED`         | **variable** | Slot id of the in-feed card unit.                                                        |
 
-Scope them per GitHub Environment (`develop` / `production`), the way the DevTeam settings are scoped: a preview deploy serving impressions against the production property pollutes its reporting and can trip AdSense's invalid-traffic checks.
+Set them under **Settings → Environments → `production` → Environment variables**.
+
+**Develop carries no publisher id, and cannot be given one by a variable.** `deploy-develop.yml` pins `PUBLIC_ADSENSE_CLIENT: ''` outright rather than reading `vars.ADSENSE_CLIENT`, which is the one place this differs from every other setting in this document.
+
+The reason is inheritance. GitHub resolves `vars.X` as environment → repository → organization, so a repo-level `ADSENSE_CLIENT` would silently apply to develop as well — and adding one is the natural mistake, because the publisher id genuinely *is* the same for the whole account, so scoping it per environment looks redundant until you know why it is not.
+
+Why it is not: `sleekdrops.pages.dev` is a different domain from `sleekdrops.com` and is not in the AdSense account's Sites list. A publisher id there publishes an `/ads.txt` and a `google-adsense-account` tag on an unlisted domain claiming the account, which is the shape of a review failure — and since develop tracks `main` closely, that one line is the entire difference between the two environments. An empty value disables the units, `ads.txt` and the verification tag together, which is what a preview deploy should publish: nothing.
+
+Two tests in [`src/lib/ads-env.test.ts`](../src/lib/ads-env.test.ts) hold both halves — develop pinned empty, production still reading its variable — so this cannot be undone silently, in either direction. Turning ads on for develop means editing that line and knowing why.
 
 #### What each slot renders
 
@@ -124,6 +132,16 @@ Two rules decide whether a slot is used at all, and both live in the pure [`src/
 Nothing is requested until the visitor switches **Advertising** on in the consent dialog — a decline, an unanswered banner and a GPC/DNT signal all load no partner script at all (see [`src/lib/ads.ts`](../src/lib/ads.ts)). Units ship `hidden` and are removed outright for anyone who has not opted in, so no reserved "Advertisement" box is ever shown to a visitor who will not see an ad. Each unit is requested only once it comes within 300px of the viewport, because viewable CPM is what an impression is priced on, and a slot that has no box on the current viewport is dropped rather than filled. A slot the auction cannot fill reports `data-ad-status="unfilled"` and the wrapper collapses, so an unsold slot leaves no hole in the page.
 
 The `Content-Security-Policy` in [`public/_headers`](../public/_headers) already allowlists the partner's script and frame hosts. A **new** ad host would be blocked by it — add it to `script-src` / `frame-src` there, or the units silently stay empty.
+
+#### Site verification, and why one tag is not consent-gated
+
+Setting `ADSENSE_CLIENT` also emits `<meta name="google-adsense-account">` on every page (from [`SEOHead.astro`](../src/components/seo/SEOHead.astro)), alongside the `/ads.txt` the same value generates. Those two are what AdSense verifies the site with.
+
+They exist because **the ad script alone cannot verify a consent-gated site**. `src/lib/ads.ts` requests `adsbygoogle.js` only for a visitor who switched Advertising on, and neither AdSense's verification crawler nor its policy reviewer accepts a consent banner — so the snippet AdSense hands you on onboarding is never what they find here, and the review stalls on "ad code not found". Google publishes the meta tag for exactly this case.
+
+That tag is the one part of the ad integration deliberately outside the consent gate, and it is allowed to be because it costs the visitor nothing: an inert `<meta>` carrying an account id that already ships publicly in `/ads.txt`. No script, no cookie, no device storage, no request — so ePrivacy Art. 5(3), the rule the gate exists to satisfy, does not reach it. Everything that *does* set storage stays behind the opt-in.
+
+Both signals appear only on a build that has a publisher id, so an unconfigured environment still claims nothing.
 
 Leaving `ADSENSE_CLIENT` unset is a supported state, and is how this ships until the ids are issued.
 The build then disables ads everywhere after a single `[ads]` console warning: no partner script is requested, and `public/ads.txt` - generated from that same value by `scripts/generate-ads-txt.mjs` during `prebuild` - is not written at all.
