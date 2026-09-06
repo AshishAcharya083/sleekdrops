@@ -1,0 +1,240 @@
+---
+/**
+ * AdUnit - one ad slot, and the only component that renders ad markup.
+ *
+ * A page asks for a *placement*, never a network or a slot id: `<AdUnit
+ * placement="sidebar" />`. The id behind it comes from `./ads-env`, and whether
+ * a visitor may be shown anything at all comes from `./ads` - so the pages stay
+ * partner-agnostic exactly as `src/lib/ads.ts` intends, and moving off AdSense
+ * later touches this file and those two rather than every page carrying a unit.
+ *
+ * Four things this component has to get right, three of which are the difference
+ * between an ad unit that earns and one that quietly costs:
+ *
+ *  1. **Nothing renders for a build with no ids.** An unconfigured build emits no
+ *     markup at all - not a hidden node, not a reserved box. That is the state
+ *     this repo ships in until the ids are issued, and it has to cost the page
+ *     nothing.
+ *  2. **Nothing renders before consent.** The unit ships `hidden` and is revealed
+ *     only once `loadAds()` says the visitor opted in; anyone else has it removed
+ *     from the DOM entirely. A reserved "Advertisement" box shown to someone who
+ *     declined, or who has not answered the banner yet, is a worse page than the
+ *     shift that revealing costs - so the shift is where this errs.
+ *  3. **A slot that cannot be seen is never requested.** The sidebar unit is
+ *     display:none below the layout's 1000px breakpoint, and requesting an ad for
+ *     a hidden slot burns an impression at zero viewability and is squarely
+ *     against AdSense's policy on it. Every unit is measured after it is
+ *     revealed, and one with no box is dropped rather than filled.
+ *  4. **An unfilled slot leaves no hole.** AdSense marks a slot it could not fill
+ *     `data-ad-status="unfilled"`, and the reserved height would otherwise stay
+ *     on the page as a labelled blank. The wrapper collapses when that happens.
+ *
+ * The request itself is deferred until the unit is near the viewport, which is
+ * what viewable CPM is priced on: an ad requested at page load and never scrolled
+ * to is an unviewed impression that drags the whole property's viewability down.
+ *
+ * Astro hoists and de-duplicates the script below, so a page carrying four units
+ * runs one copy of it over all four - and a page carrying none downloads nothing,
+ * which is why this wiring lives here rather than in `src/scripts/chrome.ts`.
+ */
+import { adsEnv, type AdPlacement } from '@lib/ads-env';
+
+export interface Props {
+  /** Which slot this is. The id behind it is build configuration. */
+  placement: AdPlacement;
+  /** Extra class on the wrapper, for the surface that owns the surrounding layout. */
+  class?: string;
+}
+
+const { placement, class: className } = Astro.props;
+
+const { client, slots } = adsEnv();
+const slot = slots[placement];
+
+/**
+ * An unconfigured build renders nothing. Both halves are checked: the publisher
+ * id is validated by `./ads-env` (so a typo reads as empty), and a single empty
+ * slot id disables that one placement while the others keep running.
+ */
+const configured = Boolean(client && slot);
+
+/**
+ * The sidebar sits in a 280px rail and must not try to be full-width; every
+ * other placement is in a flowing column and should be.
+ */
+const fullWidth = placement === 'sidebar' ? 'false' : 'true';
+---
+
+{
+  configured && (
+    <aside
+      class:list={['ad-unit', `ad-unit--${placement}`, className]}
+      data-ad-unit
+      data-ad-placement={placement}
+      aria-label="Advertisement"
+      hidden
+    >
+      <span class="ad-unit__label">Advertisement</span>
+      <ins
+        class="adsbygoogle"
+        style="display:block"
+        data-ad-client={client}
+        data-ad-slot={slot}
+        data-ad-format="auto"
+        data-full-width-responsive={fullWidth}
+      />
+    </aside>
+  )
+}
+
+<style>
+  /* More specific than the UA `[hidden]` rule, which `display` would otherwise
+     beat - this is what keeps a pre-consent unit out of the grid it sits in. */
+  .ad-unit[hidden] {
+    display: none;
+  }
+
+  .ad-unit {
+    display: block;
+    margin: 2.5em 0;
+    text-align: center;
+    /* The reserved box, so the fill does not push the page around under the
+       reader. Removed the moment the slot reports itself unfilled. */
+    min-height: var(--ad-reserve, 280px);
+  }
+
+  .ad-unit--sidebar {
+    --ad-reserve: 600px;
+    margin: 24px 0 0;
+  }
+
+  .ad-unit--feed {
+    --ad-reserve: 320px;
+    margin: 0;
+  }
+
+  /* Unfilled: no box, no label, no reserved height - the layout closes over it. */
+  .ad-unit[data-ad-filled='no'] {
+    display: none;
+  }
+
+  .ad-unit__label {
+    display: block;
+    font-family: var(--font-body);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted-2, var(--muted));
+    margin-bottom: 8px;
+    user-select: none;
+  }
+
+  .ad-unit .adsbygoogle {
+    width: 100%;
+  }
+
+  /* The rail collapses under the article grid's own breakpoint; a sidebar unit
+     below it would be a slot with no box, which is never requested (see the
+     script) - this is what makes that true rather than merely narrow. */
+  @media (max-width: 1000px) {
+    .ad-unit--sidebar {
+      display: none;
+    }
+  }
+</style>
+
+<script>
+  import { adsMode, loadAds } from '@lib/ads';
+
+  /** How far ahead of the viewport a unit is requested. */
+  const PREFETCH_MARGIN = '300px';
+
+  const units = Array.from(document.querySelectorAll<HTMLElement>('[data-ad-unit]'));
+
+  /**
+   * True when the unit actually occupies space on this viewport. A unit whose
+   * media query has collapsed it - the sidebar on a narrow screen - has no box,
+   * and an ad requested into one is an impression that could never be seen.
+   */
+  const isVisible = (unit: HTMLElement): boolean =>
+    unit.offsetParent !== null && unit.getBoundingClientRect().width > 0;
+
+  /**
+   * Hand one revealed unit to the partner.
+   *
+   * `data-npa` is set per slot as well as page-wide, because the page-wide flag
+   * is read once as the tag starts: a visitor who withdrew after that reaches
+   * only the slots that spell the decision out for themselves (see src/lib/ads.ts).
+   */
+  function fill(unit: HTMLElement): void {
+    const ins = unit.querySelector<HTMLElement>('ins.adsbygoogle');
+    if (!ins) return;
+    if (adsMode() !== 'personalised') ins.dataset.npa = '1';
+    try {
+      (window.adsbygoogle ??= []).push({});
+    } catch (error) {
+      // A push that throws leaves a reserved, permanently empty box under the
+      // reader; collapsing it is the only thing that can still be got right.
+      unit.dataset.adFilled = 'no';
+      console.warn('[ads] unit could not be filled', error);
+      return;
+    }
+    watchFill(unit, ins);
+  }
+
+  /**
+   * Collapse the unit if the partner reports it unfilled. The attribute is set
+   * asynchronously, once the auction has come back, so it is observed rather
+   * than read - and the observer is disconnected as soon as either verdict lands.
+   */
+  function watchFill(unit: HTMLElement, ins: HTMLElement): void {
+    const settle = (): boolean => {
+      const status = ins.getAttribute('data-ad-status');
+      if (!status) return false;
+      if (status === 'unfilled') unit.dataset.adFilled = 'no';
+      return true;
+    };
+    if (settle()) return;
+    const observer = new MutationObserver(() => {
+      if (settle()) observer.disconnect();
+    });
+    observer.observe(ins, { attributes: true, attributeFilter: ['data-ad-status'] });
+  }
+
+  /** Request each unit as it comes within reach of the viewport. */
+  function fillWhenNear(live: HTMLElement[]): void {
+    if (typeof IntersectionObserver === 'undefined') {
+      live.forEach(fill);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries
+          .filter((entry) => entry.isIntersecting)
+          .forEach((entry) => {
+            observer.unobserve(entry.target);
+            fill(entry.target as HTMLElement);
+          });
+      },
+      { rootMargin: PREFETCH_MARGIN },
+    );
+    live.forEach((unit) => observer.observe(unit));
+  }
+
+  if (units.length > 0) {
+    // The consent gate first and the partner script only after: a visitor who
+    // declined, has not answered, or is sending a privacy signal must not have
+    // the tag fetched for them, and must not be shown a reserved box either.
+    if (!loadAds()) {
+      units.forEach((unit) => unit.remove());
+    } else {
+      units.forEach((unit) => {
+        unit.hidden = false;
+      });
+      // Measured only after the reveal - a `hidden` unit has no box by definition.
+      const live = units.filter(isVisible);
+      units.filter((unit) => !live.includes(unit)).forEach((unit) => unit.remove());
+      fillWhenNear(live);
+    }
+  }
+</script>

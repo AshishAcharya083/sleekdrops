@@ -106,6 +106,25 @@ All five are **variables**, not secrets: they are `PUBLIC_`-prefixed Astro value
 
 Scope them per GitHub Environment (`develop` / `production`), the way the DevTeam settings are scoped: a preview deploy serving impressions against the production property pollutes its reporting and can trip AdSense's invalid-traffic checks.
 
+#### What each slot renders
+
+Create four ad units in **AdSense → Ads → By ad unit** and paste each one's slot id into the matching variable. Every unit is rendered by [`src/components/ads/AdUnit.astro`](../src/components/ads/AdUnit.astro), which is the only component in the site that emits ad markup — a page asks for a *placement*, never a network or a slot id.
+
+| Placement     | Where it renders                                                                   | Suggested AdSense unit                       |
+| ------------- | ------------------------------------------------------------------------------------ | -------------------------------------------- |
+| `articleMid`  | Inside a blog post body, on the section break nearest the middle of the article.     | Display, responsive                          |
+| `articleEnd`  | Below the article body, after the affiliate disclosure.                              | Display, responsive                          |
+| `sidebar`     | The sticky rail on a blog post, beneath the table of contents. **Desktop only** — the rail collapses below 1000px and the unit is neither shown nor requested there. | Display, vertical / half-page (300×600)      |
+| `feed`        | One cell of a post grid, opening the second row (after the third card).              | Display, responsive (or an In-feed unit)     |
+
+An empty slot id disables that one placement and leaves the others running, so the units can be switched on one at a time.
+
+Two rules decide whether a slot is used at all, and both live in the pure [`src/lib/ad-placement.ts`](../src/lib/ad-placement.ts): a post shorter than 8 top-level blocks gets no mid-article unit, and a grid of fewer than 4 cards gives no cell away. Thin content beside ads is the shape of an AdSense policy action, and a unit in a three-card grid reads as an ad-first listing.
+
+Nothing is requested until the visitor switches **Advertising** on in the consent dialog — a decline, an unanswered banner and a GPC/DNT signal all load no partner script at all (see [`src/lib/ads.ts`](../src/lib/ads.ts)). Units ship `hidden` and are removed outright for anyone who has not opted in, so no reserved "Advertisement" box is ever shown to a visitor who will not see an ad. Each unit is requested only once it comes within 300px of the viewport, because viewable CPM is what an impression is priced on, and a slot that has no box on the current viewport is dropped rather than filled. A slot the auction cannot fill reports `data-ad-status="unfilled"` and the wrapper collapses, so an unsold slot leaves no hole in the page.
+
+The `Content-Security-Policy` in [`public/_headers`](../public/_headers) already allowlists the partner's script and frame hosts. A **new** ad host would be blocked by it — add it to `script-src` / `frame-src` there, or the units silently stay empty.
+
 Leaving `ADSENSE_CLIENT` unset is a supported state, and is how this ships until the ids are issued.
 The build then disables ads everywhere after a single `[ads]` console warning: no partner script is requested, and `public/ads.txt` - generated from that same value by `scripts/generate-ads-txt.mjs` during `prebuild` - is not written at all.
 An `ads.txt` naming no seller is worse than none, because that is the file a crawler reads as a domain that has revoked every seller it had.
