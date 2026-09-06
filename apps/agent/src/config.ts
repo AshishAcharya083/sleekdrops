@@ -21,12 +21,14 @@ export const config = {
     location: env('GOOGLE_CLOUD_LOCATION', 'us-central1'),
   },
 
-  // Claude subscription (writer/editor engine). The OAuth token comes from
-  // `claude setup-token` and only works through the Claude Agent SDK/CLI.
+  // Claude subscription (the article-writing engine). The OAuth token comes
+  // from `claude setup-token` and only works through the Claude Agent SDK/CLI.
+  // Opus 5 is the default: every stage whose judgement reaches the published
+  // piece runs on it, and on a subscription the marginal cost is zero.
   claude: {
     oauthToken: env('CLAUDE_CODE_OAUTH_TOKEN'),
     apiKey: env('ANTHROPIC_API_KEY'),
-    modelDefault: env('CLAUDE_MODEL', 'claude-sonnet-4-5'),
+    modelDefault: env('CLAUDE_MODEL', 'claude-opus-5'),
   },
 
   tavilyApiKey: env('TAVILY_API_KEY'),

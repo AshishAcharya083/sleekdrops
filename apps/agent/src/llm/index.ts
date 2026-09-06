@@ -12,7 +12,9 @@
 //             bearer, which is why this engine exists at all.
 //
 // Which agents use which engine is decided in pipeline/runner.ts (modelFor):
-// writer + editor follow the admin "prose engine" toggle; everything else is
+// every article-writing stage (researcher, keyword strategist, outliner,
+// writer, SEO reviewer, editor) follows the admin engine toggle, which
+// defaults to Claude Opus 5. The topic scout and the image agent stay on
 // Gemini. A per-agent model override may name any model from either engine.
 import { config } from '../config.js';
 import { getSetting } from '../db/pool.js';
@@ -26,9 +28,14 @@ export interface LlmSettings {
   gemini_model?: string;
   /** Claude subscription OAuth token from `claude setup-token`. */
   claude_token?: string;
-  /** Model the Claude engine runs. */
+  /** Model the Claude engine runs. Defaults to claude-opus-5. */
   claude_model?: string;
-  /** Engine for writer + editor: Claude subscription or Gemini. */
+  /**
+   * Engine for every article-writing stage: Claude subscription or Gemini.
+   * Named `prose_engine` for the settings rows already in the database — it
+   * covered writer + editor only when it was introduced, and now covers
+   * research, keyword strategy, outlining and review as well.
+   */
   prose_engine?: 'claude' | 'gemini';
 }
 

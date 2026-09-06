@@ -11,15 +11,16 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 | - | ----- | ----- | ------------ |
 | 1 | `topic_scout` | (out of band) | Sweeps the live web (Tavily) for trending products/topics **not covered before** (checks D1 posts + every prior suggestion), writes suggestions for the admin |
 | 2 | `researcher` | research | Plans targeted searches, builds an evidence dossier: facts + source URLs, real Amazon links (non-Amazon "amazonUrl"s are dropped deterministically), keywords, competitor gap |
-| 3 | `outliner` | outline | SEO content brief: ≤60-char title, dek, slug, keyword plan, H2/H3 outline, FAQ |
-| 4 | `writer` | write | Full markdown draft in the site voice; products linked only as `/go/<slug>`, with mandated placements (tables, per-product CTAs, conclusion) |
-| 5 | `seo_reviewer` | seo_review | Strict scored review (0–100) against the brief + SEO checklist → pass/fail verdict |
-| 6 | `editor` | edit | Surgical revision resolving the reviewer's issues and any admin feedback (loops with #5, bounded by `max_revision_rounds`) |
-| 7 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
-| 8 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter. Stands down entirely when the operator attached their own image, and skips itself when `GCS_IMAGES_BUCKET` is unset |
-| 9 | `publisher` | publish | Upserts D1 `posts` + `affiliate_links`, fires the `content-updated` dispatch → site rebuilds |
+| 3 | `keyword_strategist` | keyword | **Reads the live SERP** for 4 candidate queries and picks the one we can win: intent, difficulty, zero-click risk, SERP features, the top 3 to beat, the gaps they leave, PAA questions, entities, snippet target, word-count target |
+| 4 | `outliner` | outline | SEO content brief executing that plan: ≤60-char title, dek, slug, H2/H3 outline, mandatory FAQ |
+| 5 | `writer` | write | Full markdown draft in the site voice; answer-first sections, sourced claims, products linked only as `/go/<slug>` with mandated placements (tables, per-product CTAs, conclusion) |
+| 6 | `seo_reviewer` | seo_review | Deterministic anti-slop scan **first**, then a scored review across five dimensions (search / generative-engine / voice / E-E-A-T / links) → pass/fail verdict |
+| 7 | `editor` | edit | Surgical revision resolving the reviewer's issues, the voice-scan findings and any admin feedback (loops with the reviewer, bounded by `max_revision_rounds`) |
+| 8 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
+| 9 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter. Stands down entirely when the operator attached their own image, and skips itself when `GCS_IMAGES_BUCKET` is unset |
+| 10 | `publisher` | publish | Upserts D1 `posts` + `affiliate_links`, fires the `content-updated` dispatch → site rebuilds |
 
-Flow: `research → outline → write → seo_review ⇄ edit → assemble → image → publish`.
+Flow: `research → keyword → outline → write → seo_review ⇄ edit → assemble → image → publish`.
 With `publish_mode = approval` (default) the article parks at
 `waiting_approval` until you hit **Approve & publish** in the admin panel.
 Every agent prompt is grounded with today's date (Australia/Sydney) so years
@@ -55,21 +56,93 @@ exist for the slug, its copy is updated too, so a later re-publish can't push
 the old image back over the new one. `updatedDate` is deliberately not stamped:
 swapping a photo is not an editorial revision.
 
+## What the pipeline optimises for
+
+Two audiences read every article, and they reward different things.
+
+**Google.** The `keyword` stage is what changed here. Picking a target query
+used to be a side effect of writing the brief — the researcher named whatever
+phrase it had read most, and nobody had looked at a results page. So a piece
+could be built for a query owned by Amazon's own product listings, or for a
+head term whose answer never leaves the AI Overview. The keyword strategist
+runs a real SERP read over several candidates first (the superseo
+`keyword-deep-dive` method), and commits to one on winnability rather than
+prettiness: what format ranks, who holds the top three, what they miss, how
+long they are, and how much of the traffic clicks through at all. Everything
+downstream is built against that plan.
+
+**Generative engines.** Being cited by ChatGPT, Claude, Perplexity and AI
+Overviews is a different game from ranking, and the overlap is mostly about
+being *extractable*. Every major H2 now opens with a self-contained 40–60 word
+answer; claims are paired with a named source and a year; entities are named
+instead of gestured at ("Ninja AF160", not "several models"); and every article
+ends with a real FAQ section. That FAQ is load-bearing — `apps/web` reads it
+back out of the published markdown and emits **FAQPage** structured data, which
+is the strongest single citation signal available to us. It costs no extra
+frontmatter field: `extractFaq()` parses the body the writer already produced.
+
+**Neither, if it reads like a machine.** See below.
+
+## The anti-slop gate
+
+Telling a model "don't write like an AI" does not work. It agrees, and then
+writes *"In today's fast-paced landscape, it's worth noting that this robust
+solution seamlessly delves into..."* anyway.
+
+So `src/content/slop.ts` measures the draft instead — plain string matching, no
+LLM. Banned vocabulary (delve, leverage, robust, seamless, pivotal, showcase,
+"landscape" used metaphorically…), banned phrases ("it's worth noting", "let's
+dive in", "plays a crucial role"), the structural tells (binary contrasts,
+additive hedges, negative listing, copula avoidance, participial tack-ons,
+false agency), and two density rules that scale with length: hedge adverbs and
+em-dashes per thousand words. It also flags metronomic rhythm — four
+consecutive sentences within three words of each other.
+
+The scan runs **before** the SEO reviewer prompts anything, and its hits are
+handed to the model as established fact rather than left to its judgement. Then:
+
+- every finding becomes an issue with a line number, an example and a fix;
+- a banned word or phrase is **high severity whatever the score**, and a
+  high-severity issue blocks the pass — one "delve" in an otherwise strong
+  draft still forces a revision round;
+- the scan's score caps the review's `voice` dimension and the overall score,
+  so a model that liked the draft cannot out-vote the scanner;
+- the editor re-runs the scan on the draft in front of it, so it never works
+  from a stale line number.
+
+Rules from the [`stop-slop`](https://hvpandya.com) skill and the
+[superseo](https://github.com/inhouseseo/superseo-skills) `write-content`
+anti-slop ruleset, narrowed to what a regex can judge honestly. Anything
+needing taste — does this take a position, are the specifics real — stays with
+the reviewing model.
+
 ## Two engines, routed by model id
 
 Every LLM call goes through `src/llm/`, which routes on the model id:
 
 | Engine | Models | Runs | Auth |
 | --- | --- | --- | --- |
-| **Gemini** (Google ADK) | everything not `claude-*` (default `gemini-2.5-flash`) | topic scout, researcher, outliner, SEO reviewer | admin-set AI Studio key → Vertex ADC (`GOOGLE_GENAI_USE_VERTEXAI=true`, keyless on Cloud Run) → `GEMINI_API_KEY` |
-| **Claude subscription** (Claude Agent SDK) | `claude-*` (default `claude-sonnet-4-5`) | writer + editor, switchable in Settings | `claude setup-token` → paste in admin Settings, or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` in `.env` |
+| **Gemini** (Google ADK) | everything not `claude-*` (default `gemini-2.5-flash`) | topic scout, image agent | admin-set AI Studio key → Vertex ADC (`GOOGLE_GENAI_USE_VERTEXAI=true`, keyless on Cloud Run) → `GEMINI_API_KEY` |
+| **Claude subscription** (Claude Agent SDK) | `claude-*` (default **`claude-opus-5`**) | every article stage: researcher, keyword strategist, outliner, writer, SEO reviewer, editor — switchable in Settings | `claude setup-token` → paste in admin Settings, or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` in `.env` |
 
 The subscription token only works through the Agent SDK/CLI — it is not an API
-key, which is why the Claude engine is a separate execution path. Writer and
-editor follow the admin **Settings → Writer & editor use** toggle (Claude by
-default, graceful fallback to Gemini when no token is configured). Per-agent
-model overrides sit on top and can put any agent on either engine. Usage
-(tokens; USD only where a provider bills per call) is recorded per agent
+key, which is why the Claude engine is a separate execution path.
+
+Every stage whose judgement lands in the published piece runs on Opus 5, not
+just the two that write prose. The old split (writer + editor on Claude,
+research and review on the cheap model) had the economics backwards: a draft is
+capped by the quality of the brief behind it and the honesty of the review in
+front of it, so a weaker researcher or reviewer costs more than a weaker writer
+does. On a subscription the marginal cost of the better model is zero.
+
+The topic scout stays on Gemini — high-volume discovery that a human triages
+anyway — and so does the image agent, which needs that engine's vision and
+image generation.
+
+Article stages follow the admin **Settings → Article stages use** toggle
+(Claude by default, graceful fallback to Gemini when no token is configured).
+Per-agent model overrides sit on top and can put any agent on either engine.
+Usage (tokens; USD only where a provider bills per call) is recorded per agent
 session and aggregated in the admin panel.
 
 ## Autonomy: what runs by itself
@@ -86,8 +159,8 @@ session and aggregated in the admin panel.
 
 - `topics` — scout suggestions; `suggested → approved/rejected` (unique on
   normalized title = the "never repeat a topic" guard, alongside the D1 check)
-- `articles` — the work unit ("card"): stage, status, dossier/brief/draft/
-  review/frontmatter JSONB, revision round, error
+- `articles` — the work unit ("card"): stage, status, dossier/keyword plan/
+  brief/draft/review/frontmatter JSONB, revision round, error
 - `agent_sessions` — one row per agent run: model, tokens in/out, cost USD,
   duration, summary/error
 - `settings` — publish_mode, per-agent models, revision cap, worker toggle

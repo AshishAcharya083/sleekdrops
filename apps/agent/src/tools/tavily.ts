@@ -8,6 +8,31 @@ export interface SearchHit {
 }
 
 export async function tavilySearch(query: string, maxResults = 6): Promise<SearchHit[]> {
+  return (await tavilySerp(query, maxResults)).results;
+}
+
+export interface SerpRead {
+  query: string;
+  /** Ranked organic results — the closest thing to reading the SERP. */
+  results: SearchHit[];
+  /**
+   * Tavily's own generated answer for the query. Not an organic result: it is
+   * a live sample of what a generative engine currently says about this
+   * query, which is exactly what a GEO play has to earn a citation inside.
+   * Empty unless `withAnswer` was asked for.
+   */
+  answer: string;
+}
+
+/**
+ * One search, with the ranked results and (optionally) the generated answer.
+ * `tavilySearch` is the thin wrapper the researcher and scout still use.
+ */
+export async function tavilySerp(
+  query: string,
+  maxResults = 6,
+  withAnswer = false,
+): Promise<SerpRead> {
   if (!config.tavilyApiKey) {
     throw new Error('TAVILY_API_KEY is not set — add it to apps/agent/.env');
   }
@@ -19,17 +44,66 @@ export async function tavilySearch(query: string, maxResults = 6): Promise<Searc
       query,
       max_results: maxResults,
       search_depth: 'advanced',
+      ...(withAnswer ? { include_answer: true } : {}),
     }),
   });
   if (!res.ok) {
     throw new Error(`Tavily HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
   }
-  const json = (await res.json()) as { results?: Array<Record<string, string>> };
-  return (json.results ?? []).map((r) => ({
-    title: r.title ?? '',
-    url: r.url ?? '',
-    content: r.content ?? '',
-  }));
+  const json = (await res.json()) as {
+    results?: Array<Record<string, string>>;
+    answer?: string;
+  };
+  return {
+    query,
+    results: (json.results ?? []).map((r) => ({
+      title: r.title ?? '',
+      url: r.url ?? '',
+      content: r.content ?? '',
+    })),
+    answer: typeof json.answer === 'string' ? json.answer : '',
+  };
+}
+
+/** Several SERP reads at once, tolerating individual failures. */
+export async function tavilySerpMany(
+  queries: string[],
+  maxResults = 6,
+  withAnswer = false,
+): Promise<SerpRead[]> {
+  const settled = await Promise.allSettled(
+    queries.map((query) => tavilySerp(query, maxResults, withAnswer)),
+  );
+  return settled.map((outcome, i) =>
+    outcome.status === 'fulfilled' ? outcome.value : { query: queries[i], results: [], answer: '' },
+  );
+}
+
+/**
+ * Render SERP reads for a keyword-analysis prompt: ranked position, domain and
+ * the snippet, so the model can judge who holds the page and in what format.
+ */
+export function formatSerps(serps: SerpRead[]): string {
+  return serps
+    .map((serp) => {
+      const ranked =
+        serp.results.length === 0
+          ? '(no results)'
+          : serp.results
+              .map((r, i) => {
+                let domain = r.url;
+                try {
+                  domain = new URL(r.url).hostname.replace(/^www\./, '');
+                } catch {
+                  /* keep the raw string */
+                }
+                return `${i + 1}. ${r.title}\n   ${domain} — ${r.url}\n   ${r.content.slice(0, 400)}`;
+              })
+              .join('\n');
+      const answer = serp.answer ? `\nGenerated answer currently shown for this query:\n${serp.answer}\n` : '';
+      return `### SERP: "${serp.query}"\n${ranked}${answer}`;
+    })
+    .join('\n\n');
 }
 
 export interface ImageHit {

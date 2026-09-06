@@ -2,6 +2,7 @@
 
 export type Stage =
   | 'research'
+  | 'keyword'
   | 'outline'
   | 'write'
   | 'seo_review'
@@ -30,6 +31,8 @@ export interface ArticleRow {
   status: ArticleStatus;
   revision_round: number;
   research: ResearchDossier | null;
+  /** Live SERP read: which keyword we're built to win, and what it takes. */
+  keyword_plan: KeywordPlan | null;
   outline: ContentBrief | null;
   draft_md: string | null;
   seo_review: SeoReview | null;
@@ -103,6 +106,47 @@ export interface ResearchDossier {
   faqIdeas: Array<{ question: string; answerHint: string }>;
 }
 
+/**
+ * Output of the keyword strategist — a keyword-deep-dive over the live SERP
+ * rather than a guess from the dossier. Everything downstream (brief, draft,
+ * review) is built against this, so the piece targets a query we can actually
+ * win instead of the prettiest phrase in the research.
+ */
+export interface KeywordPlan {
+  /** The one query the piece is built to rank for. */
+  primaryKeyword: string;
+  /** Why this candidate beat the others we checked. */
+  rationale: string;
+  /** Informational | Commercial Investigation | Transactional | Navigational */
+  intent: string;
+  /** Read off the SERP competition, not a tool score. */
+  difficulty: 'Easy' | 'Moderate' | 'Hard';
+  /** How much of this query's traffic never leaves Google. */
+  zeroClickRisk: 'Low' | 'Medium' | 'High';
+  /** Featured snippet, People Also Ask, AI Overview, image pack, ... */
+  serpFeatures: string[];
+  /** The content type the SERP rewards — match it or lose. */
+  winningFormat: string;
+  /** Average length of the top results plus ~10%. */
+  wordCountTarget: number;
+  secondaryKeywords: string[];
+  /** Long-tail questions to answer as H2/H3 with an extractable block. */
+  paaQuestions: string[];
+  /** Named things the top pages cover; naming them is what GEO rewards. */
+  entities: string[];
+  competitors: Array<{ url: string; format: string; angle: string; strength: string }>;
+  /** Subtopics the top results handle badly — our information gain. */
+  contentGaps: string[];
+  /** The extractable answer block we're trying to win the snippet with. */
+  snippetTarget: { question: string; format: 'paragraph' | 'list' | 'table'; answer: string };
+  /** What a generative engine says about this query today, if we saw one. */
+  currentAiAnswer: string;
+  titleOptions: string[];
+  metaDescription: string;
+  /** Candidates that lost, and why — shown in the admin panel. */
+  rejected: Array<{ keyword: string; reason: string }>;
+}
+
 export interface ContentBrief {
   seoTitle: string;
   dek: string;
@@ -123,6 +167,25 @@ export interface SeoReview {
   pass: boolean;
   issues: Array<{ severity: 'high' | 'medium' | 'low'; issue: string; fix: string }>;
   summary: string;
+  /**
+   * Per-dimension scores. One number hid which axis was failing, so an editor
+   * pass had to guess; these say whether the problem is search, citability,
+   * voice, trust or the affiliate contract.
+   */
+  dimensions?: {
+    /** Classic search: keyword placement, headings, intent match, depth. */
+    seo: number;
+    /** Generative-engine citability: extractable answers, sourcing, entities. */
+    geo: number;
+    /** Reads human. Mirrors the deterministic anti-slop scan. */
+    voice: number;
+    /** Experience, expertise, authority, trust. */
+    eeat: number;
+    /** /go/ link contract and placement rules. */
+    links: number;
+  };
+  /** Deterministic anti-slop scan, run before the model sees the draft. */
+  slop?: { score: number; words: number; findings: number };
   /** Set by the runner when revision rounds ran out but we shipped anyway. */
   forcedThrough?: boolean;
 }
