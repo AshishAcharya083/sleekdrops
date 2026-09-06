@@ -38,11 +38,7 @@ export function Pipeline() {
                     {a.seo_score && <span className="badge">SEO {a.seo_score}</span>}
                     {a.hero_image_url && <span className="badge violet">🖼️ hero</span>}
                   </div>
-                  {a.error && (
-                    <div className="muted" style={{ color: 'var(--red)', marginTop: 6, fontSize: 12 }}>
-                      {a.error.slice(0, 120)}
-                    </div>
-                  )}
+                  {a.error && <div className="err">{a.error.slice(0, 120)}</div>}
                 </div>
               ))}
               {items.length === 0 && <p className="muted" style={{ padding: '4px 6px', fontSize: 12 }}>empty</p>}

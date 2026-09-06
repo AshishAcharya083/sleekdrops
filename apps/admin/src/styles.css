@@ -133,14 +133,19 @@ button.btn.approve-inline {
 
 .board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 @media (max-width: 1000px) { .board { grid-template-columns: repeat(2, 1fr); } }
-.lane { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+@media (max-width: 480px) { .board { grid-template-columns: 1fr; } }
+/* min-width: 0 - a 1fr track is floored at its content's min-content width, so
+   without this an article title or error with no spaces widens the whole page. */
+.lane { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-width: 0; }
 .lane h4 { margin: 2px 4px 10px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .lane .count { float: right; color: var(--text); }
 .cardlet {
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
   padding: 10px; margin-bottom: 8px; cursor: pointer; font-size: 13px;
+  overflow-wrap: anywhere;
 }
 .cardlet:hover { border-color: var(--accent); }
+.cardlet .err { color: var(--red); font-size: 12px; margin-top: 6px; }
 .cardlet .meta { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 
 .topic-row { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border-bottom: 1px solid var(--border); }
