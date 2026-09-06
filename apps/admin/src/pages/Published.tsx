@@ -59,7 +59,7 @@ export function Published() {
       {error && <div className="error-banner">API unreachable: {error}</div>}
       {err && <div className="error-banner">{err}</div>}
       {notice && <div className="card" style={{ padding: 10, marginBottom: 12 }}>{notice}</div>}
-      <div className="card" style={{ padding: 0 }}>
+      <div className="card table-scroll" tabIndex={0} role="region" aria-label="Published posts">
         <table>
           <thead>
             <tr>

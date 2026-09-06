@@ -200,7 +200,7 @@ export function Topics() {
       {others.length > 0 && (
         <div className="section">
           <h2>Decided</h2>
-          <div className="card" style={{ padding: 0 }}>
+          <div className="card table-scroll" tabIndex={0} role="region" aria-label="Decided topics">
             <table>
               <thead>
                 <tr>

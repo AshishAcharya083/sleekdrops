@@ -10,7 +10,7 @@ export function Sessions() {
   return (
     <>
       {error && <div className="error-banner">API unreachable: {error}</div>}
-      <div className="card" style={{ padding: 0 }}>
+      <div className="card table-scroll" tabIndex={0} role="region" aria-label="Agent sessions">
         <table>
           <thead>
             <tr>
