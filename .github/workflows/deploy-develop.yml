@@ -70,6 +70,23 @@ jobs:
           # In-app feedback widget - develop only. It is a visible control on the
           # page, so production stays without it until we have looked at it here.
           PUBLIC_DEVTEAM_ANALYTICS_FEEDBACK: 'true'
+          # Google Analytics 4 - the measurement id of the property THIS
+          # environment reports into, read from the matching GitHub Environment
+          # (develop) so develop and production carry different values under one
+          # name. Public: it ships in the JS bundle every visitor downloads, so
+          # it is a repo/environment *variable* rather than a secret.
+          #
+          # Per environment for the reason the AdSense ids are: one property
+          # receiving both sites means every figure production is judged on -
+          # sessions, conversion rate, the affiliate click-through - is inflated
+          # by preview traffic, and nothing in GA4 can separate the two after the
+          # fact beyond a hostname filter nobody remembers to apply.
+          #
+          # An empty value (or anything that is not a `G-` measurement id)
+          # disables GA4 silently after one console warning: gtag.js is never
+          # requested and no `_ga` cookie is written. The DevTeam sink is
+          # unaffected, and so is the rest of the site.
+          PUBLIC_GA4_ID: ${{ vars.GA4_MEASUREMENT_ID }}
           # DevTeam A/B Testing - flag-delivery host + per-environment client key.
           # Held in repo settings for the same reason as the ingest key above: the
           # key is minted per environment in the A/B Testing tab and a stale one

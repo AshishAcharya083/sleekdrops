@@ -40,11 +40,23 @@ import { CONSENT_KEY, POLICY_VERSION, parseConsent } from './consent.ts';
  * key and host it creates its client with. An empty key disables the sink, so
  * without this the module under test would have no client at all.
  */
+let devteamKey = 'dtp_test';
+
 mock.module(new URL('./analytics-env.ts', import.meta.url).href, {
   namedExports: {
-    analyticsEnv: () => ({ key: 'dtp_test', host: 'http://analytics.test' }),
+    analyticsEnv: () => ({ key: devteamKey, host: 'http://analytics.test' }),
   },
 });
+
+/** Run `body` against a build that was given no DevTeam ingest key. */
+async function noDevteamKey(body: () => Promise<void> | void): Promise<void> {
+  devteamKey = '';
+  try {
+    await body();
+  } finally {
+    devteamKey = 'dtp_test';
+  }
+}
 
 /**
  * The same for `./ads`, which is imported here for one thing only: the ad gate
@@ -60,6 +72,28 @@ mock.module(new URL('./ads-env.ts', import.meta.url).href, {
     }),
   },
 });
+
+/**
+ * The GA4 property this build reports into. Substituted for the same reason the
+ * two above are - `import.meta.env` does not exist under the bare runner - and
+ * held in a mutable binding because "no measurement id" is a supported build
+ * state with its own behaviour, which `noGa4Property` below drives.
+ */
+let ga4Property = 'G-TEST123456';
+
+mock.module(new URL('./ga-env.ts', import.meta.url).href, {
+  namedExports: { gaEnv: () => ({ id: ga4Property }) },
+});
+
+/** Run `body` against a build that was given no GA4 measurement id. */
+async function noGa4Property(body: () => Promise<void> | void): Promise<void> {
+  ga4Property = '';
+  try {
+    await body();
+  } finally {
+    ga4Property = 'G-TEST123456';
+  }
+}
 
 const ads = await import('./ads.ts');
 
@@ -163,9 +197,36 @@ interface GoogleTagWindow {
  * the queue instead.
  */
 function queuedConsentSignals(window: GoogleTagWindow): unknown[] {
-  return (window.dataLayer ?? [])
-    .map((entry) => Array.from(entry as ArrayLike<unknown>))
-    .filter((args) => args[0] === 'consent');
+  return gtagCommands(window).filter((args) => args[0] === 'consent');
+}
+
+/**
+ * Every gtag command this page queued, as `[command, ...args]`. gtag.js is a
+ * `dataLayer.push(arguments)` shim, so the queue *is* what the tag will send -
+ * reading it is how a hit is asserted without executing Google's script.
+ */
+const gtagCommands = (window: GoogleTagWindow): unknown[][] =>
+  (window.dataLayer ?? []).map((entry) => Array.from(entry as ArrayLike<unknown>));
+
+/** The hits queued for GA4, in the order the tag would send them. */
+const gtagEvents = (
+  window: GoogleTagWindow,
+): { name: string; params: Record<string, unknown> }[] =>
+  gtagCommands(window)
+    .filter((args) => args[0] === 'event')
+    .map((args) => ({
+      name: String(args[1]),
+      params: (args[2] ?? {}) as Record<string, unknown>,
+    }));
+
+const gtagEventNames = (window: GoogleTagWindow): string[] =>
+  gtagEvents(window).map((event) => event.name);
+
+/** The parameters the document's one `gtag('config', ...)` command carries. */
+function gtagConfig(window: GoogleTagWindow): Record<string, unknown> {
+  const configs = gtagCommands(window).filter((args) => args[0] === 'config');
+  assert.equal(configs.length, 1, 'expected exactly one gtag config per document');
+  return (configs[0][2] ?? {}) as Record<string, unknown>;
 }
 
 /**
@@ -855,4 +916,154 @@ test('chrome.ts dispatches the page view only through the guarded entry point', 
     /\btrack\(\s*EVENTS\.pageView/,
     'the page view must go through trackPageView, which holds the one-per-document guard',
   );
+});
+
+/**
+ * The GA4 sink, asserted on the queue gtag.js actually sends from.
+ *
+ * Everything below matters because GA4 answers a hit it cannot use with a 2xx
+ * and drops it: a mis-named event, a `$`-prefixed parameter and a property that
+ * was never configured all look identical in the browser, and identical to a
+ * working integration, surfacing only as a report that stays empty.
+ */
+
+test('every tracked event reaches GA4, under the name GA4 can count', async () => {
+  // The gap this closes: GA4 used to receive the `config` page view and nothing
+  // else, so the outbound affiliate click - the site's primary conversion - was
+  // measurable in DevTeam and entirely absent from GA4.
+  const tab = openTab();
+  const { window } = loadPage(tab, '/deals/foo');
+  chrome.grantConsent();
+
+  chrome.track('Affiliate Link Clicked', {
+    slug: 'a-deal',
+    placement: 'sidebar',
+    position: 2,
+    // Dropped by the PII scrub before either sink sees it, so its absence from
+    // GA4 is the scrub holding rather than the GA4 mapping hiding it.
+    email: 'someone@example.com',
+  });
+  chrome.track('Theme Toggled', { theme: 'dark' });
+  await flush();
+
+  assert.deepEqual(gtagEventNames(window), ['affiliate_link_clicked', 'theme_toggled']);
+  const click = gtagEvents(window)[0].params;
+  assert.equal(click.slug, 'a-deal');
+  assert.equal(click.placement, 'sidebar');
+  assert.equal(click.position, 2);
+  assert.equal(click.send_to, ga4Property, 'the hit must name the property it is for');
+  assert.equal(click.email, undefined, 'the scrub runs before both sinks, not after one');
+  // Both sinks were fed from the one scrubbed payload, so they cannot disagree.
+  assert.deepEqual(names(tab), [SESSION_START, 'Affiliate Link Clicked', 'Theme Toggled']);
+});
+
+test('the page view reaches GA4 once, as GA4 own page_view', async () => {
+  // `config` would send a page view of its own, and the site dispatches one that
+  // carries the screen, slug and brand. Two would be a page counted twice; the
+  // bare one alone would be a page counted without any of its dimensions.
+  const tab = openTab();
+  const { window } = loadPage(tab, '/deals/foo');
+  chrome.grantConsent();
+
+  chrome.trackPageView({ referrer: '', screen: 'deal-detail', slug: 'a-deal' });
+  chrome.trackPageView({ referrer: '', screen: 'deal-detail', slug: 'a-deal' });
+  await flush();
+
+  assert.equal(gtagConfig(window).send_page_view, false, 'the tag must not send its own');
+  assert.deepEqual(gtagEventNames(window), ['page_view']);
+  const view = gtagEvents(window)[0].params;
+  assert.equal(view.screen, 'deal-detail');
+  assert.equal(view.slug, 'a-deal');
+  assert.equal(view.path, '/deals/foo');
+});
+
+test('a page view buffered before consent still reaches GA4 when it is granted', async () => {
+  // The banner-accept path: the view is recorded before the tag exists, and the
+  // grant loads the tag and then drains the buffer. An order that drained first
+  // would lose the site's only page view for that document in GA4.
+  const tab = openTab();
+  const { window } = loadPage(tab, '/');
+
+  chrome.boot();
+  chrome.trackPageView({ referrer: '', screen: 'home' });
+  assert.deepEqual(gtagEventNames(window), [], 'nothing may reach GA4 before consent');
+
+  banner.grantConsent();
+  await flush();
+
+  assert.deepEqual(gtagEventNames(window), ['page_view']);
+});
+
+test('GA4 is told the normalized page, never the raw query string', async () => {
+  // GA4 would otherwise auto-capture location.href and document.referrer
+  // verbatim. `config` parameters apply to every later event from the tag, so
+  // one override covers the whole document rather than only the first hit.
+  const tab = openTab();
+  const { window } = loadPage(tab, '/deals/foo');
+  Object.assign(globalThis.location, {
+    href: 'https://sleekdrops.com/deals/foo/?utm_term=someone%40example.com&q=secret',
+  });
+  chrome.grantConsent();
+
+  const config = gtagConfig(window);
+  assert.equal(config.page_location, 'https://sleekdrops.com/deals/foo');
+  assert.equal(config.page_referrer, '', 'a direct visit is reported as one');
+});
+
+test('an experiment stamp survives the rename GA4 forces on it', async () => {
+  // `$exp_*` is the shape the platform stamps and the shape GA4 rejects outright.
+  // Without the rename every experiment on the site would be measurable in
+  // DevTeam and invisible in GA4 - with nothing anywhere looking broken.
+  const tab = openTab();
+  const { window } = loadPage(tab, '/');
+  chrome.grantConsent();
+
+  chrome.track('$experiment_viewed', {
+    experiment_key: 'hero_cta_copy',
+    variant_key: 'treatment',
+  });
+  await flush();
+
+  assert.deepEqual(gtagEventNames(window), ['experiment_viewed']);
+  assert.equal(gtagEvents(window)[0].params.experiment_key, 'hero_cta_copy');
+});
+
+test('a build with no measurement id tags the document with nothing', async () => {
+  // The state every local `pnpm dev` is in, and the state an environment is in
+  // before its property exists. It has to cost the page nothing at all: no
+  // third-party script, no `_ga` cookie, and no effect on the other sink.
+  await noGa4Property(async () => {
+    const tab = openTab();
+    const { scripts, window } = loadPage(tab, '/');
+    chrome.grantConsent();
+    chrome.trackPageView({ referrer: '', screen: 'home' });
+    await flush();
+
+    assert.deepEqual(ga4Tags(scripts), [], 'no measurement id means no gtag.js');
+    assert.deepEqual(gtagCommands(window), []);
+    assert.deepEqual(names(tab), [SESSION_START, PAGE_VIEW], 'the DevTeam sink is unaffected');
+    assert.equal(
+      logsSaying(tab, 'GA4 NOT configured').length,
+      1,
+      'and the reason is said once, not left to be inferred from an empty report',
+    );
+  });
+});
+
+test('GA4 still counts when the DevTeam sink is the one left unconfigured', async () => {
+  // The mirror image, and the reason the GA4 forward sits outside the client
+  // guard in send(): an empty ingest key is a supported state that disables one
+  // sink, and reading it as "send nothing anywhere" would leave a correctly
+  // configured GA4 property receiving not one funnel event.
+  await noDevteamKey(async () => {
+    const tab = openTab();
+    const { scripts, window } = loadPage(tab, '/');
+    chrome.grantConsent();
+    chrome.trackPageView({ referrer: '', screen: 'home' });
+    chrome.track(HERO_CTA, { cta: 'Read the latest' });
+
+    assert.equal(ga4Tags(scripts).length, 1);
+    assert.deepEqual(gtagEventNames(window), ['page_view', 'hero_cta_clicked']);
+    assert.deepEqual(tab.events, [], 'and nothing was sent to the sink that has no key');
+  });
 });

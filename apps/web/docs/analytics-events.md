@@ -36,6 +36,31 @@ Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../sr
 
 DevTeam Analytics is initialised with `sendBeacon` transport so a click event still reaches the server when the click immediately navigates the page away.
 
+### The two sinks, and how one payload reaches both
+
+Every event is scrubbed **once** at the `send()` chokepoint in [`src/lib/analytics.ts`](../src/lib/analytics.ts) and handed to both sinks from that one payload, so DevTeam Analytics and GA4 can never disagree about what was sent.
+Neither is conditional on the other being configured: an empty `PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY` disables the DevTeam sink and leaves GA4 counting, and an empty `PUBLIC_GA4_ID` does the reverse.
+
+GA4 is reached through [`src/lib/ga.ts`](../src/lib/ga.ts), the only module in the site that touches gtag.js.
+Which property it reports into is per-environment build configuration ([`src/lib/ga-env.ts`](../src/lib/ga-env.ts) reading `PUBLIC_GA4_ID`), never a constant — develop and production have their own, and a local `pnpm dev` has none and so tags nothing. See [`docs/deployment.md`](./deployment.md).
+
+GA4 accepts neither this document's Title Case names nor the `$`-prefixed platform namespace, and it answers a hit it cannot use with a `2xx` and drops it — so a mis-named event looks exactly like a working integration and surfaces only as a report that stays empty.
+`ga.ts` therefore owns a mapping that is pure, unit-tested and enforced:
+
+- **Event names** are the Title Case name lowercased with every run of non-alphanumerics collapsed to `_` (`TOC Link Clicked` → `toc_link_clicked`), derived mechanically so an event added to `EVENTS` reaches GA4 without a second edit anyone could forget.
+  Three names are contracts instead: `Page Viewed` → **`page_view`** (GA4's own event, the one every standard report is built on), `$experiment_viewed` → `experiment_viewed`, `$client_error` → `client_error`.
+  A name GA4 reserves (`error`, `session_start`, `user_engagement`, the `ga_`/`google_`/`firebase_` prefixes) or cannot parse is **not sent**, with one warning naming it.
+- **Parameter names** lose a leading `$`, so the sticky `$exp_<key>` stamps arrive as `exp_<key>` — without that, every experiment would be measurable in DevTeam and invisible in GA4.
+  This runs *after* `scrub()` and never instead of it: the scrub decides what may leave the browser, this decides only how GA4 spells what the scrub already released.
+- **Limits** are applied here rather than left to Google: values truncate at 100 characters and an event keeps at most 25 parameters, taken in payload order — so surplus experiment stamps are what drops, never a funnel dimension.
+
+Because the site dispatches its own page view (once per document per path, carrying `screen`, `category`, `slug` and `brand`), the tag is configured with `send_page_view: false` and that dispatch **is** GA4's `page_view`.
+The tag is also configured with a path-only `page_location` and `page_referrer`, and `config` parameters apply to every later event, so raw query strings never reach Google on any hit.
+
+GA4 is requested only after an analytics opt-in — stricter than Google Consent Mode, which loads the tag and asks it to restrict itself — so this site sends no Consent Mode signal.
+A withdrawal sets `ga-disable-<id>` and deletes the `_ga` cookies in the same page load.
+`Affiliate Redirect Served` never reaches GA4 at all: it is emitted server-side by a Pages Function, which has no browser to run gtag.js in.
+
 ### The taxonomy is enforced, not just documented
 
 "Keep this doc and the code in sync" is a build failure rather than a convention.
