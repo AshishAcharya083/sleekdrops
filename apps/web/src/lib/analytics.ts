@@ -22,6 +22,14 @@
  * read and enforced by `./ads`, which has no dependency on this module or on the
  * analytics SDKs.
  *
+ * Two sinks hang off that one gate and off one payload. `send()` scrubs an event
+ * once and hands the result to the DevTeam client and, through the `./ga`
+ * chokepoint, to GA4 - so the two never disagree about what was sent, and neither
+ * depends on the other being configured. Which GA4 property receives it is
+ * per-environment build configuration (`./ga-env`), never a constant: develop and
+ * production report into their own properties and a local `pnpm dev`, which has
+ * no measurement id, reports into nothing.
+ *
  * A/B testing hangs off the same gate at both ends: `./experiments` is started
  * from the grant path with the DevTeam SDK's own distinct id and stopped from the
  * withdrawal path, and the sticky `$exp_*` stamps it hands back are merged into
@@ -65,9 +73,10 @@ import {
   type ConsentPrompt,
   type ConsentStatus,
 } from './consent.ts';
+import { sendGa, setGaOptOut, startGa, stopGa } from './ga.ts';
 import { hasPrivacySignal } from './privacy-signal.ts';
 import { whenDistinctIdRestored } from './distinct-id.ts';
-import { scrub, urlToPath, CLIENT_ERROR_EVENT, type EventProps } from './pii.ts';
+import { scrub, CLIENT_ERROR_EVENT, type EventProps } from './pii.ts';
 import { clearVisit, newEventId, normalizePath, touchVisit, type VisitStorage } from './visit.ts';
 import {
   ErrorDeduper,
@@ -85,14 +94,6 @@ import {
 } from './experiments.ts';
 
 export type { EventProps, ConsentPrompt };
-
-const GA4_ID = 'G-8B65NZ3BD4';
-
-/** gtag.js's documented per-property kill switch: set truthy and the tag sends nothing. */
-const GA_DISABLE_FLAG = `ga-disable-${GA4_ID}`;
-
-/** GA4's identifier cookies - `_ga` and the per-property `_ga_<container>`. */
-const GA_COOKIE = /^_ga(_|$)/;
 
 /**
  * The product event taxonomy. Every track call uses one of these names so the
@@ -188,77 +189,19 @@ function writeConsent(grants: ConsentGrants): void {
 }
 
 /**
- * Turn the GA4 tag off - or, on a re-grant, back on - for the rest of this
- * document.
+ * Load gtag.js for this document's build, once.
  *
- * Withdrawal cannot take gtag.js away: the script stays in the DOM, `window.gtag`
- * stays callable, and the tag goes on emitting on its own (a `user_engagement` on
- * every visibility change and unload, plus whatever enhanced measurement the
- * property has switched on). Its opt-out flag is the only thing that stops it.
- * Setting it back to false matters just as much - `ensureGa()` is a no-op once the
- * tag is loaded, so a visitor who withdraws and opts back in on the same page would
- * otherwise stay silently opted out of the sink they just re-consented to.
+ * Withdrawal cannot take the tag away again: the script stays in the DOM,
+ * `window.gtag` stays callable, and it goes on emitting on its own (a
+ * `user_engagement` on every visibility change and unload, plus whatever enhanced
+ * measurement the property has switched on). That is why the grant path pairs
+ * this with the opt-out flag rather than relying on the load guard - see
+ * `./ga`, which owns both.
  */
-function setGaOptOut(disabled: boolean): void {
-  if (typeof window === 'undefined') return;
-  (window as unknown as Record<string, boolean>)[GA_DISABLE_FLAG] = disabled;
-}
-
-/**
- * Expire GA4's identifier cookies. gtag.js writes them with `path=/` on the
- * registrable domain, which is not necessarily the host this page is served from,
- * and a cookie is only removed by a write matching the pair it was set with - so
- * every domain this host could have used is tried. A write for a domain the page
- * is not allowed to set is dropped by the browser.
- */
-function forgetGaCookies(): void {
-  if (typeof document === 'undefined' || typeof document.cookie !== 'string') return;
-  const names = document.cookie
-    .split(';')
-    .map((pair) => pair.split('=')[0].trim())
-    .filter((name) => GA_COOKIE.test(name));
-  if (names.length === 0) return;
-  const labels = (typeof location === 'undefined' ? '' : location.hostname).split('.');
-  // Every parent domain down to - but not including - the public suffix, which no
-  // site is allowed to write, plus the host itself (no domain attribute at all).
-  const parents = labels.slice(0, -1).map((_, index) => `; domain=.${labels.slice(index).join('.')}`);
-  names.forEach((name) => {
-    ['', ...parents].forEach((domain) => {
-      document.cookie = `${name}=; path=/; max-age=0${domain}`;
-    });
-  });
-}
-
-/** Stop the GA4 sink and take its identifier cookies with it. */
-function stopGa(): void {
-  setGaOptOut(true);
-  forgetGaCookies();
-}
-
 function ensureGa(): void {
   const s = scope();
-  if (s.gaReady || typeof document === 'undefined') return;
-  s.gaReady = true;
-  const tag = document.createElement('script');
-  tag.async = true;
-  tag.src = `https://www.googletagmanager.com/gtag/js?id=${GA4_ID}`;
-  document.head.appendChild(tag);
-  const w = window as Window & { dataLayer?: unknown[]; gtag?: (...a: unknown[]) => void };
-  w.dataLayer = w.dataLayer || [];
-  w.gtag = function gtag(): void {
-    w.dataLayer!.push(arguments);
-  };
-  w.gtag('js', new Date());
-  // Override the page params GA4 would otherwise auto-capture so raw query
-  // strings (which can carry PII) never reach Google - path only. The page
-  // identity is normalized, exactly as the `Page Viewed` event's `path` is, so a
-  // slash-suffixed entry URL does not split GA4's page count either; the referrer
-  // gets the same plain reduction as the event's, so the two sinks agree.
-  w.gtag('config', GA4_ID, {
-    page_location: location.origin + normalizePath(location.href),
-    page_referrer: urlToPath(document.referrer),
-  });
-  serverLog('info', 'GA4 initialized -> ' + GA4_ID);
+  if (s.gaReady) return;
+  s.gaReady = startGa(serverLog);
 }
 
 /**
@@ -356,8 +299,6 @@ function visitStamp(): EventProps {
 }
 
 function send(item: QueuedEvent<TrackableEvent>): void {
-  const client = scope().client;
-  if (!client) return;
   // The theme stamp goes in first, so the one call site that carries a more
   // precise per-event value ('Theme Toggled', which records the mode switched
   // to) keeps it; the two agree by construction anyway, since toggleTheme sets
@@ -365,6 +306,14 @@ function send(item: QueuedEvent<TrackableEvent>): void {
   // the call site. The visit and experiment stamps go in last so no call site can
   // shadow the two keys the platform counts on.
   const props = scrub({ ...themeStamp(), ...item.props, ...visitStamp(), ...stickyProps() }, item.event);
+  // Both sinks from the one scrubbed payload, and neither conditional on the
+  // other. GA4 goes first and outside the client guard on purpose: an empty
+  // DevTeam ingest key is a supported state (it disables that sink silently), and
+  // reading it as "send nothing anywhere" is what would leave a correctly
+  // configured GA4 property receiving page views and not one funnel event.
+  sendGa(item.event, props, serverLog);
+  const client = scope().client;
+  if (!client) return;
   client.track(item.event, props);
   console.info('[analytics] event sent:', item.event, props);
 }
@@ -435,9 +384,15 @@ function applyGrant(): void {
   // is attributed to the variants this visitor was bucketed into on an earlier
   // page load.
   restoreStickyProps();
+  // The DevTeam client before the GA4 tag, so that `serverLog` has somewhere to
+  // forward to by the time the tag reports whether it came up. Which property a
+  // build tagged the document with - or that it had no measurement id to tag it
+  // with at all - is the first thing worth knowing when a GA4 report reads empty,
+  // and the Logs view is where it is reachable after the fact; console-only, it
+  // is gone the moment the visitor closes the tab.
+  ensureDevteam();
   setGaOptOut(false);
   ensureGa();
-  ensureDevteam();
   serverLog('info', 'consent granted - analytics active');
   drainBuffer(s).forEach(send);
   startExperimentsForVisitor();

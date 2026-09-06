@@ -47,6 +47,30 @@ The same pair is also uploaded to the Pages project as **runtime** variables, by
 That step exists because the `PUBLIC_` values above are inlined into the browser bundle by Vite and never reach a Pages Function, and `functions/go/[slug].js` — which counts the outbound affiliate click, the site's primary conversion — reads them from `context.env` at request time.
 Both go up as secrets because wrangler has no command for a plain-text Pages variable and a secret reads back through `context.env` identically; nothing is committed to `wrangler.toml` or to the repo, an empty value is skipped, and an empty key leaves the Function's sink off while the 302 is still served.
 
+### Google Analytics 4 (required for GA4 to count anything)
+
+Both deploy workflows pass this into the web build as `PUBLIC_GA4_ID`.
+
+| Repo setting          | Kind         | What it is                                                                                          |
+| --------------------- | ------------ | ----------------------------------------------------------------------------------------------------- |
+| `GA4_MEASUREMENT_ID`  | **variable** | The measurement id of the property **this environment** reports into, `G-…`, from GA4 → Admin → Data streams → Web. |
+
+**Scope it per GitHub Environment (`develop` / `production`), not as a repo variable** — that is the entire point of the setting.
+One property receiving both sites means every figure production is judged on (sessions, conversion rate, the affiliate click-through rate) is inflated by preview traffic, and nothing in GA4 separates the two after the fact beyond a hostname filter nobody remembers to apply.
+Set it under **Settings → Environments → `develop` → Environment variables**, and again under `production`; `vars.GA4_MEASUREMENT_ID` then resolves to whichever one the running job is deploying to.
+
+It is a **variable**, not a secret: it is a `PUBLIC_`-prefixed Astro value inlined verbatim into the JS bundle every visitor downloads, and Google treats it as a public identifier.
+
+Leaving it unset is a supported state, and is what a local `pnpm dev` runs in.
+The build then disables GA4 after a single `[analytics]` console warning (also forwarded to the DevTeam Logs view): gtag.js is never requested, no `_ga` cookie is written, and nothing else about the site changes.
+That is deliberate — a developer's laptop and a preview deploy must not be able to land traffic in the reports the site is actually judged on.
+
+Anything that is not a `G-` measurement id reads as unset and is refused with that same warning rather than tagging the document with it.
+A Universal Analytics property (`UA-…`), a Tag Manager container (`GTM-…`) or a lowercase paste names no property gtag.js can report into, so loading the tag for one can only produce a page that looks healthy while Google discards every hit.
+
+GA4 loads only for a visitor who accepted analytics — the tag is not requested before consent, which is stricter than Google Consent Mode (that loads the tag and asks it to restrict itself), so no Consent Mode signal is sent or needed.
+A withdrawal sets the tag's own `ga-disable-<id>` flag and deletes its `_ga` cookies in the same page load.
+
 ### DevTeam A/B Testing (required for experiments to run)
 
 Both deploy workflows pass these into the web build as `PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY` / `PUBLIC_DEVTEAM_FLAGS_HOST`.

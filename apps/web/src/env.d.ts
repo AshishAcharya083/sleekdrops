@@ -3,6 +3,12 @@
 interface ImportMetaEnv {
   readonly SITE_URL?: string;
   readonly BLOG_API_URL?: string;
+  /**
+   * Google Analytics 4 measurement id (`G-...`) for THIS environment's property.
+   * Empty - or anything that is not a `G-` measurement id - disables the GA4
+   * sink silently after one warning.
+   */
+  readonly PUBLIC_GA4_ID?: string;
   /** DevTeam Analytics public ingest key (dtp_...). Empty disables the sink. */
   readonly PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY?: string;
   /** DevTeam Analytics ingest host. Defaults to http://localhost:6080. */
