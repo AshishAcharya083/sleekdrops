@@ -68,7 +68,7 @@ project; there are no develop/production splits anywhere except the website.
 
 | What                                              | Where                                            | Trigger                                      |
 | ------------------------------------------------- | ------------------------------------------------ | -------------------------------------------- |
-| Agent platform (API + worker + scheduler + admin) | Cloud Run `sleekdrops-agent`, us-central1        | `gcloud run deploy` (see below)              |
+| Agent platform (API + worker + scheduler + admin) | Cloud Run `sleekdrops-agent`, us-central1        | push to `develop` touching `apps/agent`, `apps/admin` or the Dockerfile |
 | Pipeline state                                    | Cloud SQL Postgres `sleekdrops-pg` (db-f1-micro) | —                                            |
 | Secrets (Tavily, D1 token, admin token)           | GCP Secret Manager                               | —                                            |
 | Admin panel                                       | sleekdrops-admin.pages.dev                       | push to `develop` touching `apps/admin`      |
@@ -79,11 +79,25 @@ Gemini calls on Cloud Run go through **Vertex AI with the service account's
 ADC** — no API key anywhere. The Claude subscription token is pasted in admin
 Settings (stored in Postgres) or set as the `CLAUDE_CODE_OAUTH_TOKEN` env var.
 
-Redeploy after code changes:
+Redeploying is automatic: a push to `develop` that touches `apps/agent`,
+`apps/admin`, the Dockerfile or the lockfile runs
+[`deploy-agent.yml`](.github/workflows/deploy-agent.yml), which type-checks and
+tests the platform, builds the admin panel into the image, pushes it to
+Artifact Registry and rolls out a new Cloud Run revision — then health-checks
+it. The container migrates the database on boot, so a green check also means
+migrations applied.
 
-```bash
-gcloud run deploy sleekdrops-agent --source . --region us-central1 --project sleekdrops
-```
+GitHub authenticates to GCP with **Workload Identity Federation** — its OIDC
+token is exchanged for short-lived credentials, so there is no service-account
+key in the repo. The provider is pinned to this repository, and
+`github-deployer@sleekdrops.iam.gserviceaccount.com` may only push to Artifact
+Registry, deploy Cloud Run, and act as the agent's runtime service account.
+
+Deploying by image alone leaves the rest of the service untouched — runtime
+service account, min-instances, and the Secret Manager wiring for
+`DATABASE_URL`, `ADMIN_TOKEN`, `TAVILY_API_KEY`, `CLOUDFLARE_D1_TOKEN` and
+`GITHUB_TOKEN`. Change those with `gcloud run services update`, never with
+`--set-env-vars` in the workflow (that flag replaces the whole set).
 
 The hosted admin panel is pre-pointed at the Cloud Run URL (baked in at build
 time via `VITE_API_BASE`); paste the admin token (Secret Manager `admin-token`)
@@ -93,22 +107,30 @@ into its header field once. The **API base** field still accepts
 See [`apps/agent/README.md`](apps/agent/README.md) for the pipeline design and
 [`apps/web/README.md`](apps/web/README.md) for the editorial rules.
 
-###to deploy
-cd ../.. # back to repo root (…/sleekdrops)
+### Manual deploy (fallback)
+
+Two constraints shaped this, and they are why `gcloud run deploy --source`
+isn't used: the default compute service account lacks
+`roles/cloudbuild.builds.builder` on the run-sources bucket, and esbuild's Go
+runtime crashes under the QEMU amd64 emulation a cross-build from Apple
+Silicon needs — so the admin panel is built natively first and the image is
+built with buildx.
+
+```bash
+# from the repo root, with N one past the highest existing tag
+pnpm --filter @sleekdrops/admin build
 
 docker buildx build --platform linux/amd64 \
- -t us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent:v2 \
- --push .
+  -t us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent:vN \
+  --push .
 
 gcloud run deploy sleekdrops-agent \
- --image us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent:v2 \
- --region us-central1
+  --image us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent:vN \
+  --region us-central1 --project sleekdrops
+```
 
-## to deploy at once in cloud run
+The admin token for the hosted panel:
 
-gcloud projects add-iam-policy-binding sleekdrops \
- --member=serviceAccount:705604429631-compute@developer.gserviceaccount.com \
- --role=roles/cloudbuild.builds.builder
-
-get the auth token from here:
+```bash
 gcloud secrets versions access latest --secret=admin-token --project sleekdrops | pbcopy
+```

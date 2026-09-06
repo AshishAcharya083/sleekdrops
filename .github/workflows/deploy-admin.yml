@@ -28,6 +28,12 @@ jobs:
   build-and-deploy:
     name: Build & deploy (admin)
     runs-on: ubuntu-latest
+    # The DevTeam analytics key and host live on the `develop` environment (the
+    # website deploys read them the same way). Without this the panel shipped
+    # with both values empty and disabled its analytics sink on boot.
+    environment:
+      name: develop
+      url: https://sleekdrops-admin.pages.dev
 
     steps:
       - name: Checkout

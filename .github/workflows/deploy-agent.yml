@@ -1,0 +1,152 @@
+name: Deploy agent platform
+
+# The agent platform is one Cloud Run service in a single environment (like the
+# admin panel, unlike the website's develop/production split), so it deploys
+# from develop. The admin SPA is baked INTO this image — the container serves
+# the panel alongside the API — so an apps/admin change ships here too, not
+# only to Cloudflare Pages.
+#
+# Auth is keyless: GitHub's OIDC token is exchanged for short-lived Google
+# credentials through Workload Identity Federation, so no service-account key
+# exists in this repo. The provider is locked to this repository, and the
+# deployer service account can do exactly three things — push to Artifact
+# Registry, deploy Cloud Run, and act as the agent's runtime service account.
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'apps/agent/**'
+      - 'apps/admin/**'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'patches/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/deploy-agent.yml'
+  workflow_dispatch:
+
+# Deliberately NOT cancel-in-progress: a superseded deploy that is already
+# rolling out should finish rather than leave a half-applied revision.
+concurrency:
+  group: deploy-agent
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # the OIDC token that Workload Identity Federation exchanges
+
+env:
+  GCP_PROJECT: sleekdrops
+  GCP_REGION: us-central1
+  SERVICE: sleekdrops-agent
+  IMAGE: us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent
+  # Public identifiers, not secrets — the provider's own attribute condition is
+  # what restricts who may use it.
+  WIF_PROVIDER: projects/705604429631/locations/global/workloadIdentityPools/github/providers/github
+  DEPLOYER_SA: github-deployer@sleekdrops.iam.gserviceaccount.com
+
+jobs:
+  build-and-deploy:
+    name: Build & deploy (agent platform)
+    runs-on: ubuntu-latest
+    environment:
+      name: develop
+      url: https://sleekdrops-agent-705604429631.us-central1.run.app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The image runs the TypeScript sources through tsx, so a type error would
+      # only surface at runtime in production. Catch it here instead.
+      - name: Type-check agent platform
+        run: pnpm --filter @sleekdrops/agent check
+
+      - name: Test agent platform
+        run: pnpm --filter @sleekdrops/agent test
+
+      # The Dockerfile copies apps/admin/dist in PREBUILT, so the panel has to
+      # be built before the image. (Locally that is a workaround for esbuild
+      # crashing under QEMU; here it is simply what the Dockerfile expects.)
+      - name: Build admin panel (baked into the image)
+        run: pnpm --filter @sleekdrops/admin build
+        env:
+          # Same values the Pages deploy bakes in, so the panel served by Cloud
+          # Run behaves identically to sleekdrops-admin.pages.dev.
+          VITE_API_BASE: ${{ vars.AGENT_API_BASE || 'https://sleekdrops-agent-705604429631.us-central1.run.app' }}
+          VITE_DEVTEAM_ANALYTICS_INGEST_KEY: ${{ secrets.DEVTEAM_ANALYTICS_INGEST_KEY }}
+          VITE_DEVTEAM_ANALYTICS_HOST: ${{ vars.DEVTEAM_ANALYTICS_HOST }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Authenticate Docker to Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      # No buildx and no --platform: this runner is already linux/amd64, which
+      # is what Cloud Run wants. (The local flow needs `buildx --platform
+      # linux/amd64` only because it cross-builds from Apple Silicon.)
+      - name: Build and push the image
+        run: |
+          docker build -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:latest"
+
+      # Deploying by image alone: every other setting on the service — the
+      # runtime service account, min-instances, and the Secret Manager wiring
+      # for DATABASE_URL / ADMIN_TOKEN / TAVILY_API_KEY / CLOUDFLARE_D1_TOKEN /
+      # GITHUB_TOKEN — is left exactly as it is. Never add --set-env-vars here;
+      # that flag replaces the whole set rather than adding to it.
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE:$GITHUB_SHA" \
+            --region "$GCP_REGION" \
+            --project "$GCP_PROJECT" \
+            --quiet
+
+      # The container migrates the database on boot, so a green health check
+      # also means migrations applied. Cloud Run has already shifted traffic by
+      # this point, so this reports rather than gates — but it turns a silently
+      # broken revision into a red build.
+      - name: Smoke-check the new revision
+        run: |
+          url="$(gcloud run services describe "$SERVICE" --region "$GCP_REGION" \
+                   --project "$GCP_PROJECT" --format='value(status.url)')"
+          revision="$(gcloud run services describe "$SERVICE" --region "$GCP_REGION" \
+                   --project "$GCP_PROJECT" --format='value(status.latestReadyRevisionName)')"
+          echo "revision $revision at $url"
+          for attempt in 1 2 3 4 5; do
+            body="$(curl -fsS --max-time 20 "$url/api/health" || true)"
+            echo "attempt $attempt: ${body:-<no response>}"
+            case "$body" in
+              *'"ok":true'*)
+                echo "::notice::$SERVICE healthy on $revision"
+                exit 0
+                ;;
+            esac
+            sleep 10
+          done
+          echo "::error::$SERVICE did not report healthy after the deploy (revision $revision)"
+          exit 1
