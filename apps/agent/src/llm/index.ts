@@ -12,14 +12,22 @@
 //             bearer, which is why this engine exists at all.
 //
 // Which agents use which engine is decided in pipeline/runner.ts (modelFor):
-// every article-writing stage (researcher, keyword strategist, outliner,
-// writer, SEO reviewer, editor) follows the admin engine toggle, which
-// defaults to Claude Opus 5. The topic scout and the image agent stay on
-// Gemini. A per-agent model override may name any model from either engine.
+// every stage that runs a prompt — topic scout, researcher, keyword
+// strategist, outliner, writer, SEO reviewer, editor — follows the admin
+// engine toggle, which defaults to Claude Opus 5. The image agent is the one
+// exception and is pinned to Gemini, because vision checking and image
+// generation are that engine's capabilities, not a preference. A per-agent
+// model override may name any model from either engine.
+//
+// Both engines can be given live web search (`search: true`) so a stage can
+// check a fact instead of trusting its context: Gemini uses Google Search
+// grounding, Claude uses the in-process tools in ./searchTools.ts.
 import { config } from '../config.js';
 import { getSetting } from '../db/pool.js';
 import { geminiChat } from './gemini.js';
-import { claudeChat, resolveClaudeCredential } from './claude.js';
+import { claudeChat, CLAUDE_NOT_CONFIGURED, resolveClaudeCredential } from './claude.js';
+
+export { CLAUDE_NOT_CONFIGURED };
 
 export interface LlmSettings {
   /** Google AI Studio key. Empty = Vertex ADC (Cloud Run) or GEMINI_API_KEY. */
@@ -49,6 +57,15 @@ export async function llmSettings(): Promise<LlmSettings> {
   return value;
 }
 
+/**
+ * Drop the cache after an admin save. Without this, pasting a Claude token
+ * leaves the engine reporting itself unconfigured — and the pipeline refusing
+ * to start on it — for up to another 30 seconds.
+ */
+export function clearLlmSettingsCache(): void {
+  llmCache = null;
+}
+
 export function defaultGeminiModel(s: LlmSettings): string {
   // Tolerate the old OpenRouter-style "google/gemini-*" ids in stale settings.
   return (s.gemini_model || config.geminiModelDefault).replace(/^google\//, '');
@@ -64,6 +81,57 @@ export const isClaudeModel = (model: string): boolean =>
 /** True when the Claude engine has a usable credential (token or API key). */
 export async function claudeConfigured(): Promise<boolean> {
   return (await resolveClaudeCredential(await llmSettings())) !== null;
+}
+
+/** Where an engine's credential came from — reported, never the value itself. */
+export type CredentialSource =
+  | 'admin-settings'
+  | 'env-oauth-token'
+  | 'env-api-key'
+  | 'vertex-adc'
+  | null;
+
+export interface EngineReadiness {
+  configured: boolean;
+  source: CredentialSource;
+}
+
+export interface EngineStatus {
+  claude: EngineReadiness;
+  gemini: EngineReadiness;
+}
+
+/**
+ * Which engines can actually run, for the admin panel.
+ *
+ * This exists because the failure it reports used to be invisible: the toggle
+ * said Claude, no token was set anywhere, and every stage quietly ran on
+ * Gemini and wrote `gemini-2.5-flash` into its session row. The panel now says
+ * so before a single article is queued.
+ */
+export async function engineStatus(): Promise<EngineStatus> {
+  const settings = await llmSettings();
+  const credential = resolveClaudeCredential(settings);
+  return {
+    claude: {
+      configured: credential !== null,
+      source:
+        credential === null
+          ? null
+          : settings.claude_token
+            ? 'admin-settings'
+            : credential.envName === 'CLAUDE_CODE_OAUTH_TOKEN'
+              ? 'env-oauth-token'
+              : 'env-api-key',
+    },
+    gemini: settings.gemini_api_key
+      ? { configured: true, source: 'admin-settings' }
+      : config.vertex.enabled
+        ? { configured: true, source: 'vertex-adc' }
+        : config.geminiApiKey
+          ? { configured: true, source: 'env-api-key' }
+          : { configured: false, source: null },
+  };
 }
 
 export interface LlmUsage {
@@ -86,6 +154,13 @@ export interface ChatOptions {
   maxTokens?: number;
   /** Ask the engine for a JSON object response (best effort). */
   jsonMode?: boolean;
+  /**
+   * Give the model live web search so it can verify what it is about to say.
+   * Only the stages that check facts turn this on — the writer and the editor
+   * work from the dossier alone, so a draft can never quietly acquire a source
+   * nobody reviewed.
+   */
+  search?: boolean;
 }
 
 /** Accumulates usage across the several LLM calls one agent run makes. */

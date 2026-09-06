@@ -9,12 +9,12 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 
 | # | Agent | Stage | What it does |
 | - | ----- | ----- | ------------ |
-| 1 | `topic_scout` | (out of band) | Sweeps the live web (Tavily) for trending products/topics **not covered before** (checks D1 posts + every prior suggestion), writes suggestions for the admin |
-| 2 | `researcher` | research | Plans targeted searches, builds an evidence dossier: facts + source URLs, real Amazon links (non-Amazon "amazonUrl"s are dropped deterministically), keywords, competitor gap |
+| 1 | `topic_scout` | (out of band) | Sweeps the live web (Tavily) for trending products/topics **not covered before** (checks D1 posts + every prior suggestion), **verifies each candidate is still current** with its own search, writes suggestions for the admin |
+| 2 | `researcher` | research | Plans targeted searches, builds an evidence dossier: facts + source URLs, real Amazon links (non-Amazon "amazonUrl"s are dropped deterministically), keywords, competitor gap. **Every price and spec is checked against a primary source** before it is filed |
 | 3 | `keyword_strategist` | keyword | **Reads the live SERP** for 4 candidate queries and picks the one we can win: intent, difficulty, zero-click risk, SERP features, the top 3 to beat, the gaps they leave, PAA questions, entities, snippet target, word-count target |
 | 4 | `outliner` | outline | SEO content brief executing that plan: ≤60-char title, dek, slug, H2/H3 outline, mandatory FAQ |
 | 5 | `writer` | write | Full markdown draft in the site voice; answer-first sections, sourced claims, products linked only as `/go/<slug>` with mandated placements (tables, per-product CTAs, conclusion) |
-| 6 | `seo_reviewer` | seo_review | Deterministic anti-slop scan **first**, then a scored review across five dimensions (search / generative-engine / voice / E-E-A-T / links) → pass/fail verdict |
+| 6 | `seo_reviewer` | seo_review | Deterministic anti-slop scan **first**, then a scored review across five dimensions (search / generative-engine / voice / E-E-A-T / links) → pass/fail verdict. **Fact-checks the riskiest claims** against live sources as part of E-E-A-T |
 | 7 | `editor` | edit | Surgical revision resolving the reviewer's issues, the voice-scan findings and any admin feedback (loops with the reviewer, bounded by `max_revision_rounds`) |
 | 8 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
 | 9 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter. Stands down entirely when the operator attached their own image, and skips itself when `GCS_IMAGES_BUCKET` is unset |
@@ -122,8 +122,8 @@ Every LLM call goes through `src/llm/`, which routes on the model id:
 
 | Engine | Models | Runs | Auth |
 | --- | --- | --- | --- |
-| **Gemini** (Google ADK) | everything not `claude-*` (default `gemini-2.5-flash`) | topic scout, image agent | admin-set AI Studio key → Vertex ADC (`GOOGLE_GENAI_USE_VERTEXAI=true`, keyless on Cloud Run) → `GEMINI_API_KEY` |
-| **Claude subscription** (Claude Agent SDK) | `claude-*` (default **`claude-opus-5`**) | every article stage: researcher, keyword strategist, outliner, writer, SEO reviewer, editor — switchable in Settings | `claude setup-token` → paste in admin Settings, or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` in `.env` |
+| **Gemini** (Google ADK) | everything not `claude-*` (default `gemini-2.5-flash`) | image agent, plus every other stage when the toggle says so | admin-set AI Studio key → Vertex ADC (`GOOGLE_GENAI_USE_VERTEXAI=true`, keyless on Cloud Run) → `GEMINI_API_KEY` |
+| **Claude subscription** (Claude Agent SDK) | `claude-*` (default **`claude-opus-5`**) | every stage that runs a prompt: topic scout, researcher, keyword strategist, outliner, writer, SEO reviewer, editor — switchable in Settings | `claude setup-token` → paste in admin Settings, or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` in `.env` |
 
 The subscription token only works through the Agent SDK/CLI — it is not an API
 key, which is why the Claude engine is a separate execution path.
@@ -133,17 +133,58 @@ just the two that write prose. The old split (writer + editor on Claude,
 research and review on the cheap model) had the economics backwards: a draft is
 capped by the quality of the brief behind it and the honesty of the review in
 front of it, so a weaker researcher or reviewer costs more than a weaker writer
-does. On a subscription the marginal cost of the better model is zero.
+does. On a subscription the marginal cost of the better model is zero. The
+topic scout joined them for the same reason: it decides what everything
+downstream then spends its budget on.
 
-The topic scout stays on Gemini — high-volume discovery that a human triages
-anyway — and so does the image agent, which needs that engine's vision and
-image generation.
+The **image agent is the one exception** and always runs on Gemini. It
+vision-checks candidate photos and generates a hero when none is usable — a
+capability boundary, not a preference — so it is not offered as an override
+either.
 
-Article stages follow the admin **Settings → Article stages use** toggle
-(Claude by default, graceful fallback to Gemini when no token is configured).
-Per-agent model overrides sit on top and can put any agent on either engine.
-Usage (tokens; USD only where a provider bills per call) is recorded per agent
-session and aggregated in the admin panel.
+Stages follow the admin **Settings → Every article stage uses** toggle (Claude
+by default). Per-agent model overrides sit on top and can put any agent on
+either engine. Usage (tokens; USD only where a provider bills per call) is
+recorded per agent session and aggregated in the admin panel.
+
+### A missing credential fails loudly
+
+A Claude stage with no token used to fall back to Gemini and log a warning
+nobody reads. The panel said Opus 5, every session row said `gemini-2.5-flash`,
+and articles came out of the cheap model unnoticed — for as long as it took
+somebody to compare the two screens. There is no automatic downgrade now:
+`modelFor` refuses, the article fails with the missing-credential message on
+it, and `GET /api/settings` reports which engines actually hold a credential so
+the Settings page can warn before anything is queued.
+
+## Verification: the stages that may open the web
+
+Three stages get live web access, and they are the three whose job is to be
+right rather than to be readable:
+
+| Stage | What it checks |
+| --- | --- |
+| `topic_scout` | that a trend is current and the product is still sold here, before the pipeline spends a run on it |
+| `researcher` | every price, model number, headline spec and availability claim, against a primary source, before it enters the dossier |
+| `seo_reviewer` | the three or four claims in the draft that would do the most damage if wrong — a contradiction is a high-severity issue with the right figure in the fix |
+
+On Claude that is two in-process MCP tools (`src/llm/searchTools.ts`):
+`web_search` over the pipeline's own Tavily index, and `read_page` to read a
+source rather than a snippet. On Gemini it is Google Search grounding, which
+costs the forced-JSON response type — those stages ask for JSON in the prompt
+and lean on `extractJson`, which already handles a fenced reply.
+
+**The writer, the editor and the outliner have no web access, deliberately.**
+They work from the dossier the research and review stages verified. A writer
+that could search would pull in sources nobody reviewed and reach for the
+competing articles sitting at the top of every result page — the pages the
+piece has to beat, not echo. Every agent also carries `SOURCE_DISCIPLINE`:
+competing articles are competitive intelligence, never source material, and
+never get named, quoted, linked or paraphrased in the body.
+
+`searchPolicy.test.ts` asserts that split against the agent sources, in both
+directions — no prose stage searches, and no verifying stage has quietly
+stopped.
 
 ## Autonomy: what runs by itself
 

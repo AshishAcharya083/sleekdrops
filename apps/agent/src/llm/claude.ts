@@ -1,13 +1,36 @@
-// Claude engine — single-shot generation through the Claude Agent SDK, which
-// is the only sanctioned consumer of a Claude subscription OAuth token
+// Claude engine — generation through the Claude Agent SDK, which is the only
+// sanctioned consumer of a Claude subscription OAuth token
 // (CLAUDE_CODE_OAUTH_TOKEN, minted by `claude setup-token`). Same pattern as
 // devteam-platform: the credential is resolved per run, injected into the
 // child process environment only (never an argv), and a token outranks an
 // ANTHROPIC_API_KEY so the subscription actually gets used.
+//
+// The engine runs in one of two shapes:
+//   single-shot  — one turn, no tools. The default: the stage was handed its
+//                  evidence and answers from it.
+//   verifying    — `search: true`. The model gets live web search and a page
+//                  reader (llm/searchTools.ts) and several turns to use them
+//                  before it answers. Only the stages that check facts ask for
+//                  this; the writer and editor never do.
+//
+// Isolation is deliberate in both shapes: no built-in tools, no filesystem
+// settings, no MCP config beyond the one server we pass, and a cwd outside any
+// repo — so a CLAUDE.md or a ~/.claude/settings.json on the host can never
+// change what a published article says.
 import { tmpdir } from 'node:os';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
+import { VERIFY_TOOLS, verificationServer } from './searchTools.js';
 import type { ChatOptions, LlmResult, LlmSettings } from './index.js';
+
+/**
+ * Turn budget when search is on. Generous enough for a handful of searches and
+ * the pages behind them, bounded so a model that keeps looking can't run the
+ * stage into the worker's 30-minute stranded-claim recovery.
+ */
+const SEARCH_MAX_TURNS = 24;
+
+const TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface ClaudeCredential {
   envName: 'CLAUDE_CODE_OAUTH_TOKEN' | 'ANTHROPIC_API_KEY';
@@ -22,14 +45,41 @@ export function resolveClaudeCredential(settings: LlmSettings): ClaudeCredential
   return null;
 }
 
+export const CLAUDE_NOT_CONFIGURED =
+  'Claude engine not configured — paste a subscription token (from `claude setup-token`) ' +
+  'in admin Settings, or set CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY in apps/agent/.env';
+
+/**
+ * The SDK options for one run. Split out so the isolation guarantees can be
+ * asserted without a credential or a network: no built-in tools in either
+ * shape, no host settings, no MCP config beyond ours, and search tools only
+ * when the caller actually asked to verify something.
+ */
+export function queryOptions(
+  opts: Pick<ChatOptions, 'system' | 'search'>,
+  model: string,
+  env: Record<string, string>,
+) {
+  return {
+    systemPrompt: opts.system ?? '',
+    model,
+    maxTurns: opts.search ? SEARCH_MAX_TURNS : 1,
+    // No built-in tools in either shape: no Bash, no file access, no network
+    // beyond the search server below.
+    tools: [],
+    ...(opts.search
+      ? { mcpServers: { verify: verificationServer() }, allowedTools: VERIFY_TOOLS }
+      : { allowedTools: [] }),
+    strictMcpConfig: true,
+    settingSources: [], // ignore ~/.claude and any project settings
+    env,
+    cwd: tmpdir(), // keep the CLI away from any repo's CLAUDE.md/settings
+  };
+}
+
 export async function claudeChat(opts: ChatOptions, settings: LlmSettings): Promise<LlmResult> {
   const credential = resolveClaudeCredential(settings);
-  if (!credential) {
-    throw new Error(
-      'Claude engine not configured — paste a subscription token (from `claude setup-token`) ' +
-        'in admin Settings, or set CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY in apps/agent/.env',
-    );
-  }
+  if (!credential) throw new Error(CLAUDE_NOT_CONFIGURED);
 
   // Exactly one Anthropic credential in the child env: an inherited API key
   // would silently outrank the subscription token in the CLI's precedence.
@@ -45,24 +95,20 @@ export async function claudeChat(opts: ChatOptions, settings: LlmSettings): Prom
     : opts.prompt;
 
   const abort = new AbortController();
-  const timeout = setTimeout(() => abort.abort(), 10 * 60 * 1000);
+  const timeout = setTimeout(() => abort.abort(), TIMEOUT_MS);
   try {
     const run = query({
       prompt,
-      options: {
-        systemPrompt: opts.system ?? '',
-        model,
-        maxTurns: 1,
-        allowedTools: [],
-        env,
-        cwd: tmpdir(), // keep the CLI away from any repo's CLAUDE.md/settings
-        abortController: abort,
-      },
+      options: { ...queryOptions(opts, model, env), abortController: abort },
     });
     for await (const message of run) {
       if (message.type !== 'result') continue;
       if (message.subtype !== 'success') {
-        throw new Error(`Claude engine failed (${message.subtype})`);
+        throw new Error(
+          message.subtype === 'error_max_turns'
+            ? `Claude engine hit its ${SEARCH_MAX_TURNS}-turn budget before answering`
+            : `Claude engine failed (${message.subtype})`,
+        );
       }
       if (!message.result) throw new Error('Claude engine returned an empty completion');
       const usage = message.usage;
