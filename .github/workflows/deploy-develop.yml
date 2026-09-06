@@ -28,7 +28,12 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: develop
-      url: https://sleekdrops.pages.dev
+      # The preview alias for this branch. Cloudflare Pages serves the project's
+      # *production* branch at the bare `sleekdrops.pages.dev` and every other
+      # branch at `<branch>.sleekdrops.pages.dev`, so the bare host named here
+      # before pointed GitHub's Deployments UI - and anyone checking what a
+      # develop deploy actually shipped - straight at production.
+      url: https://develop.sleekdrops.pages.dev
 
     steps:
       - name: Checkout
@@ -53,6 +58,12 @@ jobs:
 
       - name: Build (develop)
         env:
+          # Deliberately NOT this deploy's own preview host. SITE_URL is what
+          # every canonical link, og:url and sitemap entry is built from, so
+          # pointing it at the preview would make develop a self-canonicalising
+          # second copy of the site competing with the real one in the index.
+          # Aimed at the production host instead, every develop page tells a
+          # crawler that the canonical version of it lives there.
           SITE_URL: https://sleekdrops.pages.dev
           NODE_ENV: production
           # DevTeam Analytics - public ingest key (dtp_) + ingest host. The key is

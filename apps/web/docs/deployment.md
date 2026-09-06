@@ -5,10 +5,14 @@ Two environments, both static builds, both deployed to Cloudflare Pages.
 | Branch    | Environment | URL                              | Workflow                                   |
 | --------- | ----------- | -------------------------------- | ------------------------------------------ |
 | `main`    | production  | https://sleekdrops.com           | `.github/workflows/deploy-production.yml`  |
-| `develop` | develop     | https://develop.sleekdrops.com   | `.github/workflows/deploy-develop.yml`     |
+| `develop` | develop     | https://develop.sleekdrops.pages.dev | `.github/workflows/deploy-develop.yml` |
 | any PR    | (checks)    | —                                | `.github/workflows/pr-checks.yml`          |
 
 A push to `main` triggers the production build, type-check, and deploy. A push to `develop` triggers the same against the develop URL. Every PR runs a type-check and a build (no deploy) to keep `main` and `develop` shippable.
+
+**Which `pages.dev` host is which** — Cloudflare Pages serves the project's *production* branch at the bare `sleekdrops.pages.dev` and every other branch at `<branch>.sleekdrops.pages.dev`. So `sleekdrops.pages.dev` is production (the same build as `sleekdrops.com`), and develop is `develop.sleekdrops.pages.dev`. Checking the bare host to see what develop shipped shows you production instead — which is an easy way to conclude that a per-environment setting has leaked when it has not.
+
+Note that develop's build still sets `SITE_URL` to the **production** host on purpose: canonical links, `og:url` and the sitemap are built from it, so pointing it at the preview would make develop a self-canonicalising second copy competing with the real site in the index.
 
 The build runs `pnpm prebuild` (which generates `public/_redirects` from `src/data/affiliate-links.json`) → `astro check` → `astro build`. Output goes to `dist/`. `wrangler-action@v3` pushes `dist/` to the matching Cloudflare Pages project.
 
