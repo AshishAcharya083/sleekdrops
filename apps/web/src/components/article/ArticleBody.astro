@@ -8,10 +8,24 @@
  * the gate that emits `Article Read` (see src/lib/read-completion.ts). The
  * sentinel lives here rather than on the page so it is always the last thing in
  * the body, whatever the page appends after the markdown.
+ *
+ * It carries the two in-article ad slots for the same reason: the body is the
+ * only thing that knows where the content actually ends, and the mid-article
+ * unit has to be positioned against the rendered blocks rather than against the
+ * page's source. `<slot />` is markdown plus whatever the page appends, so the
+ * mid unit is placed here on the client, where those blocks exist as elements —
+ * the rule for *which* block it goes before is the pure `midArticleIndex` in
+ * src/lib/ad-placement.ts, and a body too short to carry one loses it entirely.
+ *
+ * Both units render nothing at all unless the build has ids for them and the
+ * visitor opted in to advertising; see src/components/ads/AdUnit.astro.
  */
+import AdUnit from '@components/ads/AdUnit.astro';
 ---
-<div class="article-body">
+<div class="article-body" data-article-body>
   <slot />
+  <AdUnit placement="articleMid" />
+  <AdUnit placement="articleEnd" />
   <div class="read-sentinel" data-read-sentinel aria-hidden="true" />
 </div>
 
@@ -172,4 +186,38 @@
     border-top: 1px solid var(--hairline);
     margin: 2.5em 0;
   }
+
+  /* The ad slots set their own rhythm, wider than the prose sibling rule's.
+     The attribute is carried purely to out-specify that rule (both are two
+     classes, so source order would otherwise decide it). */
+  .article-body :global(> .ad-unit[data-ad-unit]) { margin: 2.5em 0; }
 </style>
+
+<script>
+  import { midArticleIndex } from '@lib/ad-placement';
+
+  /**
+   * Move the mid-article unit to the break it belongs on, or drop it if this
+   * body is too short to carry one.
+   *
+   * Done here rather than in the page source because `<slot />` is rendered
+   * markdown: the blocks the unit is positioned against only exist as elements
+   * once the document does. The unit ships at the end of the body and moves up,
+   * which is also why the order this runs in relative to AdUnit's own script does
+   * not matter - an IntersectionObserver watches the *element*, so a node moved
+   * before the callback fires is observed wherever it lands, and a node already
+   * removed for a visitor who declined is simply not found here.
+   */
+  const body = document.querySelector<HTMLElement>('[data-article-body]');
+  const unit = body?.querySelector<HTMLElement>('[data-ad-placement="articleMid"]');
+
+  if (body && unit) {
+    // The editorial blocks only: not the two ad slots, not the read sentinel.
+    const blocks = Array.from(body.children).filter(
+      (el) => !el.hasAttribute('data-ad-unit') && !el.hasAttribute('data-read-sentinel'),
+    );
+    const index = midArticleIndex(blocks.map((el) => el.tagName.toLowerCase()));
+    if (index === null) unit.remove();
+    else body.insertBefore(unit, blocks[index]);
+  }
+</script>

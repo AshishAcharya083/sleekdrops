@@ -7,6 +7,7 @@ import IconButton from '@components/ui/IconButton.astro';
 import ArticleBody from '@components/article/ArticleBody.astro';
 import Verdict from '@components/article/Verdict.astro';
 import TableOfContents from '@components/article/TableOfContents.astro';
+import AdUnit from '@components/ads/AdUnit.astro';
 import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro';
 import ProsConsList from '@components/affiliate/ProsConsList.astro';
 import ProductCallout from '@components/affiliate/ProductCallout.astro';
@@ -123,6 +124,7 @@ const schema = product
 
       <aside class="article-aside">
         <TableOfContents headings={headings} />
+        <AdUnit placement="sidebar" />
       </aside>
     </div>
 
@@ -254,5 +256,16 @@ const schema = product
   .article-aside {
     position: sticky;
     top: 100px;
+    /* Bounded to the viewport and scrollable within it. A sticky rail taller
+       than the screen moves with the scroll, so its lower half is unreachable —
+       which for the ad slot beneath the contents means an impression that can
+       never be viewed, and for a long table of contents meant entries nobody
+       could reach. */
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* The rail is a scroll container now, so leave room for its scrollbar
+       rather than letting one crop the unit's right edge. */
+    scrollbar-gutter: stable;
   }
 </style>

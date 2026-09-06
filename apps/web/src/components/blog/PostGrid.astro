@@ -1,19 +1,35 @@
 ---
 import PostCard from './PostCard.astro';
+import AdUnit from '@components/ads/AdUnit.astro';
+import { inFeedIndex } from '@lib/ad-placement';
 import type { BlogPost } from '@lib/posts';
 
 /**
  * Grid wrapper. Default 3-column at desktop, collapses to 1 on mobile.
  * Pass `columns={2}` for the two-up sidebar layout used on category pages.
+ *
+ * Carries the in-feed ad slot, which takes one grid cell and so reads as a card
+ * rather than as a band across the listing. Which cell — and whether the grid is
+ * big enough to give one away at all — is the pure `inFeedIndex` in
+ * src/lib/ad-placement.ts; a short grid stays whole. The unit renders nothing
+ * unless the build has an id for it and the visitor opted in to advertising, and
+ * it is `hidden` until then, so it occupies no cell in either case.
  */
 export interface Props {
   posts: BlogPost[];
   columns?: 2 | 3;
 }
 const { posts, columns = 3 } = Astro.props;
+
+const adIndex = inFeedIndex(posts.length);
 ---
 <div class:list={['post-grid', `post-grid--${columns}`]}>
-  {posts.map((post) => <PostCard post={post} />)}
+  {posts.map((post, index) => (
+    <>
+      {index === adIndex && <AdUnit placement="feed" class="post-grid__ad" />}
+      <PostCard post={post} />
+    </>
+  ))}
 </div>
 
 <style>
@@ -23,6 +39,18 @@ const { posts, columns = 3 } = Astro.props;
   }
   .post-grid--3 { grid-template-columns: repeat(3, 1fr); }
   .post-grid--2 { grid-template-columns: repeat(2, 1fr); }
+
+  /* The unit sits in a card's cell, so it is bounded by the cell rather than by
+     the ad's own reserved height — a tall fill would otherwise stretch the row
+     it opens and leave every card beside it short. */
+  .post-grid :global(.post-grid__ad) {
+    align-self: stretch;
+    overflow: hidden;
+    border: 1px solid var(--hairline);
+    border-radius: 16px;
+    background: var(--surface);
+    padding: 12px;
+  }
 
   @media (max-width: 1000px) { .post-grid--3 { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 700px)  {

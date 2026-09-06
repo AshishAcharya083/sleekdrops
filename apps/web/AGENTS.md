@@ -56,6 +56,7 @@ sleekdrops/
 │   │   ├── blog/                   # PostCard, PostGrid, FeaturedPost, ListingHero, ...
 │   │   ├── article/                # ArticleBody, Verdict, TableOfContents, LegalLayout
 │   │   ├── affiliate/              # DealCard, PromoCard, ProductCallout, ProsConsList, ...
+│   │   ├── ads/                    # AdUnit — the only component that emits ad markup
 │   │   └── seo/                    # SEOHead, JsonLd, Breadcrumbs
 │   ├── content/
 │   │   ├── config.ts               # Blog + embedded product Zod schema
