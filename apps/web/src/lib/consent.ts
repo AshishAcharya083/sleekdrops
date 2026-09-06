@@ -7,7 +7,23 @@
  * privacy-signal boolean and acts on the result.
  */
 
-/** Bump when the privacy policy materially changes to force a re-prompt. */
+/**
+ * The consent scope this site asks for. A visitor whose stored record carries an
+ * older version is re-prompted, so bumping it destroys every consent record on
+ * file - which is the right thing exactly four times:
+ *
+ *  - a new purpose category (a category that is not analytics),
+ *  - a new vendor or recipient of the data,
+ *  - a change of legal basis,
+ *  - a change to what an existing category *does*.
+ *
+ * Nothing else. Adding a storage item that serves the already-consented analytics
+ * purpose, is first-party only, is written only on grant and is deleted on
+ * withdrawal is not a change of purpose, scope or recipient, so it does not bump
+ * this - `sd_sid` (see `./visit`) was added under exactly those conditions.
+ * Editorial changes to the storage inventory are recorded by the `updated` date on
+ * `src/pages/privacy.astro` instead.
+ */
 export const POLICY_VERSION = 1;
 
 /** localStorage key, mirroring the `sd-theme` convention in chrome.ts. */

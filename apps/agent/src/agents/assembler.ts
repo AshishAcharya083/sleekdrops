@@ -1,14 +1,17 @@
 // Assembler — turns the approved draft into the exact D1 payload: validated
 // frontmatter JSON + affiliate_links rows for every /go/ slug in the body.
-// Deterministic code does the validation; the LLM only fills editorial gaps.
-import { chatJson, UsageTracker } from '../llm/index.js';
+// Affiliate destinations are built 100% deterministically from the dossier —
+// no LLM touches a URL. Each row is region-aware: a liveness-verified ASIN for
+// the marketplace it was captured on, plus a search term the /go/ resolver
+// uses for every other region (search-results pages never 404).
 import {
+  amazonSearchUrl,
   estimateReadTime,
   goSlugsIn,
   pickCover,
   validateArticle,
 } from '../content/contract.js';
-import { SITE_CONTEXT } from './context.js';
+import { productSearchTerm, verifyAmazonProductUrl } from '../tools/amazon.js';
 import type { AffiliateLinkRow, ArticleRow } from '../pipeline/types.js';
 
 export interface AssembledArticle {
@@ -19,18 +22,18 @@ export interface AssembledArticle {
   droppedSlugs: string[];
 }
 
-export async function runAssembler(
-  article: ArticleRow,
-  model: string,
-  tracker: UsageTracker,
-): Promise<AssembledArticle> {
+export async function runAssembler(article: ArticleRow): Promise<AssembledArticle> {
   const brief = article.outline!;
   let body = article.draft_md!;
   const slugsInBody = goSlugsIn(body);
   const products = article.research?.products ?? [];
   const today = new Date().toISOString().slice(0, 10);
 
-  // The deterministic parts never go through the LLM.
+  // The deterministic parts never go through the LLM. A re-assembly (e.g. the
+  // admin-feedback loop) keeps the original pubDate and any hero image already
+  // found, and stamps updatedDate instead.
+  const prior = article.frontmatter ?? {};
+  const pubDate = typeof prior.pubDate === 'string' ? prior.pubDate : today;
   const frontmatter: Record<string, unknown> = {
     title: brief.seoTitle,
     dek: brief.dek,
@@ -39,64 +42,57 @@ export async function runAssembler(
     kind: brief.kind,
     author: brief.author,
     tags: brief.tags,
-    pubDate: today,
+    pubDate,
+    ...(pubDate !== today ? { updatedDate: today } : {}),
     readTime: estimateReadTime(body),
     cover: pickCover(brief.slug),
     featured: false,
     draft: false,
   };
-
-  // LLM maps each /go/ slug in the body to its affiliate destination using
-  // the dossier's real Amazon URLs.
-  let links: AffiliateLinkRow[] = [];
-  if (slugsInBody.length > 0) {
-    const mapped = await chatJson<{ links: AffiliateLinkRow[] }>(
-      {
-        model,
-        system: SITE_CONTEXT,
-        temperature: 0.1,
-        prompt: `Map each affiliate slug used in an article body to its destination URL.
-
-Slugs used in the body: ${slugsInBody.join(', ')}
-
-Known products (ONLY legitimate URL source — amazonUrl values are real):
-${JSON.stringify(products, null, 2)}
-
-Rules:
-- One row per slug that appears in the body.
-- default_url: the product's amazonUrl from the list above. If a slug has no
-  matching product with a real amazonUrl, use "MISSING" so it can be caught.
-- note: "<product name>, Amazon Australia, used by ${brief.slug}".
-
-Return JSON {"links": [{"slug": string, "default_url": string, "note": string}]}`,
-      },
-      tracker,
-    );
-    links = mapped.links ?? [];
+  // An operator-dropped hero image outranks whatever the image agent found on
+  // an earlier pass — that's the whole point of dropping one. Stamping it here
+  // (not only in the image stage) is what lets an image attached at brief time
+  // survive every re-assembly.
+  const heroImage =
+    article.hero_image_url ?? (typeof prior.heroImage === 'string' ? prior.heroImage : null);
+  const heroAlt = article.hero_image_url
+    ? article.hero_alt
+    : typeof prior.heroAlt === 'string'
+      ? prior.heroAlt
+      : null;
+  if (heroImage) {
+    frontmatter.heroImage = heroImage;
+    if (heroAlt) frontmatter.heroAlt = heroAlt;
   }
 
-  // Fill gaps deterministically from the dossier before failing anything.
-  const bySlug = new Map(links.map((l) => [l.slug, l]));
+  // One affiliate row per /go/ slug in the body, straight from the dossier.
+  const bySlug = new Map<string, AffiliateLinkRow>();
   for (const slug of slugsInBody) {
-    const existing = bySlug.get(slug);
-    if (existing && existing.default_url !== 'MISSING') continue;
-    const product = products.find((p) => p.goSlug === slug && p.amazonUrl);
-    if (product) {
-      bySlug.set(slug, {
-        slug,
-        default_url: product.amazonUrl!,
-        note: `${product.name}, Amazon Australia, used by ${brief.slug}`,
-      });
-    } else {
-      bySlug.delete(slug);
-    }
-  }
-  const finalLinks = [...bySlug.values()].filter((l) => slugsInBody.includes(l.slug));
+    const product = products.find((p) => p.goSlug === slug);
+    if (!product) continue; // no dossier product behind this slug → stripped below
 
-  // A /go/ slug with no resolvable URL would fail the site build. Rather than
+    const search = productSearchTerm(product);
+    // Only a liveness-probed ASIN ships, and only for its own marketplace.
+    const verified = product.amazonUrl ? await verifyAmazonProductUrl(product.amazonUrl) : null;
+
+    bySlug.set(slug, {
+      slug,
+      // Safety-net destination (used only if the resolver can't build one):
+      // home-market search results — always a live page.
+      default_url: amazonSearchUrl(search),
+      regions_json: {
+        network: 'amazon',
+        search,
+        ...(verified ? { asins: { [verified.region]: verified.asin } } : {}),
+      },
+      note: `${product.name} — ${verified ? `ASIN ${verified.asin} (${verified.region}, verified ${today})` : 'search link (no verified ASIN)'}, used by ${brief.slug}`,
+    });
+  }
+  const finalLinks = [...bySlug.values()];
+
+  // A /go/ slug with no dossier product would fail the site build. Rather than
   // failing the article, strip those links and keep the product as plain text.
-  const resolvable = new Set(finalLinks.map((l) => l.slug));
-  const droppedSlugs = slugsInBody.filter((slug) => !resolvable.has(slug));
+  const droppedSlugs = slugsInBody.filter((slug) => !bySlug.has(slug));
   for (const slug of droppedSlugs) {
     body = body
       .replace(new RegExp(`\\[([^\\]]*)\\]\\(/go/${slug}\\)`, 'g'), '$1')
@@ -104,7 +100,8 @@ Return JSON {"links": [{"slug": string, "default_url": string, "note": string}]}
   }
   frontmatter.readTime = estimateReadTime(body);
 
-  // Anything left is a genuine contract violation (schema, raw merchant URL).
+  // Anything left is a genuine contract violation (schema, raw merchant URL,
+  // non-approved merchant destination).
   const problems = validateArticle(body, frontmatter, finalLinks);
   if (problems.length > 0) {
     throw new Error(`assembly validation failed:\n- ${problems.join('\n- ')}`);

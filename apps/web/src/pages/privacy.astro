@@ -6,7 +6,7 @@ import { buildCategorySchema, buildMeta } from '@lib/seo';
 const meta = buildMeta({
   title: 'Privacy policy',
   description:
-    "How SleekDrops handles your data: consent-gated, privacy-friendly analytics, minimal first-party cookies, an FTC-compliant affiliate disclosure, and zero data sold to advertisers.",
+    "How SleekDrops handles your data: consent-gated, privacy-friendly analytics, minimal first-party cookies and browser storage, an FTC-compliant affiliate disclosure, and zero data sold to advertisers.",
   pathname: '/privacy',
 });
 ---
@@ -17,7 +17,7 @@ const meta = buildMeta({
   <LegalLayout
     eyebrow="Legal"
     titleHtml="Privacy <em>policy</em>."
-    updated="June 30, 2026"
+    updated="August 10, 2026"
     toc={[
       { href: '#summary',      label: 'Plain summary' },
       { href: '#scope',        label: 'Scope of this policy' },
@@ -40,7 +40,7 @@ const meta = buildMeta({
   >
     <div class="summary" id="summary">
       <strong>Plain summary</strong>
-      We host on Cloudflare, we use privacy-friendly analytics only with your consent, we don't sell anything to advertisers, and we keep cookies to a minimum: essential ones for your dark-mode preference and saved articles, plus analytics cookies only if you opt in. Most outbound product links are affiliate links — we earn a small commission at no extra cost to you. If you signed up for the newsletter you can leave any time with one click.
+      We host on Cloudflare, we use privacy-friendly analytics only with your consent, we don't sell anything to advertisers, and we keep cookies and similar technologies, including local and session storage on your device, to a minimum: essential ones for your dark-mode preference and saved articles, plus analytics ones only if you opt in. Most outbound product links are affiliate links — we earn a small commission at no extra cost to you. If you signed up for the newsletter you can leave any time with one click.
     </div>
 
     <h2 id="scope">Scope of this <em>policy</em></h2>
@@ -51,7 +51,7 @@ const meta = buildMeta({
     <p>SleekDrops is a static publication. The site itself stores no personal data about you directly. The following limited information is collected by services we rely on:</p>
     <ul>
       <li><strong>Server logs.</strong> Our host (Cloudflare) automatically logs IP addresses, user-agent strings, and request paths for security, abuse prevention, and performance — standard for any website. We do not access or analyse these logs.</li>
-      <li><strong>Analytics.</strong> With your consent, we use <strong>Mixpanel</strong> (and Google Analytics 4) for privacy-friendly product analytics, to understand which pages and deals are useful. We record anonymous, aggregate events (page views plus a small set of funnel interactions such as hero call-to-action clicks, deal-card clicks, outbound "View deal" clicks, and newsletter sign-ups) together with non-identifying context only: the screen name, page path, deal or post slug, brand, retailer, call-to-action label, and placement. Personal data is stripped in your browser before any event is sent, so no email addresses, names, full search or query strings, or anything you type is ever collected; Mixpanel and Google may derive approximate location (country/region) from your IP address. Nothing runs until you opt in, and we honour Global Privacy Control / Do-Not-Track signals automatically; see <a href="#cookies">Cookies &amp; tracking</a>.</li>
+      <li><strong>Analytics.</strong> With your consent, we use <strong>DevTeam Analytics</strong> (and Google Analytics 4) for privacy-friendly product analytics, to understand which pages and deals are useful and which parts of the site people actually use. We record anonymous, aggregate events (page views; a small set of funnel interactions such as hero call-to-action clicks, deal-card clicks, outbound "View deal" clicks, and newsletter sign-ups; and how you interact with the site's own controls, namely switching between light and dark mode, using the share or copy-link buttons, opening an image full-size, and following a table-of-contents link) together with non-identifying context only: the screen name, page path, deal or post slug, brand, retailer, call-to-action label, placement, the heading of a table-of-contents link you follow, and whether you are reading in light or dark mode. Light or dark is the only thing we record about your display preference, and it is noted on each event so we can tell how the site is read overall. Each event also carries two randomly generated identifiers that exist purely to make the counts correct — one for the event itself, so a duplicate can be discarded rather than counted twice, and one for your current visit, so page views from one visit are grouped together. Personal data is stripped in your browser before any event is sent, so no email addresses, names, full search or query strings, or anything you type is ever collected; DevTeam Analytics and Google may derive approximate location (country/region) from your IP address. Nothing runs until you opt in, and we honour Global Privacy Control / Do-Not-Track signals automatically; see <a href="#cookies">Cookies &amp; tracking</a>.</li>
       <li><strong>Newsletter.</strong> If you subscribe, we store your email address and (optionally) your first name with our mail provider, solely to deliver the newsletter.</li>
       <li><strong>Contact form.</strong> If you write to us, we receive whatever information you choose to put in the message — typically a name, email, and the content of your question.</li>
     </ul>
@@ -69,12 +69,19 @@ const meta = buildMeta({
     <p>We do not use your data for automated decision-making, behavioural advertising, profiling, or sale to data brokers. We do not train AI models on your data.</p>
 
     <h2 id="cookies">Cookies &amp; <em>tracking</em></h2>
-    <p>Without analytics consent we set only two first-party cookies:</p>
+    <p>We use cookies and similar technologies, including local and session storage on your device. Without analytics consent we store only two first-party items besides your privacy choice (below), and neither of them is a cookie:</p>
     <ul>
-      <li><code>sd-theme</code> — remembers your dark-mode preference (12 months).</li>
-      <li><code>sd-bookmarks</code> — stores the article slugs you've saved (kept in your browser only; never sent to us; 12 months).</li>
+      <li><code>sd-theme</code> — browser local storage. Remembers your dark-mode preference (kept until you clear your browser).</li>
+      <li><code>sd-bookmarks</code> — browser local storage. Stores the article slugs you've saved (kept in your browser only; never sent to us).</li>
     </ul>
-    <p>We store your privacy choice (<code>sd-consent</code>) in your browser's local storage as an essential setting that never leaves your browser. If you opt in to analytics, two more storage items are written: an anonymous Mixpanel device identifier in local storage (Mixpanel does not use cookies), and Google Analytics' own first-party measurement cookies (such as <code>_ga</code>) used to count visits. Both exist only to de-duplicate the anonymous events you consented to. No analytics load, and no analytics cookie or storage is written, until you accept. If your browser sends a Global Privacy Control or Do-Not-Track signal we treat it as a decline and never start. You can change your choice at any time from the footer.</p>
+    <p>We store your privacy choice (<code>sd-consent</code>) in your browser's local storage as an essential setting that never leaves your browser. If you opt in to analytics, four more items are written:</p>
+    <ul>
+      <li>An anonymous DevTeam Analytics device identifier in browser local storage (DevTeam Analytics does not use cookies).</li>
+      <li><code>sd_sid</code> — browser session storage (not a cookie). Groups page views from a single visit so analytics counts sessions correctly. It is randomly generated, is never derived from you or your device, and is used for nothing else. Cleared when the browser tab is closed, and replaced after 30 minutes of inactivity.</li>
+      <li>Google Analytics' own first-party measurement cookies (such as <code>_ga</code>), used to count visits.</li>
+      <li><code>sd-exp</code> in browser local storage, which records only which version of a page layout or wording you were shown so we can compare them in aggregate.</li>
+    </ul>
+    <p>All four exist only to make the anonymous analytics you consented to countable — discarding a duplicate event, grouping one visit's page views, counting visits, and recording which layout you were shown — and none of them is used for advertising or for tracking you across other sites. No analytics load, and no analytics cookie or storage is written, until you accept; <code>sd_sid</code>, <code>sd-exp</code>, the DevTeam Analytics device identifier and Google Analytics' <code>_ga</code> cookies are deleted the moment you decline or withdraw, and both analytics tools stop measuring straight away — you do not have to reload the page. If your browser sends a Global Privacy Control or Do-Not-Track signal we treat it as a decline and never start. You can change your choice at any time from <strong>Privacy preferences</strong> in the footer.</p>
     <p>Affiliate networks (Amazon, Awin, CJ Affiliate, Impact, and similar) may set their own cookies on <strong>the destination retailer's domain</strong> once you click an outbound link. SleekDrops itself does not set advertising cookies, and we do not embed third-party ad scripts on this site by default.</p>
     <p>If we add display advertising in the future (see <a href="#ads">Advertising partners</a>), this section will be updated and — where required by law — a consent banner will be presented.</p>
 
@@ -98,8 +105,9 @@ const meta = buildMeta({
     <p>The following services may process limited data on our behalf:</p>
     <ul>
       <li><strong>Cloudflare</strong> (USA / global) — hosting, CDN, security. Privacy policy: <a href="https://www.cloudflare.com/privacypolicy/" rel="noopener nofollow" target="_blank">cloudflare.com/privacypolicy</a>.</li>
-      <li><strong>Mixpanel</strong> (USA) - privacy-friendly product analytics, used only with your consent to measure anonymous, aggregate usage. We strip personal data in your browser before sending and configure Mixpanel not to collect raw page URLs or referrers. Privacy policy: <a href="https://mixpanel.com/legal/privacy-policy/" rel="noopener nofollow" target="_blank">mixpanel.com/legal/privacy-policy</a>.</li>
-      <li><strong>Google Analytics 4</strong> (USA / global) - aggregate traffic measurement, loaded only with your consent and alongside Mixpanel. We send page paths rather than full URLs so query strings never reach Google. Privacy policy: <a href="https://policies.google.com/privacy" rel="noopener nofollow" target="_blank">policies.google.com/privacy</a>.</li>
+      <!-- TODO(privacy): confirm DevTeam Analytics' hosting/jurisdiction and add its privacy-policy URL before publishing — not verifiable from the codebase alone. -->
+      <li><strong>DevTeam Analytics</strong> — privacy-friendly product analytics, used only with your consent to measure anonymous, aggregate usage. We strip personal data in your browser before sending, so raw page URLs and referrers never reach it.</li>
+      <li><strong>Google Analytics 4</strong> (USA / global) - aggregate traffic measurement, loaded only with your consent and alongside DevTeam Analytics. We send page paths rather than full URLs so query strings never reach Google. Privacy policy: <a href="https://policies.google.com/privacy" rel="noopener nofollow" target="_blank">policies.google.com/privacy</a>.</li>
       <li><strong>Email service provider</strong> — used to deliver The Daily Drop newsletter. Stores subscriber email addresses with appropriate Standard Contractual Clauses for international transfers where applicable.</li>
       <li><strong>Affiliate networks</strong> — Amazon Associates, Awin, CJ Affiliate, Impact, Sovrn, Skimlinks. These are not processors of your personal data on our behalf; they are independent controllers that may receive limited information (such as a referring URL and a cookie ID) when you click an outbound affiliate link.</li>
     </ul>

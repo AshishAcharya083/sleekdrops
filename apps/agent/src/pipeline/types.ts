@@ -7,6 +7,7 @@ export type Stage =
   | 'seo_review'
   | 'edit'
   | 'assemble'
+  | 'image'
   | 'publish'
   | 'done';
 
@@ -34,10 +35,25 @@ export interface ArticleRow {
   seo_review: SeoReview | null;
   frontmatter: Record<string, unknown> | null;
   affiliate_links: AffiliateLinkRow[] | null;
+  /**
+   * Operator-supplied hero image (dropped in the admin panel). Set, it wins
+   * over anything the image agent finds or generates: the assembler stamps it
+   * into frontmatter on every pass and the image stage skips itself.
+   */
+  hero_image_url: string | null;
+  hero_alt: string | null;
+  /** Admin feedback awaiting application — consumed (cleared) by the editor stage. */
+  feedback: string | null;
   error: string | null;
   published_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** A markdown reference the operator supplied (uploaded file or pasted block). */
+export interface ReferenceMaterial {
+  name: string;
+  content: string;
 }
 
 export interface TopicRow {
@@ -50,6 +66,15 @@ export interface TopicRow {
   why_trending: string | null;
   sources: string[];
   status: string;
+  /** 'scout' | 'manual' — manual topics carry an operator brief below. */
+  source: string;
+  /** Operator's free-text brief for a manual topic (null for scouted topics). */
+  instructions: string | null;
+  /** Operator-supplied markdown references, treated as authoritative context. */
+  research_notes: ReferenceMaterial[];
+  /** Hero image attached at brief time — copied onto the article on approval. */
+  hero_image_url: string | null;
+  hero_alt: string | null;
 }
 
 export interface TopicSuggestion {
@@ -102,9 +127,23 @@ export interface SeoReview {
   forcedThrough?: boolean;
 }
 
+/**
+ * Payload for the affiliate_links.regions_json column. Structured keys drive
+ * the region-aware Amazon builder in apps/web/functions/_lib/affiliates.mjs;
+ * any other key is a per-region literal URL (legacy rows).
+ */
+export interface AffiliateRegions {
+  network?: 'amazon';
+  /** Search term for marketplaces without a verified ASIN — never 404s. */
+  search?: string;
+  /** Marketplace-specific ASINs, only for regions they were verified on. */
+  asins?: Record<string, string>;
+  [regionUrl: string]: unknown;
+}
+
 export interface AffiliateLinkRow {
   slug: string;
   default_url: string;
-  regions_json?: Record<string, string> | null;
+  regions_json?: AffiliateRegions | null;
   note?: string;
 }

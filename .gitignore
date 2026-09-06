@@ -38,6 +38,9 @@ secrets.md
 # up.sh / down.sh runtime state (logs + pids)
 .run/
 
+# DevTeam verification runs (browser screenshots, logs)
+.devteam-run/
+
 # macOS
 .DS_Store
 

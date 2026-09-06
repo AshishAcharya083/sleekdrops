@@ -26,6 +26,43 @@ Add these in **Settings → Secrets and variables → Actions → Repository sec
 | `CLOUDFLARE_ACCOUNT_ID`    | Cloudflare dashboard right sidebar of any zone, or **Workers & Pages → Overview**.                               |
 | `CLOUDFLARE_PROJECT_NAME`  | The name of the Pages project you created — e.g. `sleekdrops` (used in the wrangler command).                    |
 
+### DevTeam Analytics (required for the analytics + logging sink)
+
+**DevTeam publishes all four of the settings below itself** — into this repo's Actions secrets and variables on the deployment environment matching the DevTeam environment — whenever analytics is provisioned or an A/B client key is minted.
+Nobody copies a key by hand, and nothing here needs setting up manually.
+The names are DevTeam's canonical ones, so the platform, this repo's settings, and the workflows below cannot drift apart.
+
+If a value is ever missing, re-run the publish from the DevTeam project's **Config** tab (**Sync to GitHub**) rather than pasting one in — a hand-entered key goes stale the next time the project re-provisions.
+
+Both deploy workflows pass the analytics pair into the web build as `PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY` / `PUBLIC_DEVTEAM_ANALYTICS_HOST`; the admin panel reads the same two repo settings under its own `VITE_` prefix, so both apps report into one project.
+
+| Repo setting                                | Kind         | What it is                                                                          |
+| ------------------------------------------- | ------------ | ------------------------------------------------------------------------------------ |
+| `DEVTEAM_ANALYTICS_INGEST_KEY`              | **secret**   | The project's ingest key (`dtp_…`). Ingest-only.                                    |
+| `DEVTEAM_ANALYTICS_HOST`                    | **variable** | The platform's ingest host, e.g. `https://ingest.analytics.internal.getdevteam.ai`. |
+
+An empty key disables the DevTeam sink silently after one warning; GA4 is unaffected.
+
+### DevTeam A/B Testing (required for experiments to run)
+
+Both deploy workflows pass these into the web build as `PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY` / `PUBLIC_DEVTEAM_FLAGS_HOST`.
+
+| Repo setting                | Kind         | What it is                                                                                        |
+| --------------------------- | ------------ | -------------------------------------------------------------------------------------------------- |
+| `DEVTEAM_FLAGS_CLIENT_KEY`  | **secret**   | The environment's client key (`dtfl_…`), minted and published by DevTeam.                        |
+| `DEVTEAM_FLAGS_HOST`        | **variable** | The platform's flag-delivery host — always `https://`, e.g. `https://app.internal.getdevteam.ai`. |
+
+The **secret** / **variable** column is not cosmetic: a workflow reads a secret through `secrets.*` and a variable through `vars.*`, so a client key stored as a variable arrives in the build as an empty string and every experiment reports 0 users with nothing anywhere looking broken.
+
+`DEVTEAM_FLAGS_CLIENT_KEY` lives in Actions *secrets* only so it is easy to rotate per environment — it is **not** confidential.
+It is a read-only GrowthBook client key, and being a `PUBLIC_`-prefixed Astro variable it is inlined verbatim into the JS bundle every visitor downloads.
+Never put a privileged platform API key in that slot: it would be published on the next deploy.
+
+`DEVTEAM_FLAGS_HOST` must be `https://`. The flag payload decides what the page renders and how visitors are bucketed, and it is neither signed nor encrypted, so a plaintext host would let any network intermediary rewrite it.
+A `http://` host on the (https) deployed site is refused with a single console warning and every feature falls back to its code-side default — the browser would block it as mixed content anyway. Plain `http` still works for local development, where the page itself is `http`.
+
+Leaving either unset is a supported state: the build ships with experiments disabled and every feature renders its code-side default.
+
 ### Cloudflare R2 (only if you've enabled R2 for images)
 
 These are read by the publishing pipeline, **not** by the website build. Add them only when you wire R2 into the agent:

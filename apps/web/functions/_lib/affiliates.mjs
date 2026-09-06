@@ -50,13 +50,22 @@ export const CF_PUBLISHER_ID = ''; // your Commission Factory publisher id
 // ---------------------------------------------------------------------------
 
 export const NETWORKS = {
-  // Amazon: storefront + tag come from the region; only the ASIN is per-link.
-  // Row shape: { network:'amazon', asin:'B0...', asins?:{ us:'B0..', au:'B0..' } }
+  // Amazon: storefront + tag come from the region; the row carries per-region
+  // ASINs and a search term. ASINs are marketplace-specific — an ASIN captured
+  // on amazon.com.au routinely 404s on amazon.com — so an ASIN is only used
+  // for the region it was captured on; every other region gets a search-results
+  // link, which always renders.
+  // Row shape: { network:'amazon', search:'ninja blast portable blender',
+  //              asins?:{ au:'B0..', us:'B0..' } }
   amazon(entry, region) {
     const market = AMAZON[region] ?? AMAZON[DEFAULT_REGION];
-    const asin = (entry.asins && entry.asins[region]) || entry.asin;
-    if (!market || !asin) return null;
-    return `https://${market.host}/dp/${asin}?tag=${market.tag}`;
+    if (!market) return null;
+    const asin = entry.asins && entry.asins[region];
+    if (asin) return `https://${market.host}/dp/${asin}?tag=${market.tag}`;
+    if (entry.search) {
+      return `https://${market.host}/s?k=${encodeURIComponent(entry.search)}&tag=${market.tag}`;
+    }
+    return null;
   },
 
   // Awin: wrap a destination URL with the merchant id + your publisher id.

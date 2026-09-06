@@ -36,11 +36,9 @@ const year = new Date().getFullYear();
 
       <div class="footer-col">
         <h6>Subscribe</h6>
-        <p>One honest deal, every morning. Free.</p>
-        <form class="footer-newsletter" data-mock-form data-mock-label="✓ Joined" data-signup>
-          <input type="email" placeholder="you@inbox.com" required aria-label="Email address" />
-          <button type="submit">Join</button>
-        </form>
+        {/* No mailing list exists yet, so there is nothing here that could accept
+            an address and claim to have stored it. See Newsletter.astro. */}
+        <p>One honest deal, every morning. Drop alerts are coming soon.</p>
       </div>
     </div>
 
@@ -51,6 +49,12 @@ const year = new Date().getFullYear();
         <a href="/contact">Contact</a>
         <a href="/privacy">Privacy</a>
         <a href="/disclaimer">Disclaimer</a>
+        {/* The dialog this reopens is client-side only, so the control ships
+            hidden and the island script below reveals it - a visitor without
+            JavaScript is shown no control rather than a dead one. It is the
+            footer entry the preferences dialog and the privacy policy both
+            promise. */}
+        <button type="button" aria-haspopup="dialog" data-consent-preferences hidden>Privacy preferences</button>
       </span>
     </div>
   </div>
@@ -94,34 +98,6 @@ const year = new Date().getFullYear();
     color: var(--muted);
     margin: 0 0 14px;
   }
-  .footer-newsletter {
-    display: flex;
-    background: var(--surface);
-    border: 1px solid var(--hairline-strong);
-    border-radius: 999px;
-    overflow: hidden;
-    padding: 4px 4px 4px 18px;
-  }
-  .footer-newsletter input {
-    flex: 1;
-    border: 0;
-    outline: none;
-    background: transparent;
-    font-family: var(--font-body);
-    font-size: 14px;
-    color: var(--ink);
-  }
-  .footer-newsletter button {
-    background: var(--ink);
-    color: var(--paper);
-    border: 0;
-    padding: 10px 18px;
-    border-radius: 999px;
-    font-family: var(--font-body);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-  }
   .footer-bottom {
     padding-top: 32px;
     border-top: 1px solid var(--hairline);
@@ -133,11 +109,44 @@ const year = new Date().getFullYear();
     gap: 16px;
     flex-wrap: wrap;
   }
-  .footer-links { display: flex; gap: 18px; flex-wrap: wrap; }
+  .footer-links { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
   .footer-links a { color: var(--muted); text-decoration: none; }
   .footer-links a:hover { color: var(--accent); }
+  /* Reads as one of the links beside it - it is the same kind of destination,
+     it just opens a dialog instead of a page. */
+  .footer-links button {
+    font: inherit;
+    line-height: inherit;
+    color: var(--muted);
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+  .footer-links button:hover { color: var(--accent); }
+  .footer-links button[hidden] { display: none; }
 
   @media (max-width: 900px) {
     .footer-grid { grid-template-columns: 1fr; gap: 32px; }
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    .footer-links button { transition: none; }
+  }
 </style>
+
+<script>
+  import { openConsentPreferences } from '@lib/consent-preferences';
+
+  document.querySelectorAll<HTMLButtonElement>('[data-consent-preferences]').forEach((button) => {
+    button.hidden = false;
+    button.addEventListener('click', () => {
+      // Safari does not focus a button on click, and the dialog hands focus back
+      // to whatever was focused when it opened - so say it explicitly rather than
+      // leave the visitor's focus on <body> when they close it again.
+      button.focus();
+      openConsentPreferences(document);
+    });
+  });
+</script>

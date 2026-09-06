@@ -5,8 +5,10 @@
  *
  * One root holds three surfaces (banner, GPC info card, preferences dialog);
  * the consent state machine in `@lib/analytics` decides which — if any — to
- * reveal on load. Everything is hidden until the client script runs, so the
- * static HTML never flashes a prompt at a visitor who has already chosen.
+ * reveal on load, and `@lib/consent-surface` moves between them (including when
+ * the footer's Privacy preferences control asks for the dialog back). Everything
+ * is hidden until the client script runs, so the static HTML never flashes a
+ * prompt at a visitor who has already chosen.
  */
 const policyDate = '28 June 2026';
 ---
@@ -77,7 +79,7 @@ const policyDate = '28 June 2026';
         <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
       </button>
     </div>
-    <p class="sd-prefs__sub">Choose what Sleekdrops may measure. You can change this any time from the footer.</p>
+    <p class="sd-prefs__sub">Choose what Sleekdrops may measure. You can change this any time from <strong>Privacy preferences</strong> in the footer.</p>
 
     <div class="pref-row">
       <div class="pref-row__text">
@@ -93,7 +95,7 @@ const policyDate = '28 June 2026';
     <div class="pref-row">
       <div class="pref-row__text">
         <span class="pref-row__title">Anonymous analytics</span>
-        <p class="pref-row__help">Aggregate, anonymized page views. Personal data is stripped in your browser before anything is sent — see below.</p>
+        <p class="pref-row__help">Aggregate, anonymized page views. Stores a randomly generated session identifier in your browser so page views from one visit are counted together - no advertising, no cross-site tracking. Personal data is stripped in your browser before anything is sent — see below.</p>
       </div>
       <label class="sd-switch">
         <input type="checkbox" data-analytics-switch aria-label="Anonymous analytics" />
@@ -136,6 +138,15 @@ const policyDate = '28 June 2026';
     border-radius: var(--r-lg);
     box-shadow: var(--shadow-lg);
     padding: var(--s-6);
+    /* The root is pinned to the bottom of a fixed viewport, so a surface taller
+       than the viewport grows upwards and pushes its own heading and close button
+       past the top edge, where nothing can scroll them back. The preferences
+       dialog does exactly that on a phone. Cap every surface at the viewport
+       instead and let it scroll itself. `dvh` where it is supported, so mobile
+       browser chrome sliding in or out cannot re-clip it. */
+    max-height: calc(100vh - 2 * var(--s-4));
+    max-height: calc(100dvh - 2 * var(--s-4));
+    overflow-y: auto;
   }
   .sd-consent[hidden] { display: none; }
 
@@ -376,36 +387,15 @@ const policyDate = '28 June 2026';
 </style>
 
 <script>
-  import { boot, grantConsent, denyConsent } from '@lib/analytics';
-
-  type SurfaceName = 'banner' | 'gpc' | 'prefs';
+  import { boot, consentStatus, grantConsent, denyConsent } from '@lib/analytics';
+  import { createConsentSurface } from '@lib/consent-surface';
 
   const root = document.querySelector<HTMLElement>('[data-consent-root]');
   if (root) {
-    const surfaces: Record<SurfaceName, HTMLElement | null> = {
-      banner: root.querySelector('[data-surface="banner"]'),
-      gpc: root.querySelector('[data-surface="gpc"]'),
-      prefs: root.querySelector('[data-surface="prefs"]'),
-    };
+    const prefsPanel = root.querySelector<HTMLElement>('[data-surface="prefs"]');
     const analyticsSwitch = root.querySelector<HTMLInputElement>('[data-analytics-switch]');
     const policyPill = root.querySelector<HTMLElement>('[data-policy-pill]');
     const policyNote = root.querySelector<HTMLElement>('[data-policy-note]');
-
-    let previousSurface: 'banner' | 'gpc' | null = null;
-    let returnFocusTo: HTMLElement | null = null;
-
-    const show = (name: SurfaceName): void => {
-      root.hidden = false;
-      (Object.keys(surfaces) as SurfaceName[]).forEach((key) => {
-        const el = surfaces[key];
-        if (el) el.hidden = key !== name;
-      });
-    };
-
-    const dismiss = (): void => {
-      root.hidden = true;
-      document.removeEventListener('keydown', onPrefsKey);
-    };
 
     const focusable = (el: HTMLElement): HTMLElement[] =>
       [...el.querySelectorAll<HTMLElement>('button, [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter(
@@ -413,15 +403,14 @@ const policyDate = '28 June 2026';
       );
 
     function onPrefsKey(ev: KeyboardEvent): void {
-      const panel = surfaces.prefs;
-      if (!panel || panel.hidden) return;
+      if (!prefsPanel || prefsPanel.hidden) return;
       if (ev.key === 'Escape') {
         ev.preventDefault();
-        closePrefs();
+        surface.closePrefs();
         return;
       }
       if (ev.key !== 'Tab') return;
-      const items = focusable(panel);
+      const items = focusable(prefsPanel);
       if (items.length === 0) return;
       const first = items[0];
       const last = items[items.length - 1];
@@ -434,22 +423,27 @@ const policyDate = '28 June 2026';
       }
     }
 
-    const openPrefs = (): void => {
-      returnFocusTo = document.activeElement as HTMLElement | null;
-      show('prefs');
-      document.addEventListener('keydown', onPrefsKey);
-      focusable(surfaces.prefs as HTMLElement)[0]?.focus();
-    };
-
-    const closePrefs = (): void => {
-      document.removeEventListener('keydown', onPrefsKey);
-      if (previousSurface) {
-        show(previousSurface);
-        returnFocusTo?.focus();
-      } else {
-        dismiss();
-      }
-    };
+    // Which surface is on screen, which prompt is still owed an answer and where
+    // focus goes on close all live in @lib/consent-surface, where they are testable;
+    // everything below is the DOM this page happens to hold them in. The document is
+    // the channel the footer control's request arrives on.
+    const surface = createConsentSurface({
+      root,
+      surfaces: {
+        banner: root.querySelector<HTMLElement>('[data-surface="banner"]'),
+        gpc: root.querySelector<HTMLElement>('[data-surface="gpc"]'),
+        prefs: prefsPanel,
+      },
+      analyticsSwitch,
+      channel: document,
+      consentStatus,
+      activeElement: () => document.activeElement as HTMLElement | null,
+      onPrefsOpened: () => {
+        document.addEventListener('keydown', onPrefsKey);
+        if (prefsPanel) focusable(prefsPanel)[0]?.focus();
+      },
+      onPrefsClosed: () => document.removeEventListener('keydown', onPrefsKey),
+    });
 
     root.addEventListener('click', (ev) => {
       const action = (ev.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
@@ -457,41 +451,35 @@ const policyDate = '28 June 2026';
       switch (action) {
         case 'accept':
           grantConsent();
-          dismiss();
+          surface.dismiss();
           break;
         case 'decline':
           denyConsent();
-          dismiss();
+          surface.dismiss();
           break;
         case 'customize':
-          openPrefs();
+          surface.openPrefs();
           break;
         case 'close-prefs':
-          closePrefs();
+          surface.closePrefs();
           break;
         case 'save':
           if (analyticsSwitch?.checked) grantConsent();
           else denyConsent();
-          dismiss();
+          surface.dismiss();
           break;
         case 'decline-all':
           denyConsent();
-          dismiss();
+          surface.dismiss();
           break;
       }
     });
 
     const prompt = boot();
-    if (prompt === 'banner' || prompt === 'policy-update') {
-      previousSurface = 'banner';
-      if (prompt === 'policy-update') {
-        policyPill?.removeAttribute('hidden');
-        policyNote?.removeAttribute('hidden');
-      }
-      show('banner');
-    } else if (prompt === 'gpc') {
-      previousSurface = 'gpc';
-      show('gpc');
+    if (prompt === 'policy-update') {
+      policyPill?.removeAttribute('hidden');
+      policyNote?.removeAttribute('hidden');
     }
+    surface.start(prompt);
   }
 </script>

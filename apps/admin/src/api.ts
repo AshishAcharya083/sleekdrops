@@ -1,5 +1,17 @@
 // Thin API client. If the agent server has ADMIN_TOKEN set, the token typed
 // into the header bar is stored in localStorage and sent as a bearer.
+//
+// This is also the panel's single fetch chokepoint, so it is where the client
+// trace id goes out as X-Trace-Id and where every request failure is logged and
+// reported with a stack trace. The agent's log lines for the same request carry
+// that id, so a client error in the Analytics tab leads straight to them.
+import { TRACE_HEADER, captureError, getTraceId, log } from './analytics';
+
+/** A markdown reference the operator supplied (uploaded file or pasted block). */
+export interface ReferenceMaterial {
+  name: string;
+  content: string;
+}
 
 export interface Topic {
   id: string;
@@ -11,8 +23,30 @@ export interface Topic {
   why_trending: string | null;
   sources: string[];
   status: string;
+  /** 'scout' (Topic Scout) | 'manual' (operator-authored). */
+  source: string;
+  instructions: string | null;
+  research_notes: ReferenceMaterial[];
+  /** Operator-dropped hero image, attached while briefing the piece. */
+  hero_image_url: string | null;
+  hero_alt: string | null;
   created_at: string;
 }
+
+/** Payload for POST /api/topics/manual (create when `id` absent, else edit). */
+export interface ManualTopicPayload {
+  id?: string;
+  title: string;
+  instructions: string;
+  category: string;
+  post_type: string;
+  /** The image file itself is uploaded separately; only its alt text is here. */
+  hero_alt: string;
+  references: ReferenceMaterial[];
+}
+
+export const TOPIC_CATEGORIES = ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel'] as const;
+export const TOPIC_POST_TYPES = ['article', 'guide', 'roundup'] as const;
 
 export interface ArticleSummary {
   id: string;
@@ -24,6 +58,7 @@ export interface ArticleSummary {
   status: string;
   revision_round: number;
   seo_score: string | null;
+  hero_image_url: string | null;
   error: string | null;
   published_at: string | null;
   created_at: string;
@@ -60,6 +95,7 @@ export interface Overview {
 
 export interface ArticleDetail {
   article: ArticleSummary & {
+    hero_alt: string | null;
     research: unknown;
     outline: unknown;
     draft_md: string | null;
@@ -68,6 +104,26 @@ export interface ArticleDetail {
     affiliate_links: Array<{ slug: string; default_url: string; note?: string }> | null;
   };
   sessions: Session[];
+}
+
+export interface PublishedPost {
+  slug: string;
+  status: string;
+  title: string;
+  category: string;
+  post_type: string;
+  author: string;
+  pub_date: string;
+  updated_at: string;
+  /** Read out of the live post's frontmatter — null when it has no hero. */
+  hero_image: string | null;
+  hero_alt: string | null;
+}
+
+/** What the hero routes report back about the site rebuild they asked for. */
+export interface RebuildResult {
+  dispatched: boolean;
+  dispatchError?: string | null;
 }
 
 export interface Settings {
@@ -109,16 +165,69 @@ export function setApiBase(base: string): void {
   localStorage.setItem('sleekdrops_api_base', base.trim());
 }
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+const elapsed = (startedAt: number): number => Math.round(performance.now() - startedAt);
+
+/**
+ * The one place a request leaves the panel: auth, trace header, failure logging
+ * and error reporting all live here, whether the body is JSON or a file.
+ */
+async function request<T>(path: string, init: RequestInit, headers: Record<string, string>): Promise<T> {
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${getApiBase()}${path}`, { ...init, headers });
+  const traceId = getTraceId();
+  if (traceId) headers[TRACE_HEADER] = traceId;
+
+  const method = init.method ?? 'GET';
+  const started = performance.now();
+  log('info', `api request ${method} ${path}`, { route: path, method });
+
+  let res: Response;
+  try {
+    res = await fetch(`${getApiBase()}${path}`, { ...init, headers });
+  } catch (e) {
+    const attributes = { route: path, method, source: 'api', duration_ms: elapsed(started) };
+    log('error', `api request unreachable ${method} ${path}`, attributes);
+    captureError(e, attributes);
+    throw e;
+  }
+
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `HTTP ${res.status}`);
+    const body = (await res.json().catch(() => ({}))) as { error?: string; traceId?: string };
+    const error = new Error(body.error ?? `HTTP ${res.status}`);
+    const attributes = {
+      route: path,
+      method,
+      http_status: res.status,
+      source: 'api',
+      duration_ms: elapsed(started),
+      // The agent returns its trace id on uncaught errors and echoes it on every
+      // response, so the report points at the exact server-side log lines.
+      server_trace_id: body.traceId ?? res.headers.get(TRACE_HEADER) ?? undefined,
+    };
+    log('error', `api request failed ${method} ${path}`, attributes);
+    captureError(error, attributes);
+    throw error;
   }
   return (await res.json()) as T;
+}
+
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  return request<T>(path, init ?? {}, { 'Content-Type': 'application/json' });
+}
+
+/**
+ * Multipart POST for the hero-image drop. The Content-Type header is
+ * deliberately left unset: the browser has to add it itself, together with the
+ * multipart boundary it generated.
+ */
+export async function apiUpload<T>(
+  path: string,
+  { file, fields }: { file?: File | null; fields?: Record<string, string> } = {},
+): Promise<T> {
+  const body = new FormData();
+  if (file) body.set('file', file, file.name);
+  for (const [key, value] of Object.entries(fields ?? {})) body.set(key, value);
+  return request<T>(path, { method: 'POST', body }, {});
 }
 
 export const fmtCost = (v: number | string): string => `$${Number(v).toFixed(4)}`;

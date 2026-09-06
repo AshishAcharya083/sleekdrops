@@ -55,11 +55,29 @@ jobs:
         env:
           SITE_URL: https://sleekdrops.pages.dev
           NODE_ENV: production
-          # DevTeam Analytics — public ingest key (dtp_) + prod ingest host.
-          # The key is ingest-only and safe to commit; PUBLIC_ exposes it to
-          # the Astro build so the DevTeam analytics + logging sink is active.
-          PUBLIC_Devteam__IngestKey: dtp_-IApS0klc1JtsB7kOI84IqD09M1NcO8wrKmK0tbfuLQ
-          PUBLIC_Devteam__Host: https://ingest.analytics.internal.getdevteam.ai
+          # DevTeam Analytics - public ingest key (dtp_) + ingest host. The key is
+          # ingest-only and safe to expose; PUBLIC_ hands it to the Astro build so
+          # the analytics + logging sink is active.
+          #
+          # Held in repo settings rather than inline: re-provisioning a project on
+          # DevTeam mints a NEW analytics project and key, and the old key keeps
+          # returning 202 from an orphaned project. A hardcoded key therefore goes
+          # stale silently - the site looks healthy while the Analytics tab reads a
+          # different project and shows nothing. The admin panel reads the same two
+          # settings, so both apps always report into one project.
+          PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY: ${{ secrets.DEVTEAM_ANALYTICS_INGEST_KEY }}
+          PUBLIC_DEVTEAM_ANALYTICS_HOST: ${{ vars.DEVTEAM_ANALYTICS_HOST }}
+          # In-app feedback widget - develop only. It is a visible control on the
+          # page, so production stays without it until we have looked at it here.
+          PUBLIC_DEVTEAM_ANALYTICS_FEEDBACK: 'true'
+          # DevTeam A/B Testing - flag-delivery host + per-environment client key.
+          # Held in repo settings for the same reason as the ingest key above: the
+          # key is minted per environment in the A/B Testing tab and a stale one
+          # serves an empty payload, so every experiment would read 0% while the
+          # site looks healthy. An empty value disables experiments and every
+          # feature falls back to its code-side default.
+          PUBLIC_DEVTEAM_FLAGS_HOST: ${{ vars.DEVTEAM_FLAGS_HOST }}
+          PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY: ${{ secrets.DEVTEAM_FLAGS_CLIENT_KEY }}
           # Develop is a code-only preview rendered against the SAME live
           # editorial content as production. Content lives in Cloudflare D1,
           # so the build needs the same D1 env vars as prod.

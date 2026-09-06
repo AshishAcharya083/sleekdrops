@@ -107,11 +107,6 @@ export function buildHomeSchema(): WithContext<WebSite> {
     name: 'SleekDrops',
     url: siteUrl,
     publisher: PUBLISHER,
-    potentialAction: {
-      '@type': 'SearchAction',
-      target: `${siteUrl}/blog?query={search_term_string}`,
-      'query-input': 'required name=search_term_string',
-    } as never,
   };
 }
 

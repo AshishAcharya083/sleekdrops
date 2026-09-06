@@ -64,11 +64,25 @@ jobs:
         env:
           SITE_URL: https://sleekdrops.com
           NODE_ENV: production
-          # DevTeam Analytics — public ingest key (dtp_) + prod ingest host.
-          # The key is ingest-only and safe to commit; PUBLIC_ exposes it to
-          # the Astro build so the DevTeam analytics + logging sink is active.
-          PUBLIC_Devteam__IngestKey: dtp_9YapTQMaVMIKD5vLxcIiBl8ByAtwbHILHjrSUi2bshg
-          PUBLIC_Devteam__Host: https://ingest.getdevteam.ai
+          # DevTeam Analytics - public ingest key (dtp_) + ingest host. The key is
+          # ingest-only and safe to expose; PUBLIC_ hands it to the Astro build so
+          # the analytics + logging sink is active.
+          #
+          # Held in repo settings rather than inline, matching deploy-develop.yml:
+          # an inlined key is committed to git history for anyone with repo access,
+          # and it goes stale silently when the project is re-provisioned on
+          # DevTeam - the site looks healthy while the Analytics tab reads a
+          # different project and shows nothing.
+          PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY: ${{ secrets.DEVTEAM_ANALYTICS_INGEST_KEY }}
+          PUBLIC_DEVTEAM_ANALYTICS_HOST: ${{ vars.DEVTEAM_ANALYTICS_HOST }}
+          # DevTeam A/B Testing - flag-delivery host + per-environment client key.
+          # Held in repo settings rather than inline: the key is minted per
+          # environment in the A/B Testing tab and a stale one serves an empty
+          # payload, so every experiment would read 0% while the site looks
+          # healthy. An empty value disables experiments and every feature falls
+          # back to its code-side default.
+          PUBLIC_DEVTEAM_FLAGS_HOST: ${{ vars.DEVTEAM_FLAGS_HOST }}
+          PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY: ${{ secrets.DEVTEAM_FLAGS_CLIENT_KEY }}
           # Used by apps/web/scripts/fetch-content.mjs to read posts +
           # affiliate links from Cloudflare D1 during the prebuild step. The
           # database id is not a secret; CLOUDFLARE_D1_TOKEN needs

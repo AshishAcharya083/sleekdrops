@@ -1,40 +1,53 @@
 ---
 import BrandMark from '@components/ui/BrandMark.astro';
 import IconButton from '@components/ui/IconButton.astro';
+import { NAV_ITEM_ATTRIBUTE } from '@lib/nav-experiment';
 
 /**
- * Sticky translucent header with brand, primary nav, and the search /
- * theme-toggle icon buttons. Pass `active` to underline the current page.
+ * Sticky translucent header with brand, primary nav, and the theme-toggle
+ * icon button. Pass `active` to underline the current page.
  */
+type NavId = 'home' | 'blog' | 'categories' | 'deals' | 'about' | 'contact';
+
 export interface Props {
-  active?: 'home' | 'blog' | 'categories' | 'deals' | 'about' | 'contact';
+  active?: NavId;
 }
 const { active } = Astro.props;
 
-const navItems = [
+interface NavItem {
+  id: NavId;
+  label: string;
+  href: string;
+  /**
+   * Feature key of the experiment that may take this item out of the nav.
+   * The item always ships in the server HTML; chrome.ts removes it client-side
+   * for the variant that says so, and puts it back if the flag flips.
+   */
+  experimentFeature?: string;
+}
+
+const navItems: NavItem[] = [
   { id: 'home', label: 'Home', href: '/' },
   { id: 'blog', label: 'Blog', href: '/blog' },
   { id: 'categories', label: 'Categories', href: '/categories' },
   { id: 'deals', label: 'Deals', href: '/deals' },
-  { id: 'about', label: 'About', href: '/about' },
+  { id: 'about', label: 'About', href: '/about', experimentFeature: 'remove-about-page' },
   { id: 'contact', label: 'Contact', href: '/contact' },
-] as const;
+];
 ---
 <header class="site-header">
   <div class="header-inner">
     <BrandMark />
     <nav class="site-nav" aria-label="Primary">
       {navItems.map((item) => (
-        <a href={item.href} class:list={[{ active: active === item.id }]}>{item.label}</a>
+        <a
+          href={item.href}
+          class:list={[{ active: active === item.id }]}
+          {...(item.experimentFeature ? { [NAV_ITEM_ATTRIBUTE]: item.experimentFeature } : {})}
+        >{item.label}</a>
       ))}
     </nav>
     <div class="header-actions">
-      <IconButton title="Search">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="11" cy="11" r="7" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
-      </IconButton>
       <IconButton title="Toggle theme" data={{ 'theme-toggle': 'true' }}>
         <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
         <svg class="sun" viewBox="0 0 24 24" aria-hidden="true">
@@ -108,6 +121,10 @@ const navItems = [
   :global(:root[data-theme="dark"] .icon-btn) .moon { display: none; }
   :global(:root[data-theme="dark"] .icon-btn) .sun { display: block; }
 
+  /* There is no drawer behind this: below the breakpoint the primary nav is
+     simply not on screen, so a nav experiment cannot reach these visitors.
+     NAV_HIDDEN_QUERY in src/lib/nav-experiment.ts mirrors the bound to keep
+     them out of the bucketing; nav-experiment.test.ts fails if the two drift. */
   @media (max-width: 900px) {
     .site-nav { display: none; }
     .header-inner { padding: 14px 20px; }

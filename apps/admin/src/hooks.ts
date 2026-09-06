@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { captureError } from './analytics';
 import { api } from './api';
 
 /** Poll a GET endpoint on an interval; realtime-enough for a light admin. */
@@ -19,6 +20,7 @@ export function usePoll<T>(path: string, intervalMs = 4000): {
         setError(null);
       })
       .catch((e: Error) => {
+        captureError(e, { route: path, action: 'poll' });
         if (alive.current) setError(e.message);
       });
   }, [path]);

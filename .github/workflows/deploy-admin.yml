@@ -53,6 +53,10 @@ jobs:
           # Baked-in default API base: the Cloud Run agent platform. The panel's
           # header field still overrides it (e.g. http://localhost:8787).
           VITE_API_BASE: ${{ vars.AGENT_API_BASE || 'https://sleekdrops-agent-705604429631.us-central1.run.app' }}
+          # DevTeam Analytics - the same project the website reports to. Unset
+          # values disable the sink silently, so the panel still deploys.
+          VITE_DEVTEAM_ANALYTICS_INGEST_KEY: ${{ secrets.DEVTEAM_ANALYTICS_INGEST_KEY }}
+          VITE_DEVTEAM_ANALYTICS_HOST: ${{ vars.DEVTEAM_ANALYTICS_HOST }}
 
       # Idempotent: fails harmlessly once the project exists.
       - name: Ensure Pages project exists

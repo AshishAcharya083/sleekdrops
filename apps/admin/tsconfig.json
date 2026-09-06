@@ -11,6 +11,9 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    // The node --test suites import their subject with an explicit .ts
+    // extension (node's type stripping needs it), and are type-checked here.
+    "allowImportingTsExtensions": true,
     "noEmit": true,
     "useDefineForClassFields": true
   },

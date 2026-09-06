@@ -23,11 +23,12 @@ The technical handbook for the **sleekdrops** Astro site. Read this before editi
 │  ├── src/                (everything else)   │
 │  └── scripts/                                │
 │      ├── fetch-content.mjs                   │
-│      └── generate-redirects.mjs              │
+│      ├── generate-redirects.mjs              │
+│      └── check-anchors.mjs                   │
 └──────────────────────────────────────────────┘
 ```
 
-**Build flow:** `pnpm build` → `prebuild` runs `fetch-content.mjs` (queries D1 for published posts → `src/content/blog/`, affiliate links → `.d1-cache/affiliate-links.json`, and enforces body guardrails: no raw merchant URLs, every `/go/<slug>` must exist in `affiliate_links`) → `generate-redirects.mjs` (writes `public/_redirects`) → `astro check && astro build`.
+**Build flow:** `pnpm build` → `prebuild` runs `fetch-content.mjs` (queries D1 for published posts → `src/content/blog/`, affiliate links → `.d1-cache/affiliate-links.json`, and enforces body guardrails: no raw merchant URLs, every `/go/<slug>` must exist in `affiliate_links`) → `generate-redirects.mjs` (writes `public/_redirects`) → `astro check && astro build` → `check-anchors.mjs` (fails the build on any in-page anchor in `dist/` with no matching element).
 
 **Trigger flow:** after writing to D1, fire `repository_dispatch` type `content-updated` at this repo (POST /repos/AshishAcharya083/sleekdrops/dispatches) → CI rebuilds → Cloudflare Pages deploys. Live in ~90s.
 
@@ -75,7 +76,8 @@ sleekdrops/
 │   └── styles/
 ├── scripts/
 │   ├── fetch-content.mjs           # Queries D1 at build time
-│   └── generate-redirects.mjs      # Writes public/_redirects from .d1-cache
+│   ├── generate-redirects.mjs      # Writes public/_redirects from .d1-cache
+│   └── check-anchors.mjs           # Fails the build on dead in-page anchors
 ├── .d1-cache/                      # GITIGNORED — D1 fetch target
 ├── docs/                           # Engineering notes
 ├── .github/workflows/              # CI/CD: main → production, develop → staging
@@ -97,15 +99,34 @@ sleekdrops/
 
 ---
 
+## Conventions
+
+**No UI element may report success for an operation that did not happen.**
+A control that accepts input and answers "✓ Subscribed" / "✓ Message sent" while nothing is stored or sent is a false claim to the visitor, not an unfinished feature.
+Ship the honest placeholder (no input, no submit, copy that says what is and isn't there) until the real path exists.
+
+**A control that cannot act must not look like it can.**
+The homepage hero used to render `href="#today"` whether or not `DropPanel` emitted that id, so with no live drop the button did nothing at all.
+In-page anchor CTAs are therefore derived from the state that renders their target - see [`src/lib/hero-cta.ts`](src/lib/hero-cta.ts) - and `scripts/check-anchors.mjs` fails the build on any `href="#..."` in `dist/` with no matching element.
+The rule that script enforces lives in [`src/lib/anchor-integrity.ts`](src/lib/anchor-integrity.ts), unit-tested by its sibling `.test.ts`.
+
+**Every surface degrades to a designed empty state.**
+A heading over an empty row, or a blank hero column, is a broken page rather than a neutral one.
+Sections whose only content is data either render an empty state or are omitted entirely.
+
+---
+
 ## Common commands
 
 ```bash
 pnpm install            # install deps
 pnpm fetch-content      # query D1 → src/content/blog + .d1-cache
 pnpm dev                # fetch-content + http://localhost:4321
-pnpm build              # fetch-content + redirects + astro check + production build
+pnpm build              # fetch-content + redirects + astro check + production build + anchor check
 pnpm preview            # serve the production build
 pnpm check              # type-check only
+pnpm test               # node --test over src/**/*.test.ts
+pnpm check:anchors      # in-page anchors resolve in dist/ (also runs as part of build)
 ```
 
 For local dev, copy `.env.example` to `.env` and fill in `CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `CLOUDFLARE_D1_TOKEN`.
