@@ -12,7 +12,9 @@
  *  2. 84 of the 124 URLs were tag pages, 11 of 12 sampled holding a single post.
  *     A tag page with fewer than MIN_TAG_POSTS posts is left out of the sitemap
  *     here and `noindex`ed by the page (the two read the same threshold), and the
- *     `/reviews` hub is left out while it has nothing to list.
+ *     empty editorial hubs are left out while they have nothing to list. Deals
+ *     and promos are time-sensitive and stay out of the sitemap; their live
+ *     cards and navigation links make them discoverable when inventory exists.
  *
  * Plain ESM because `astro.config.mjs` imports it at config-load time, before
  * anything is built; the pages import the same module so the threshold cannot
@@ -132,7 +134,6 @@ export function createSitemapPolicy(posts) {
   };
   const byTag = group((post) => post.tags.map(slugify));
   const byCategory = group((post) => (post.category ? [slugify(post.category)] : []));
-  const byAuthor = group((post) => (post.author ? [post.author] : []));
   const byType = group((post) => [post.postType]);
 
   const pathOf = (url) => {
@@ -153,7 +154,7 @@ export function createSitemapPolicy(posts) {
     const tag = first(new RegExp(`^/tag/([^/]+)${PAGE_SUFFIX}$`), path);
     if (tag !== undefined) return latestChange(byTag.get(tag) ?? []);
     const author = first(/^\/author\/([^/]+)$/, path);
-    if (author !== undefined) return latestChange(byAuthor.get(author) ?? []);
+    if (author === 'desk') return latestChange(posts);
     if (new RegExp(`^/reviews${PAGE_SUFFIX}$`).test(path)) return latestChange(byType.get('review') ?? []);
     if (new RegExp(`^/guides${PAGE_SUFFIX}$`).test(path)) return latestChange(byType.get('guide') ?? []);
     return undefined;
@@ -167,6 +168,8 @@ export function createSitemapPolicy(posts) {
       const tag = first(new RegExp(`^/tag/([^/]+)${PAGE_SUFFIX}$`), path);
       if (tag !== undefined) return isIndexableTag(byTag.get(tag)?.length ?? 0);
       if (new RegExp(`^/reviews${PAGE_SUFFIX}$`).test(path)) return (byType.get('review')?.length ?? 0) > 0;
+      if (new RegExp(`^/guides${PAGE_SUFFIX}$`).test(path)) return (byType.get('guide')?.length ?? 0) > 0;
+      if (path === '/deals' || path === '/promos') return false;
       return true;
     },
     /** @astrojs/sitemap `serialize`: the entry with a lastmod when one is known. */

@@ -18,4 +18,4 @@ export const SITE_NAME = 'SleekDrops';
  * `buildMeta` does not have to truncate it for a meta description.
  */
 export const SITE_DESCRIPTION =
-  'SleekDrops publishes independent product reviews, side-by-side comparisons and buying guides for Australian shoppers. No paid placements, quietly opinionated.';
+  'SleekDrops publishes independent product research, side-by-side comparisons and buying guides for Australian shoppers. No paid placements, quietly opinionated.';
