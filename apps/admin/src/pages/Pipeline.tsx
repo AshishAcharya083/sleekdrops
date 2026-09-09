@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
-import type { ArticleDetail, ArticleSummary, KeywordPlan } from '../api';
+import type { ArticleDetail, ArticleSummary, KeywordPlan, ResearchDetail } from '../api';
 import { api, apiUpload, duration, fmtCost, fmtTime } from '../api';
 import { Badge } from '../components';
 import { HeroImageField } from '../HeroImageField';
@@ -62,6 +62,80 @@ const DIMENSION_HELP: Record<string, string> = {
   eeat: 'Experience, expertise, authority, trust — methodology, evidence, honest trade-offs.',
   links: 'The /go/ affiliate contract and the placement rules.',
 };
+
+/** The counts worth showing, in the order an operator reads them. */
+const EVIDENCE_COUNTS: Array<[string, string]> = [
+  ['primaryFacts', 'primary facts'],
+  ['expertFacts', 'expert facts'],
+  ['ownerFacts', 'owner facts'],
+  ['aggregatorFacts', 'aggregator facts'],
+  ['untieredFacts', 'untiered facts'],
+  ['testedClaims', 'tested claims'],
+  ['ownerComplaints', 'owner complaints'],
+  ['failureModes', 'failure modes'],
+  ['whoShouldNotBuy', 'who should not buy'],
+  ['datedPriceObservations', 'dated prices'],
+  ['products', 'products'],
+];
+
+/**
+ * Why the research stage passed or stopped. A failed card used to say only
+ * that research failed, which sends an operator back to re-run the same stage
+ * and get the same dossier; this names the thin stratum and where that
+ * evidence is gathered.
+ */
+function EvidenceSection({ research }: { research: ResearchDetail }) {
+  const gate = research.sufficiency;
+  if (!gate) return null;
+  return (
+    <div className="section">
+      <h2>
+        Evidence <span className={`badge ${gate.pass ? 'green' : 'red'}`}>{gate.pass ? 'sufficient' : 'too thin'}</span>
+      </h2>
+      <div className="card">
+        <div className="row" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
+          {EVIDENCE_COUNTS.filter(([key]) => gate.counts[key] !== undefined).map(([key, label]) => (
+            <span className="badge" key={key}>
+              {label}: {gate.counts[key]}
+            </span>
+          ))}
+        </div>
+        <p className="muted" style={{ marginBottom: 0, fontSize: 12 }}>
+          Deterministic gate, run in code after the dossier was synthesised. Checked{' '}
+          {fmtTime(gate.checkedAt)}. A {gate.postType} that clears it carries owner complaints,
+          failure modes and dated prices - the material a spec sheet cannot supply.
+        </p>
+      </div>
+      {gate.shortfalls.length > 0 && (
+        <div className="card table-scroll" tabIndex={0} role="region" aria-label="Evidence strata that came up short" style={{ marginTop: 8 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Stratum</th>
+                <th>Missing</th>
+                <th>Where it comes from</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gate.shortfalls.map((s) => (
+                <tr key={s.label}>
+                  <td className="mono">{s.stratum}</td>
+                  <td>
+                    {s.label}{' '}
+                    <span style={{ color: 'var(--red)' }}>
+                      {s.have}/{s.need}
+                    </span>
+                  </td>
+                  <td className="muted">{s.fix}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * What the piece is built to win, and why. Shown above the review because it
@@ -294,6 +368,8 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                 </div>
               </div>
             )}
+
+            {detail.article.research && <EvidenceSection research={detail.article.research} />}
 
             {detail.article.keyword_plan && (
               <KeywordPlanSection plan={detail.article.keyword_plan} />

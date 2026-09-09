@@ -20,9 +20,10 @@ import { runKeywordStrategist } from '../agents/keywordStrategist.js';
 import { runOutliner } from '../agents/outliner.js';
 import { runPublisher } from '../agents/publisher.js';
 import { runResearcher } from '../agents/researcher.js';
+import { checkEvidence } from '../agents/evidence.js';
 import { runSeoReviewer } from '../agents/seoReviewer.js';
 import { runWriter } from '../agents/writer.js';
-import type { ArticleRow, Stage, TopicRow } from './types.js';
+import type { ArticleRow, ResearchDossier, Stage, TopicRow } from './types.js';
 
 const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
   research: 'researcher',
@@ -111,7 +112,23 @@ async function uniqueSlug(articleId: string, want: string): Promise<string> {
   return `${want}-${articleId.slice(0, 8)}`;
 }
 
-export async function runStage(article: ArticleRow): Promise<void> {
+/**
+ * The research stage's collaborator. Injectable for one reason: `runResearcher`
+ * is a live model plus live Tavily, and the evidence gate's fail path - dossier
+ * stored, article routed to failed, the shortfall on the card - has no other
+ * way to be driven against a real database. Production always uses the default.
+ */
+export type Researcher = (
+  article: ArticleRow,
+  topic: TopicRow | null,
+  model: string,
+  tracker: UsageTracker,
+) => Promise<ResearchDossier>;
+
+export async function runStage(
+  article: ArticleRow,
+  researcher: Researcher = runResearcher,
+): Promise<void> {
   const stage = article.stage;
   if (stage === 'done') return;
   const agent = STAGE_AGENT[stage];
@@ -176,9 +193,19 @@ export async function runStage(article: ArticleRow): Promise<void> {
         const topic = article.topic_id
           ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
           : null;
-        const dossier = await runResearcher(article, topic, model!, tracker);
+        const dossier = await researcher(article, topic, model!, tracker);
+        // The evidence gate: deterministic, and stamped onto the dossier
+        // before it is stored so a failed card can show which stratum was
+        // thin rather than only that research "failed".
+        dossier.sufficiency = checkEvidence(dossier, article.post_type);
         await updateArticle(article.id, { research: JSON.stringify(dossier) });
-        summary = `${dossier.facts?.length ?? 0} facts, ${dossier.products?.length ?? 0} products, primary keyword "${dossier.keywords?.primary}"`;
+        if (!dossier.sufficiency.pass) throw new Error(dossier.sufficiency.message);
+        const counts = dossier.sufficiency.counts;
+        summary =
+          `${counts.facts} facts (${counts.primaryFacts} primary / ${counts.expertFacts} expert / ` +
+          `${counts.ownerFacts} owner / ${counts.untieredFacts} untiered), ${counts.products} products, ` +
+          `${counts.ownerComplaints} owner complaint(s), ${counts.failureModes} failure mode(s), ` +
+          `${counts.datedPriceObservations} dated price(s), primary keyword "${dossier.keywords?.primary}"`;
         next = { stage: 'keyword', status: 'queued' };
         break;
       }
