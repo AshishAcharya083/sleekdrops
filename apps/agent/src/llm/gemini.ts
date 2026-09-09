@@ -1,7 +1,21 @@
-// Gemini engine — single-shot generation through Google ADK. Each call builds
-// a throwaway LlmAgent and runs it on an ephemeral in-memory session; the
-// pipeline's own state lives in Postgres, so nothing here persists.
-import { Gemini, InMemoryRunner, LlmAgent, isFinalResponse, stringifyContent } from '@google/adk';
+// Gemini engine — generation through Google ADK. Each call builds a throwaway
+// LlmAgent and runs it on an ephemeral in-memory session; the pipeline's own
+// state lives in Postgres, so nothing here persists.
+//
+// `search: true` attaches Google Search grounding, which is Gemini's own
+// built-in tool: the model runs the searches inside the API call, so there is
+// nothing to execute locally. It costs the response-schema constraint though —
+// grounding and a forced JSON mime type are mutually exclusive — so a JSON
+// stage that searches asks for JSON in the prompt instead and leans on
+// extractJson(), which already handles a fenced or prose-wrapped reply.
+import {
+  GOOGLE_SEARCH,
+  Gemini,
+  InMemoryRunner,
+  LlmAgent,
+  isFinalResponse,
+  stringifyContent,
+} from '@google/adk';
 import { config } from '../config.js';
 import type { ChatOptions, LlmResult, LlmSettings } from './index.js';
 
@@ -31,10 +45,11 @@ export async function geminiChat(opts: ChatOptions, settings: LlmSettings): Prom
     name: 'sleekdrops_stage',
     model: geminiModel(opts.model, settings),
     instruction: opts.system ?? '',
+    ...(opts.search ? { tools: [GOOGLE_SEARCH] } : {}),
     generateContentConfig: {
       temperature: opts.temperature ?? 0.7,
       maxOutputTokens: opts.maxTokens ?? 8192,
-      ...(opts.jsonMode ? { responseMimeType: 'application/json' } : {}),
+      ...(opts.jsonMode && !opts.search ? { responseMimeType: 'application/json' } : {}),
     },
   });
   const runner = new InMemoryRunner({ agent, appName: 'sleekdrops' });

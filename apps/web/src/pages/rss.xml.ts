@@ -8,8 +8,12 @@ export async function GET(context: APIContext): Promise<Response> {
   return rss({
     title: 'SleekDrops',
     description:
-      "Exclusive deals dropping daily. Honest product reviews, side-by-side comparisons, and one daily deal worth your inbox.",
+      'Independent product research, side-by-side comparisons and buying guides for Australian shoppers.',
     site: context.site ?? 'https://sleekdrops.com',
+    // @astrojs/rss appends a trailing slash to every item link whatever
+    // `trailingSlash` says; the site's canonical form has none, and a feed that
+    // names a second form of every URL hands aggregators a redirect per item.
+    trailingSlash: false,
     items: posts.map((post) => ({
       title: post.data.title,
       description: post.data.dek,
@@ -18,6 +22,7 @@ export async function GET(context: APIContext): Promise<Response> {
       categories: [post.data.category, ...post.data.tags],
       author: getAuthor(post.data.author).name,
     })),
-    customData: '<language>en-us</language>',
+    // The audience is Australian and prices are in AUD; say so.
+    customData: '<language>en-AU</language>',
   });
 }

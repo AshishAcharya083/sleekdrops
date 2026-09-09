@@ -8,6 +8,7 @@ import {
   amazonSearchUrl,
   estimateReadTime,
   goSlugsIn,
+  MONETISED_INTENTS,
   pickCover,
   validateArticle,
 } from '../content/contract.js';
@@ -106,5 +107,18 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
   if (problems.length > 0) {
     throw new Error(`assembly validation failed:\n- ${problems.join('\n- ')}`);
   }
+  // The dossier had products and the intent is commercial, yet nothing in the
+  // body resolved to one — the draft ignored the link contract. The reviewer's
+  // `links` dimension is supposed to catch this; being sure is deterministic.
+  const intent = article.keyword_plan?.intent;
+  if (finalLinks.length === 0 && intent && MONETISED_INTENTS.has(intent)) {
+    throw new Error(
+      `no affiliate links for a ${intent} piece: the dossier carried ${products.length} product(s) ` +
+        `and the draft linked ${slugsInBody.length} /go/ slug(s)` +
+        `${droppedSlugs.length > 0 ? `, all unresolvable (${droppedSlugs.join(', ')})` : ''}. ` +
+        `Publishing this would earn nothing.`,
+    );
+  }
+
   return { frontmatter, affiliateLinks: finalLinks, body, droppedSlugs };
 }

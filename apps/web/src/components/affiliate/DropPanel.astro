@@ -22,7 +22,7 @@ export interface Props {
   /**
    * Where the no-drop state sends the visitor. A prop rather than a hardcoded
    * link because the right destination is the caller's to know: /deals renders
-   * this panel too, where "browse past drops" would point the page at itself.
+   * this panel too, where a page-level action could point back at itself.
    * Omit it to render no action - see resolveDropPanelAction in @lib/hero-cta.
    */
   emptyAction?: DropPanelAction;
@@ -58,7 +58,7 @@ const d = todaysDrop;
   <div>
     <Eyebrow>No drop live</Eyebrow>
     <h3>No live drop right now.</h3>
-    <p class="desc">Drops land without a fixed schedule. Here is everything we have run so far.</p>
+    <p class="desc">There are no archived deals yet. Read our current buying guides while the deals desk is quiet.</p>
   </div>
   {/* Slot for the deferred "email me the next drop" capture - a single field
       drops in here without touching the panel's layout. */}

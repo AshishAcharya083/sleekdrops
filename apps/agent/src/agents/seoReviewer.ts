@@ -23,6 +23,8 @@ import {
   LINK_PLACEMENT_RULES,
   SEO_RULES,
   siteContext,
+  SOURCE_DISCIPLINE,
+  VERIFICATION_RULES,
 } from './context.js';
 import type { ArticleRow, SeoReview } from '../pipeline/types.js';
 
@@ -45,9 +47,10 @@ export async function runSeoReviewer(
   const review = await chatJson<SeoReview>(
     {
       model,
-      system: `${siteContext()}\n\n${LINK_PLACEMENT_RULES}\n\n${SEO_RULES}\n\n${GEO_RULES}\n\n${ANTI_SLOP_RULES}`,
+      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}\n\n${LINK_PLACEMENT_RULES}\n\n${SEO_RULES}\n\n${GEO_RULES}\n\n${ANTI_SLOP_RULES}\n\n${VERIFICATION_RULES}`,
       temperature: 0.2,
       maxTokens: 6000,
+      search: true,
       prompt: `You are a strict SEO + editorial reviewer. Score this draft against the brief
 and the keyword plan.
 ${planBrief ? `\n${planBrief}\n` : ''}
@@ -86,7 +89,22 @@ Score these dimensions 0-100 each:
    taken, rhythm varied, no section-summary padding.
 4. eeat — methodology ("how we picked"), specific evidence, honest trade-offs,
    a non-empty cons list per pick, the editorial-synthesis disclaimer present,
-   nothing invented beyond the dossier.
+   nothing invented beyond the dossier. FACT-CHECK THIS DIMENSION, do not just
+   judge it: pick the three or four claims that would do the most damage if
+   wrong — the headline prices, the flagship spec, "the latest model", a
+   release year, an Australian availability claim — and check each one against
+   a primary source with web_search / read_page. A claim the search contradicts
+   is a high-severity issue with the correct figure in the fix. A claim you
+   cannot confirm anywhere is a medium-severity issue asking for it to be cut
+   or hedged. Say in the summary what you checked and what came back.
+   Deduct nothing for claims you did not have budget to check.${
+     article.revision_round > 0
+       ? `\n   This is revision round ${article.revision_round}: the facts were already
+   checked on an earlier pass and the editor may not add new ones. Re-check only
+   figures that have changed since, and spend the rest of the budget on the
+   other four dimensions.`
+       : ''
+   }
 5. links — every product link is /go/<slug> form, no raw merchant URLs, and the
    placement rules are followed: first mention per section, a link column in
    comparison tables, per-product CTA lines, linked conclusion picks.

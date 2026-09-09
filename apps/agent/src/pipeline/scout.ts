@@ -14,13 +14,18 @@ export async function isScoutRunning(): Promise<boolean> {
 export async function startScoutRun(): Promise<string> {
   const [run] = await q<{ id: string }>('INSERT INTO scout_runs DEFAULT VALUES RETURNING id');
   void (async () => {
-    const model = await modelFor('topic_scout');
     const tracker = new UsageTracker();
-    const [session] = await q<{ id: string }>(
-      `INSERT INTO agent_sessions (scout_run_id, agent, model) VALUES ($1, 'topic_scout', $2) RETURNING id`,
-      [run.id, model],
-    );
+    // Model resolution is inside the try on purpose: it fails when the engine
+    // toggle names Claude and no credential is set, and a throw out here would
+    // leave scout_runs stuck on 'running' — which isScoutRunning() reads, so
+    // every later sweep would refuse to start with nothing explaining why.
+    let session: { id: string } | undefined;
     try {
+      const model = await modelFor('topic_scout');
+      [session] = await q<{ id: string }>(
+        `INSERT INTO agent_sessions (scout_run_id, agent, model) VALUES ($1, 'topic_scout', $2) RETURNING id`,
+        [run.id, model],
+      );
       const topics = await runTopicScout(model, tracker, run.id);
       await q(
         `UPDATE scout_runs SET status = 'done', topics_found = $2, ended_at = now() WHERE id = $1`,
@@ -46,12 +51,22 @@ export async function startScoutRun(): Promise<string> {
         run.id,
         message,
       ]);
-      await q(
-        `UPDATE agent_sessions SET status = 'failed', error = $2, tokens_input = $3,
-           tokens_output = $4, cost_usd = $5, llm_calls = $6, ended_at = now()
-         WHERE id = $1`,
-        [session.id, message, tracker.tokensInput, tracker.tokensOutput, tracker.costUsd, tracker.llmCalls],
-      );
+      // No session row when the model itself could not be resolved — write one
+      // so the Sessions tab carries the reason rather than only scout_runs.
+      if (session) {
+        await q(
+          `UPDATE agent_sessions SET status = 'failed', error = $2, tokens_input = $3,
+             tokens_output = $4, cost_usd = $5, llm_calls = $6, ended_at = now()
+           WHERE id = $1`,
+          [session.id, message, tracker.tokensInput, tracker.tokensOutput, tracker.costUsd, tracker.llmCalls],
+        );
+      } else {
+        await q(
+          `INSERT INTO agent_sessions (scout_run_id, agent, status, summary, error, ended_at)
+           VALUES ($1, 'topic_scout', 'failed', 'scout could not start', $2, now())`,
+          [run.id, message],
+        );
+      }
       console.error(`[scout] run ${run.id} failed: ${message}`);
     }
   })();

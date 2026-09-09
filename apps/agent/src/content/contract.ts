@@ -10,13 +10,23 @@ export const CATEGORIES = ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Trav
 // human-driven per the editorial rules. The pipeline writes the other three.
 export const POST_TYPES = ['article', 'guide', 'roundup'] as const;
 
+/**
+ * Search intents the site earns from. A piece written to answer "which should
+ * I buy" that ships with nothing to click is the one defect that costs revenue
+ * rather than quality, and post_type does not catch it: a `guide` must carry
+ * products (the dossier contract enforces that), but a plain `article` may
+ * legitimately carry none — a trend or news piece has nothing to link. Whether
+ * THIS article is that kind is only knowable once the keyword strategist has
+ * read the SERP and named the intent.
+ */
+export const MONETISED_INTENTS = new Set(['Commercial Investigation', 'Transactional']);
+
 export const AUTHORS = [
-  { id: 'mira', name: 'Mira Kapoor', beat: 'Senior reviews editor — home, general product testing' },
-  { id: 'theo', name: 'Theo Renn', beat: 'Audio & tech' },
-  { id: 'aiko', name: 'Aiko Tanaka', beat: 'Health & wearables' },
-  { id: 'lina', name: 'Lina Voss', beat: 'Fashion & textiles' },
-  { id: 'sam', name: 'Sam Ortiz', beat: 'Personal finance' },
-  { id: 'beatriz', name: 'Beatriz Lima', beat: 'Travel & gear' },
+  {
+    id: 'desk',
+    name: 'SleekDrops Editorial Desk',
+    beat: 'Research-led product coverage across Tech, Home, Fashion, Health, Finance and Travel',
+  },
 ] as const;
 
 export const frontmatterSchema = z.object({

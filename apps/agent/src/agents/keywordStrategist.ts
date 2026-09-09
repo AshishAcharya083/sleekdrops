@@ -12,7 +12,7 @@
 // Everything downstream is built against the result, which is why it runs
 // before the outliner instead of leaving keyword choice as a side effect of
 // writing a brief.
-import { chatJson, UsageTracker } from '../llm/index.js';
+import { chatJson, requireKeys, UsageTracker } from '../llm/index.js';
 import { formatSerps, tavilySerpMany } from '../tools/tavily.js';
 import { GEO_RULES, operatorBrief, siteContext } from './context.js';
 import type { ArticleRow, KeywordPlan, TopicRow } from '../pipeline/types.js';
@@ -64,6 +64,7 @@ Rules:
 Return JSON {"candidates": string[]} — ${CANDIDATES_TO_CHECK + 3} to ${CANDIDATES_TO_CHECK + 6} queries, best first.`,
     },
     tracker,
+    requireKeys<{ candidates: string[] }>('candidates'),
   );
 
   const shortlist = (candidates ?? [])
@@ -139,6 +140,9 @@ Return JSON:
  "rejected": [{"keyword": string, "reason": string}] (the candidates you did not pick)}`,
     },
     tracker,
+    // normalizePlan back-fills a lot, so a fragment here degrades quietly to a
+    // plan built on defaults rather than on the SERP read that was paid for.
+    requireKeys<KeywordPlan>('primaryKeyword', 'wordCountTarget'),
   );
 
   return normalizePlan(plan, {

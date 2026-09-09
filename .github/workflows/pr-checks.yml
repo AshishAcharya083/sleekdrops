@@ -11,6 +11,25 @@ jobs:
   build:
     name: Build & type-check (all apps)
     runs-on: ubuntu-latest
+
+    # The agent platform's API tests run against a real Postgres: its SQL only
+    # fails on a live server (a bad column alias 500ed /api/usage in v0.10.0),
+    # so an unreachable database proves nothing about those routes.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sleekdrops
+          POSTGRES_PASSWORD: sleekdrops
+          POSTGRES_DB: sleekdrops_agent
+        ports:
+          - 5544:5432
+        options: >-
+          --health-cmd "pg_isready -U sleekdrops -d sleekdrops_agent"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,6 +67,8 @@ jobs:
         run: pnpm --filter @sleekdrops/agent check
 
       - name: Test agent platform
+        env:
+          DATABASE_URL: postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent
         run: pnpm --filter @sleekdrops/agent test
 
       - name: Build admin panel

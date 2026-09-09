@@ -6,6 +6,7 @@ import {
   resolveConsent,
   uniformGrants,
   CONSENT_CATEGORIES,
+  DEFAULT_GRANTS,
   POLICY_VERSION,
   type ConsentGrants,
 } from './consent.ts';
@@ -16,6 +17,10 @@ const record = (grants: ConsentGrants, v: number = POLICY_VERSION, ts = 1) => ({
 /** A record as policy version 1 wrote it: one status, for analytics, no categories. */
 const legacy = (status: 'granted' | 'denied') => JSON.stringify({ v: 1, status, ts: 123 });
 
+test('the site default is anonymous analytics on, advertising off', () => {
+  assert.deepEqual(DEFAULT_GRANTS, { analytics: 'granted', ads: 'denied' });
+});
+
 test('parseConsent reads a per-category record', () => {
   assert.deepEqual(
     parseConsent(JSON.stringify({ v: 2, grants: { analytics: 'granted', ads: 'denied' }, ts: 123 })),
@@ -23,10 +28,17 @@ test('parseConsent reads a per-category record', () => {
   );
 });
 
-test('parseConsent denies a category the record does not mention', () => {
+test('a category the record does not mention takes the site default', () => {
+  // Ads was never put to this visitor, and its default is off.
   assert.deepEqual(parseConsent(JSON.stringify({ v: 2, grants: { analytics: 'granted' }, ts: 1 })), {
     v: 2,
     grants: { analytics: 'granted', ads: 'denied' },
+    ts: 1,
+  });
+  // Analytics was never put to this visitor either, and its default is on.
+  assert.deepEqual(parseConsent(JSON.stringify({ v: 2, grants: { ads: 'granted' }, ts: 1 })), {
+    v: 2,
+    grants: { analytics: 'granted', ads: 'granted' },
     ts: 1,
   });
 });
@@ -52,7 +64,7 @@ test('parseConsent defaults a missing timestamp to 0', () => {
 
 test('a policy-1 record migrates to the equivalent per-category record', () => {
   // The single status it carries was the analytics decision; ads did not exist
-  // when it was written, so it is the one thing this visitor never agreed to.
+  // when it was written, so it takes the default, which is off.
   assert.deepEqual(parseConsent(legacy('granted')), {
     v: 1,
     grants: { analytics: 'granted', ads: 'denied' },
@@ -65,57 +77,42 @@ test('a policy-1 record migrates to the equivalent per-category record', () => {
   });
 });
 
-test('a migrated policy-1 record re-prompts instead of being read as a decision', () => {
-  const stored = parseConsent(legacy('granted'));
-  assert.ok(stored, 'a stored decision must survive the policy bump as a record');
-  assert.deepEqual(resolveConsent(stored, false), {
-    // 'policy-update', not 'banner': the visitor decided once and is being asked
-    // again, which is only distinguishable because the record parsed.
-    prompt: 'policy-update',
-    effects: { analytics: 'pending', ads: 'pending' },
+test('a record from an older policy version is honoured, not re-prompted', () => {
+  // There is nothing to prompt with any more; what the visitor decided stands.
+  assert.deepEqual(resolveConsent(parseConsent(legacy('denied')), false), {
+    effects: { analytics: 'deny', ads: 'deny' },
+  });
+  assert.deepEqual(resolveConsent(record(uniformGrants('granted'), POLICY_VERSION - 1), false), {
+    effects: { analytics: 'grant', ads: 'grant' },
   });
 });
 
-test('a privacy signal always declines every category and shows the GPC card', () => {
-  // Wins even over a stored grant of both categories.
-  const stored = record(uniformGrants('granted'));
-  const denied = { prompt: 'gpc', effects: { analytics: 'deny', ads: 'deny' } };
-  assert.deepEqual(resolveConsent(stored, true), denied);
+test('a privacy signal always declines every category', () => {
+  // Wins even over a stored grant of both categories, and over the default.
+  const denied = { effects: { analytics: 'deny', ads: 'deny' } };
+  assert.deepEqual(resolveConsent(record(uniformGrants('granted')), true), denied);
   assert.deepEqual(resolveConsent(null, true), denied);
   assert.deepEqual(resolveConsent(parseConsent(legacy('granted')), true), denied);
 });
 
-test('an in-date record applies each category silently and independently', () => {
+test('a stored record applies each category silently and independently', () => {
   assert.deepEqual(resolveConsent(record({ analytics: 'granted', ads: 'denied' }), false), {
-    prompt: 'none',
     effects: { analytics: 'grant', ads: 'deny' },
   });
   assert.deepEqual(resolveConsent(record({ analytics: 'denied', ads: 'granted' }), false), {
-    prompt: 'none',
     effects: { analytics: 'deny', ads: 'grant' },
   });
   assert.deepEqual(resolveConsent(record(uniformGrants('granted')), false), {
-    prompt: 'none',
     effects: { analytics: 'grant', ads: 'grant' },
   });
   assert.deepEqual(resolveConsent(record(uniformGrants('denied')), false), {
-    prompt: 'none',
     effects: { analytics: 'deny', ads: 'deny' },
   });
 });
 
-test('no stored record shows the first-visit banner and holds every category', () => {
+test('no stored record applies the site default: analytics on, ads off, nothing pending', () => {
   assert.deepEqual(resolveConsent(null, false), {
-    prompt: 'banner',
-    effects: { analytics: 'pending', ads: 'pending' },
-  });
-});
-
-test('a stale policy version re-prompts and keeps holding every category', () => {
-  const stored = record(uniformGrants('granted'), POLICY_VERSION - 1);
-  assert.deepEqual(resolveConsent(stored, false), {
-    prompt: 'policy-update',
-    effects: { analytics: 'pending', ads: 'pending' },
+    effects: { analytics: 'grant', ads: 'deny' },
   });
 });
 
@@ -125,4 +122,5 @@ test('every category the site declares is resolved, none left undefined', () => 
   const { effects } = resolveConsent(null, false);
   assert.deepEqual(Object.keys(effects).sort(), [...CONSENT_CATEGORIES].sort());
   assert.deepEqual(Object.keys(uniformGrants('denied')).sort(), [...CONSENT_CATEGORIES].sort());
+  assert.deepEqual(Object.keys(DEFAULT_GRANTS).sort(), [...CONSENT_CATEGORIES].sort());
 });

@@ -23,7 +23,7 @@ import {
 const source = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
 
 const FOOTER = '../components/layout/Footer.astro';
-const BANNER = '../components/layout/ConsentBanner.astro';
+const BANNER = '../components/layout/PrivacyPreferences.astro';
 const PRIVACY = '../pages/privacy.astro';
 
 test('a control asking for preferences reaches the island listening for it', () => {
@@ -90,15 +90,17 @@ test('the footer control is revealed by its own script rather than shipped dead'
   assert.match(footer, /\bhidden = false/);
 });
 
-test('the consent island hands the document to the surface that listens on it', () => {
-  // What the island does with the request - reopen the dialog pre-filled, close it
-  // without resurrecting a spent prompt, hand focus back exactly once - is
-  // `@lib/consent-surface`, asserted for real in consent-surface.test.ts. The one
-  // thing only the island can get wrong is which channel that surface listens on,
-  // which is the same drift this module exists to prevent.
-  const banner = source(BANNER);
-  assert.match(banner, /createConsentSurface\(\{[\s\S]*?channel: document,/);
-  assert.match(banner, /surface\.start\(prompt\)/);
+test('the preferences island hands the document to the surface that listens on it', () => {
+  // What the island does with the request - open the dialog pre-filled, hand focus
+  // back exactly once - is `@lib/consent-surface`, asserted for real in
+  // consent-surface.test.ts. The one thing only the island can get wrong is which
+  // channel that surface listens on, which is the same drift this module exists
+  // to prevent. And it must still boot the gate: with no banner, this island is
+  // the only place the stored decision (or the default) is applied.
+  const island = source(BANNER);
+  assert.match(island, /createPreferencesSurface\(\{[\s\S]*?channel: document,/);
+  assert.match(island, /\bboot\(\);/);
+  assert.doesNotMatch(island, /data-action="(accept|decline|customize)"/, 'no prompt controls remain');
 });
 
 test('the promise of a footer control names a control the footer actually ships', () => {

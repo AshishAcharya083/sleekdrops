@@ -16,7 +16,7 @@ interface Props { page: Page<BlogPost>; }
 const { page } = Astro.props;
 
 const desc =
-  'Single-product reviews — tested for two weeks against the nearest competitor, scored honestly, and never sponsored.';
+  'Single-product reviews — researched against the nearest competitors, scored honestly, and never sponsored.';
 
 const meta = buildMeta({
   title: page.currentPage === 1 ? 'Reviews' : `Reviews — page ${page.currentPage}`,
@@ -24,6 +24,9 @@ const meta = buildMeta({
   pathname: page.url.current,
   prevUrl: page.url.prev ?? undefined,
   nextUrl: page.url.next ?? undefined,
+  // An empty hub is a thin page; keep it out of the index until it lists something.
+  // The sitemap applies the same rule (src/lib/sitemap-policy.mjs).
+  noindex: page.total === 0,
 });
 ---
 <BaseLayout
@@ -33,14 +36,14 @@ const meta = buildMeta({
   screen="reviews-listing"
 >
   <ListingHero
-    eyebrow="Independent · Two-week test minimum"
+    eyebrow="Independent · Never sponsored"
     titleHtml="The <em>reviews</em>."
     dek={desc}
   />
   <div class="container">
     <div class="listing-grid">
       {page.data.length === 0 ? (
-        <p class="empty">No reviews yet. The desk is testing.</p>
+        <p class="empty">No reviews yet.</p>
       ) : (
         <PostGrid posts={page.data} columns={3} />
       )}

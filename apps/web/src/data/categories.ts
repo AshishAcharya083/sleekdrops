@@ -23,9 +23,9 @@ export const categories: Category[] = [
     id: 'tech',
     name: 'Tech',
     slug: 'tech',
-    blurb: 'Headphones, speakers, the gadgets we keep on the desk.',
+    blurb: 'Headphones, speakers and practical personal technology.',
     intro:
-      'Headphones, e-readers, smart-home gear, and the laptops worth replacing yours for. Reviewed by people who use this stuff for a living.',
+      'Headphones, e-readers, smart-home gear, and the laptops worth replacing yours for. Compared on the specs and owner reviews that matter, not the launch hype.',
   },
   {
     id: 'home',
@@ -33,15 +33,15 @@ export const categories: Category[] = [
     slug: 'home',
     blurb: 'Kitchens, desks, the long, quiet half of the house.',
     intro:
-      'Kettles, desks, lighting, and the unglamorous infrastructure that makes a room better. Tested in real rooms, not studio sets.',
+      'Kettles, desks, lighting, and the practical infrastructure of a home. Compared through published specifications, owner reports and expert coverage.',
   },
   {
     id: 'fashion',
     name: 'Fashion',
     slug: 'fashion',
-    blurb: 'Wardrobe staples and the third-wash test.',
+    blurb: 'Wardrobe staples, materials and construction.',
     intro:
-      'Coats, knits, denim, and the considered purchases that earn closet space. Pilling, hand-feel, and the hem that hangs without break-in.',
+      'Coats, knits, denim, and considered wardrobe purchases. We compare materials, construction details, care requirements and long-term owner reports.',
   },
   {
     id: 'health',
@@ -49,7 +49,7 @@ export const categories: Category[] = [
     slug: 'health',
     blurb: 'Wearables, sleep, and the data behind the claims.',
     intro:
-      'Sleep rings, watches, scales, and the kind of measurement that actually changes behavior. We log the data so you don’t have to.',
+      'Sleep rings, watches, scales, and the evidence behind their claims. We compare published research, specifications and owner reports.',
   },
   {
     id: 'finance',
@@ -57,7 +57,7 @@ export const categories: Category[] = [
     slug: 'finance',
     blurb: 'Cards, accounts, and the spreadsheets behind the picks.',
     intro:
-      'Cashback cards, high-yield accounts, and the math nobody else runs. We model real spend profiles, not the marketing rate.',
+      'Cashback cards, savings accounts, and the terms behind the headline rate. We show the assumptions and arithmetic behind each comparison.',
   },
   {
     id: 'travel',
@@ -65,7 +65,7 @@ export const categories: Category[] = [
     slug: 'travel',
     blurb: 'Bags, gear, and the routines of frequent flyers.',
     intro:
-      'Carry-on bags, packing cubes, and the gear that survives forty flights a year. Tested in real airports, not on a kitchen scale.',
+      'Carry-on bags, packing cubes, and practical travel gear compared through specifications, owner reports and established expert coverage.',
   },
 ];
 

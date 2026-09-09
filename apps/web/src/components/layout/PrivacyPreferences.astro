@@ -1,81 +1,18 @@
 ---
 /**
- * ConsentBanner — the opt-in consent surface, rendered once per page from
- * BaseLayout and pinned to the bottom of the viewport above the footer.
+ * PrivacyPreferences — the privacy-preferences dialog, rendered once per page
+ * from BaseLayout and pinned to the bottom of the viewport above the footer.
  *
- * One root holds three surfaces (banner, GPC info card, preferences dialog);
- * the consent state machine in `@lib/analytics` decides which — if any — to
- * reveal on load, and `@lib/consent-surface` moves between them (including when
- * the footer's Privacy preferences control asks for the dialog back). Everything
- * is hidden until the client script runs, so the static HTML never flashes a
- * prompt at a visitor who has already chosen.
+ * It replaces the first-visit consent banner. Nothing here opens by itself: the
+ * island's script boots the consent state machine in `@lib/analytics` (which
+ * applies the stored decision, or the site default - anonymous analytics on,
+ * advertising off - silently), and the dialog appears only when the footer's
+ * Privacy preferences control asks for it through `@lib/consent-preferences`.
+ * Everything is hidden until then, so the static HTML never flashes a prompt.
  */
-/**
- * The date the policy-update surface cites, which has to be the "Last updated"
- * date `src/pages/privacy.astro` publishes: the surface exists to send the
- * visitor there, and a date the page does not carry reads as the wrong policy.
- * Move the two together whenever POLICY_VERSION is bumped.
- */
-const policyDate = 'September 3, 2026';
 ---
 
 <div class="sd-consent-root" data-consent-root hidden>
-  {/* Default / policy-update banner */}
-  <section
-    class="sd-consent"
-    role="region"
-    aria-label="Privacy consent"
-    data-surface="banner"
-    hidden
-  >
-    <span class="pill pill--policy" data-policy-pill hidden>Policy updated</span>
-    <p class="eyebrow">Your privacy</p>
-    <h2 class="sd-consent__title">A quick word before we count anything</h2>
-    <p class="sd-consent__body" data-policy-note hidden>
-      Our privacy policy changed on {policyDate} — please confirm your choice.
-    </p>
-    <p class="sd-consent__body">
-      We'd like to measure anonymous, aggregate page views — which guides get
-      read, nothing more. No analytics run until you say yes, and we never
-      collect your email address, your searches, or anything you type.
-      <a href="/privacy">Read our Privacy Policy</a>.
-    </p>
-    <p class="sd-consent__body sd-consent__body--ads">
-      Advertising is a separate choice: ads from Google AdSense stay switched off,
-      and no ad script is loaded at all, unless you turn them on under
-      <strong>Customize</strong>.
-    </p>
-    <div class="sd-consent__actions">
-      <button type="button" class="sd-link" data-action="customize">Customize</button>
-      <button type="button" class="btn btn-outline" data-action="decline">Decline</button>
-      <button type="button" class="btn btn-primary" data-action="accept">Accept analytics</button>
-    </div>
-  </section>
-
-  {/* GPC / DNT respected */}
-  <section
-    class="sd-consent sd-consent--info"
-    role="region"
-    aria-label="Privacy signal detected"
-    data-surface="gpc"
-    hidden
-  >
-    <div class="gpc-head">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" />
-      </svg>
-      <p class="eyebrow">Privacy signal detected</p>
-    </div>
-    <p class="sd-consent__body">
-      We saw a Global Privacy Control / Do-Not-Track signal from your browser, so
-      analytics and advertising stay off automatically — nothing to do.
-    </p>
-    <div class="sd-consent__actions">
-      <button type="button" class="sd-link" data-action="customize">Manage anyway</button>
-    </div>
-  </section>
-
-  {/* Preferences dialog */}
   <section
     class="sd-consent sd-prefs"
     role="dialog"
@@ -90,12 +27,12 @@ const policyDate = 'September 3, 2026';
         <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
       </button>
     </div>
-    <p class="sd-prefs__sub">Choose what Sleekdrops may measure and what it may show you. You can change this any time from <strong>Privacy preferences</strong> in the footer.</p>
+    <p class="sd-prefs__sub">Choose what SleekDrops may measure and what it may show you. Anonymous analytics is on unless you switch it off here; advertising is off unless you switch it on. Changes apply straight away, and you can come back to this any time from <strong>Privacy preferences</strong> in the footer.</p>
 
     <div class="pref-row">
       <div class="pref-row__text">
         <span class="pref-row__title">Essential <span class="tag">Always on</span></span>
-        <p class="pref-row__help">Keeps the site working — your theme choice and this consent setting. Never used for tracking and never leaves your browser.</p>
+        <p class="pref-row__help">Keeps the site working — your theme choice and this privacy setting. Never used for tracking and never leaves your browser.</p>
       </div>
       <label class="sd-switch" title="Always on">
         <input type="checkbox" checked disabled aria-label="Essential — always on" />
@@ -105,8 +42,8 @@ const policyDate = 'September 3, 2026';
 
     <div class="pref-row">
       <div class="pref-row__text">
-        <span class="pref-row__title">Anonymous analytics</span>
-        <p class="pref-row__help">Aggregate, anonymized page views. Stores a randomly generated session identifier in your browser so page views from one visit are counted together - no advertising, no cross-site tracking. Personal data is stripped in your browser before anything is sent — see below.</p>
+        <span class="pref-row__title">Anonymous analytics <span class="tag">On by default</span></span>
+        <p class="pref-row__help">Aggregate, anonymised page views — which guides get read, nothing more. Stores a randomly generated session identifier in your browser so page views from one visit are counted together; no advertising, no cross-site tracking. Personal data is stripped in your browser before anything is sent — see below. Switch it off and it stops immediately.</p>
       </div>
       <label class="sd-switch">
         <input type="checkbox" data-analytics-switch aria-label="Anonymous analytics" />
@@ -116,8 +53,8 @@ const policyDate = 'September 3, 2026';
 
     <div class="pref-row">
       <div class="pref-row__text">
-        <span class="pref-row__title">Advertising</span>
-        <p class="pref-row__help">Lets <strong>Google AdSense</strong> show ads on this site, which sets its own cookies and browser storage and may personalise what you see using your activity here and on other sites. Off by default: with this switch off no ad script is requested at all. You can withdraw it here at any time.</p>
+        <span class="pref-row__title">Advertising <span class="tag">Off by default</span></span>
+        <p class="pref-row__help">Lets <strong>Google AdSense</strong> show ads on this site, which sets its own cookies and browser storage and may personalise what you see using your activity here and on other sites. With this switch off no ad script is requested at all. You can withdraw it here at any time.</p>
       </div>
       <label class="sd-switch">
         <input type="checkbox" data-ads-switch aria-label="Advertising" />
@@ -135,7 +72,7 @@ const policyDate = 'September 3, 2026';
     </div>
 
     <div class="sd-prefs__actions">
-      <button type="button" class="btn btn-outline" data-action="decline-all">Decline all</button>
+      <button type="button" class="btn btn-outline" data-action="decline-all">Switch everything off</button>
       <button type="button" class="btn btn-primary" data-action="save">Save preferences</button>
     </div>
   </section>
@@ -160,62 +97,19 @@ const policyDate = 'September 3, 2026';
     border-radius: var(--r-lg);
     box-shadow: var(--shadow-lg);
     padding: var(--s-6);
-    /* The root is pinned to the bottom of a fixed viewport, so a surface taller
+    /* The root is pinned to the bottom of a fixed viewport, so a dialog taller
        than the viewport grows upwards and pushes its own heading and close button
-       past the top edge, where nothing can scroll them back. The preferences
-       dialog does exactly that on a phone. Cap every surface at the viewport
-       instead and let it scroll itself. `dvh` where it is supported, so mobile
-       browser chrome sliding in or out cannot re-clip it. */
+       past the top edge, where nothing can scroll them back - which it does on a
+       phone. Cap it at the viewport instead and let it scroll itself. `dvh` where
+       it is supported, so mobile browser chrome sliding in or out cannot re-clip it. */
     max-height: calc(100vh - 2 * var(--s-4));
     max-height: calc(100dvh - 2 * var(--s-4));
     overflow-y: auto;
   }
   .sd-consent[hidden] { display: none; }
 
-  .sd-consent__title {
-    font-family: var(--font-display);
-    font-weight: 400;
-    letter-spacing: -0.015em;
-    font-size: 24px;
-    line-height: var(--lh-snug);
-    color: var(--ink);
-    margin: 0 0 var(--s-2);
-  }
-  .sd-consent__body {
-    font-size: var(--t-body-sm);
-    line-height: var(--lh-base);
-    color: var(--ink-2);
-    margin: 0;
-    min-width: 0;
-    overflow-wrap: break-word;
-  }
-  .sd-consent__body[data-policy-note] { margin-bottom: var(--s-2); color: var(--muted); }
-  .sd-consent__body--ads { margin-top: var(--s-3); color: var(--muted); }
-  .sd-consent__body[hidden] { display: none; }
-
-  .sd-consent__actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--s-2);
-    margin-top: var(--s-6);
-  }
-
-  .pill {
-    display: inline-block;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    padding: 3px 10px;
-    border-radius: var(--r-full);
-    margin: 0 0 var(--s-3);
-  }
-  .pill--policy { background: var(--warning-soft); color: var(--warning); }
-  .pill[hidden] { display: none; }
-
-  /* Buttons — the consent surface composes the .btn tokens directly so it does
-     not depend on the scoped styles of the Button component. */
+  /* Buttons — the dialog composes the .btn tokens directly so it does not
+     depend on the scoped styles of the Button component. */
   .btn {
     display: inline-flex;
     align-items: center;
@@ -241,25 +135,6 @@ const policyDate = 'September 3, 2026';
   }
   .btn-outline:hover { border-color: var(--ink); transform: translateY(-1px); }
 
-  .sd-link {
-    background: none;
-    border: 0;
-    cursor: pointer;
-    font-family: var(--font-body);
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--muted);
-    padding: 8px 4px;
-    margin-right: auto;
-    text-decoration: underline;
-    text-decoration-color: transparent;
-    text-underline-offset: 3px;
-    transition: color var(--dur-fast) var(--ease-out),
-      text-decoration-color var(--dur-fast) var(--ease-out);
-  }
-  .sd-link:hover { color: var(--ink); text-decoration-color: var(--hairline-strong); }
-
-  /* Preferences dialog */
   .sd-prefs__head {
     display: flex;
     align-items: flex-start;
@@ -311,6 +186,7 @@ const policyDate = 'September 3, 2026';
   .pref-row__title {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--s-2);
     font-size: var(--t-body);
     font-weight: 700;
@@ -335,7 +211,6 @@ const policyDate = 'September 3, 2026';
     overflow-wrap: break-word;
   }
 
-  /* Switch (.sd-switch — new shared control) */
   .sd-switch { display: inline-flex; flex: none; cursor: pointer; margin-top: 2px; }
   .sd-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
   .sd-switch__track {
@@ -390,17 +265,7 @@ const policyDate = 'September 3, 2026';
 
   .sd-prefs__actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-6); }
 
-  /* GPC info card */
-  .sd-consent--info { border-left: 3px solid var(--info); }
-  .gpc-head { display: flex; align-items: center; gap: var(--s-2); margin-bottom: var(--s-2); }
-  .gpc-head svg { flex: none; width: 18px; height: 18px; stroke: var(--info); stroke-width: 2; fill: none; }
-  .gpc-head .eyebrow { margin: 0; color: var(--info); }
-
-  /* Mobile: action rows wrap to full-width stacked, Accept stays prominent. */
   @media (max-width: 480px) {
-    .sd-consent__actions { gap: var(--s-3); }
-    .sd-consent__actions .btn { flex: 1 1 100%; }
-    .sd-consent__actions .sd-link { order: -1; flex: 1 1 100%; text-align: left; }
     .sd-prefs__actions .btn { flex: 1 1 100%; }
   }
 
@@ -410,32 +275,30 @@ const policyDate = 'September 3, 2026';
 </style>
 
 <script>
-  import { boot, consentStatus, grantConsent, denyConsent, setConsent } from '@lib/analytics';
+  import { boot, consentStatus, denyConsent, setConsent } from '@lib/analytics';
   import { isAdsGranted } from '@lib/ads';
-  import { createConsentSurface } from '@lib/consent-surface';
+  import { createPreferencesSurface } from '@lib/consent-surface';
 
   const root = document.querySelector<HTMLElement>('[data-consent-root]');
   if (root) {
-    const prefsPanel = root.querySelector<HTMLElement>('[data-surface="prefs"]');
+    const dialog = root.querySelector<HTMLElement>('[data-surface="prefs"]');
     const analyticsSwitch = root.querySelector<HTMLInputElement>('[data-analytics-switch]');
     const adsSwitch = root.querySelector<HTMLInputElement>('[data-ads-switch]');
-    const policyPill = root.querySelector<HTMLElement>('[data-policy-pill]');
-    const policyNote = root.querySelector<HTMLElement>('[data-policy-note]');
 
     const focusable = (el: HTMLElement): HTMLElement[] =>
       [...el.querySelectorAll<HTMLElement>('button, [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter(
         (n) => !n.hasAttribute('disabled') && n.offsetParent !== null,
       );
 
-    function onPrefsKey(ev: KeyboardEvent): void {
-      if (!prefsPanel || prefsPanel.hidden) return;
+    function onDialogKey(ev: KeyboardEvent): void {
+      if (!dialog || dialog.hidden) return;
       if (ev.key === 'Escape') {
         ev.preventDefault();
-        surface.closePrefs();
+        surface.close();
         return;
       }
       if (ev.key !== 'Tab') return;
-      const items = focusable(prefsPanel);
+      const items = focusable(dialog);
       if (items.length === 0) return;
       const first = items[0];
       const last = items[items.length - 1];
@@ -448,17 +311,12 @@ const policyDate = 'September 3, 2026';
       }
     }
 
-    // Which surface is on screen, which prompt is still owed an answer and where
-    // focus goes on close all live in @lib/consent-surface, where they are testable;
-    // everything below is the DOM this page happens to hold them in. The document is
-    // the channel the footer control's request arrives on.
-    const surface = createConsentSurface({
+    // What the dialog shows and where focus goes live in @lib/consent-surface, where
+    // they are testable; everything below is the DOM this page happens to hold them
+    // in. The document is the channel the footer control's request arrives on.
+    const surface = createPreferencesSurface({
       root,
-      surfaces: {
-        banner: root.querySelector<HTMLElement>('[data-surface="banner"]'),
-        gpc: root.querySelector<HTMLElement>('[data-surface="gpc"]'),
-        prefs: prefsPanel,
-      },
+      dialog,
       switches: { analytics: analyticsSwitch, ads: adsSwitch },
       channel: document,
       // Each category answers for itself: analytics from the decision this
@@ -466,50 +324,36 @@ const policyDate = 'September 3, 2026';
       isGranted: (category) =>
         category === 'ads' ? isAdsGranted() : consentStatus() === 'granted',
       activeElement: () => document.activeElement as HTMLElement | null,
-      onPrefsOpened: () => {
-        document.addEventListener('keydown', onPrefsKey);
-        if (prefsPanel) focusable(prefsPanel)[0]?.focus();
+      onOpened: () => {
+        document.addEventListener('keydown', onDialogKey);
+        if (dialog) focusable(dialog)[0]?.focus();
       },
-      onPrefsClosed: () => document.removeEventListener('keydown', onPrefsKey),
+      onClosed: () => document.removeEventListener('keydown', onDialogKey),
     });
 
     root.addEventListener('click', (ev) => {
       const action = (ev.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
       if (!action) return;
       switch (action) {
-        case 'accept':
-          grantConsent();
-          surface.dismiss();
-          break;
-        case 'decline':
-          denyConsent();
-          surface.dismiss();
-          break;
-        case 'customize':
-          surface.openPrefs();
-          break;
         case 'close-prefs':
-          surface.closePrefs();
+          surface.close();
           break;
         case 'save':
           setConsent({
             analytics: analyticsSwitch?.checked ? 'granted' : 'denied',
             ads: adsSwitch?.checked ? 'granted' : 'denied',
           });
-          surface.dismiss();
+          surface.close();
           break;
         case 'decline-all':
           denyConsent();
-          surface.dismiss();
+          surface.close();
           break;
       }
     });
 
-    const prompt = boot();
-    if (prompt === 'policy-update') {
-      policyPill?.removeAttribute('hidden');
-      policyNote?.removeAttribute('hidden');
-    }
-    surface.start(prompt);
+    // Apply the decision in force - stored, or the site default - and start (or
+    // not) the analytics sinks. Nothing is shown.
+    boot();
   }
 </script>

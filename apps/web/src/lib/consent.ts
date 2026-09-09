@@ -6,29 +6,29 @@
  * without a browser or any SDK. analytics.ts feeds it the parsed record and the
  * privacy-signal boolean and acts on the result; `./ads` feeds it the same two
  * things for the advertising category.
+ *
+ * The model, since September 2026, is opt-out for analytics and opt-in for ads,
+ * with no prompt of any kind:
+ *
+ *  - Anonymous analytics is ON by default. The site is Australian, where the
+ *    Privacy Act does not condition first-party, aggregate analytics on a prior
+ *    opt-in, and the banner that used to ask was the first thing a visitor
+ *    arriving from a search result saw. It can be switched off at any time from
+ *    the footer's Privacy preferences, and the withdrawal path clears everything
+ *    the grant stored.
+ *  - Advertising is OFF by default and stays an explicit opt-in: the ad tag writes
+ *    cookies and device storage the moment it runs, which is the thing ePrivacy
+ *    conditions on consent for visitors it reaches.
+ *  - A Global Privacy Control / Do-Not-Track signal switches every category off,
+ *    over the default and over a stored grant alike.
  */
 
 /**
- * The consent scope this site asks for. A visitor whose stored record carries an
- * older version is re-prompted, so bumping it destroys every consent record on
- * file - which is the right thing exactly four times:
- *
- *  - a new purpose category (a category that is not analytics),
- *  - a new vendor or recipient of the data,
- *  - a change of legal basis,
- *  - a change to what an existing category *does*.
- *
- * Nothing else. Adding a storage item that serves the already-consented analytics
- * purpose, is first-party only, is written only on grant and is deleted on
- * withdrawal is not a change of purpose, scope or recipient, so it does not bump
- * this - `sd_sid` (see `./visit`) was added under exactly those conditions.
- * Editorial changes to the storage inventory are recorded by the `updated` date on
- * `src/pages/privacy.astro` instead.
- *
- * Version 2 adds the `ads` category and its vendor (Google AdSense) - the first
- * and second reasons on that list at once - so every record written under the
- * analytics-only policy is re-prompted rather than read as an ads decision the
- * visitor never made.
+ * The policy version a stored record is stamped with. It is written for
+ * provenance and no longer re-prompts anyone (there is nothing to prompt with):
+ * a record from an older version is honoured for the categories it names, and a
+ * category it does not name takes the site default below. Version 1 stored one
+ * status, for analytics; version 2 stores one per category.
  */
 export const POLICY_VERSION = 2;
 
@@ -48,6 +48,13 @@ export type ConsentCategory = (typeof CONSENT_CATEGORIES)[number];
 
 /** The visitor's decision for every category, one status each. */
 export type ConsentGrants = Record<ConsentCategory, ConsentStatus>;
+
+/**
+ * What applies when the visitor has decided nothing: anonymous analytics on,
+ * advertising off. Also what a stored record falls back to for a category it
+ * does not mention.
+ */
+export const DEFAULT_GRANTS: ConsentGrants = { analytics: 'granted', ads: 'denied' };
 
 export interface ConsentRecord {
   v: number;
@@ -70,24 +77,13 @@ interface StoredConsent {
 }
 
 /**
- * Which consent surface the UI should render:
- *  - `none`          a decision is already in force; render nothing
- *  - `banner`        first-visit opt-in prompt
- *  - `policy-update` stored consent predates the current policy version
- *  - `gpc`           a GPC/DNT signal was honoured; passive info card
- */
-export type ConsentPrompt = 'none' | 'banner' | 'policy-update' | 'gpc';
-
-/**
  * What to enforce immediately for one category:
  *  - `grant`   load what the category needs and flush anything held for it
  *  - `deny`    drop what is held, send nothing, load nothing
- *  - `pending` keep holding until the visitor chooses
  */
-export type ConsentEffect = 'grant' | 'deny' | 'pending';
+export type ConsentEffect = 'grant' | 'deny';
 
 export interface ConsentResolution {
-  prompt: ConsentPrompt;
   /** What to enforce immediately, per category. */
   effects: Record<ConsentCategory, ConsentEffect>;
 }
@@ -119,23 +115,20 @@ const isStatus = (value: unknown): value is ConsentStatus =>
 /**
  * A policy-1 record read as the per-category record it is equivalent to: the one
  * status it carries is the analytics decision, and ads - a category that did not
- * exist when it was written, and so was never put to this visitor - is denied.
- *
- * The record still re-prompts, because its version is behind (see POLICY_VERSION),
- * and that is the point of migrating it rather than discarding it: `policy-update`
- * tells the visitor their earlier choice is being revisited, where a null record
- * would show them the first-visit banner as if they had never decided.
+ * exist when it was written, and so was never put to this visitor - takes the
+ * default, which is off.
  */
 function migrateLegacy(status: unknown): ConsentGrants | null {
   if (!isStatus(status)) return null;
-  return { analytics: status, ads: 'denied' };
+  return { ...DEFAULT_GRANTS, analytics: status };
 }
 
 /**
  * The grants a stored record carries, or null when it carries none we can read.
- * A category the record does not mention is denied - a decision that was never
- * taken is not consent - but a category it mentions with a value that is not a
- * status makes the whole record unreadable rather than silently half-applied.
+ * A category the record does not mention takes the site default - a decision
+ * that was never taken is not a decision - but a category it mentions with a
+ * value that is not a status makes the whole record unreadable rather than
+ * silently half-applied.
  */
 function readGrants(parsed: StoredConsent): ConsentGrants | null {
   if (typeof parsed.grants !== 'object' || parsed.grants === null) {
@@ -144,7 +137,10 @@ function readGrants(parsed: StoredConsent): ConsentGrants | null {
   const stored = parsed.grants as Record<string, unknown>;
   const present = CONSENT_CATEGORIES.filter((category) => stored[category] !== undefined);
   if (present.length === 0 || !present.every((category) => isStatus(stored[category]))) return null;
-  return byCategory((category) => (stored[category] === 'granted' ? 'granted' : 'denied'));
+  return byCategory((category) => {
+    const value = stored[category];
+    return isStatus(value) ? value : DEFAULT_GRANTS[category];
+  });
 }
 
 /** Parse and validate a stored consent record; returns null if absent/malformed. */
@@ -157,7 +153,7 @@ export function parseConsent(raw: string | null): ConsentRecord | null {
     if (!grants) return null;
     return { v: parsed.v, grants, ts: typeof parsed.ts === 'number' ? parsed.ts : 0 };
   } catch {
-    /* unreadable / malformed record - treat as no consent on file */
+    /* unreadable / malformed record - treat as no decision on file */
   }
   return null;
 }
@@ -165,21 +161,19 @@ export function parseConsent(raw: string | null): ConsentRecord | null {
 /**
  * Resolve what to do on page load from the stored record and the browser's
  * privacy signal. A GPC/DNT signal always wins and counts as a decline for every
- * non-essential category; an in-date stored record applies silently, category by
- * category; a stale record re-prompts; otherwise we show the first-visit banner
- * and hold everything until the visitor chooses.
+ * non-essential category; a stored record applies silently, category by
+ * category, whatever policy version wrote it; with no record the site defaults
+ * apply. Nothing is ever left pending, and nothing is ever prompted for.
  */
 export function resolveConsent(
   record: ConsentRecord | null,
   privacySignal: boolean,
-  policyVersion: number = POLICY_VERSION,
 ): ConsentResolution {
-  if (privacySignal) return { prompt: 'gpc', effects: everyCategory('deny') };
-  if (record && record.v === policyVersion) {
-    const effects = byCategory<ConsentEffect>((category) =>
-      record.grants[category] === 'granted' ? 'grant' : 'deny',
-    );
-    return { prompt: 'none', effects };
-  }
-  return { prompt: record ? 'policy-update' : 'banner', effects: everyCategory('pending') };
+  if (privacySignal) return { effects: everyCategory('deny') };
+  const grants = record?.grants ?? DEFAULT_GRANTS;
+  return {
+    effects: byCategory<ConsentEffect>((category) =>
+      grants[category] === 'granted' ? 'grant' : 'deny',
+    ),
+  };
 }

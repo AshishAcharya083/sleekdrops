@@ -160,6 +160,12 @@ export interface RebuildResult {
   dispatchError?: string | null;
 }
 
+/** Whether an engine can actually run, and where its credential came from. */
+export interface EngineReadiness {
+  configured: boolean;
+  source: 'admin-settings' | 'env-oauth-token' | 'env-api-key' | 'vertex-adc' | null;
+}
+
 export interface Settings {
   models: Record<string, string>;
   publish_mode: string;
@@ -173,6 +179,8 @@ export interface Settings {
     prose_engine?: 'claude' | 'gemini';
   };
   scout_interval_hours: number;
+  /** Derived server-side, read-only — the API ignores it on save. */
+  engines?: { claude: EngineReadiness; gemini: EngineReadiness };
 }
 
 export function getToken(): string {

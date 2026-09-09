@@ -1,23 +1,55 @@
 ---
 /**
- * AffiliateDisclosure — the mandatory disclosure block shown on every
- * page that carries affiliate links. Tone (per the design system) is
- * calm and informational, not shouty.
+ * AffiliateDisclosure — the disclosure every page with affiliate links carries.
+ *
+ * Two placements, because the regulators and Amazon want different things from
+ * it. The FTC's Endorsement Guides say a reader must be able to see the
+ * disclosure and the link "at the same time", and the ACCC's 2023 sweep named a
+ * disclosure "at the very end" in "small or hard to read font" as the failing
+ * pattern - so an article opens with the `inline` line under its byline, before
+ * the first /go/ link. Amazon's Operating Agreement (§5) requires the sentence
+ * "As an Amazon Associate I earn from qualifying purchases" clearly and
+ * prominently; both placements carry it.
+ *
+ * It says what is true: we earn a commission, our picks are researched and
+ * independent, and we do not lab-test every product. Tone (per the design
+ * system) is calm and informational, not shouty.
  */
+export interface Props {
+  /** `inline` is the one-line note under a byline; `note` the fuller block at the end. */
+  variant?: 'note' | 'inline';
+}
+const { variant = 'note' } = Astro.props;
 ---
-<aside class="disclosure" role="note" aria-label="Affiliate disclosure">
-  <strong>Disclosure.</strong> SleekDrops earns a commission when you click affiliate links — at no extra cost to you. Our reviews are independent. We test the product before linking it.
-</aside>
+{variant === 'inline' ? (
+  <p class="disclosure disclosure--inline" role="note" aria-label="Affiliate disclosure">
+    This page has affiliate links: when you buy through them, SleekDrops earns a commission at no extra cost to you. As an Amazon Associate we earn from qualifying purchases.
+    <a href="/disclaimer">How we work</a>.
+  </p>
+) : (
+  <aside class="disclosure" role="note" aria-label="Affiliate disclosure">
+    <strong>Disclosure.</strong> SleekDrops earns a commission when you buy through links on this page, at no extra cost to you. As an Amazon Associate we earn from qualifying purchases. Our picks are chosen editorially and independently: we research manufacturer specs, owner reviews and expert coverage rather than lab-testing every product, and no brand pays for a place here. <a href="/disclaimer">How we work</a>.
+  </aside>
+)}
 
 <style>
   .disclosure {
     border-top: 1px solid var(--hairline);
     padding: 14px 0 0;
     margin: 40px 0 0;
-    font-size: 11px;
-    line-height: 1.5;
-    color: var(--muted-2);
-    max-width: 60ch;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: 64ch;
   }
-  .disclosure strong { color: var(--muted); font-weight: 600; }
+  .disclosure strong { color: var(--ink-2); font-weight: 600; }
+  .disclosure a { color: inherit; text-underline-offset: 2px; }
+
+  .disclosure--inline {
+    border-top: 0;
+    border-left: 2px solid var(--hairline-strong);
+    padding: 2px 0 2px 12px;
+    margin: 20px 0 0;
+    font-size: 13px;
+  }
 </style>

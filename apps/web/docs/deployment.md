@@ -5,14 +5,60 @@ Two environments, both static builds, both deployed to Cloudflare Pages.
 | Branch    | Environment | URL                              | Workflow                                   |
 | --------- | ----------- | -------------------------------- | ------------------------------------------ |
 | `main`    | production  | https://sleekdrops.com           | `.github/workflows/deploy-production.yml`  |
-| `develop` | develop     | https://develop.sleekdrops.com   | `.github/workflows/deploy-develop.yml`     |
+| `develop` | develop     | https://develop.sleekdrops.pages.dev | `.github/workflows/deploy-develop.yml` |
 | any PR    | (checks)    | —                                | `.github/workflows/pr-checks.yml`          |
 
 A push to `main` triggers the production build, type-check, and deploy. A push to `develop` triggers the same against the develop URL. Every PR runs a type-check and a build (no deploy) to keep `main` and `develop` shippable.
 
+**Which `pages.dev` host is which** — Cloudflare Pages serves the project's *production* branch at the bare `sleekdrops.pages.dev` and every other branch at `<branch>.sleekdrops.pages.dev`. So `sleekdrops.pages.dev` is production (the same build as `sleekdrops.com`), and develop is `develop.sleekdrops.pages.dev`. Checking the bare host to see what develop shipped shows you production instead — which is an easy way to conclude that a per-environment setting has leaked when it has not.
+
+Note that develop's build still sets `SITE_URL` to the **production** host on purpose: canonical links, `og:url` and the sitemap are built from it, so pointing it at the preview would make develop a self-canonicalising second copy competing with the real site in the index.
+
+### Only production is indexable
+
+Both deploy workflows set `PUBLIC_SITE_ENV` — `production` on production, `preview` on develop. It is a plain workflow value, not a repo variable, because it is a property of the deployment rather than a setting anyone tunes.
+
+| Value | robots meta on every page | `robots.txt` |
+| --- | --- | --- |
+| `production` | `index, follow` (a page asking for `noindex` still gets `noindex, follow`) | crawl rules **plus** the `Sitemap:` line, built from `SITE_URL` |
+| anything else | `noindex, nofollow` | the same crawl rules, **no** sitemap, and a header saying it is a preview |
+
+**Only the exact string `production` is indexable.** Unset, empty, misspelled or `Production` all read as a preview, so a preview environment added later is safe because it did nothing rather than because someone remembered this page.
+
+That direction is deliberate. `develop` is held at the same code level as `main` and renders the same pages from the same live editorial content, so an indexable preview is a complete second copy of the site competing with the real one for its own rankings — and, to an AdSense reviewer, duplicated content on a domain the account does not own.
+
+The failure in the other direction — production's line going missing and silently de-listing the live site — does not break a build and would be invisible for weeks, so [`src/lib/site-env.test.ts`](../src/lib/site-env.test.ts) asserts both halves and fails CI instead.
+
+**The preview `robots.txt` deliberately does not `Disallow: /`.** What keeps a preview out of the index is the `noindex` on every page, and Google is explicit that a page blocked by `robots.txt` cannot be crawled and therefore cannot have its `noindex` seen — a blanket disallow would *preserve* anything already indexed rather than remove it. Blocking discovery and blocking indexing are different jobs; `noindex` is the one that does the second.
+
 The build runs `pnpm prebuild` (which generates `public/_redirects` from `src/data/affiliate-links.json`) → `astro check` → `astro build`. Output goes to `dist/`. `wrangler-action@v3` pushes `dist/` to the matching Cloudflare Pages project.
 
 ---
+
+### Canonical URLs, the sitemap and IndexNow
+
+`astro.config.mjs` sets `build.format: 'file'`, so a page is written as
+`blog/<slug>.html` and Cloudflare Pages serves it at `/blog/<slug>` - the form the
+canonical tag, the sitemap, the RSS feed and the JSON-LD all name. With Astro's
+default directory layout Pages 308-redirected every one of those URLs to the
+trailing-slash form, and Google indexed the slash form. After a deploy,
+`curl -I https://sleekdrops.com/blog/<slug>` must return 200 and the slash form
+must redirect back to it.
+
+The sitemap carries a `lastmod` per URL, derived from post dates by
+`src/lib/sitemap-policy.mjs` (a post's `updatedDate ?? pubDate`; the newest post a
+listing holds). The same module leaves out tag pages with fewer than three posts
+and empty review or guide hubs. Time-sensitive deal and promo hubs stay out of
+the sitemap and are linked from navigation only while they have live inventory.
+The empty pages also `noindex` themselves.
+
+After the production deploy, `scripts/indexnow-submit.mjs` POSTs the URLs whose
+lastmod changed in the last 36 hours to IndexNow, which fans out to Bing,
+Yandex, Naver, Seznam, Yep and Amazon (Google does not take part). The key it
+presents is `public/indexnow-key.txt`, served at the site root; rotate it by
+writing a new 32-character value into that file. The step is best-effort and
+never fails the deploy. Bing Webmaster Tools shows what was received under
+IndexNow.
 
 ## Required GitHub repository secrets
 
@@ -129,7 +175,7 @@ An empty slot id disables that one placement and leaves the others running, so t
 
 Two rules decide whether a slot is used at all, and both live in the pure [`src/lib/ad-placement.ts`](../src/lib/ad-placement.ts): a post shorter than 8 top-level blocks gets no mid-article unit, and a grid of fewer than 4 cards gives no cell away. Thin content beside ads is the shape of an AdSense policy action, and a unit in a three-card grid reads as an ad-first listing.
 
-Nothing is requested until the visitor switches **Advertising** on in the consent dialog — a decline, an unanswered banner and a GPC/DNT signal all load no partner script at all (see [`src/lib/ads.ts`](../src/lib/ads.ts)). Units ship `hidden` and are removed outright for anyone who has not opted in, so no reserved "Advertisement" box is ever shown to a visitor who will not see an ad. Each unit is requested only once it comes within 300px of the viewport, because viewable CPM is what an impression is priced on, and a slot that has no box on the current viewport is dropped rather than filled. A slot the auction cannot fill reports `data-ad-status="unfilled"` and the wrapper collapses, so an unsold slot leaves no hole in the page.
+Nothing is requested until the visitor switches **Advertising** on under **Privacy preferences** in the footer — a decline, the default (no decision on file) and a GPC/DNT signal all load no partner script at all (see [`src/lib/ads.ts`](../src/lib/ads.ts)). Units ship `hidden` and are removed outright for anyone who has not opted in, so no reserved "Advertisement" box is ever shown to a visitor who will not see an ad. Each unit is requested only once it comes within 300px of the viewport, because viewable CPM is what an impression is priced on, and a slot that has no box on the current viewport is dropped rather than filled. A slot the auction cannot fill reports `data-ad-status="unfilled"` and the wrapper collapses, so an unsold slot leaves no hole in the page.
 
 The `Content-Security-Policy` in [`public/_headers`](../public/_headers) already allowlists the partner's script and frame hosts. A **new** ad host would be blocked by it — add it to `script-src` / `frame-src` there, or the units silently stay empty.
 
@@ -152,7 +198,7 @@ It also validates the value first - anything that is not `ca-pub-<digits>` fails
 The site build applies the same check to the same value (`publisherId()` in `src/lib/ads-env.ts`): a publisher id the generator refuses is one the page will not ask the partner to serve against either, so the two halves of the setting cannot disagree.
 
 Ads are additionally gated on consent at runtime, so a configured publisher id on its own serves nothing.
-The partner script is requested only for a visitor who switched **Advertising** on in the consent dialog; a decline, an unanswered banner and a GPC/DNT signal all leave it unrequested.
+The partner script is requested only for a visitor who switched **Advertising** on under **Privacy preferences**; a decline, the default and a GPC/DNT signal all leave it unrequested.
 That is stricter than serving non-personalised ads to a decline, and deliberately so: the ad tag writes cookies and device storage of its own (frequency capping, reporting, fraud) as soon as it runs, which ePrivacy Art. 5(3) conditions on consent whether or not the ads are personalised.
 
 ### Response headers

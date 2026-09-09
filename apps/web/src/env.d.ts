@@ -4,6 +4,12 @@ interface ImportMetaEnv {
   readonly SITE_URL?: string;
   readonly BLOG_API_URL?: string;
   /**
+   * Which deployment this build is. Only the exact string `production` is
+   * indexable; anything else (unset included) is treated as a preview and
+   * noindexed. See src/lib/site-env.ts.
+   */
+  readonly PUBLIC_SITE_ENV?: string;
+  /**
    * Google Analytics 4 measurement id (`G-...`) for THIS environment's property.
    * Empty - or anything that is not a `G-` measurement id - disables the GA4
    * sink silently after one warning.

@@ -63,6 +63,16 @@ jobs:
       - name: Build (production)
         env:
           SITE_URL: https://sleekdrops.com
+          # The one build that may be indexed. `production` is the only value
+          # that means it: every other deployment - develop, a future preview, a
+          # local `pnpm dev` - noindexes itself by default rather than by
+          # remembering to.
+          #
+          # This line is therefore load-bearing for the whole site's search
+          # presence. Removing it does not break the build, it silently
+          # de-lists sleekdrops.com, so a test over both deploy workflows
+          # (apps/web/src/lib/site-env.test.ts) fails CI if it goes missing.
+          PUBLIC_SITE_ENV: production
           NODE_ENV: production
           # DevTeam Analytics - public ingest key (dtp_) + ingest host. The key is
           # ingest-only and safe to expose; PUBLIC_ hands it to the Astro build so
@@ -168,3 +178,22 @@ jobs:
           # Run from apps/web so wrangler picks up the functions/ directory.
           workingDirectory: apps/web
           command: pages deploy dist --project-name=${{ secrets.CLOUDFLARE_PROJECT_NAME }} --branch=main
+
+      # Tell the IndexNow engines (Bing, Yandex, Naver, Seznam, Yep, Amazon)
+      # which URLs changed, now that they are live. Bing's index is what Copilot,
+      # DuckDuckGo and ChatGPT search read from, and it says sitemap freshness
+      # decides how quickly a change reaches its answers - so this is the cheapest
+      # AI-visibility lever there is. Google does not take part; Search Console
+      # covers it. Only production submits: the preview deploy is noindex.
+      #
+      # The URLs come from the sitemap's own lastmod (apps/web/src/lib/
+      # sitemap-policy.mjs), so only what this deploy changed is claimed. The key
+      # is public/indexnow-key.txt, which the deploy above has just published.
+      # Best-effort: the site is already live, so a rejected ping must not fail
+      # the deploy.
+      - name: Notify IndexNow of changed URLs
+        continue-on-error: true
+        working-directory: apps/web
+        env:
+          SITE_URL: https://sleekdrops.com
+        run: node scripts/indexnow-submit.mjs --since-hours 36

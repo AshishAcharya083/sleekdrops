@@ -16,7 +16,7 @@ interface Props { page: Page<BlogPost>; }
 const { page } = Astro.props;
 
 const desc =
-  'Buying guides — side-by-side testing across at least three contenders, with a clear winner and a clear runner-up.';
+  'Buying guides — at least three contenders compared side by side, with a clear winner and a clear runner-up.';
 
 const meta = buildMeta({
   title: page.currentPage === 1 ? 'Buying guides' : `Guides — page ${page.currentPage}`,
@@ -24,6 +24,8 @@ const meta = buildMeta({
   pathname: page.url.current,
   prevUrl: page.url.prev ?? undefined,
   nextUrl: page.url.next ?? undefined,
+  // An empty hub is a thin page; keep it out of the index until it lists something.
+  noindex: page.total === 0,
 });
 ---
 <BaseLayout
@@ -33,7 +35,7 @@ const meta = buildMeta({
   screen="guides-listing"
 >
   <ListingHero
-    eyebrow="Tested across at least three contenders"
+    eyebrow="At least three contenders compared"
     titleHtml="The <em>guides</em>."
     dek={desc}
   />

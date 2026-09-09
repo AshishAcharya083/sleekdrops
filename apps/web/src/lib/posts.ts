@@ -41,6 +41,9 @@ export async function getPostsByCategory(category: string): Promise<BlogPost[]> 
 
 export async function getPostsByAuthor(authorId: string): Promise<BlogPost[]> {
   const posts = await getAllPosts();
+  // The public desk owns the complete archive. Older D1 rows keep their legacy
+  // author ids so this rollout does not require a destructive content rewrite.
+  if (authorId === 'desk') return posts;
   return posts.filter((p) => p.data.author === authorId);
 }
 

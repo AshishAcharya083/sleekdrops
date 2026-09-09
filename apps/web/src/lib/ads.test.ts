@@ -150,17 +150,16 @@ beforeEach(() => {
   publisher = PUBLISHER;
 });
 
-test('nothing is requested while the visitor has not answered the prompt', () => {
+test('with no decision on file, advertising is off and nothing is requested', () => {
   const { scripts } = loadPage();
   assert.equal(ads.loadAds(), false);
   assert.equal(ads.isAdsGranted(), false);
-  assert.equal(ads.adsMode(), 'none', 'an unanswered prompt is not a decline');
+  assert.equal(ads.adsMode(), 'non-personalised', 'the default is a decline');
   assert.deepEqual(scripts, []);
 });
 
 test('a record written before the ads category existed loads nothing', () => {
-  // It re-prompts (the policy version moved), so it is not an ads decision - and
-  // an undecided visitor gets no partner script.
+  // Ads was never put to that visitor, so the category takes the default: off.
   const { scripts } = loadPage(legacyStored('granted'));
   assert.equal(ads.loadAds(), false);
   assert.equal(ads.isAdsGranted(), false);
@@ -220,12 +219,17 @@ test('a mid-page opt-in loads personalised, and a mid-page withdrawal does not',
   // The preferences dialog is reachable from the footer on every page, so the
   // stored record can change under a document that has already asked for ads.
   const { scripts, window } = loadPage();
-  assert.equal(ads.loadAds(), false, 'nothing loads while the prompt is unanswered');
+  assert.equal(ads.loadAds(), false, 'nothing loads on the default');
 
   localStorage.setItem(CONSENT_KEY, stored(uniformGrants('granted')));
   assert.equal(ads.isAdsGranted(), true, 'the new decision is readable straight away');
   assert.equal(ads.loadAds(), true, 'and the opt-in is what finally loads the partner');
-  assert.equal(scripts[0].npaWhenInjected, undefined, 'personalised, as granted');
+  // The default is a decline, and the unit that asked under it already switched
+  // personalisation off for this document (the flag is only ever set, never
+  // cleared - see requestNonPersonalizedAds). So a mid-page opt-in serves
+  // contextually until the next page load, which loses a little revenue and
+  // cannot leak a profile the other way round.
+  assert.equal(scripts[0].npaWhenInjected, 1, 'contextual for the rest of this page');
 
   // Withdrawing cannot unsend the script this document already has, but it does
   // withdraw permission to personalise what that script serves from here on, and

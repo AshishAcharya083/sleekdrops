@@ -2,9 +2,11 @@
 // records an agent_session (model, tokens, cost, duration), and routes the
 // article to its next stage. Verdict-driven, bounded revision loop —
 // a light version of devteam-platform's card lane pattern.
+import { MONETISED_INTENTS } from '../content/contract.js';
 import { getSetting, q } from '../db/pool.js';
 import {
   claudeConfigured,
+  CLAUDE_NOT_CONFIGURED,
   defaultClaudeModel,
   defaultGeminiModel,
   isClaudeModel,
@@ -38,20 +40,17 @@ const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
 const NO_LLM_AGENTS = new Set(['assembler', 'publisher']);
 
 /**
- * Agents that do the article writing — every stage whose judgement lands in the
- * published piece. All of them follow the admin engine toggle, which defaults
- * to Claude (Opus 5).
+ * Every agent that runs a prompt. All of them follow the admin engine toggle,
+ * which defaults to Claude (Opus 5).
  *
- * This used to be writer + editor only, with research, keyword strategy and
- * review left on the cheap model. That was the wrong split: a draft is capped
- * by the quality of the brief behind it, so a weaker researcher or reviewer
- * costs more than a weaker writer does.
- *
- * `topic_scout` stays on Gemini — it is high-volume discovery, not writing, and
- * a human triages everything it produces. `image_agent` stays on Gemini too
- * because it needs that engine's vision and image generation.
+ * This started as writer + editor, then grew to the six article stages, and
+ * now includes the topic scout as well. The reasoning is the same each time: a
+ * stage is only as good as the one feeding it. A weaker scout picks the topics
+ * everything downstream then spends its budget on, so leaving it on the cheap
+ * model saved the least valuable tokens in the pipeline.
  */
-const ARTICLE_AGENTS = new Set([
+const ENGINE_AGENTS = new Set([
+  'topic_scout',
   'researcher',
   'keyword_strategist',
   'outliner',
@@ -60,21 +59,32 @@ const ARTICLE_AGENTS = new Set([
   'editor',
 ]);
 
+/**
+ * Pinned to Gemini whatever the toggle says. The image agent vision-checks
+ * candidate photos and generates a hero when none is usable — that is a
+ * capability boundary, not a preference, so it is not offered as a choice in
+ * the admin panel either.
+ */
+const GEMINI_ONLY_AGENTS = new Set(['image_agent']);
+
 export async function modelFor(agent: string): Promise<string> {
   const settings = await llmSettings();
   const overrides = await getSetting<Record<string, string>>('models', {});
+  if (GEMINI_ONLY_AGENTS.has(agent)) return defaultGeminiModel(settings);
+
   const pick =
     overrides[agent] ||
-    (ARTICLE_AGENTS.has(agent) && (settings.prose_engine ?? 'claude') === 'claude'
+    (ENGINE_AGENTS.has(agent) && (settings.prose_engine ?? 'claude') === 'claude'
       ? defaultClaudeModel(settings)
       : defaultGeminiModel(settings));
-  // A Claude pick without a credential degrades to Gemini instead of failing
-  // the stage — the admin panel points this out next to the toggle.
+
+  // A Claude pick without a credential used to degrade to Gemini and log a
+  // warning nobody reads — so the panel said Opus 5 while every session row
+  // said gemini-2.5-flash, and the articles came out of the cheap model
+  // unnoticed. Refusing to start is the honest failure: it names the missing
+  // credential on the article, in the pipeline, where an operator will see it.
   if (isClaudeModel(pick) && !(await claudeConfigured())) {
-    console.warn(
-      `[pipeline] ${agent}: Claude engine selected but no subscription token / API key configured — using Gemini`,
-    );
-    return defaultGeminiModel(settings);
+    throw new Error(`${agent} is set to run on ${pick}. ${CLAUDE_NOT_CONFIGURED}`);
   }
   return pick;
 }
@@ -105,7 +115,31 @@ export async function runStage(article: ArticleRow): Promise<void> {
   const stage = article.stage;
   if (stage === 'done') return;
   const agent = STAGE_AGENT[stage];
-  const model = NO_LLM_AGENTS.has(agent) ? null : await modelFor(agent);
+
+  // Picking the model can fail now (a Claude stage with no credential), and it
+  // happens before there is a session row to fail. Record one anyway: an
+  // article left 'running' would be re-queued by recoverStranded every 30
+  // minutes forever, with nothing on screen to say why.
+  let model: string | null;
+  try {
+    model = NO_LLM_AGENTS.has(agent) ? null : await modelFor(agent);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await q(
+      `INSERT INTO agent_sessions (article_id, agent, status, summary, error, ended_at)
+       VALUES ($1, $2, 'failed', $3, $4, now())`,
+      [article.id, agent, `${stage} could not start`, message],
+    );
+    await updateArticle(article.id, {
+      status: 'failed',
+      error: message,
+      claimed_by: null,
+      claimed_at: null,
+    });
+    console.error(`[pipeline] ${article.id} ${stage} could not start: ${message}`);
+    return;
+  }
+
   const tracker = new UsageTracker();
 
   const [session] = await q<{ id: string }>(
@@ -154,6 +188,18 @@ export async function runStage(article: ArticleRow): Promise<void> {
           : null;
         const plan = await runKeywordStrategist(article, topic, model!, tracker);
         await updateArticle(article.id, { keyword_plan: JSON.stringify(plan) });
+        // Earliest point at which "this piece earns nothing" is knowable: the
+        // dossier is built, and the SERP read has just named the intent. Fail
+        // here rather than at assemble — outline, write, review and up to two
+        // edit rounds all run on Opus 5 before the missing links would show up.
+        const products = article.research?.products?.length ?? 0;
+        if (products === 0 && MONETISED_INTENTS.has(plan.intent)) {
+          throw new Error(
+            `the dossier has no products but the SERP read says this is a ${plan.intent} query — ` +
+              `the piece would publish with nothing to click. Re-run research (a "${article.post_type}" ` +
+              `is not required to find products, so it did not) or add them to the topic brief by hand.`,
+          );
+        }
         summary = `"${plan.primaryKeyword}" — ${plan.intent}, ${plan.difficulty} difficulty, ${plan.zeroClickRisk} zero-click risk, ${plan.wordCountTarget} words, ${plan.contentGaps.length} gap(s) to exploit`;
         next = { stage: 'outline', status: 'queued' };
         break;

@@ -57,7 +57,7 @@ export async function runPublisher(article: ArticleRow): Promise<PublishResult> 
       String(frontmatter.title ?? article.title),
       article.category,
       article.post_type,
-      String(frontmatter.author ?? 'mira'),
+      String(frontmatter.author ?? 'desk'),
       String(frontmatter.pubDate ?? new Date().toISOString().slice(0, 10)),
       JSON.stringify(frontmatter),
       body,

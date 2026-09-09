@@ -37,11 +37,14 @@ const dataAttrs = Object.fromEntries(
 const Tag = href ? 'a' : 'button';
 
 /* Affiliate links (rel contains "sponsored") default to opening in a new tab
-   with safe rel attributes, unless the caller overrides target. */
+   with `noopener`, unless the caller overrides target. Deliberately not
+   `noreferrer`: Amazon's Program Policies (§6(v)) require that Amazon can tell
+   which site a click came from, and `noreferrer` strips the Referer that says
+   so. The page's Referrer-Policy already reduces it to the origin. */
 const isSponsored = !!rel && /\bsponsored\b/.test(rel);
 const finalTarget = target ?? (isSponsored ? '_blank' : undefined);
 const finalRel = isSponsored
-  ? Array.from(new Set([...(rel ?? '').split(/\s+/).filter(Boolean), 'noopener', 'noreferrer'])).join(' ')
+  ? Array.from(new Set([...(rel ?? '').split(/\s+/).filter(Boolean), 'noopener'])).join(' ')
   : rel;
 ---
 <Tag

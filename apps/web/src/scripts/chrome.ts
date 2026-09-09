@@ -20,8 +20,9 @@
  *     payload, while the nav is on screen.
  *
  * The analytics SDKs themselves are bootstrapped separately by the
- * ConsentBanner island, which gates the DevTeam + GA4 analytics sinks behind the visitor's consent
- * choice; track() here simply buffers until that choice is made.
+ * PrivacyPreferences island, which applies the visitor's stored decision (or the
+ * site default: anonymous analytics on, advertising off) to the DevTeam + GA4
+ * sinks; track() here simply buffers until that has happened.
  */
 
 import {
@@ -76,9 +77,9 @@ if (!window.__sdChromeInit) {
    * this file): pages tag the <body> with the page-view payload, and funnel
    * elements carry `data-track` + an optional JSON `data-track-props`. See
    * docs/analytics-events.md for the taxonomy. Analytics is initialised behind
-   * the consent gate by the ConsentBanner island; track() buffers until the
-   * visitor chooses and drops everything on a decline, so none of this needs
-   * guarding. */
+   * the consent gate by the PrivacyPreferences island; track() buffers until
+   * the decision in force is applied and drops everything on a decline, so
+   * none of this needs guarding. */
   const parseProps = (raw: string | undefined): EventProps | undefined => {
     if (!raw) return undefined;
     try {

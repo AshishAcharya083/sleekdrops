@@ -17,6 +17,8 @@ const meta = buildMeta({
   title: 'Promo codes',
   description: desc,
   pathname: '/promos',
+  // Nothing to list yet: a thin page, kept out of the index until there is.
+  noindex: promos.length === 0,
 });
 ---
 <BaseLayout

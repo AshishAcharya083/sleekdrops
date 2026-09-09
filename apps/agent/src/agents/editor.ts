@@ -6,6 +6,10 @@
 // the review may be a round old, and an editor working from a stale line
 // number wastes the pass. The list it gets is what the scan says about the
 // draft in front of it, right now.
+//
+// No web access here either. When the reviewer's issue is "this figure is
+// unverified", the fix is to cut or hedge it — not to go and find a number
+// nobody reviewed and slide it into a draft on its way out.
 import { chat, UsageTracker } from '../llm/index.js';
 import { detectSlop, formatSlopReport } from '../content/slop.js';
 import {
@@ -16,6 +20,7 @@ import {
   LINK_PLACEMENT_RULES,
   SEO_RULES,
   siteContext,
+  SOURCE_DISCIPLINE,
 } from './context.js';
 import type { ArticleRow } from '../pipeline/types.js';
 
@@ -40,6 +45,7 @@ export async function runEditor(
     system: [
       siteContext(),
       EDITORIAL_RULES,
+      SOURCE_DISCIPLINE,
       ANTI_SLOP_RULES,
       LINK_PLACEMENT_RULES,
       SEO_RULES,
@@ -48,7 +54,9 @@ export async function runEditor(
     temperature: 0.4,
     prompt: `Revise this draft to resolve every issue below. Keep everything that already
 works — this is a surgical edit, not a rewrite. Never add facts that are not in
-the research dossier. Keep all /go/<slug> links intact (fix them if malformed).
+the research dossier: where an issue says a claim is unverified, cut it or
+hedge it in plain words rather than replacing it with a figure from memory.
+Keep all /go/<slug> links intact (fix them if malformed).
 ${feedback ? `
 ADMIN FEEDBACK — highest priority, apply it even where it goes beyond the SEO
 issues (but never break the editorial rules or invent facts):
