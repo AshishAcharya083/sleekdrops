@@ -10,6 +10,7 @@ import PostGrid from '@components/blog/PostGrid.astro';
 import Newsletter from '@components/layout/Newsletter.astro';
 import { getAllPosts, getFeaturedPost } from '@lib/posts';
 import { getActiveDeals, todaysDrop } from '@data/deals';
+import { SITE_DESCRIPTION } from '@data/site';
 import { buildHomeSchema, buildMeta } from '@lib/seo';
 import { formatMedium } from '@lib/format';
 import { resolveHeroSecondaryCta, resolveDropPanelAction } from '@lib/hero-cta';
@@ -44,8 +45,7 @@ const dropPanelAction = resolveDropPanelAction(secondaryCta);
 
 const meta = buildMeta({
   title: 'Independent buying guides for Australia',
-  description:
-    'SleekDrops publishes independent product research, side-by-side comparisons and buying guides for Australian shoppers. No paid placements.',
+  description: SITE_DESCRIPTION,
   pathname: '/',
 });
 ---
