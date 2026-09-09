@@ -59,6 +59,33 @@ export async function listD1Posts(): Promise<PublishedPostRow[]> {
   );
 }
 
+/** A published body, for the scanner's cross-corpus repetition metrics. */
+export interface PublishedBodyRow {
+  slug: string;
+  title: string;
+  body_md: string;
+  pub_date: string | null;
+}
+
+/**
+ * The most recently published bodies, newest first. D1 is where published
+ * content lives, so it is also the corpus: no mirror to keep in sync, and
+ * articles that went out before the scanner existed are in it already.
+ */
+export async function fetchPublishedBodies(
+  limit: number,
+  excludeSlug?: string | null,
+): Promise<PublishedBodyRow[]> {
+  return d1Query<PublishedBodyRow>(
+    `SELECT slug, title, body_md, pub_date
+     FROM posts
+     WHERE status = 'published' AND body_md IS NOT NULL AND slug <> ?1
+     ORDER BY pub_date DESC, slug
+     LIMIT ?2`,
+    [excludeSlug ?? '', limit],
+  );
+}
+
 export interface PostHero {
   heroImage: string | null;
   heroAlt: string | null;
