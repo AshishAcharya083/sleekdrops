@@ -11,7 +11,6 @@ import type {
   FAQPage,
   Offer,
   Organization,
-  Person,
   Product as ProductSchema,
   ProfilePage,
   Review,
@@ -47,9 +46,9 @@ const PUBLISHER: Organization = {
   logo: { '@type': 'ImageObject', url: `${siteUrl}/mark.svg` },
 };
 
-/** The byline as structured data, pointing at the author's own page on this site. */
-function personSchema(author: Author): Person {
-  return { '@type': 'Person', name: author.name, url: absoluteUrl(`/author/${author.id}`) };
+/** The editorial desk byline, pointing at its profile page on this site. */
+function authorSchema(author: Author): Organization {
+  return { '@type': 'Organization', name: author.name, url: absoluteUrl(`/author/${author.id}`) };
 }
 
 export interface BreadcrumbItem {
@@ -140,7 +139,7 @@ export function buildArticleSchema(
     inLanguage: LANGUAGE,
     datePublished: post.data.pubDate.toISOString(),
     dateModified: (post.data.updatedDate ?? post.data.pubDate).toISOString(),
-    author: personSchema(author),
+    author: authorSchema(author),
     articleSection: post.data.category,
     keywords: post.data.tags.join(', '),
     image: [post.data.heroImage ?? defaultImage],
@@ -194,7 +193,7 @@ export function buildReviewSchema(
     '@type': 'Review',
     name: post.data.title,
     reviewBody: post.data.dek,
-    author: personSchema(author),
+    author: authorSchema(author),
     itemReviewed: reviewedProduct,
     reviewRating: {
       '@type': 'Rating',
@@ -251,12 +250,11 @@ export function buildAuthorSchema(author: Author): WithContext<ProfilePage> {
     name: author.name,
     url: absoluteUrl(`/author/${author.id}`),
     mainEntity: {
-      '@type': 'Person',
+      '@type': 'Organization',
       name: author.name,
       description: author.bio,
-      jobTitle: author.role,
       sameAs: author.url ? [author.url] : [],
-    } as Person,
+    } as Organization,
   };
 }
 

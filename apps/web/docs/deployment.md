@@ -48,7 +48,9 @@ must redirect back to it.
 The sitemap carries a `lastmod` per URL, derived from post dates by
 `src/lib/sitemap-policy.mjs` (a post's `updatedDate ?? pubDate`; the newest post a
 listing holds). The same module leaves out tag pages with fewer than three posts
-and the empty reviews hub, and the pages `noindex` themselves from the same rule.
+and empty review or guide hubs. Time-sensitive deal and promo hubs stay out of
+the sitemap and are linked from navigation only while they have live inventory.
+The empty pages also `noindex` themselves.
 
 After the production deploy, `scripts/indexnow-submit.mjs` POSTs the URLs whose
 lastmod changed in the last 36 hours to IndexNow, which fans out to Bing,

@@ -37,6 +37,7 @@ export type HeroSecondaryCta =
 /** Where the no-drop hero sends visitors when there is an archive to send them to. */
 export const DEALS_ARCHIVE_HREF = '/deals';
 const BROWSE_ARCHIVE_LABEL = 'Browse past drops';
+export const GUIDES_HREF = '/guides';
 
 export function resolveHeroSecondaryCta(state: HeroDealState): HeroSecondaryCta {
   if (state.hasActiveDrop) {
@@ -61,12 +62,11 @@ export interface DropPanelAction {
 /**
  * The no-drop panel's route out, given the CTA the hero already resolved to.
  *
- * The panel carries the archive route only when the hero itself does not: two
- * buttons to `/deals` a hundred pixels apart are noise, not a second option.
- * With the hero CTA omitted - today's state - this is the visitor's one real
- * next step, which is exactly why the panel owns it rather than the hero.
+ * If the hero already offers a deal or its archive, the panel needs no second
+ * action. With no deal inventory, it points to the populated buying-guide hub
+ * instead of sending a visitor to an empty archive.
  */
 export function resolveDropPanelAction(cta: HeroSecondaryCta): DropPanelAction | undefined {
   if (cta.kind !== 'none') return undefined;
-  return { href: DEALS_ARCHIVE_HREF, label: BROWSE_ARCHIVE_LABEL };
+  return { href: GUIDES_HREF, label: 'Read the buying guides' };
 }

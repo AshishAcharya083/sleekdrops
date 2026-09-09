@@ -11,7 +11,7 @@ const brief: ContentBrief = {
   seoTitle: 'Best budget air fryers (2026)',
   dek: 'The three worth buying, and the one to skip.',
   slug: 'best-budget-air-fryers',
-  author: 'mira',
+  author: 'desk',
   kind: 'buying guide',
   searchIntent: 'commercial',
   primaryKeyword: 'budget air fryer',

@@ -12,7 +12,7 @@ import { listViewProps } from '@lib/listing';
 const deals = getActiveDeals().filter((d) => d.id !== todaysDrop?.id);
 
 const desc =
-  "Live affiliate deals worth your attention — curated daily, dropped when the price actually drops. We list every code in plain text and every expiry up front.";
+  'Live affiliate deals worth your attention, checked when they are published and removed when they expire. Every code and expiry is shown up front.';
 
 const meta = buildMeta({
   title: "Today's drops & deals",
@@ -68,10 +68,10 @@ const meta = buildMeta({
           <h2 class="rest-title">Nothing else live right now</h2>
           <p>
             We list a deal only while its price actually holds, so this page runs empty
-            between drops rather than padded with expired ones. The reviews behind the
-            picks are the better read in the meantime.
+            between drops rather than padded with expired ones. Our buying guides are
+            the better read in the meantime.
           </p>
-          <a class="more" href="/reviews">Read the reviews →</a>
+          <a class="more" href="/guides">Read the buying guides →</a>
         </div>
       )}
     </section>

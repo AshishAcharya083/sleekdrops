@@ -1,12 +1,18 @@
 ---
 import BrandMark from '@components/ui/BrandMark.astro';
 import { categories } from '@data/categories';
+import { getActiveDeals } from '@data/deals';
+import { getPostsByType } from '@lib/posts';
 
+const [reviews, guides] = await Promise.all([
+  getPostsByType('review'),
+  getPostsByType('guide'),
+]);
 const exploreLinks = [
   { label: 'All posts', href: '/blog' },
-  { label: 'Reviews', href: '/reviews' },
-  { label: 'Buying guides', href: '/guides' },
-  { label: "Today's deals", href: '/deals' },
+  ...(reviews.length > 0 ? [{ label: 'Reviews', href: '/reviews' }] : []),
+  ...(guides.length > 0 ? [{ label: 'Buying guides', href: '/guides' }] : []),
+  ...(getActiveDeals().length > 0 ? [{ label: "Today's deals", href: '/deals' }] : []),
 ];
 const year = new Date().getFullYear();
 ---
@@ -15,7 +21,7 @@ const year = new Date().getFullYear();
     <div class="footer-grid">
       <div class="footer-col">
         <BrandMark />
-        <p>Honest reviews, side-by-side comparisons, and the day's best deal — in your inbox before coffee.</p>
+        <p>Independent product research, side-by-side comparisons and practical buying guides for Australian shoppers.</p>
       </div>
 
       <div class="footer-col">
@@ -38,12 +44,12 @@ const year = new Date().getFullYear();
         <h6>Subscribe</h6>
         {/* No mailing list exists yet, so there is nothing here that could accept
             an address and claim to have stored it. See Newsletter.astro. */}
-        <p>One honest deal, every morning. Drop alerts are coming soon.</p>
+        <p>Useful deal alerts are coming soon. There is no list to join yet.</p>
       </div>
     </div>
 
     <div class="footer-bottom">
-      <span>© {year} SleekDrops. All reviews are independent.</span>
+      <span>© {year} SleekDrops. All editorial coverage is independent.</span>
       <span class="footer-links">
         <a href="/about">About</a>
         <a href="/contact">Contact</a>
