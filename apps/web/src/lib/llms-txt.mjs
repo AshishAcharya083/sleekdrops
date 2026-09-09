@@ -23,9 +23,11 @@
  * Neither reproduces an article body. The pages are already crawlable and
  * canonical, a copy of the corpus would be the same words on a second URL, and
  * the bodies are full of `/go/` affiliate redirects - the one path robots.txt
- * disallows for every crawler. Every summary here is passed through
- * `plainText`, which keeps a markdown link's label and drops its target, so no
- * affiliate hop can reach these files even from a quoted lead paragraph.
+ * disallows for every crawler. Every string that reaches these files - a
+ * summary, a heading, and equally a title, a category or a tag - is passed
+ * through `plainText`, which keeps a markdown link's label and drops its target,
+ * so no affiliate hop can reach these files even from a quoted lead paragraph
+ * and no article can write structure into the file that describes it.
  *
  * "Strongest" is scored, not hand-picked (see `scoreArticle`): both files are
  * regenerated from the content collection on every build by
@@ -81,6 +83,19 @@ export function plainText(markdown) {
     .replace(/\*\*|__|[*_`]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Any frontmatter string on its way into these files. Titles, categories, types
+ * and tags are authored by the pipeline from web research and are editable in
+ * admin, and they arrive here as `key: <JSON>` lines that `parseFrontmatter`
+ * JSON-parses - so a `\n` in a title is a real newline by the time it reaches a
+ * heading or a list item, and the article would be choosing the file's
+ * structure. `plainText` collapses that back to one line and drops link targets,
+ * which is the same treatment the summaries already get.
+ */
+function frontmatterText(value) {
+  return typeof value === 'string' || typeof value === 'number' ? plainText(String(value)) : '';
 }
 
 /** Frontmatter and body, split at the closing fence. */
@@ -156,11 +171,11 @@ export function toArticleRecord(slug, data, body, now = new Date()) {
 
   return {
     slug,
-    title: typeof data.title === 'string' ? data.title : slug,
-    dek: typeof data.dek === 'string' ? plainText(data.dek) : '',
-    category: typeof data.category === 'string' ? data.category : '',
-    postType: typeof data.postType === 'string' ? data.postType : 'article',
-    tags: Array.isArray(data.tags) ? data.tags.map(String) : [],
+    title: frontmatterText(data.title) || slug,
+    dek: frontmatterText(data.dek),
+    category: frontmatterText(data.category),
+    postType: frontmatterText(data.postType) || 'article',
+    tags: Array.isArray(data.tags) ? data.tags.map(frontmatterText).filter(Boolean) : [],
     pubDate,
     updatedDate,
     readTime: Number.isFinite(data.readTime) ? Number(data.readTime) : null,
@@ -292,9 +307,15 @@ export function curate(articles, options = {}) {
   return curated;
 }
 
-/** `- [Title](url): one-line summary` - the link form the llms.txt convention uses. */
+/**
+ * `- [Title](url): one-line summary` - the link form the llms.txt convention
+ * uses. The label is escaped because a bare `]` in a title would close it early
+ * and hand the following `(...)` to the reader as the link target, which is the
+ * one thing a title must not be able to choose.
+ */
 function linkLine(title, url, note) {
-  return note ? `- [${title}](${url}): ${note}` : `- [${title}](${url})`;
+  const label = title.replace(/([[\]])/g, '\\$1');
+  return note ? `- [${label}](${url}): ${note}` : `- [${label}](${url})`;
 }
 
 function articleUrl(siteUrl, slug) {
