@@ -20,7 +20,7 @@ interface Props { page: Page<BlogPost>; }
 const { page } = Astro.props;
 
 const baseDescription =
-  'Reviews, buying guides, and side-by-side comparisons. Every post is independent — we make our money from affiliate links, never from sponsorships or paid placements.';
+  'Product research, buying guides, and side-by-side comparisons. Every post is independent — we make our money from affiliate links, never from sponsorships or paid placements.';
 
 const meta = buildMeta({
   title: page.currentPage === 1 ? 'The blog' : `The blog — page ${page.currentPage}`,
@@ -37,7 +37,7 @@ const meta = buildMeta({
   screen="blog-listing"
 >
   <ListingHero
-    eyebrow="Editorial · Refreshed daily"
+    eyebrow="Independent editorial"
     titleHtml="The <em>blog</em>."
     dek={baseDescription}
   />

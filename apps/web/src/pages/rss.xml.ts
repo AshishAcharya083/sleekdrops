@@ -8,7 +8,7 @@ export async function GET(context: APIContext): Promise<Response> {
   return rss({
     title: 'SleekDrops',
     description:
-      "Exclusive deals dropping daily. Honest product reviews, side-by-side comparisons, and one daily deal worth your inbox.",
+      'Independent product research, side-by-side comparisons and buying guides for Australian shoppers.',
     site: context.site ?? 'https://sleekdrops.com',
     // @astrojs/rss appends a trailing slash to every item link whatever
     // `trailingSlash` says; the site's canonical form has none, and a feed that

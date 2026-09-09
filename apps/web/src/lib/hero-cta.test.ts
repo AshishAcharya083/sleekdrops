@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
   DEALS_ARCHIVE_HREF,
   DROP_PANEL_ID,
+  GUIDES_HREF,
   resolveDropPanelAction,
   resolveHeroSecondaryCta,
 } from './hero-cta.ts';
@@ -52,8 +53,8 @@ test('no drop and no archive omits the CTA rather than duplicating the primary o
 test('with no hero CTA the panel carries the one real next step', () => {
   const cta = resolveHeroSecondaryCta({ hasActiveDrop: false, archivedDealCount: 0 });
   assert.deepEqual(resolveDropPanelAction(cta), {
-    href: DEALS_ARCHIVE_HREF,
-    label: 'Browse past drops',
+    href: GUIDES_HREF,
+    label: 'Read the buying guides',
   });
 });
 

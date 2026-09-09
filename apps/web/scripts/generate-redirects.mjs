@@ -53,8 +53,16 @@ const header = [
   '',
 ];
 
-// Reserved for future system-level rewrites (e.g., legacy URL → new URL).
-const systemRewrites = [];
+// Preserve links to the former individual bylines while every post moves to
+// the single public SleekDrops Editorial Desk identity.
+const systemRewrites = [
+  '/author/mira /author/desk 301',
+  '/author/theo /author/desk 301',
+  '/author/aiko /author/desk 301',
+  '/author/lina /author/desk 301',
+  '/author/sam /author/desk 301',
+  '/author/beatriz /author/desk 301',
+];
 
 // Validate every entry has a fallback destination. `default` is the safety net
 // the Function falls back to when a network builder can't produce a URL (e.g.

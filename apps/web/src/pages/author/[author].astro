@@ -43,7 +43,7 @@ const meta = buildMeta({
 
   <ListingHero
     eyebrow={author.role}
-    titleHtml={`<em>${author.name.split(' ')[0]}</em> ${author.name.split(' ').slice(1).join(' ')}`}
+    titleHtml="<em>SleekDrops</em> Editorial Desk"
     dek={author.bio}
     stats={[
       { num: String(posts.length), lbl: 'Posts' },
@@ -52,7 +52,7 @@ const meta = buildMeta({
 
   <div class="container">
     {posts.length === 0 ? (
-      <p class="empty">No posts from {author.name} yet — they're working on it.</p>
+      <p class="empty">No posts from {author.name} yet.</p>
     ) : (
       <div class="grid">
         <PostGrid posts={posts} columns={3} />
