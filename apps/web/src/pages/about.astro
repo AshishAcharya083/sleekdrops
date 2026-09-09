@@ -2,6 +2,7 @@
 import BaseLayout from '@layouts/BaseLayout.astro';
 import Eyebrow from '@components/ui/Eyebrow.astro';
 import { listAuthors, authorInitials } from '@data/authors';
+import { SITE_DESCRIPTION } from '@data/site';
 import { getAllPosts } from '@lib/posts';
 import { buildCategorySchema, buildMeta } from '@lib/seo';
 
@@ -11,8 +12,7 @@ const published = (await getAllPosts()).length;
 
 const meta = buildMeta({
   title: 'About SleekDrops',
-  description:
-    'SleekDrops publishes independent product reviews, side-by-side comparisons and buying guides for Australian shoppers. No paid placements, and quietly opinionated.',
+  description: SITE_DESCRIPTION,
   pathname: '/about',
 });
 ---

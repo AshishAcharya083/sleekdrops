@@ -387,11 +387,32 @@ later feeds `Product` + `Review` + pros/cons JSON-LD on single-product reviews.
 
 - Google Merchant Center, Manufacturer Center, Product Ratings feeds, CSS
   programme: not available to an Australian non-merchant.
-- An explicit `User-agent: OAI-SearchBot / Allow: /` group.
-- `llms.txt`: no vendor reads it; Google: it "neither harm[s] nor help[s]".
+- An explicit `User-agent: OAI-SearchBot / Allow: /` group, and `llms.txt`.
+  Both were reversed on 2026-09-09 - see "Decided since" below; the reasoning
+  above is left as it was written.
 - FAQPage as a Google rich-result strategy; HowTo; sitelinks search box;
   standalone `Offer` markup.
 - Buying ads for discovery.
+
+### Decided since: the AI-crawler surface (2026-09-09)
+
+Two "Ignore" items shipped anyway, for reasons this audit did not weigh.
+
+- **`llms.txt` and `llms-full.txt`.** Still true that no vendor is known to read
+  either, and neither is a ranking play. They ship because the cost is one
+  generated file each (`scripts/generate-llms-txt.mjs`, rebuilt from the content
+  collection on every build, never hand-maintained) and because nothing else on
+  the site states which of our pages we would put forward and what each one
+  answers. Bodies are never reproduced - the pages are canonical, and their
+  `/go/` links are disallowed to every crawler.
+- **Explicit AI-agent groups in `robots.txt`.** §3.8's warning is the reason the
+  rules live in `src/lib/robots-policy.mjs` rather than in the file: a named
+  group replaces the wildcard, so the group repeats `Disallow: /api/` and
+  `/go/`, and `robots-policy.test.ts` parses the emitted file to assert that for
+  every named token. What changed is that the policy is now stated rather than
+  inferred from a wildcard - which is what an audit, or an operator honouring a
+  per-agent opt-out, has to read. §3.8 still holds: Cloudflare's bot toggles,
+  not this file, decide whether those agents reach the origin at all.
 
 ---
 

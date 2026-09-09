@@ -20,8 +20,8 @@ Both deploy workflows set `PUBLIC_SITE_ENV` — `production` on production, `pre
 
 | Value | robots meta on every page | `robots.txt` |
 | --- | --- | --- |
-| `production` | `index, follow` (a page asking for `noindex` still gets `noindex, follow`) | crawl rules **plus** the `Sitemap:` line, built from `SITE_URL` |
-| anything else | `noindex, nofollow` | the same crawl rules, **no** sitemap, and a header saying it is a preview |
+| `production` | `index, follow` (a page asking for `noindex` still gets `noindex, follow`) | crawl rules **plus** the `Sitemap:` line and the `/llms.txt` pointers, built from `SITE_URL` |
+| anything else | `noindex, nofollow` | the same crawl rules, **no** sitemap and no absolute pointers, and a header saying it is a preview |
 
 **Only the exact string `production` is indexable.** Unset, empty, misspelled or `Production` all read as a preview, so a preview environment added later is safe because it did nothing rather than because someone remembered this page.
 
@@ -49,6 +49,23 @@ The sitemap carries a `lastmod` per URL, derived from post dates by
 `src/lib/sitemap-policy.mjs` (a post's `updatedDate ?? pubDate`; the newest post a
 listing holds). The same module leaves out tag pages with fewer than three posts
 and the empty reviews hub, and the pages `noindex` themselves from the same rule.
+
+`/llms.txt` and `/llms-full.txt` are the crawl surface written for a retrieval
+agent rather than a reader: the site description, the categories that have
+articles, and the strongest articles with a one-line summary each in the short
+file, every live article with a fuller summary in the long one. Both are built
+from the content collection on every build by `scripts/generate-llms-txt.mjs`
+(rules in `src/lib/llms-txt.mjs`), so neither is ever hand-maintained. A build
+with no live articles writes neither, and `generate-robots.mjs` - which runs
+after it - only names them in `robots.txt` when they exist.
+
+`robots.txt` names the major AI crawlers and answer engines explicitly
+(`src/lib/robots-policy.mjs`), with the same policy the wildcard carries: the
+articles are open, `/api/` and `/go/` are not. A named group *replaces* the
+wildcard for that agent under RFC 9309, so the group repeats both disallows;
+`src/lib/robots-policy.test.ts` parses the emitted file and asserts `/go/` stays
+disallowed for every token, which is the assertion that would catch a group
+accidentally split in two.
 
 After the production deploy, `scripts/indexnow-submit.mjs` POSTs the URLs whose
 lastmod changed in the last 36 hours to IndexNow, which fans out to Bing,
