@@ -1,7 +1,8 @@
 /**
- * The Article JSON-LD every post ships. Google's Article guidance asks for an
+ * The Article graph every post ships. Google's Article guidance asks for an
  * author with a `url`, a publisher whose `logo` is a logo, and dates that mean
- * something; this pins the shape so a refactor cannot quietly drop one.
+ * something; this pins the shape so a refactor cannot quietly drop one. The
+ * graph wiring itself (entities, citations, picks) is in seo-graph.test.ts.
  */
 
 import { test } from 'node:test';
@@ -28,44 +29,74 @@ const post = {
     readTime: 8,
     cover: 'fill-1',
     heroImage: 'https://images.example/hero.jpg',
+    currency: 'AUD',
     featured: false,
     draft: false,
   },
 } as unknown as BlogPost;
 
-test('the article names its author page, its language and its own URL', () => {
-  const schema = buildArticleSchema(post, author) as Record<string, unknown>;
-  assert.equal(schema['@type'], 'Article');
-  assert.equal(schema.url, 'https://sleekdrops.com/blog/harman-kardon-luna-2');
-  assert.equal(schema.inLanguage, 'en-AU');
-  assert.deepEqual(schema.author, {
-    '@type': 'Person',
-    name: 'Theo Renn',
-    url: 'https://sleekdrops.com/author/theo',
-  });
-  assert.deepEqual(schema.mainEntityOfPage, {
-    '@type': 'WebPage',
-    '@id': 'https://sleekdrops.com/blog/harman-kardon-luna-2',
-  });
+type Node = Record<string, unknown>;
+
+/** The graph's node of a given @type — every builder here returns one @graph. */
+function node(schema: unknown, type: string): Node {
+  const nodes = (schema as { '@graph': Node[] })['@graph'];
+  const found = nodes.find((entry) => entry['@type'] === type);
+  assert.ok(found, `no ${type} node in the graph`);
+  return found;
+}
+
+test('the article names its author node, its language and its own URL', () => {
+  const schema = buildArticleSchema(post, author);
+  assert.equal((schema as Node)['@context'], 'https://schema.org');
+
+  const article = node(schema, 'Article');
+  assert.equal(article.url, 'https://sleekdrops.com/blog/harman-kardon-luna-2');
+  assert.equal(article['@id'], 'https://sleekdrops.com/blog/harman-kardon-luna-2#article');
+  assert.equal(article.inLanguage, 'en-AU');
+  assert.deepEqual(article.author, { '@id': 'https://sleekdrops.com/author/theo#person' });
+
+  const person = node(schema, 'Person');
+  assert.equal(person['@id'], 'https://sleekdrops.com/author/theo#person');
+  assert.equal(person.url, 'https://sleekdrops.com/author/theo');
+  assert.equal(person.name, 'Theo Renn');
+});
+
+test('the article is part of a WebPage node, which is part of the site', () => {
+  const schema = buildArticleSchema(post, author);
+  const pageId = 'https://sleekdrops.com/blog/harman-kardon-luna-2#webpage';
+
+  const article = node(schema, 'Article');
+  assert.deepEqual(article.isPartOf, { '@id': pageId });
+  assert.deepEqual(article.mainEntityOfPage, { '@id': pageId });
+
+  const webPage = node(schema, 'WebPage');
+  assert.equal(webPage['@id'], pageId);
+  assert.equal(webPage.url, 'https://sleekdrops.com/blog/harman-kardon-luna-2');
+  assert.deepEqual(webPage.isPartOf, { '@id': 'https://sleekdrops.com/#website' });
 });
 
 test('dateModified follows updatedDate, and falls back to the publish date', () => {
-  const updated = buildArticleSchema(post, author) as Record<string, unknown>;
+  const updated = node(buildArticleSchema(post, author), 'Article');
   assert.equal(updated.datePublished, '2026-05-30T00:00:00.000Z');
   assert.equal(updated.dateModified, '2026-09-04T00:00:00.000Z');
+  assert.notEqual(updated.dateModified, updated.datePublished);
 
   const fresh = { ...post, data: { ...post.data, updatedDate: undefined } } as unknown as BlogPost;
-  const first = buildArticleSchema(fresh, author) as Record<string, unknown>;
+  const first = node(buildArticleSchema(fresh, author), 'Article');
   assert.equal(first.dateModified, first.datePublished);
 });
 
 test('the publisher logo is the square mark as an ImageObject, not the social card', () => {
-  const schema = buildArticleSchema(post, author) as { publisher: Record<string, unknown> };
-  assert.equal(schema.publisher['@type'], 'Organization');
-  assert.deepEqual(schema.publisher.logo, {
+  const schema = buildArticleSchema(post, author);
+  const publisher = node(schema, 'Organization');
+  assert.equal(publisher['@id'], 'https://sleekdrops.com/#organization');
+  assert.deepEqual(publisher.logo, {
     '@type': 'ImageObject',
     url: 'https://sleekdrops.com/mark.svg',
   });
+  assert.deepEqual(node(schema, 'Article').publisher, {
+    '@id': 'https://sleekdrops.com/#organization',
+  });
   // The hero, when there is one, is the article image; the card is only the fallback.
-  assert.deepEqual((schema as Record<string, unknown>).image, ['https://images.example/hero.jpg']);
+  assert.deepEqual(node(schema, 'Article').image, ['https://images.example/hero.jpg']);
 });

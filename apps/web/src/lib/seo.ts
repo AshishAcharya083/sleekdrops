@@ -2,6 +2,11 @@
  * SEO helpers — meta payload construction, absolute URL resolution, and
  * JSON-LD schema builders for each page type. Imported by SEOHead and
  * the page front-matter.
+ *
+ * Post pages ship one linked `@graph` rather than a stack of loose objects:
+ * the publisher, the site, the page, the byline and the article are separate
+ * nodes with stable `@id`s that reference each other, which is the shape a
+ * generative engine can actually resolve into a knowledge graph.
  */
 
 import type {
@@ -9,6 +14,7 @@ import type {
   BreadcrumbList,
   CollectionPage,
   FAQPage,
+  ItemList,
   Offer,
   Organization,
   Person,
@@ -16,12 +22,14 @@ import type {
   ProfilePage,
   Review,
   Thing,
+  WebPage,
   WebSite,
   WithContext,
 } from 'schema-dts';
 import type { Author } from '@data/authors';
 import type { Deal } from '@data/deals';
 import type { Promo } from '@data/promos';
+import type { PickData, SourceData } from '../content/config';
 import type { BlogPost } from './posts';
 
 // Same defensive read as ads-env / analytics-env / flags-env: Vite inlines
@@ -38,18 +46,135 @@ const defaultImage = `${siteUrl}/og-default.png`;
 /** Every page is written for Australian readers; the schema says so. */
 const LANGUAGE = 'en-AU';
 
+/** The audience, and every price on the site, is Australian. */
+const DEFAULT_CURRENCY = 'AUD';
+
+// Stable node identities. They are fragments of the site's own URLs so the
+// same organisation, site and person mean the same node on every page that
+// declares them.
+const ORGANIZATION_ID = `${siteUrl}/#organization`;
+const WEBSITE_ID = `${siteUrl}/#website`;
+
+/**
+ * External profiles the publisher actually controls. `sameAs` is an identity
+ * claim, so it stays empty until there is a real profile to point at rather
+ * than naming something we do not own.
+ */
+const PUBLISHER_PROFILES: string[] = [];
+
 const PUBLISHER: Organization = {
   '@type': 'Organization',
+  '@id': ORGANIZATION_ID,
   name: 'SleekDrops',
   url: siteUrl,
   // The square mark, not the 1200x630 social card: Google's Article guidance
   // wants `publisher.logo` to be a logo, and reads it as an ImageObject.
   logo: { '@type': 'ImageObject', url: `${siteUrl}/mark.svg` },
+  publishingPrinciples: `${siteUrl}/about`,
+  ...(PUBLISHER_PROFILES.length > 0 ? { sameAs: PUBLISHER_PROFILES } : {}),
 };
 
-/** The byline as structured data, pointing at the author's own page on this site. */
-function personSchema(author: Author): Person {
-  return { '@type': 'Person', name: author.name, url: absoluteUrl(`/author/${author.id}`) };
+const WEBSITE: WebSite = {
+  '@type': 'WebSite',
+  '@id': WEBSITE_ID,
+  name: 'SleekDrops',
+  url: siteUrl,
+  inLanguage: LANGUAGE,
+  publisher: { '@id': ORGANIZATION_ID },
+};
+
+function authorPageUrl(author: Author): string {
+  return absoluteUrl(`/author/${author.id}`);
+}
+
+function authorId(author: Author): string {
+  return `${authorPageUrl(author)}#person`;
+}
+
+/** Words that name a job, not a subject — they do not belong in `knowsAbout`. */
+const JOB_TITLE_WORD = /\b(editor|writer|reporter|contributor|journalist)\b/i;
+
+/**
+ * The subjects a byline covers: their beat, split where it names more than one
+ * ("Audio & tech"), plus the section this piece sits in. Deduped case-
+ * insensitively so "tech" and "Tech" are one topic.
+ */
+function authorTopics(author: Author, category?: string): string[] {
+  const topics = new Map<string, string>();
+  for (const part of [...author.role.split(/\s*[&,/]\s*/), category ?? '']) {
+    const topic = part.trim();
+    if (!topic || JOB_TITLE_WORD.test(topic)) continue;
+    const key = topic.toLowerCase();
+    if (!topics.has(key)) topics.set(key, `${topic[0].toUpperCase()}${topic.slice(1)}`);
+  }
+  return [...topics.values()];
+}
+
+/** The byline as a graph node: same `@id` here, on the author page and in a Review. */
+function authorNode(author: Author, category?: string): Person {
+  const topics = authorTopics(author, category);
+  return {
+    '@type': 'Person',
+    '@id': authorId(author),
+    name: author.name,
+    url: authorPageUrl(author),
+    description: author.bio,
+    jobTitle: author.role,
+    ...(topics.length > 0 ? { knowsAbout: topics } : {}),
+    ...(author.url ? { sameAs: [author.url] } : {}),
+  };
+}
+
+/** Site-wide identity for a named entity, so the same thing is one node everywhere. */
+function entityNode(name: string): Thing {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return {
+    '@type': 'Thing',
+    ...(slug ? { '@id': `${siteUrl}/#/entity/${slug}` } : {}),
+    name,
+  };
+}
+
+/** How many of the keyword plan's entities the piece is `about`; the rest it `mentions`. */
+const ABOUT_ENTITY_COUNT = 3;
+
+function citationNode(source: SourceData): WebPage {
+  return {
+    '@type': 'WebPage',
+    '@id': source.url,
+    url: source.url,
+    ...(source.publisher
+      ? { publisher: { '@type': 'Organization', name: source.publisher } }
+      : {}),
+    ...(source.date ? { datePublished: source.date } : {}),
+  };
+}
+
+/**
+ * The number out of a price as it was stated ("A$2,699", "around $180"). Null
+ * when there is no number in it — an offer with an invented price is worse
+ * than no offer at all.
+ *
+ * A currency symbol wins over any other number in the string, so "2026 model,
+ * $199" prices the model at 199 rather than at the year.
+ */
+function parsePrice(stated: string | undefined): string | null {
+  const cleaned = stated?.replace(/,/g, '');
+  if (!cleaned) return null;
+  const tagged = cleaned.match(/(?:AUD|A?\$)\s*(\d+(?:\.\d{1,2})?)/i);
+  if (tagged) return tagged[1];
+  const bare = cleaned.match(/\d+(?:\.\d{1,2})?/);
+  return bare ? bare[0] : null;
+}
+
+/** Body words, markdown stripped — Article.wordCount. */
+function countWords(body: string): number {
+  const text = plainText((body ?? '').replace(/^#{1,6}\s+/gm, ''));
+  return text ? text.split(/\s+/).filter(Boolean).length : 0;
+}
+
+function graph(nodes: Thing[]): WithContext<Thing> {
+  return { '@context': 'https://schema.org', '@graph': nodes } as unknown as WithContext<Thing>;
 }
 
 export interface BreadcrumbItem {
@@ -116,37 +241,146 @@ export function buildBreadcrumbSchema(
   };
 }
 
-export function buildHomeSchema(): WithContext<WebSite> {
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'WebSite',
-    name: 'SleekDrops',
-    url: siteUrl,
-    publisher: PUBLISHER,
-  };
+/** The home page is where the site and its publisher are declared in full. */
+export function buildHomeSchema(): WithContext<Thing> {
+  return graph([PUBLISHER, WEBSITE]);
 }
 
-export function buildArticleSchema(
-  post: BlogPost,
-  author: Author,
-): WithContext<Article> {
-  const url = absoluteUrl(`/blog/${post.slug}`);
-  return {
-    '@context': 'https://schema.org',
+function postUrl(post: BlogPost): string {
+  return absoluteUrl(`/blog/${post.slug}`);
+}
+
+/**
+ * Publisher, site, page, byline and article as one linked graph.
+ *
+ * `mainEntityId` is the node the piece is really about when there is one — the
+ * ItemList of picks on a roundup, the Product on a review.
+ */
+function postNodes(post: BlogPost, author: Author, mainEntityId?: string): Thing[] {
+  const url = postUrl(post);
+  const webPageId = `${url}#webpage`;
+  const entities = post.data.entities ?? [];
+  const sources = post.data.sources ?? [];
+  const words = countWords(post.body);
+  const datePublished = post.data.pubDate.toISOString();
+  // Distinct from datePublished whenever the post has been revised; a post
+  // that never has says so honestly rather than claiming freshness.
+  const dateModified = (post.data.updatedDate ?? post.data.pubDate).toISOString();
+  const image = post.data.heroImage ?? defaultImage;
+  const about = entities.slice(0, ABOUT_ENTITY_COUNT);
+  const mentions = entities.slice(ABOUT_ENTITY_COUNT);
+
+  const webPage: WebPage = {
+    '@type': 'WebPage',
+    '@id': webPageId,
+    url,
+    name: post.data.title,
+    description: post.data.dek,
+    inLanguage: LANGUAGE,
+    isPartOf: { '@id': WEBSITE_ID },
+    datePublished,
+    dateModified,
+    primaryImageOfPage: { '@type': 'ImageObject', url: image },
+  };
+
+  const article: Article = {
     '@type': 'Article',
+    '@id': `${url}#article`,
     headline: post.data.title,
     description: post.data.dek,
     url,
     inLanguage: LANGUAGE,
-    datePublished: post.data.pubDate.toISOString(),
-    dateModified: (post.data.updatedDate ?? post.data.pubDate).toISOString(),
-    author: personSchema(author),
+    datePublished,
+    dateModified,
+    author: { '@id': authorId(author) },
+    publisher: { '@id': ORGANIZATION_ID },
+    isPartOf: { '@id': webPageId },
+    mainEntityOfPage: { '@id': webPageId },
     articleSection: post.data.category,
     keywords: post.data.tags.join(', '),
-    image: [post.data.heroImage ?? defaultImage],
-    mainEntityOfPage: { '@type': 'WebPage', '@id': url },
-    publisher: PUBLISHER,
+    image: [image],
+    ...(words > 0 ? { wordCount: words } : {}),
+    ...(about.length > 0 ? { about: about.map(entityNode) } : {}),
+    ...(mentions.length > 0 ? { mentions: mentions.map(entityNode) } : {}),
+    ...(sources.length > 0 ? { citation: sources.map(citationNode) } : {}),
+    ...(mainEntityId ? { mainEntity: { '@id': mainEntityId } } : {}),
   };
+
+  return [PUBLISHER, WEBSITE, webPage, authorNode(author, post.data.category), article];
+}
+
+/** Post types whose whole point is a ranked set of products. */
+const LIST_POST_TYPES = new Set(['guide', 'roundup']);
+
+function productNode(pick: PickData, pageUrl: string, currency: string): ProductSchema {
+  const price = parsePrice(pick.price);
+  return {
+    '@type': 'Product',
+    '@id': `${pageUrl}#pick-${pick.goSlug}`,
+    name: pick.name,
+    ...(pick.brand ? { brand: { '@type': 'Brand', name: pick.brand } } : {}),
+    // No `availability`: the destination is a marketplace we do not have stock
+    // data for. No `aggregateRating` either — we earn commission on this
+    // product, so a rating we award ourselves is exactly the self-serving
+    // markup Google's guidelines exclude.
+    ...(price !== null
+      ? {
+          offers: {
+            '@type': 'Offer',
+            price,
+            priceCurrency: currency,
+            url: absoluteUrl(`/go/${pick.goSlug}`),
+          } satisfies Offer,
+        }
+      : {}),
+  };
+}
+
+/**
+ * The ranked picks of a guide or roundup as an ItemList of Product nodes.
+ * Null when the post is not one of those, or carries no picks — every post
+ * published before the pipeline wrote them is in that case.
+ */
+function buildPickList(post: BlogPost): { id: string; node: ItemList } | null {
+  const picks = post.data.picks ?? [];
+  if (picks.length === 0 || !LIST_POST_TYPES.has(post.data.postType)) return null;
+
+  const url = postUrl(post);
+  const currency = post.data.currency ?? DEFAULT_CURRENCY;
+  return {
+    id: `${url}#picks`,
+    node: {
+      '@type': 'ItemList',
+      '@id': `${url}#picks`,
+      name: post.data.title,
+      numberOfItems: picks.length,
+      // The body ranks them; position 1 is the top pick.
+      itemListOrder: 'https://schema.org/ItemListOrderAscending',
+      itemListElement: picks.map((pick, index) => ({
+        '@type': 'ListItem',
+        position: index + 1,
+        item: productNode(pick, url, currency),
+      })),
+    },
+  };
+}
+
+/**
+ * Article JSON-LD as a linked graph. Guides and roundups additionally carry
+ * the ItemList of everything they recommend; a post with no picks, sources or
+ * entities simply emits fewer nodes.
+ */
+export function buildArticleSchema(post: BlogPost, author: Author): WithContext<Thing> {
+  const picks = buildPickList(post);
+  return graph([...postNodes(post, author, picks?.id), ...(picks ? [picks.node] : [])]);
+}
+
+/**
+ * The JSON-LD a blog post ships: the Product graph for a post with embedded
+ * product data, the Article graph for everything else.
+ */
+export function buildPostSchema(post: BlogPost, author: Author): WithContext<Thing> {
+  return post.data.product ? buildReviewSchema(post, author) : buildArticleSchema(post, author);
 }
 
 /**
@@ -155,13 +389,10 @@ export function buildArticleSchema(
  * Pre-condition: post.data.postType === 'review' AND post.data.product is set.
  * Enforced by the content-collection refine() in src/content/config.ts.
  *
- * The Offer URL points to /go/<post.slug>; the redirect target lives in
- * the sleekdrops-cms repo's data/affiliate-links.json keyed by the same slug.
+ * The Offer URL points to /go/<post.slug>; the redirect target is the
+ * affiliate_links row carrying the same slug.
  */
-export function buildReviewSchema(
-  post: BlogPost,
-  author: Author,
-): WithContext<Thing> {
+export function buildReviewSchema(post: BlogPost, author: Author): WithContext<Thing> {
   const product = post.data.product;
   if (!product) {
     // Should never happen — the content schema enforces this. Throw loudly so
@@ -172,43 +403,56 @@ export function buildReviewSchema(
     );
   }
 
+  const url = postUrl(post);
+  const productId = `${url}#product`;
+  const reviewId = `${url}#review`;
+  // The post says what it is priced in; AUD only as the fallback for a post
+  // written before the field existed. Nothing here assumes a currency.
+  const currency = post.data.currency ?? DEFAULT_CURRENCY;
+  const price = parsePrice(product.price);
+
   const reviewedProduct: ProductSchema = {
     '@type': 'Product',
+    '@id': productId,
     name: product.name,
     brand: { '@type': 'Brand', name: product.brand },
     description: product.tagline,
-    offers: {
-      '@type': 'Offer',
-      // The audience and the frontmatter price are Australian.
-      priceCurrency: 'AUD',
-      price: product.price.replace(/[^0-9.]/g, ''),
-      availability: 'https://schema.org/InStock',
-      url: absoluteUrl(`/go/${post.slug}`),
-    },
+    review: { '@id': reviewId },
+    ...(price !== null
+      ? {
+          offers: {
+            '@type': 'Offer',
+            priceCurrency: currency,
+            price,
+            availability: 'https://schema.org/InStock',
+            url: absoluteUrl(`/go/${post.slug}`),
+          } satisfies Offer,
+        }
+      : {}),
     // No AggregateRating: schema.org defines it as "the average rating based on
-    // multiple ratings or reviews", and one editorial review is not that. The
-    // single Review below is the honest shape and is enough for a product snippet.
+    // multiple ratings or reviews", and one editorial review is not that — on a
+    // product we earn commission on, awarding ourselves one is the self-serving
+    // markup Google's guidelines exclude. The single Review below is the honest
+    // shape and is enough for a product snippet.
   };
 
   const review: Review = {
     '@type': 'Review',
+    '@id': reviewId,
     name: post.data.title,
     reviewBody: post.data.dek,
-    author: personSchema(author),
-    itemReviewed: reviewedProduct,
+    author: { '@id': authorId(author) },
+    itemReviewed: { '@id': productId },
     reviewRating: {
       '@type': 'Rating',
       ratingValue: product.rating,
       bestRating: 5,
       worstRating: 1,
     },
-    publisher: PUBLISHER,
+    publisher: { '@id': ORGANIZATION_ID },
   };
 
-  return {
-    '@context': 'https://schema.org',
-    '@graph': [reviewedProduct, review],
-  } as unknown as WithContext<Thing>;
+  return graph([...postNodes(post, author, productId), reviewedProduct, review]);
 }
 
 export function buildOfferSchema(
@@ -249,14 +493,9 @@ export function buildAuthorSchema(author: Author): WithContext<ProfilePage> {
     '@context': 'https://schema.org',
     '@type': 'ProfilePage',
     name: author.name,
-    url: absoluteUrl(`/author/${author.id}`),
-    mainEntity: {
-      '@type': 'Person',
-      name: author.name,
-      description: author.bio,
-      jobTitle: author.role,
-      sameAs: author.url ? [author.url] : [],
-    } as Person,
+    url: authorPageUrl(author),
+    // The same Person node every byline on the site points at.
+    mainEntity: authorNode(author),
   };
 }
 

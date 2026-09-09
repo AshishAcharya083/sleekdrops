@@ -49,6 +49,34 @@ export const productSchema = z.object({
 
 export type ProductData = z.infer<typeof productSchema>;
 
+/**
+ * A source behind the article, written by the agent's assembler from the
+ * research dossier. Feeds JSON-LD `citation` in src/lib/seo.ts. `date` is
+ * reserved for the researcher's per-fact publication date and is unset today.
+ */
+export const sourceSchema = z.object({
+  url: z.string().url(),
+  publisher: z.string().min(1).optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+export type SourceData = z.infer<typeof sourceSchema>;
+
+/**
+ * A product the article recommends — one per /go/ slug the body links, with a
+ * matching affiliate_links row behind it. Guides and roundups turn these into
+ * an ItemList of Product nodes.
+ */
+export const pickSchema = z.object({
+  name: z.string().min(1),
+  brand: z.string().min(1).optional(),
+  /** As the research stated it, e.g. "A$229"; the schema builder parses the number. */
+  price: z.string().min(1).optional(),
+  goSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+});
+
+export type PickData = z.infer<typeof pickSchema>;
+
 const blog = defineCollection({
   type: 'content',
   schema: z
@@ -91,6 +119,16 @@ const blog = defineCollection({
       heroAlt: z.string().optional(),
       /** Embedded product object — required when postType === 'review'. */
       product: productSchema.optional(),
+      // Structured-data inputs written by the pipeline's assembler. All
+      // optional: posts published before they existed carry none of them.
+      /** Sources the research drew on — JSON-LD `citation`. */
+      sources: z.array(sourceSchema).optional(),
+      /** Named things the piece covers — JSON-LD `about` / `mentions`. */
+      entities: z.array(z.string().min(1)).optional(),
+      /** Recommended products — the ItemList on guides and roundups. */
+      picks: z.array(pickSchema).optional(),
+      /** ISO 4217 code every price in this post is quoted in. */
+      currency: z.string().min(1).default('AUD'),
       featured: z.boolean().default(false),
       draft: z.boolean().default(false),
     })

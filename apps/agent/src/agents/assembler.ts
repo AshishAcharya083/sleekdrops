@@ -8,12 +8,13 @@ import {
   amazonSearchUrl,
   estimateReadTime,
   goSlugsIn,
+  HOME_CURRENCY,
   MONETISED_INTENTS,
   pickCover,
   validateArticle,
 } from '../content/contract.js';
 import { productSearchTerm, verifyAmazonProductUrl } from '../tools/amazon.js';
-import type { AffiliateLinkRow, ArticleRow } from '../pipeline/types.js';
+import type { AffiliateLinkRow, ArticleRow, ResearchDossier } from '../pipeline/types.js';
 
 export interface AssembledArticle {
   frontmatter: Record<string, unknown>;
@@ -21,6 +22,41 @@ export interface AssembledArticle {
   /** Body after stripping /go/ links that had no resolvable destination. */
   body: string;
   droppedSlugs: string[];
+}
+
+/**
+ * The dossier's sources, in the order the research stated them, deduped and
+ * limited to web URLs — they become the page's JSON-LD `citation`.
+ */
+function citableSources(
+  facts: ResearchDossier['facts'],
+): Array<{ url: string; publisher?: string }> {
+  const seen = new Set<string>();
+  const sources: Array<{ url: string; publisher?: string }> = [];
+  for (const fact of facts) {
+    const url = fact.sourceUrl?.trim();
+    if (!url || seen.has(url)) continue;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      continue;
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
+    seen.add(url);
+    const publisher = parsed.hostname.replace(/^www\./, '');
+    sources.push({ url, ...(publisher ? { publisher } : {}) });
+  }
+  return sources;
+}
+
+function uniqueEntities(entities: string[]): string[] {
+  const seen = new Set<string>();
+  for (const entity of entities) {
+    const name = entity.trim();
+    if (name) seen.add(name);
+  }
+  return [...seen];
 }
 
 export async function runAssembler(article: ArticleRow): Promise<AssembledArticle> {
@@ -100,6 +136,34 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
       .replace(new RegExp(`/go/${slug}`, 'g'), '');
   }
   frontmatter.readTime = estimateReadTime(body);
+
+  // Structured-data inputs for the site's JSON-LD graph. `picks` is keyed off
+  // the resolved affiliate rows, not the raw body, so every Offer URL the site
+  // emits has a live /go/ destination behind it.
+  const sources = citableSources(article.research?.facts ?? []);
+  const entities = uniqueEntities(article.keyword_plan?.entities ?? []);
+  const picks = [...bySlug.keys()].flatMap((slug) => {
+    const product = products.find((p) => p.goSlug === slug);
+    if (!product) return [];
+    // A nameless product is a broken dossier row, not a pick. Skipping it keeps
+    // the article publishable — the affiliate link behind it still works.
+    const name = product.name.trim();
+    if (!name) return [];
+    const brand = product.brand?.trim();
+    const price = product.approxPrice?.trim();
+    return [
+      {
+        name,
+        ...(brand ? { brand } : {}),
+        ...(price ? { price } : {}),
+        goSlug: slug,
+      },
+    ];
+  });
+  if (sources.length > 0) frontmatter.sources = sources;
+  if (entities.length > 0) frontmatter.entities = entities;
+  if (picks.length > 0) frontmatter.picks = picks;
+  frontmatter.currency = HOME_CURRENCY;
 
   // Anything left is a genuine contract violation (schema, raw merchant URL,
   // non-approved merchant destination).
