@@ -7,7 +7,7 @@
 // the JSONB round trip with its tiers, dates and publishers intact - both of
 // those only happen in SQL. Point DATABASE_URL at a throwaway server to run
 // these.
-import { after, before, test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
@@ -34,6 +34,11 @@ const reachable = await pool
   .catch(() => false);
 const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to run these';
 
+// Migrate before anything reads a table: on an empty database `settings` does
+// not exist until this runs, and a `before()` hook would run too late for the
+// top-level settings read below.
+if (reachable) await migrate();
+
 /** The admin panel can store a Claude token too; if one is there, stand down. */
 const credentialled =
   reachable && (await getSetting<{ claude_token?: string }>('llm', {})).claude_token;
@@ -43,11 +48,6 @@ const modelSkip = credentialled
 
 const app = createApp();
 const AUTH = { Authorization: 'Bearer test-admin-token' };
-
-before(async () => {
-  if (!reachable) return;
-  await migrate();
-});
 
 after(async () => {
   if (reachable) await pool.end();
