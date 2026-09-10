@@ -104,10 +104,10 @@ const BYLINE_TOPICS = categories.map((category) => category.name);
  * Review.
  *
  * An Organization, not a Person. The site publishes under one labelled
- * editorial-desk byline rather than named reviewer personas, and the markup
- * says the same thing the page does — a Person node here would assert a human
- * author the reader is never shown. `parentOrganization` ties the desk to the
- * publisher so the two same-named nodes resolve as one operation.
+ * editorial-desk byline rather than named reviewer personas, so a Person node
+ * here would assert a human author the page never shows. `parentOrganization`
+ * ties the desk to the publisher so the two same-named nodes resolve as one
+ * operation.
  */
 function authorNode(author: Author): Organization {
   return {
