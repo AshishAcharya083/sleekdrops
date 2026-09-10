@@ -29,7 +29,7 @@ import type {
 import type { Author } from '@data/authors';
 import type { Deal } from '@data/deals';
 import type { Promo } from '@data/promos';
-import type { PickData, SourceData } from '../content/config';
+import type { PickData, SourceData } from '../content/frontmatter';
 import type { BlogPost } from './posts';
 
 // Same defensive read as ads-env / analytics-env / flags-env: Vite inlines
@@ -157,6 +157,8 @@ function citationNode(source: SourceData): WebPage {
  *
  * A currency symbol wins over any other number in the string, so "2026 model,
  * $199" prices the model at 199 rather than at the year.
+ *
+ * Only ever applied to a price the page itself displays; see `productNode`.
  */
 function parsePrice(stated: string | undefined): string | null {
   const cleaned = stated?.replace(/,/g, '');
@@ -312,27 +314,75 @@ function postNodes(post: BlogPost, author: Author, mainEntityId?: string): Thing
 /** Post types whose whole point is a ranked set of products. */
 const LIST_POST_TYPES = new Set(['guide', 'roundup']);
 
-function productNode(pick: PickData, pageUrl: string, currency: string): ProductSchema {
-  const price = parsePrice(pick.price);
+/**
+ * One rendered heading, as `post.render()` hands them back: `slug` is the id
+ * Astro actually emitted on the `<h*>`, so an anchor built from it resolves.
+ */
+export interface PostHeading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+
+const GO_LINK = /\/go\/([a-z0-9]+(?:-[a-z0-9]+)*)/g;
+
+/**
+ * The id of the section each pick is recommended in, keyed by its /go/ slug —
+ * the ItemList entries point at those anchors, which is the shape Google
+ * documents for a list whose items all live on one page.
+ *
+ * Headings are matched by position rather than by text: `headings` is in
+ * document order, one entry per heading Astro rendered, so the nth `#` line in
+ * the body is `headings[n]` whatever markdown that heading contains. If the
+ * two ever disagree on how many headings there are (a setext heading, say),
+ * no anchors are returned at all rather than a set that has drifted by one.
+ */
+function pickAnchors(body: string, headings: PostHeading[]): Map<string, string> {
+  const anchors = new Map<string, string>();
+  let seen = 0;
+  let inFence = false;
+  let section: string | null = null;
+
+  for (const line of (body ?? '').split('\n')) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (/^#{1,6}\s+/.test(line)) {
+      section = headings[seen]?.slug ?? null;
+      seen += 1;
+      continue;
+    }
+    if (!section) continue;
+    for (const [, slug] of line.matchAll(GO_LINK)) {
+      if (!anchors.has(slug)) anchors.set(slug, section);
+    }
+  }
+
+  return seen === headings.length ? anchors : new Map();
+}
+
+/**
+ * A recommended pick as a Product node.
+ *
+ * Deliberately carries no `offers`. The research states an approximate or RRP
+ * figure, the page never prints it, and Google's structured-data policies
+ * require markup to describe content the reader can actually see — a price
+ * that exists only in the markup is the pattern they suppress rich results
+ * for, and an Amazon-derived figure baked into a static build would breach the
+ * Associates 24-hour refresh rule besides. If a live, displayed price ever
+ * lands on the page, an Offer mirroring it exactly is the change to make.
+ *
+ * No `aggregateRating` either: we earn commission on this product, so a rating
+ * we award ourselves is the self-serving markup the same guidelines exclude.
+ */
+function productNode(pick: PickData, pageUrl: string): ProductSchema {
   return {
     '@type': 'Product',
     '@id': `${pageUrl}#pick-${pick.goSlug}`,
     name: pick.name,
     ...(pick.brand ? { brand: { '@type': 'Brand', name: pick.brand } } : {}),
-    // No `availability`: the destination is a marketplace we do not have stock
-    // data for. No `aggregateRating` either — we earn commission on this
-    // product, so a rating we award ourselves is exactly the self-serving
-    // markup Google's guidelines exclude.
-    ...(price !== null
-      ? {
-          offers: {
-            '@type': 'Offer',
-            price,
-            priceCurrency: currency,
-            url: absoluteUrl(`/go/${pick.goSlug}`),
-          } satisfies Offer,
-        }
-      : {}),
   };
 }
 
@@ -341,12 +391,15 @@ function productNode(pick: PickData, pageUrl: string, currency: string): Product
  * Null when the post is not one of those, or carries no picks — every post
  * published before the pipeline wrote them is in that case.
  */
-function buildPickList(post: BlogPost): { id: string; node: ItemList } | null {
+function buildPickList(
+  post: BlogPost,
+  headings: PostHeading[],
+): { id: string; node: ItemList } | null {
   const picks = post.data.picks ?? [];
   if (picks.length === 0 || !LIST_POST_TYPES.has(post.data.postType)) return null;
 
   const url = postUrl(post);
-  const currency = post.data.currency ?? DEFAULT_CURRENCY;
+  const anchors = pickAnchors(post.body, headings);
   return {
     id: `${url}#picks`,
     node: {
@@ -356,11 +409,15 @@ function buildPickList(post: BlogPost): { id: string; node: ItemList } | null {
       numberOfItems: picks.length,
       // The body ranks them; position 1 is the top pick.
       itemListOrder: 'https://schema.org/ItemListOrderAscending',
-      itemListElement: picks.map((pick, index) => ({
-        '@type': 'ListItem',
-        position: index + 1,
-        item: productNode(pick, url, currency),
-      })),
+      itemListElement: picks.map((pick, index) => {
+        const anchor = anchors.get(pick.goSlug);
+        return {
+          '@type': 'ListItem',
+          position: index + 1,
+          ...(anchor ? { url: `${url}#${anchor}` } : {}),
+          item: productNode(pick, url),
+        };
+      }),
     },
   };
 }
@@ -369,9 +426,17 @@ function buildPickList(post: BlogPost): { id: string; node: ItemList } | null {
  * Article JSON-LD as a linked graph. Guides and roundups additionally carry
  * the ItemList of everything they recommend; a post with no picks, sources or
  * entities simply emits fewer nodes.
+ *
+ * `headings` are the ones `post.render()` returned, used to anchor each pick
+ * to the section that recommends it. Omit them and the list still ships, just
+ * without per-item URLs.
  */
-export function buildArticleSchema(post: BlogPost, author: Author): WithContext<Thing> {
-  const picks = buildPickList(post);
+export function buildArticleSchema(
+  post: BlogPost,
+  author: Author,
+  headings: PostHeading[] = [],
+): WithContext<Thing> {
+  const picks = buildPickList(post, headings);
   return graph([...postNodes(post, author, picks?.id), ...(picks ? [picks.node] : [])]);
 }
 
@@ -379,15 +444,21 @@ export function buildArticleSchema(post: BlogPost, author: Author): WithContext<
  * The JSON-LD a blog post ships: the Product graph for a post with embedded
  * product data, the Article graph for everything else.
  */
-export function buildPostSchema(post: BlogPost, author: Author): WithContext<Thing> {
-  return post.data.product ? buildReviewSchema(post, author) : buildArticleSchema(post, author);
+export function buildPostSchema(
+  post: BlogPost,
+  author: Author,
+  headings: PostHeading[] = [],
+): WithContext<Thing> {
+  return post.data.product
+    ? buildReviewSchema(post, author)
+    : buildArticleSchema(post, author, headings);
 }
 
 /**
  * Build Product + Review JSON-LD from a review post's embedded product data.
  *
  * Pre-condition: post.data.postType === 'review' AND post.data.product is set.
- * Enforced by the content-collection refine() in src/content/config.ts.
+ * Enforced by the content-collection refine() in src/content/frontmatter.ts.
  *
  * The Offer URL points to /go/<post.slug>; the redirect target is the
  * affiliate_links row carrying the same slug.
@@ -418,6 +489,10 @@ export function buildReviewSchema(post: BlogPost, author: Author): WithContext<T
     brand: { '@type': 'Brand', name: product.brand },
     description: product.tagline,
     review: { '@id': reviewId },
+    // Unlike a guide's picks, this price is on the page — Verdict and
+    // ProductCallout both print `product.price` — so mirroring it into an
+    // Offer describes content the reader can see, which is what Google's
+    // structured-data policies ask for.
     ...(price !== null
       ? {
           offers: {

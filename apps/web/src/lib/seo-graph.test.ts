@@ -4,9 +4,10 @@
  *
  * Generative engines build their knowledge graph out of exactly this markup,
  * so what is pinned here is the wiring: entities and citations carried through
- * frontmatter, one Product node per recommended pick with the site's own
- * currency, no rating we award ourselves, and posts published before any of
- * these fields existed still emitting a valid graph.
+ * frontmatter, one Product node per recommended pick anchored to the section
+ * that recommends it, no price we do not print and no rating we award
+ * ourselves, and posts published before any of these fields existed still
+ * emitting a valid graph.
  */
 
 import { test } from 'node:test';
@@ -15,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { buildArticleSchema, buildPostSchema, buildReviewSchema } from './seo.ts';
+import type { PostHeading } from './seo.ts';
 import type { BlogPost } from './posts.ts';
 import type { Author } from '@data/authors';
 
@@ -27,15 +29,30 @@ const author: Author = {
 
 const BODY = `Cordless sticks are worth it for flats.
 
-## Our picks
+## Shark Detect Pro
 
-The [Shark Detect Pro](/go/shark-detect-pro) is the one to buy.`;
+The [Shark Detect Pro](/go/shark-detect-pro) is the one to buy.
+
+## Dyson V15 Detect
+
+The [Dyson V15 Detect](/go/dyson-v15-detect) costs more.
+
+## Ecovacs T30S
+
+The [Ecovacs T30S](/go/ecovacs-t30s) mops too.`;
+
+/** What `post.render()` hands back for BODY — the ids Astro put on the H2s. */
+const HEADINGS: PostHeading[] = [
+  { depth: 2, slug: 'shark-detect-pro', text: 'Shark Detect Pro' },
+  { depth: 2, slug: 'dyson-v15-detect', text: 'Dyson V15 Detect' },
+  { depth: 2, slug: 'ecovacs-t30s', text: 'Ecovacs T30S' },
+];
 
 /** A guide the pipeline produced after this change: picks, sources, entities. */
-function guide(overrides: Record<string, unknown> = {}): BlogPost {
+function guide(overrides: Record<string, unknown> = {}, body: string = BODY): BlogPost {
   return {
     slug: 'best-cordless-stick-vacuums',
-    body: BODY,
+    body,
     data: {
       title: 'The best cordless stick vacuums in Australia',
       dek: 'Three worth buying, and what they cost.',
@@ -117,8 +134,9 @@ test('the dossier sources become citations with their publisher', () => {
 
 test('wordCount counts the body, not its markdown', () => {
   const article = node(buildArticleSchema(guide(), author), 'Article');
-  // "Cordless ... flats." (7) + "Our picks" (2) + "The Shark Detect Pro ... buy." (9)
-  assert.equal(article.wordCount, 18);
+  // Headings count as words, link syntax does not: a link contributes only its
+  // anchor text, so "[Shark Detect Pro](/go/shark-detect-pro)" is three words.
+  assert.equal(article.wordCount, 35);
 });
 
 test('the byline knows about its beat and this section, not its job title', () => {
@@ -137,15 +155,18 @@ test('the byline knows about its beat and this section, not its job title', () =
 // ── The ItemList a guide or roundup emits ───────────────────────────────────
 
 test('a guide emits a Rich Results-shaped ItemList of its picks', () => {
-  const schema = buildArticleSchema(guide(), author);
+  const schema = buildArticleSchema(guide(), author, HEADINGS);
   const list = node(schema, 'ItemList');
+  const page = 'https://sleekdrops.com/blog/best-cordless-stick-vacuums';
 
-  assert.equal(list['@id'], 'https://sleekdrops.com/blog/best-cordless-stick-vacuums#picks');
+  assert.equal(list['@id'], `${page}#picks`);
   assert.equal(list.numberOfItems, 3);
   assert.equal(list.itemListOrder, 'https://schema.org/ItemListOrderAscending');
 
   const elements = list.itemListElement as Node[];
   assert.equal(elements.length, 3);
+  // Rich Results reads an all-in-one list as ListItems with consecutive 1-based
+  // positions, each naming the thing it points at and where on the page it is.
   elements.forEach((element, index) => {
     assert.equal(element['@type'], 'ListItem');
     assert.equal(element.position, index + 1, 'positions are 1-based and consecutive');
@@ -154,51 +175,143 @@ test('a guide emits a Rich Results-shaped ItemList of its picks', () => {
     assert.ok(typeof item.name === 'string' && item.name.length > 0);
   });
 
-  const top = elements[0].item as Node;
-  assert.equal(
-    top['@id'],
-    'https://sleekdrops.com/blog/best-cordless-stick-vacuums#pick-shark-detect-pro',
-  );
-  assert.deepEqual(top.brand, { '@type': 'Brand', name: 'Shark' });
-  assert.deepEqual(top.offers, {
-    '@type': 'Offer',
-    price: '1199',
-    priceCurrency: 'AUD',
-    url: 'https://sleekdrops.com/go/shark-detect-pro',
-  });
-  // "$1099.00" keeps its cents; a pick with no stated price gets no offer
-  // rather than an invented one.
-  assert.equal(((elements[1].item as Node).offers as Node).price, '1099.00');
-  assert.equal('offers' in (elements[2].item as Node), false);
+  assert.deepEqual(elements.map((element) => element.url), [
+    `${page}#shark-detect-pro`,
+    `${page}#dyson-v15-detect`,
+    `${page}#ecovacs-t30s`,
+  ]);
 
-  // The article says the list is what it is about, so the two resolve as one.
-  assert.deepEqual(node(schema, 'Article').mainEntity, { '@id': list['@id'] });
+  const top = elements[0].item as Node;
+  assert.equal(top['@id'], `${page}#pick-shark-detect-pro`);
+  assert.deepEqual(top.brand, { '@type': 'Brand', name: 'Shark' });
+  // No brand stated for the third pick, and none invented for it.
+  assert.equal('brand' in (elements[2].item as Node), false);
 });
 
-test("the currency is the post's own, never a hardcoded USD", () => {
-  const json = JSON.stringify(buildArticleSchema(guide(), author));
-  assert.ok(!json.includes('USD'));
-  assert.ok(json.includes('"priceCurrency":"AUD"'));
+test('the article names its list of picks as what the page is about', () => {
+  const schema = buildArticleSchema(guide(), author, HEADINGS);
+  assert.deepEqual(node(schema, 'Article').mainEntity, {
+    '@id': 'https://sleekdrops.com/blog/best-cordless-stick-vacuums#picks',
+  });
+});
 
-  // A post written before the field existed still gets the site default.
-  const legacy = guide({ currency: undefined });
-  const offer = (
-    (node(buildArticleSchema(legacy, author), 'ItemList').itemListElement as Node[])[0].item as Node
-  ).offers as Node;
-  assert.equal(offer.priceCurrency, 'AUD');
+test('a pick carries no price, because the page never prints one', () => {
+  // The research states an approximate/RRP figure that no reader ever sees.
+  // Marking it up would describe content that is not on the page, and would
+  // put a stale number into search results as this page's authoritative price.
+  const json = JSON.stringify(buildArticleSchema(guide(), author, HEADINGS));
+  assert.ok(!json.includes('offers'), 'no Offer node on a page with no price');
+  assert.ok(!json.includes('1199'), "the dossier's figure never reaches the markup");
+  assert.ok(!json.includes('priceCurrency'));
+  assert.ok(!json.includes('USD'));
 });
 
 test('no rating is applied to a product we earn commission on', () => {
-  const json = JSON.stringify(buildArticleSchema(guide(), author));
+  const json = JSON.stringify(buildArticleSchema(guide(), author, HEADINGS));
   assert.ok(!json.includes('aggregateRating'));
   assert.ok(!json.includes('ratingValue'));
 });
 
+test('a pick the body never links under a heading simply gets no anchor', () => {
+  // Headings the renderer did not produce, so nothing can be anchored safely.
+  const unanchored = node(buildArticleSchema(guide(), author), 'ItemList');
+  assert.equal(
+    (unanchored.itemListElement as Node[]).every((element) => !('url' in element)),
+    true,
+  );
+
+  // And a body whose heading count disagrees with what was rendered anchors
+  // nothing rather than pointing every pick one section off.
+  const drifted = node(buildArticleSchema(guide(), author, HEADINGS.slice(0, 2)), 'ItemList');
+  assert.equal(
+    (drifted.itemListElement as Node[]).every((element) => !('url' in element)),
+    true,
+  );
+});
+
+test('picks under nested headings anchor to their own section, not the intro', () => {
+  // The shape the pipeline actually writes: one H2 over per-pick H3s, an FAQ
+  // after them, and the top pick name-dropped in the intro before any heading.
+  const nested = guide(
+    {
+      picks: [
+        { name: 'Shark Detect Pro', goSlug: 'shark-detect-pro' },
+        { name: 'Dyson V15 Detect', goSlug: 'dyson-v15-detect' },
+      ],
+    },
+    [
+      'Skip to the [Shark Detect Pro](/go/shark-detect-pro) if you are in a hurry.',
+      '',
+      '## Our picks',
+      '',
+      '### Shark Detect Pro',
+      '',
+      'The [Shark Detect Pro](/go/shark-detect-pro) is the one to buy.',
+      '',
+      '### Dyson V15 Detect',
+      '',
+      'The [Dyson V15 Detect](/go/dyson-v15-detect) is the upgrade.',
+      '',
+      '## FAQ',
+      '',
+      '### Anything else?',
+      '',
+      'No.',
+    ].join('\n'),
+  );
+
+  const list = node(
+    buildArticleSchema(nested, author, [
+      { depth: 2, slug: 'our-picks', text: 'Our picks' },
+      { depth: 3, slug: 'shark-detect-pro', text: 'Shark Detect Pro' },
+      { depth: 3, slug: 'dyson-v15-detect', text: 'Dyson V15 Detect' },
+      { depth: 2, slug: 'faq', text: 'FAQ' },
+      { depth: 3, slug: 'anything-else', text: 'Anything else?' },
+    ]),
+    'ItemList',
+  );
+  const page = 'https://sleekdrops.com/blog/best-cordless-stick-vacuums';
+  assert.deepEqual((list.itemListElement as Node[]).map((element) => element.url), [
+    `${page}#shark-detect-pro`,
+    `${page}#dyson-v15-detect`,
+  ]);
+});
+
+test('a /go/ link inside a fenced code block is not mistaken for a pick anchor', () => {
+  const fenced = guide(
+    { picks: [{ name: 'Shark Detect Pro', goSlug: 'shark-detect-pro' }] },
+    [
+      '## Intro',
+      '',
+      '```',
+      '[Shark](/go/shark-detect-pro)',
+      '```',
+      '',
+      '## Shark Detect Pro',
+      '',
+      'The [Shark Detect Pro](/go/shark-detect-pro) is the one to buy.',
+    ].join('\n'),
+  );
+
+  const list = node(
+    buildArticleSchema(fenced, author, [
+      { depth: 2, slug: 'intro', text: 'Intro' },
+      { depth: 2, slug: 'shark-detect-pro', text: 'Shark Detect Pro' },
+    ]),
+    'ItemList',
+  );
+  assert.equal(
+    (list.itemListElement as Node[])[0].url,
+    'https://sleekdrops.com/blog/best-cordless-stick-vacuums#shark-detect-pro',
+  );
+});
+
 test('only guides and roundups turn their picks into a list', () => {
   const roundup = guide({ postType: 'roundup' });
-  assert.equal(node(buildArticleSchema(roundup, author), 'ItemList')['@type'], 'ItemList');
+  const list = node(buildArticleSchema(roundup, author, HEADINGS), 'ItemList');
+  assert.equal(list['@type'], 'ItemList');
 
-  const plain = buildArticleSchema(guide({ postType: 'article' }), author);
+  const plain = buildArticleSchema(guide({ postType: 'article' }), author, HEADINGS);
   assert.equal(nodes(plain).some((entry) => entry['@type'] === 'ItemList'), false);
   assert.equal('mainEntity' in node(plain, 'Article'), false);
 });
@@ -301,24 +414,39 @@ test('a review post links its Product and Review through the same graph', () => 
 test('buildPostSchema sends a review post to the Product graph and everything else to the Article one', () => {
   assert.ok(nodes(buildPostSchema(reviewPost, author)).some((n) => n['@type'] === 'Review'));
 
-  const guideGraph = nodes(buildPostSchema(guide(), author));
+  const guideGraph = nodes(buildPostSchema(guide(), author, HEADINGS));
   assert.ok(guideGraph.some((n) => n['@type'] === 'ItemList'));
   assert.equal(guideGraph.some((n) => n['@type'] === 'Review'), false);
 });
 
-test('a price is read off its currency symbol, never off a year beside it', () => {
-  const priced = guide({
-    picks: [
-      { name: 'A', price: '2026 model, $199', goSlug: 'a' },
-      { name: 'B', price: 'RRP A$1,199 (2026)', goSlug: 'b' },
-      { name: 'C', price: 'from 89.95', goSlug: 'c' },
-      { name: 'D', price: 'price on application', goSlug: 'd' },
-    ],
-  });
-  const items = (node(buildArticleSchema(priced, author), 'ItemList').itemListElement as Node[]).map(
-    (element) => (element.item as Node).offers as Node | undefined,
-  );
-  assert.deepEqual(items.map((offer) => offer?.price), ['199', '1199', '89.95', undefined]);
+function reviewPriced(price: string): Node | undefined {
+  const post = {
+    ...reviewPost,
+    data: { ...reviewPost.data, product: { ...reviewPost.data.product, price } },
+  } as unknown as BlogPost;
+  return node(buildReviewSchema(post, author), 'Product').offers as Node | undefined;
+}
+
+test('a displayed price is read off its currency symbol, never off a year beside it', () => {
+  assert.equal(reviewPriced('2026 model, $199')?.price, '199');
+  assert.equal(reviewPriced('RRP A$1,199 (2026)')?.price, '1199');
+  assert.equal(reviewPriced('from 89.95')?.price, '89.95');
+  // Nothing numeric to mirror, so no Offer rather than an invented one.
+  assert.equal(reviewPriced('price on application'), undefined);
+});
+
+test("a review's Offer is priced in the post's own currency, never a hardcoded USD", () => {
+  const json = JSON.stringify(buildReviewSchema(reviewPost, author));
+  assert.ok(!json.includes('USD'));
+  assert.ok(json.includes('"priceCurrency":"AUD"'));
+
+  // A review written before the field existed still gets the site default.
+  const legacy = {
+    ...reviewPost,
+    data: { ...reviewPost.data, currency: undefined },
+  } as unknown as BlogPost;
+  const offer = node(buildReviewSchema(legacy, author), 'Product').offers as Node;
+  assert.equal(offer.priceCurrency, 'AUD');
 });
 
 // ── The page that actually ships this ───────────────────────────────────────
@@ -331,6 +459,6 @@ test('the post page routes every post through buildPostSchema', () => {
     fileURLToPath(new URL('../pages/blog/[slug].astro', import.meta.url)),
     'utf8',
   );
-  assert.match(page, /buildPostSchema\(post, author\)/);
+  assert.match(page, /buildPostSchema\(post, author, headings\)/);
   assert.doesNotMatch(page, /buildArticleSchema|buildReviewSchema/);
 });

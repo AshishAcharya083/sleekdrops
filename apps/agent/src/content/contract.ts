@@ -55,7 +55,11 @@ export const sourceSchema = z.object({
 export const pickSchema = z.object({
   name: z.string().min(1),
   brand: z.string().min(1).optional(),
-  /** As the dossier stated it, e.g. "A$229" — parsed to a number by the site. */
+  /**
+   * As the dossier stated it, e.g. "A$229". Approximate, and the page does not
+   * print it, so the site does not put it in `offers.price` — see the note on
+   * `productNode` in apps/web/src/lib/seo.ts.
+   */
   price: z.string().min(1).optional(),
   goSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
 });

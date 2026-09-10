@@ -51,13 +51,14 @@ const meta = buildMeta({
 });
 // One linked @graph per post: publisher, site, page, byline and article, plus
 // the ItemList of picks on a guide or roundup and the Product/Review pair on a
-// review post.
+// review post. The rendered headings go in so each pick can point at the
+// section that recommends it — they carry the ids Astro actually emitted.
 //
 // The visible FAQ section is what answer engines quote; the FAQPage markup
 // read back out of it is valid and harmless but no longer a Google rich result
 // (removed May 2026), so it ships as-is rather than being relied on. Posts
 // without an FAQ section (most of the older hand-written pieces) emit no block.
-const schema = [buildPostSchema(post, author), buildFaqSchema(extractFaq(post.body))];
+const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractFaq(post.body))];
 ---
 <BaseLayout
   {...meta}
