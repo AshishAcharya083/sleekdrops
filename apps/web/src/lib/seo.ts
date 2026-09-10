@@ -17,7 +17,6 @@ import type {
   ItemList,
   Offer,
   Organization,
-  Person,
   Product as ProductSchema,
   ProfilePage,
   Review,
@@ -31,6 +30,7 @@ import type { Deal } from '@data/deals';
 import type { Promo } from '@data/promos';
 import type { PickData, SourceData } from '../content/frontmatter';
 import type { BlogPost } from './posts';
+import { categories } from '../data/categories.ts';
 
 // Same defensive read as ads-env / analytics-env / flags-env: Vite inlines
 // `import.meta.env` at build time and the bare `node --test` runner has no such
@@ -50,7 +50,7 @@ const LANGUAGE = 'en-AU';
 const DEFAULT_CURRENCY = 'AUD';
 
 // Stable node identities. They are fragments of the site's own URLs so the
-// same organisation, site and person mean the same node on every page that
+// same organisation, site and byline mean the same node on every page that
 // declares them.
 const ORGANIZATION_ID = `${siteUrl}/#organization`;
 const WEBSITE_ID = `${siteUrl}/#website`;
@@ -88,39 +88,36 @@ function authorPageUrl(author: Author): string {
 }
 
 function authorId(author: Author): string {
-  return `${authorPageUrl(author)}#person`;
+  return `${authorPageUrl(author)}#byline`;
 }
-
-/** Words that name a job, not a subject — they do not belong in `knowsAbout`. */
-const JOB_TITLE_WORD = /\b(editor|writer|reporter|contributor|journalist)\b/i;
 
 /**
- * The subjects a byline covers: their beat, split where it names more than one
- * ("Audio & tech"), plus the section this piece sits in. Deduped case-
- * insensitively so "tech" and "Tech" are one topic.
+ * The subjects the desk covers: the site's own category registry, which is
+ * exactly the ground the archive spans. Site-wide rather than per-post, because
+ * this node has one `@id` on every page and so has to say the same thing on
+ * each of them.
  */
-function authorTopics(author: Author, category?: string): string[] {
-  const topics = new Map<string, string>();
-  for (const part of [...author.role.split(/\s*[&,/]\s*/), category ?? '']) {
-    const topic = part.trim();
-    if (!topic || JOB_TITLE_WORD.test(topic)) continue;
-    const key = topic.toLowerCase();
-    if (!topics.has(key)) topics.set(key, `${topic[0].toUpperCase()}${topic.slice(1)}`);
-  }
-  return [...topics.values()];
-}
+const BYLINE_TOPICS = categories.map((category) => category.name);
 
-/** The byline as a graph node: same `@id` here, on the author page and in a Review. */
-function authorNode(author: Author, category?: string): Person {
-  const topics = authorTopics(author, category);
+/**
+ * The byline as a graph node: same `@id` here, on the author page and in a
+ * Review.
+ *
+ * An Organization, not a Person. The site publishes under one labelled
+ * editorial-desk byline rather than named reviewer personas, and the markup
+ * says the same thing the page does — a Person node here would assert a human
+ * author the reader is never shown. `parentOrganization` ties the desk to the
+ * publisher so the two same-named nodes resolve as one operation.
+ */
+function authorNode(author: Author): Organization {
   return {
-    '@type': 'Person',
+    '@type': 'Organization',
     '@id': authorId(author),
     name: author.name,
     url: authorPageUrl(author),
     description: author.bio,
-    jobTitle: author.role,
-    ...(topics.length > 0 ? { knowsAbout: topics } : {}),
+    knowsAbout: BYLINE_TOPICS,
+    parentOrganization: { '@id': ORGANIZATION_ID },
     ...(author.url ? { sameAs: [author.url] } : {}),
   };
 }
@@ -308,7 +305,7 @@ function postNodes(post: BlogPost, author: Author, mainEntityId?: string): Thing
     ...(mainEntityId ? { mainEntity: { '@id': mainEntityId } } : {}),
   };
 
-  return [PUBLISHER, WEBSITE, webPage, authorNode(author, post.data.category), article];
+  return [PUBLISHER, WEBSITE, webPage, authorNode(author), article];
 }
 
 /** Post types whose whole point is a ranked set of products. */
@@ -569,7 +566,7 @@ export function buildAuthorSchema(author: Author): WithContext<ProfilePage> {
     '@type': 'ProfilePage',
     name: author.name,
     url: authorPageUrl(author),
-    // The same Person node every byline on the site points at.
+    // The same byline node every article on the site points at.
     mainEntity: authorNode(author),
   };
 }

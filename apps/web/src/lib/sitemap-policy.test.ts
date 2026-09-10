@@ -94,13 +94,22 @@ test('a tag page below the threshold is dropped from the sitemap; one at it stay
   assert.equal(policy.filter('https://sleekdrops.com/tag/never-used'), false);
 });
 
-test('the reviews hub is listed only once there is a review to list', () => {
+test('editorial hubs are listed only once there is content to list', () => {
   const none = createSitemapPolicy([post('a', { pubDate: '2026-08-01', postType: 'roundup' })]);
   assert.equal(none.filter('https://sleekdrops.com/reviews'), false);
   assert.equal(none.filter('https://sleekdrops.com/reviews/2'), false);
+  assert.equal(none.filter('https://sleekdrops.com/guides'), false);
   const some = createSitemapPolicy([post('a', { pubDate: '2026-08-01', postType: 'review' })]);
   assert.equal(some.filter('https://sleekdrops.com/reviews'), true);
+  const withGuide = createSitemapPolicy([post('a', { pubDate: '2026-08-01', postType: 'guide' })]);
+  assert.equal(withGuide.filter('https://sleekdrops.com/guides'), true);
   assert.equal(some.filter('https://sleekdrops.com/about'), true, 'everything else is untouched');
+});
+
+test('time-sensitive deal and promo hubs are not advertised in the sitemap', () => {
+  const policy = createSitemapPolicy([post('a', { pubDate: '2026-08-01' })]);
+  assert.equal(policy.filter('https://sleekdrops.com/deals'), false);
+  assert.equal(policy.filter('https://sleekdrops.com/promos'), false);
 });
 
 test('lastmod follows the content each route lists', () => {
@@ -121,7 +130,8 @@ test('lastmod follows the content each route lists', () => {
   assert.equal(lastmod('/category/home'), '2026-08-20');
   assert.equal(lastmod('/tag/australia'), '2026-09-04');
   assert.equal(lastmod('/tag/bluetooth-speakers'), '2026-05-30');
-  assert.equal(lastmod('/author/mira'), '2026-08-20');
+  assert.equal(lastmod('/author/desk'), '2026-09-04');
+  assert.equal(lastmod('/author/mira'), undefined, 'legacy author archives are no longer public routes');
   assert.equal(lastmod('/guides'), '2026-08-20');
   assert.equal(lastmod('/reviews'), undefined, 'nothing listed, nothing changed');
   assert.equal(lastmod('/about'), undefined, 'static pages carry no date we can vouch for');

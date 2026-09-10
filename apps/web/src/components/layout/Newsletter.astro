@@ -19,9 +19,9 @@ export interface Props {
   desc?: string;
 }
 const {
-  eyebrow = 'The Daily Drop',
-  headline = 'One <em>honest</em> deal, every morning.',
-  desc = 'No "exclusive offers." No "limited time only." Just one product we\'d actually buy, with the real price and the real catch.',
+  eyebrow = 'Deal alerts',
+  headline = 'Useful alerts, when they are <em>ready</em>.',
+  desc = 'We are building the mailing list now. Until it is connected, there is no form and no email address is collected.',
 } = Astro.props;
 ---
 <section class="newsletter-band">
@@ -32,7 +32,7 @@ const {
     <div class="newsletter-pending">
       <button type="button" disabled>Coming soon</button>
     </div>
-    <div class="newsletter-meta">Drop alerts are coming soon. There is no list to join yet.</div>
+    <div class="newsletter-meta">There is no list to join yet.</div>
   </div>
 </section>
 

@@ -1,6 +1,7 @@
 ---
 import BrandMark from '@components/ui/BrandMark.astro';
 import IconButton from '@components/ui/IconButton.astro';
+import { getActiveDeals } from '@data/deals';
 import { NAV_ITEM_ATTRIBUTE } from '@lib/nav-experiment';
 
 /**
@@ -13,6 +14,7 @@ export interface Props {
   active?: NavId;
 }
 const { active } = Astro.props;
+const hasActiveDeals = getActiveDeals().length > 0;
 
 interface NavItem {
   id: NavId;
@@ -30,7 +32,7 @@ const navItems: NavItem[] = [
   { id: 'home', label: 'Home', href: '/' },
   { id: 'blog', label: 'Blog', href: '/blog' },
   { id: 'categories', label: 'Categories', href: '/categories' },
-  { id: 'deals', label: 'Deals', href: '/deals' },
+  ...(hasActiveDeals ? [{ id: 'deals' as const, label: 'Deals', href: '/deals' }] : []),
   { id: 'about', label: 'About', href: '/about', experimentFeature: 'remove-about-page' },
   { id: 'contact', label: 'Contact', href: '/contact' },
 ];

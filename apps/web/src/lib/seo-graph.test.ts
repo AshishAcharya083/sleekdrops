@@ -21,10 +21,10 @@ import type { BlogPost } from './posts.ts';
 import type { Author } from '@data/authors';
 
 const author: Author = {
-  id: 'mira',
-  name: 'Mira Kapoor',
-  role: 'Senior reviews editor',
-  bio: 'Reviews homewares.',
+  id: 'desk',
+  name: 'SleekDrops Editorial Desk',
+  role: 'Editorial team',
+  bio: 'Research-led coverage.',
 };
 
 const BODY = `Cordless sticks are worth it for flats.
@@ -58,7 +58,7 @@ function guide(overrides: Record<string, unknown> = {}, body: string = BODY): Bl
       dek: 'Three worth buying, and what they cost.',
       category: 'Home',
       postType: 'guide',
-      author: 'mira',
+      author: 'desk',
       tags: ['vacuums'],
       pubDate: new Date('2026-08-01T00:00:00Z'),
       updatedDate: new Date('2026-09-05T00:00:00Z'),
@@ -139,17 +139,23 @@ test('wordCount counts the body, not its markdown', () => {
   assert.equal(article.wordCount, 35);
 });
 
-test('the byline knows about its beat and this section, not its job title', () => {
-  const person = node(buildArticleSchema(guide(), author), 'Person');
-  assert.deepEqual(person.knowsAbout, ['Home']);
-  assert.equal(person.jobTitle, 'Senior reviews editor');
+test('the byline is the editorial desk, and says so the same way on every post', () => {
+  const bylineId = 'https://sleekdrops.com/author/desk#byline';
+  const home = nodes(buildArticleSchema(guide(), author)).find((n) => n['@id'] === bylineId);
+  assert.ok(home, 'no byline node in the graph');
+  // Not a Person: the site shows a labelled editorial desk, and markup that
+  // claimed a human reviewer would be asserting something the page does not.
+  assert.equal(home['@type'], 'Organization');
+  assert.equal(home.description, 'Research-led coverage.');
+  assert.deepEqual(home.parentOrganization, { '@id': 'https://sleekdrops.com/#organization' });
 
-  const audio = { ...author, id: 'theo', name: 'Theo Renn', role: 'Audio & tech' };
-  const techPost = guide({ category: 'Tech' });
-  assert.deepEqual(node(buildArticleSchema(techPost, audio), 'Person').knowsAbout, [
-    'Audio',
-    'Tech',
-  ]);
+  // One `@id` means one set of claims, so the section a post sits in cannot
+  // change what the desk knows about.
+  const tech = nodes(buildArticleSchema(guide({ category: 'Tech' }), author)).find(
+    (n) => n['@id'] === bylineId,
+  );
+  assert.deepEqual(tech, home);
+  assert.deepEqual(home.knowsAbout, ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel']);
 });
 
 // ── The ItemList a guide or roundup emits ───────────────────────────────────
@@ -327,7 +333,7 @@ test('a post published before any of these fields existed still emits a graph', 
       dek: 'Written by hand, long before the pipeline.',
       category: 'Tech',
       postType: 'article',
-      author: 'mira',
+      author: 'desk',
       tags: [],
       pubDate: new Date('2025-01-01T00:00:00Z'),
       readTime: 3,
@@ -356,7 +362,7 @@ const reviewPost = {
     dek: 'A balanced, good-looking portable.',
     category: 'Tech',
     postType: 'review',
-    author: 'mira',
+    author: 'desk',
     tags: ['speakers'],
     pubDate: new Date('2026-05-30T00:00:00Z'),
     readTime: 8,
@@ -395,7 +401,7 @@ test('a review post links its Product and Review through the same graph', () => 
 
   const review = node(schema, 'Review');
   assert.deepEqual(review.itemReviewed, { '@id': productId });
-  assert.deepEqual(review.author, { '@id': 'https://sleekdrops.com/author/mira#person' });
+  assert.deepEqual(review.author, { '@id': 'https://sleekdrops.com/author/desk#byline' });
   // The one editorial rating stays on the Review, where it belongs.
   assert.deepEqual(review.reviewRating, {
     '@type': 'Rating',

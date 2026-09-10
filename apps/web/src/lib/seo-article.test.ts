@@ -12,7 +12,12 @@ import { buildArticleSchema } from './seo.ts';
 import type { BlogPost } from './posts.ts';
 import type { Author } from '@data/authors';
 
-const author: Author = { id: 'theo', name: 'Theo Renn', role: 'Audio & tech', bio: 'Bio.' };
+const author: Author = {
+  id: 'desk',
+  name: 'SleekDrops Editorial Desk',
+  role: 'Editorial team',
+  bio: 'Research-led coverage.',
+};
 
 const post = {
   slug: 'harman-kardon-luna-2',
@@ -22,7 +27,7 @@ const post = {
     dek: 'A balanced, good-looking portable.',
     category: 'Tech',
     postType: 'review',
-    author: 'theo',
+    author: 'desk',
     tags: ['harman kardon', 'bluetooth speakers'],
     pubDate: new Date('2026-05-30T00:00:00Z'),
     updatedDate: new Date('2026-09-04T00:00:00Z'),
@@ -45,7 +50,15 @@ function node(schema: unknown, type: string): Node {
   return found;
 }
 
-test('the article names its author node, its language and its own URL', () => {
+/** By `@id`, for the two Organization nodes: the publisher and the byline. */
+function nodeById(schema: unknown, id: string): Node {
+  const nodes = (schema as { '@graph': Node[] })['@graph'];
+  const found = nodes.find((entry) => entry['@id'] === id);
+  assert.ok(found, `no node with @id ${id} in the graph`);
+  return found;
+}
+
+test('the article names its byline node, its language and its own URL', () => {
   const schema = buildArticleSchema(post, author);
   assert.equal((schema as Node)['@context'], 'https://schema.org');
 
@@ -53,12 +66,16 @@ test('the article names its author node, its language and its own URL', () => {
   assert.equal(article.url, 'https://sleekdrops.com/blog/harman-kardon-luna-2');
   assert.equal(article['@id'], 'https://sleekdrops.com/blog/harman-kardon-luna-2#article');
   assert.equal(article.inLanguage, 'en-AU');
-  assert.deepEqual(article.author, { '@id': 'https://sleekdrops.com/author/theo#person' });
+  assert.deepEqual(article.author, { '@id': 'https://sleekdrops.com/author/desk#byline' });
 
-  const person = node(schema, 'Person');
-  assert.equal(person['@id'], 'https://sleekdrops.com/author/theo#person');
-  assert.equal(person.url, 'https://sleekdrops.com/author/theo');
-  assert.equal(person.name, 'Theo Renn');
+  const byline = nodeById(schema, 'https://sleekdrops.com/author/desk#byline');
+  // The site publishes under one labelled editorial desk, so the byline is an
+  // Organization; a Person node would claim a human reviewer nobody is shown.
+  assert.equal(byline['@type'], 'Organization');
+  assert.equal(byline.url, 'https://sleekdrops.com/author/desk');
+  assert.equal(byline.name, 'SleekDrops Editorial Desk');
+  assert.deepEqual(byline.parentOrganization, { '@id': 'https://sleekdrops.com/#organization' });
+  assert.deepEqual(byline.knowsAbout, ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel']);
 });
 
 test('the article is part of a WebPage node, which is part of the site', () => {

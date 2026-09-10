@@ -29,12 +29,11 @@ export const MONETISED_INTENTS = new Set(['Commercial Investigation', 'Transacti
 export const HOME_CURRENCY = 'AUD';
 
 export const AUTHORS = [
-  { id: 'mira', name: 'Mira Kapoor', beat: 'Senior reviews editor — home, general product testing' },
-  { id: 'theo', name: 'Theo Renn', beat: 'Audio & tech' },
-  { id: 'aiko', name: 'Aiko Tanaka', beat: 'Health & wearables' },
-  { id: 'lina', name: 'Lina Voss', beat: 'Fashion & textiles' },
-  { id: 'sam', name: 'Sam Ortiz', beat: 'Personal finance' },
-  { id: 'beatriz', name: 'Beatriz Lima', beat: 'Travel & gear' },
+  {
+    id: 'desk',
+    name: 'SleekDrops Editorial Desk',
+    beat: 'Research-led product coverage across Tech, Home, Fashion, Health, Finance and Travel',
+  },
 ] as const;
 
 /**
