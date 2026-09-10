@@ -16,7 +16,7 @@ import RelatedPosts from '@components/blog/RelatedPosts.astro';
 import { getAllPosts, getRelatedPosts, type BlogPost } from '@lib/posts';
 import { authorInitials, getAuthor } from '@data/authors';
 import { getCategory } from '@data/categories';
-import { buildArticleSchema, buildFaqSchema, buildMeta, buildReviewSchema, extractFaq } from '@lib/seo';
+import { buildFaqSchema, buildMeta, buildPostSchema, extractFaq } from '@lib/seo';
 import { emphasiseLastWord, formatLong } from '@lib/format';
 
 export const getStaticPaths = (async () => {
@@ -49,14 +49,16 @@ const meta = buildMeta({
   image: post.data.heroImage,
   type: 'article',
 });
+// One linked @graph per post: publisher, site, page, byline and article, plus
+// the ItemList of picks on a guide or roundup and the Product/Review pair on a
+// review post. The rendered headings go in so each pick can point at the
+// section that recommends it — they carry the ids Astro actually emitted.
+//
 // The visible FAQ section is what answer engines quote; the FAQPage markup
 // read back out of it is valid and harmless but no longer a Google rich result
 // (removed May 2026), so it ships as-is rather than being relied on. Posts
 // without an FAQ section (most of the older hand-written pieces) emit no block.
-const schema = [
-  product ? buildReviewSchema(post, author) : buildArticleSchema(post, author),
-  buildFaqSchema(extractFaq(post.body)),
-];
+const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractFaq(post.body))];
 ---
 <BaseLayout
   {...meta}
