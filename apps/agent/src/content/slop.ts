@@ -355,6 +355,22 @@ const EM_DASH_ALLOWANCE_PER_1K = 2;
 // ---------------------------------------------------------------------------
 
 /**
+ * One break per line, whatever the draft was authored on.
+ *
+ * A carriage return is invisible to a reader but not to a regex: `.` and `$`
+ * refuse to span it, so a heading written `## Picks\r` satisfies a `#{1,6}`
+ * guard while failing a `#{1,6}\s+(.*)$` capture, and any code that relies on
+ * the two agreeing breaks on it. CRLF collapses to LF, which leaves the line
+ * count - and therefore every finding's line number - exactly as it was, and a
+ * lone CR becomes the break a markdown reader would see anyway. The Unicode
+ * separators become spaces rather than breaks, because that is how every
+ * markdown renderer treats them.
+ */
+function normaliseBreaks(markdown: string): string {
+  return (markdown ?? '').replace(/\r\n?/g, '\n').replace(/[\u2028\u2029]/g, ' ');
+}
+
+/**
  * Blank out everything that is not prose, preserving line count so findings
  * keep real line numbers: fenced code, inline code, link targets, bare URLs,
  * table delimiter rows, and HTML comments.
@@ -362,7 +378,7 @@ const EM_DASH_ALLOWANCE_PER_1K = 2;
 export function proseLines(markdown: string): string[] {
   const out: string[] = [];
   let inFence = false;
-  for (const raw of markdown.split('\n')) {
+  for (const raw of normaliseBreaks(markdown).split('\n')) {
     if (/^\s*(?:```|~~~)/.test(raw)) {
       inFence = !inFence;
       out.push('');
@@ -577,6 +593,14 @@ interface Block {
   level: number;
 }
 
+/**
+ * One regex for both the heading capture and the "stop at the next heading"
+ * guard in `blocks`. Two spellings of the same intent is how the block walker
+ * loses its guarantee of progress: a line the guard calls a heading but the
+ * capture cannot parse would be collected by neither branch.
+ */
+const HEADING_LINE = /^\s*(#{1,6})\s+(.*)$/;
+
 function kindOf(line: string): BlockKind {
   if (/^\s*\|/.test(line)) return 'table';
   if (/^\s*(?:[-*+]|\d+[.)])\s+/.test(line)) return 'list';
@@ -593,7 +617,7 @@ function blocks(lines: string[]): Block[] {
       i += 1;
       continue;
     }
-    const heading = /^\s*(#{1,6})\s+(.*)$/.exec(line);
+    const heading = HEADING_LINE.exec(line);
     if (heading) {
       const text = heading[2].trim();
       out.push({ kind: 'heading', line: i + 1, text, words: countWords([text]), level: heading[1].length });
@@ -606,7 +630,7 @@ function blocks(lines: string[]): Block[] {
     while (
       i < lines.length &&
       lines[i].trim() &&
-      !/^\s*#{1,6}\s/.test(lines[i]) &&
+      !HEADING_LINE.test(lines[i]) &&
       kindOf(lines[i]) === kind
     ) {
       parts.push(lines[i].replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim());
@@ -1039,7 +1063,7 @@ export function slopSeverity(finding: SlopFinding): 'high' | 'medium' | 'low' {
 }
 
 export function detectSlop(markdown: string, options?: SlopScanOptions): SlopReport {
-  const raw = (markdown ?? '').split('\n');
+  const raw = normaliseBreaks(markdown).split('\n');
   const lines = proseLines(markdown ?? '');
   const words = countWords(lines);
   const findings: SlopFinding[] = [];

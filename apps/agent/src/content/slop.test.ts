@@ -953,3 +953,24 @@ test('a spec table cannot carry a vague article', () => {
   assert.match(finding.fix, /Spec tables do not count towards this/);
   assert.ok(finding.lines.every((line) => line > 0));
 });
+
+test('a draft with Windows line endings scans the same as one without', () => {
+  // A body can reach the scanner with CRLF endings (an operator paste, a
+  // Windows-authored feedback round), with a lone CR, or with a Unicode line
+  // separator inside a line. None of those is a break to `split('\n')` but all
+  // are invisible to `.` and `$`, so a heading like "## Picks\r" once satisfied
+  // the block walker's heading guard while failing its heading capture: the
+  // walker then made no progress and the scan ran until the heap gave out.
+  for (const fixture of [VARIED, TEMPLATED]) {
+    const lf = detectSlop(fixture);
+    for (const ending of ['\r\n', '\r']) {
+      const converted = detectSlop(fixture.replace(/\n/g, ending));
+      assert.equal(converted.score, lf.score);
+      assert.equal(converted.words, lf.words);
+      assert.deepEqual(converted.findings, lf.findings);
+    }
+  }
+
+  const separated = detectSlop(VARIED.replace('## How we picked', '## How\u2028we picked'));
+  assert.equal(separated.score, detectSlop(VARIED).score);
+});

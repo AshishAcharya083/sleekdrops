@@ -12,6 +12,7 @@
 // nobody reviewed and slide it into a draft on its way out.
 import { chat, UsageTracker } from '../llm/index.js';
 import { detectSlop, formatSlopReport } from '../content/slop.js';
+import { loadPublishedCorpus } from '../content/corpus.js';
 import {
   ANTI_SLOP_RULES,
   EDITORIAL_RULES,
@@ -38,7 +39,11 @@ export async function runEditor(
   const issues = (article.seo_review?.issues ?? []).filter(
     (i) => !i.issue.startsWith('Voice scan —'),
   );
-  const slopReport = formatSlopReport(detectSlop(draft));
+  // Same scan the reviewer ran, re-derived against the draft in front of us,
+  // cross-corpus metrics included, so a repetition finding arrives with the
+  // published article it repeats.
+  const corpus = await loadPublishedCorpus({ excludeSlug: article.slug });
+  const slopReport = formatSlopReport(detectSlop(draft, { corpus }));
 
   const result = await chat({
     model,
