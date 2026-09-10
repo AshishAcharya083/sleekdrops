@@ -19,12 +19,14 @@ import { buildArticleSchema, buildPostSchema, buildReviewSchema, jsonLdScript } 
 import type { PostHeading } from './seo.ts';
 import type { BlogPost } from './posts.ts';
 import type { Author } from '@data/authors';
+import { beats } from '../data/authors.ts';
 
 const author: Author = {
   id: 'desk',
-  name: 'SleekDrops Editorial Desk',
+  name: 'SleekDrops Editorial Team',
   role: 'Editorial team',
   bio: 'Research-led coverage.',
+  voice: beats.desk.voice,
 };
 
 const BODY = `Cordless sticks are worth it for flats.
@@ -139,18 +141,18 @@ test('wordCount counts the body, not its markdown', () => {
   assert.equal(article.wordCount, 35);
 });
 
-test('the byline is the editorial desk, and says so the same way on every post', () => {
+test('the byline is the editorial team, and says so the same way on every post', () => {
   const bylineId = 'https://sleekdrops.com/author/desk#byline';
   const home = nodes(buildArticleSchema(guide(), author)).find((n) => n['@id'] === bylineId);
   assert.ok(home, 'no byline node in the graph');
-  // Not a Person: the site shows a labelled editorial desk, and markup that
-  // claimed a human reviewer would be asserting something the page does not.
+  // Not a Person: the site shows one accountable editorial team, and markup
+  // that claimed a human reviewer would be asserting something the page does not.
   assert.equal(home['@type'], 'Organization');
   assert.equal(home.description, 'Research-led coverage.');
   assert.deepEqual(home.parentOrganization, { '@id': 'https://sleekdrops.com/#organization' });
 
   // One `@id` means one set of claims, so the section a post sits in cannot
-  // change what the desk knows about.
+  // change what the byline knows about.
   const tech = nodes(buildArticleSchema(guide({ category: 'Tech' }), author)).find(
     (n) => n['@id'] === bylineId,
   );

@@ -14,7 +14,7 @@ import ProductCallout from '@components/affiliate/ProductCallout.astro';
 import AuthorCard from '@components/blog/AuthorCard.astro';
 import RelatedPosts from '@components/blog/RelatedPosts.astro';
 import { getAllPosts, getRelatedPosts, type BlogPost } from '@lib/posts';
-import { getAuthor } from '@data/authors';
+import { authorInitials, getAuthor } from '@data/authors';
 import { getCategory } from '@data/categories';
 import { buildFaqSchema, buildMeta, buildPostSchema, extractFaq } from '@lib/seo';
 import { emphasiseLastWord, formatLong } from '@lib/format';
@@ -89,10 +89,10 @@ const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractF
       <p class="lede">{post.data.dek}</p>
 
       <div class="article-meta">
-        <a class="avatar" href={`/author/${author.id}`} aria-hidden="true">{author.name.split(' ').map((p) => p[0]).join('').slice(0, 2)}</a>
+        <a class="avatar" href={`/author/${author.id}`} aria-hidden="true">{authorInitials(author)}</a>
         <div>
           <a class="author" href={`/author/${author.id}`}>{author.name}</a>
-          <div class="author-role">{author.role}</div>
+          <div class="author-role">{author.beat ? `${author.role} · ${author.beat}` : author.role}</div>
         </div>
         <span class="dot" aria-hidden="true" />
         <span class="stat">

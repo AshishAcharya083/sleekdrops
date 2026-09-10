@@ -6,8 +6,15 @@
 // the plan is missing (an article queued before the keyword stage existed) it
 // falls back to the dossier's own keywords.
 import { chatJson, requireKeys, UsageTracker } from '../llm/index.js';
-import { AUTHORS, slugify } from '../content/contract.js';
-import { GEO_RULES, keywordPlanBrief, SEO_RULES, siteContext, SOURCE_DISCIPLINE } from './context.js';
+import { authorById, defaultAuthorFor, slugify } from '../content/contract.js';
+import {
+  editorialAngleBrief,
+  GEO_RULES,
+  keywordPlanBrief,
+  SEO_RULES,
+  siteContext,
+  SOURCE_DISCIPLINE,
+} from './context.js';
 import type { ArticleRow, ContentBrief } from '../pipeline/types.js';
 
 export async function runOutliner(
@@ -17,6 +24,8 @@ export async function runOutliner(
 ): Promise<ContentBrief> {
   const plan = article.keyword_plan;
   const planBrief = keywordPlanBrief(plan);
+  const angle = article.editorial_angle;
+  const angleBrief = editorialAngleBrief(angle);
 
   const brief = await chatJson<ContentBrief>(
     {
@@ -28,11 +37,16 @@ export async function runOutliner(
 
 Working title: ${article.title}
 Post type: ${article.post_type} | Category: ${article.category}
-${planBrief ? `\n${planBrief}\n` : ''}
+${angleBrief ? `\n${angleBrief}\n` : ''}${planBrief ? `\n${planBrief}\n` : ''}
 Research dossier:
 ${JSON.stringify(article.research, null, 2)}
 
-Build the outline to execute the keyword plan:
+Build the outline to execute the angle and the keyword plan:
+${angle ? `- The sections must argue the thesis, in the "${angle.shape}" shape above. Do not
+  reach for the familiar "intro, how we picked, one section per product, FAQ"
+  running order unless that shape is what the angle asked for.
+- Every claim under "what this piece says that the top results do not" gets a
+  section or a named sub-point. That list is the reason this piece exists.` : ''}
 - Every People Also Ask question becomes an H2 or an FAQ entry. None get dropped.
 - Every content gap gets a section of its own — the gaps are the reason this
   piece can outrank the pages already there.
@@ -49,7 +63,6 @@ Return JSON:
 {"seoTitle": string (≤60 chars, front-loaded primary keyword, include the year when natural),
  "dek": string (140-160 chars, includes primary keyword, sells the click honestly),
  "slug": string (kebab-case, short, keyword-bearing),
- "author": string (one of: ${AUTHORS.map((a) => a.id).join(', ')}),
  "kind": string (human badge label, e.g. "Buying guide", "Comparison", "Trend watch"),
  "searchIntent": string,
  "primaryKeyword": string,
@@ -68,7 +81,10 @@ Return JSON:
   );
 
   brief.slug = slugify(brief.slug || brief.seoTitle || article.title);
-  if (!AUTHORS.some((a) => a.id === brief.author)) brief.author = 'desk';
+  // The byline belongs to the angle stage, which picked it against the thesis
+  // and the beat; the outliner is not asked for one. An article that predates
+  // the angle stage falls back to the beat that owns its category.
+  brief.author = (authorById(angle?.byline) ?? defaultAuthorFor(article.category)).id;
   // The plan's keyword is the decision of record: the outliner may reword the
   // title, but it does not get to re-target the piece.
   if (plan?.primaryKeyword) brief.primaryKeyword = plan.primaryKeyword;

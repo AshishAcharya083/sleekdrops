@@ -1,12 +1,18 @@
 ---
 import BaseLayout from '@layouts/BaseLayout.astro';
 import Eyebrow from '@components/ui/Eyebrow.astro';
-import { listAuthors, authorInitials } from '@data/authors';
+import { listAuthors, listBeats, authorInitials } from '@data/authors';
 import { SITE_DESCRIPTION } from '@data/site';
 import { getAllPosts } from '@lib/posts';
 import { buildCategorySchema, buildMeta } from '@lib/seo';
 
 const team = listAuthors();
+// Beats are labels on the one byline, never separate mastheads: naming a desk
+// promises a staffed team behind it, and inventing that team is exactly what
+// costs an affiliate site its standing.
+const beatLabels = listBeats()
+  .map((beat) => beat.label)
+  .filter(Boolean);
 // The one number on this page we can stand behind: it is counted, not claimed.
 const published = (await getAllPosts()).length;
 
@@ -56,8 +62,8 @@ const meta = buildMeta({
   <section class="team">
     <div class="container">
       <div class="team-head">
-        <h2>The <em>desk</em>.</h2>
-        <p>Research-led coverage published under one accountable team byline.</p>
+        <h2>The <em>team</em>.</h2>
+        <p>Research-led coverage published under one accountable team byline, tagged with the beat it was written on: {beatLabels.join(', ')}. Beats are labels, not separate mastheads: no invented authors and no claimed hands-on testing.</p>
       </div>
       <div class="team-grid">
         {team.map((author) => (

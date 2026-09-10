@@ -233,7 +233,7 @@ dek: "..."                   # required, one-sentence subhead
 category: "Tech"             # required, one of the 6 exactly
 postType: "guide"            # article | guide | roundup  (NOT review)
 kind: "Comparison"           # optional human label badge
-author: "desk"               # required, the public SleekDrops Editorial Desk byline
+author: "desk"               # required, a desk id from src/data/authors.ts
 tags: ["anker", "power bank"]
 pubDate: "2026-05-30"        # required
 readTime: 9                  # required, integer minutes
@@ -244,7 +244,7 @@ draft: false                 # optional
 ```
 
 **Rules the assembler enforces:**
-- `author` must be `desk`, matching the public SleekDrops Editorial Desk entry in the main repo's `src/data/authors.ts`. Unknown ids fail the pipeline contract.
+- `author` must be one of the beat ids in the main repo's `src/data/authors.ts` (`desk`, `tech`, `home`, `value`) - every piece publishes under the one `SleekDrops Editorial Team` byline, and the beat the angle stage picks is a tag on it. Unknown ids fail the pipeline contract; the site renders any it has never seen under the house voice rather than breaking the build.
 - `cover` is one of `fill-1`…`fill-8` (placeholder gradient; v1 has no per-post hero image — see `docs/future_planning.md` for the R2 image plan when you add real images).
 - `slug` = filename (kebab-case, unique). If a file with that slug exists, append a disambiguator or skip (idempotency via `runId`).
 - Body `/go/<slug>` links must all have matching keys in `affiliate-links.json`.
@@ -330,7 +330,7 @@ One post per category per day, deep and people-first — not a farm.
 
 - [ ] Never fabricate a price; verify against the live merchant page.
 - [ ] Never write a raw merchant URL in a post/data file — always `/go/<slug>`.
-- [ ] Use `author: "desk"` — the single public SleekDrops Editorial Desk byline.
+- [ ] Use a desk byline from `src/data/authors.ts` — accountable editorial desks, never an invented person.
 - [ ] Never auto-publish a single-product `review` (needs real hands-on testing).
 - [ ] Cons column always full; name a winner; cite real signals (E-E-A-T).
 - [ ] One excellent post/day over volume (avoid scaled-content-abuse penalties).

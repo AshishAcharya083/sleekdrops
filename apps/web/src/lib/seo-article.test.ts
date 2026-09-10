@@ -10,14 +10,9 @@ import assert from 'node:assert/strict';
 
 import { buildArticleSchema } from './seo.ts';
 import type { BlogPost } from './posts.ts';
-import type { Author } from '@data/authors';
+import { getAuthor } from '../data/authors.ts';
 
-const author: Author = {
-  id: 'desk',
-  name: 'SleekDrops Editorial Desk',
-  role: 'Editorial team',
-  bio: 'Research-led coverage.',
-};
+const author = getAuthor('desk');
 
 const post = {
   slug: 'harman-kardon-luna-2',
@@ -69,11 +64,11 @@ test('the article names its byline node, its language and its own URL', () => {
   assert.deepEqual(article.author, { '@id': 'https://sleekdrops.com/author/desk#byline' });
 
   const byline = nodeById(schema, 'https://sleekdrops.com/author/desk#byline');
-  // The site publishes under one labelled editorial desk, so the byline is an
-  // Organization; a Person node would claim a human reviewer nobody is shown.
+  // The site publishes under one accountable editorial team, so the byline is
+  // an Organization; a Person node would claim a human reviewer nobody is shown.
   assert.equal(byline['@type'], 'Organization');
   assert.equal(byline.url, 'https://sleekdrops.com/author/desk');
-  assert.equal(byline.name, 'SleekDrops Editorial Desk');
+  assert.equal(byline.name, 'SleekDrops Editorial Team');
   assert.deepEqual(byline.parentOrganization, { '@id': 'https://sleekdrops.com/#organization' });
   assert.deepEqual(byline.knowsAbout, ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel']);
 });

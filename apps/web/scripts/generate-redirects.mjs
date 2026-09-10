@@ -54,7 +54,7 @@ const header = [
 ];
 
 // Preserve links to the former individual bylines while every post moves to
-// the single public SleekDrops Editorial Desk identity.
+// the single public SleekDrops Editorial Team byline.
 const systemRewrites = [
   '/author/mira /author/desk 301',
   '/author/theo /author/desk 301',

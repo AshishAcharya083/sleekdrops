@@ -11,6 +11,7 @@ const AGENTS = [
   'topic_scout',
   'researcher',
   'keyword_strategist',
+  'angle_editor',
   'outliner',
   'writer',
   'seo_reviewer',
@@ -153,7 +154,7 @@ export function SettingsPage() {
         <h2>Claude subscription engine</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           Runs every stage that writes or judges the article on your Claude plan at
-          $0 marginal cost: topic scout, researcher, keyword strategist, outliner,
+          $0 marginal cost: topic scout, researcher, keyword strategist, angle editor, outliner,
           writer, SEO reviewer and editor. Opus 5 is the default model. Mint a
           one-year token on any machine with <code>claude setup-token</code>{' '}
           (Pro/Max/Team/Enterprise) and paste it here; no restart needed. Without

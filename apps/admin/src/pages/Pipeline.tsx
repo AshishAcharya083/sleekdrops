@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
-import type { ArticleDetail, ArticleSummary, KeywordPlan, ResearchDetail } from '../api';
+import type {
+  ArticleDetail,
+  ArticleSummary,
+  EditorialAngle,
+  KeywordPlan,
+  ResearchDetail,
+} from '../api';
 import { api, apiUpload, duration, fmtCost, fmtTime } from '../api';
 import { Badge } from '../components';
 import { HeroImageField } from '../HeroImageField';
 import { usePoll } from '../hooks';
 
 const LANES: Array<{ title: string; stages: string[] }> = [
-  { title: 'Research & Brief', stages: ['research', 'keyword', 'outline'] },
+  { title: 'Research & Brief', stages: ['research', 'keyword', 'angle', 'outline'] },
   { title: 'Write & Optimize', stages: ['write', 'seo_review', 'edit'] },
   { title: 'Assemble & Publish', stages: ['assemble', 'image', 'publish'] },
   { title: 'Done', stages: ['done'] },
@@ -223,6 +229,87 @@ function KeywordPlanSection({ plan }: { plan: KeywordPlan }) {
   );
 }
 
+/**
+ * What the piece argues, decided before it was outlined. This sits between the
+ * keyword plan and the review because it is the record both are judged
+ * against: a draft that covers the topic and takes no position is the defect
+ * this stage exists to catch, and the thesis here is what an operator reads
+ * the draft back against.
+ *
+ * "No defensible take" is shown as loudly as a thesis, not hidden. It is a
+ * real outcome - the evidence supported no position - and an operator seeing
+ * it knows the piece is competing on completeness rather than on a claim.
+ */
+function EditorialAngleSection({ angle }: { angle: EditorialAngle }) {
+  const gain = angle.informationGain ?? [];
+  return (
+    <div className="section">
+      <h2>
+        Editorial angle{' '}
+        <span className={`badge ${angle.defensible ? 'green' : 'amber'}`}>
+          {angle.defensible ? 'has a take' : 'no defensible take'}
+        </span>
+      </h2>
+      <div className="card">
+        <p style={{ marginTop: 0, fontSize: 15 }}>{angle.thesis || '(no thesis recorded)'}</p>
+        <div className="row" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
+          <span className="badge">shape: {angle.shape}</span>
+          <span className="badge">beat: {angle.byline}</span>
+          <span className="badge">
+            {gain.length} claim{gain.length === 1 ? '' : 's'} the top results miss
+          </span>
+        </div>
+        {angle.reader && (
+          <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+            <strong>Written for:</strong> {angle.reader}
+          </p>
+        )}
+        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+          {angle.defensible ? (
+            <>
+              <strong>The take:</strong> {angle.contrarianTake}
+            </>
+          ) : (
+            <>
+              <strong>Why there is no take:</strong> {angle.weakness}. The writer was told not
+              to invent one and to compete on evidence instead.
+            </>
+          )}
+        </p>
+        {gain.length > 0 && (
+          <>
+            <h4 style={{ marginBottom: 4 }}>What this piece says that the top results don't</h4>
+            <ul style={{ marginTop: 0, fontSize: 13 }}>
+              {gain.map((g, i) => (
+                <li key={i}>
+                  {g.claim}
+                  {g.absentFrom && <span className="muted"> - absent from {g.absentFrom}</span>}
+                  {g.evidence && (
+                    <>
+                      <br />
+                      <span className="muted">Evidence: {g.evidence}</span>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {angle.shapeRationale && (
+          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+            Shape: {angle.shapeRationale}
+          </p>
+        )}
+        {angle.bylineRationale && (
+          <p className="muted" style={{ marginTop: 0, marginBottom: 0, fontSize: 12 }}>
+            Beat: {angle.bylineRationale}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PlanList({ label, items }: { label: string; items: string[] }) {
   if (!items || items.length === 0) return null;
   return (
@@ -383,6 +470,10 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
 
             {detail.article.keyword_plan && (
               <KeywordPlanSection plan={detail.article.keyword_plan} />
+            )}
+
+            {detail.article.editorial_angle && (
+              <EditorialAngleSection angle={detail.article.editorial_angle} />
             )}
 
             {detail.article.seo_review && (
