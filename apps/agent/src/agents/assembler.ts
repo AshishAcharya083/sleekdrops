@@ -27,6 +27,13 @@ export interface AssembledArticle {
 /**
  * The dossier's sources, in the order the research stated them, deduped and
  * limited to web URLs — they become the page's JSON-LD `citation`.
+ *
+ * What is stored is the parser's normalised serialisation, never the raw
+ * string: a source URL is attacker-influenceable (the researcher collects them
+ * from search results), and `new URL()` percent-encodes the characters that
+ * would otherwise let one break out of the `<script type="application/ld+json">`
+ * block it is rendered into. Normalising also makes the dedupe set compare
+ * canonical forms rather than incidental spelling.
  */
 function citableSources(
   facts: ResearchDossier['facts'],
@@ -34,15 +41,17 @@ function citableSources(
   const seen = new Set<string>();
   const sources: Array<{ url: string; publisher?: string }> = [];
   for (const fact of facts) {
-    const url = fact.sourceUrl?.trim();
-    if (!url || seen.has(url)) continue;
+    const stated = fact.sourceUrl?.trim();
+    if (!stated) continue;
     let parsed: URL;
     try {
-      parsed = new URL(url);
+      parsed = new URL(stated);
     } catch {
       continue;
     }
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
+    const url = parsed.toString();
+    if (seen.has(url)) continue;
     seen.add(url);
     const publisher = parsed.hostname.replace(/^www\./, '');
     sources.push({ url, ...(publisher ? { publisher } : {}) });

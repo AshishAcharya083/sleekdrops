@@ -175,6 +175,26 @@ function graph(nodes: Thing[]): WithContext<Thing> {
   return { '@context': 'https://schema.org', '@graph': nodes } as unknown as WithContext<Thing>;
 }
 
+/**
+ * A schema serialised for `<script type="application/ld+json">`.
+ *
+ * Much of what goes into the graph (source URLs, entity and pick names) comes
+ * from research the pipeline gathered off the open web, so it is untrusted
+ * text. `JSON.stringify` escapes neither `<` nor `>`, and the script body is
+ * written with `set:html`, which does not escape anything either: a `</script>`
+ * inside any string value would otherwise close the block and let whatever
+ * followed it execute. The `\uXXXX` forms parse back to the same characters,
+ * so the JSON-LD a consumer reads is unchanged. U+2028/U+2029 are escaped for
+ * the same reason they always are in inline scripts: they are newlines to a
+ * JavaScript parser.
+ */
+export function jsonLdScript(schema: WithContext<Thing>): string {
+  return JSON.stringify(schema).replace(
+    /[<>\u2028\u2029]/g,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
+}
+
 export interface BreadcrumbItem {
   name: string;
   href: string;

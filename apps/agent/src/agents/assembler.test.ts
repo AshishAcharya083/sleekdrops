@@ -233,6 +233,34 @@ test('sources, entities, picks and the currency ride through frontmatter', async
   assert.equal(frontmatter.currency, 'AUD');
 });
 
+test('a source URL is stored as the parser normalised it, not as it was stated', async () => {
+  // A source URL comes from search results, so it is untrusted text that ends
+  // up inside the page's <script type="application/ld+json"> block. `new URL()`
+  // percent-encodes the characters that could close that block early, and
+  // canonicalising also collapses two spellings of one page into one citation.
+  const hostile = {
+    ...(twoProducts as unknown as { facts: Array<Record<string, unknown>> }),
+    facts: [
+      { fact: 'Breakout attempt.', sourceUrl: 'https://evil.example/a</script><script>alert(1)</script>' },
+      { fact: 'Same page, other spelling.', sourceUrl: 'https://WWW.Choice.com.au/vacuums' },
+      { fact: 'Same page again.', sourceUrl: 'https://www.choice.com.au/vacuums' },
+      { fact: 'Not a web scheme.', sourceUrl: 'javascript:alert(1)' },
+    ],
+  } as never;
+
+  const { frontmatter } = await runAssembler(
+    article({ research: hostile, keyword_plan: vacuumPlan, draft_md: linkedBody }),
+  );
+
+  assert.deepEqual(frontmatter.sources, [
+    {
+      url: 'https://evil.example/a%3C/script%3E%3Cscript%3Ealert(1)%3C/script%3E',
+      publisher: 'evil.example',
+    },
+    { url: 'https://www.choice.com.au/vacuums', publisher: 'choice.com.au' },
+  ]);
+});
+
 test('picks only cover the /go/ slugs that resolved to a live destination', async () => {
   // The draft linked a product the dossier never carried: the link is stripped
   // from the body, so it must not become a pick with a dead Offer URL either.

@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { buildArticleSchema, buildPostSchema, buildReviewSchema } from './seo.ts';
+import { buildArticleSchema, buildPostSchema, buildReviewSchema, jsonLdScript } from './seo.ts';
 import type { PostHeading } from './seo.ts';
 import type { BlogPost } from './posts.ts';
 import type { Author } from '@data/authors';
@@ -471,6 +471,46 @@ test("a review's Offer is priced in the post's own currency, never a hardcoded U
   } as unknown as BlogPost;
   const offer = node(buildReviewSchema(legacy, author), 'Product').offers as Node;
   assert.equal(offer.priceCurrency, 'AUD');
+});
+
+// ── The script tag the graph is rendered into ───────────────────────────────
+
+test('a string that could close the JSON-LD block is escaped, not emitted raw', () => {
+  // Source URLs and entity names come from research off the open web, and the
+  // script body is written with set:html, which escapes nothing. A raw
+  // "</script>" in any string value would end the block early and let whatever
+  // followed it run, so the serialiser escapes the angle brackets itself.
+  const hostile = guide({
+    entities: ['</script><script>alert(1)</script>'],
+    sources: [{ url: 'https://evil.example/a</script>' }],
+  });
+  const schema = buildPostSchema(hostile, author, HEADINGS);
+
+  const serialised = jsonLdScript(schema);
+
+  assert.doesNotMatch(serialised, /[<>]/);
+  assert.match(serialised, /\\u003c\/script\\u003e/);
+  // Escaping is a transport concern only: the JSON-LD a consumer parses is
+  // byte-for-byte the schema the builders returned.
+  assert.deepEqual(JSON.parse(serialised), JSON.parse(JSON.stringify(schema)));
+});
+
+test('U+2028 and U+2029 are escaped so the inline script stays parseable', () => {
+  const separators = guide({ entities: ['Dyson\u2028V15\u2029Detect'] });
+
+  const serialised = jsonLdScript(buildPostSchema(separators, author, HEADINGS));
+
+  assert.doesNotMatch(serialised, /[\u2028\u2029]/);
+  assert.match(serialised, /Dyson\\u2028V15\\u2029Detect/);
+});
+
+test('the JsonLd component serialises through the escaping helper', () => {
+  const component = readFileSync(
+    fileURLToPath(new URL('../components/seo/JsonLd.astro', import.meta.url)),
+    'utf8',
+  );
+  assert.match(component, /set:html=\{jsonLdScript\(schema\)\}/);
+  assert.doesNotMatch(component, /JSON\.stringify/);
 });
 
 // ── The page that actually ships this ───────────────────────────────────────
