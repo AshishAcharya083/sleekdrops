@@ -49,7 +49,7 @@ Return JSON:
 {"seoTitle": string (≤60 chars, front-loaded primary keyword, include the year when natural),
  "dek": string (140-160 chars, includes primary keyword, sells the click honestly),
  "slug": string (kebab-case, short, keyword-bearing),
- "author": string (one of: ${AUTHORS.map((a) => a.id).join(', ')} — match the beat),
+ "author": string (one of: ${AUTHORS.map((a) => a.id).join(', ')}),
  "kind": string (human badge label, e.g. "Buying guide", "Comparison", "Trend watch"),
  "searchIntent": string,
  "primaryKeyword": string,
@@ -68,7 +68,7 @@ Return JSON:
   );
 
   brief.slug = slugify(brief.slug || brief.seoTitle || article.title);
-  if (!AUTHORS.some((a) => a.id === brief.author)) brief.author = 'mira';
+  if (!AUTHORS.some((a) => a.id === brief.author)) brief.author = 'desk';
   // The plan's keyword is the decision of record: the outliner may reword the
   // title, but it does not get to re-target the piece.
   if (plan?.primaryKeyword) brief.primaryKeyword = plan.primaryKeyword;

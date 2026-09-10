@@ -11,7 +11,12 @@ import { buildArticleSchema } from './seo.ts';
 import type { BlogPost } from './posts.ts';
 import type { Author } from '@data/authors';
 
-const author: Author = { id: 'theo', name: 'Theo Renn', role: 'Audio & tech', bio: 'Bio.' };
+const author: Author = {
+  id: 'desk',
+  name: 'SleekDrops Editorial Desk',
+  role: 'Editorial team',
+  bio: 'Research-led coverage.',
+};
 
 const post = {
   slug: 'harman-kardon-luna-2',
@@ -21,7 +26,7 @@ const post = {
     dek: 'A balanced, good-looking portable.',
     category: 'Tech',
     postType: 'review',
-    author: 'theo',
+    author: 'desk',
     tags: ['harman kardon', 'bluetooth speakers'],
     pubDate: new Date('2026-05-30T00:00:00Z'),
     updatedDate: new Date('2026-09-04T00:00:00Z'),
@@ -39,9 +44,9 @@ test('the article names its author page, its language and its own URL', () => {
   assert.equal(schema.url, 'https://sleekdrops.com/blog/harman-kardon-luna-2');
   assert.equal(schema.inLanguage, 'en-AU');
   assert.deepEqual(schema.author, {
-    '@type': 'Person',
-    name: 'Theo Renn',
-    url: 'https://sleekdrops.com/author/theo',
+    '@type': 'Organization',
+    name: 'SleekDrops Editorial Desk',
+    url: 'https://sleekdrops.com/author/desk',
   });
   assert.deepEqual(schema.mainEntityOfPage, {
     '@type': 'WebPage',

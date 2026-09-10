@@ -24,13 +24,14 @@ The technical handbook for the **sleekdrops** Astro site. Read this before editi
 │  └── scripts/                                │
 │      ├── fetch-content.mjs                   │
 │      ├── generate-redirects.mjs              │
+│      ├── generate-llms-txt.mjs               │
 │      └── check-anchors.mjs                   │
 └──────────────────────────────────────────────┘
 ```
 
-**Build flow:** `pnpm build` → `prebuild` runs `fetch-content.mjs` (queries D1 for published posts → `src/content/blog/`, affiliate links → `.d1-cache/affiliate-links.json`, and enforces body guardrails: no raw merchant URLs, every `/go/<slug>` must exist in `affiliate_links`) → `generate-redirects.mjs` (writes `public/_redirects`) → `generate-ads-txt.mjs` (writes `public/ads.txt` from `PUBLIC_ADSENSE_CLIENT`) → `generate-robots.mjs` (writes `public/robots.txt`; only a `PUBLIC_SITE_ENV=production` build gets the sitemap line, every other build noindexes itself) → `astro check && astro build` → `check-anchors.mjs` (fails the build on any in-page anchor in `dist/` with no matching element).
+**Build flow:** `pnpm build` → `prebuild` runs `fetch-content.mjs` (queries D1 for published posts → `src/content/blog/`, affiliate links → `.d1-cache/affiliate-links.json`, and enforces body guardrails: no raw merchant URLs, every `/go/<slug>` must exist in `affiliate_links`) → `generate-redirects.mjs` (writes `public/_redirects`) → `generate-ads-txt.mjs` (writes `public/ads.txt` from `PUBLIC_ADSENSE_CLIENT`) → `generate-llms-txt.mjs` (writes `public/llms.txt` + `public/llms-full.txt` from the content collection) → `generate-robots.mjs` (writes `public/robots.txt`; only a `PUBLIC_SITE_ENV=production` build gets the sitemap line and the llms.txt pointers, every other build noindexes itself) → `astro check && astro build` → `check-anchors.mjs` (fails the build on any in-page anchor in `dist/` with no matching element).
 
-All three generated files live in `public/` and are gitignored — they are per-environment build output, not source.
+Every generated file lives in `public/` and is gitignored — they are per-environment build output, not source.
 
 **Trigger flow:** after writing to D1, fire `repository_dispatch` type `content-updated` at this repo (POST /repos/AshishAcharya083/sleekdrops/dispatches) → CI rebuilds → Cloudflare Pages deploys. Live in ~90s.
 
@@ -66,6 +67,7 @@ sleekdrops/
 │   ├── data/
 │   │   ├── authors.ts              # Byline registry — posts reference by id
 │   │   ├── categories.ts           # Six categories with blurbs + intros
+│   │   ├── site.ts                 # Site name + description (pages and llms.txt)
 │   │   ├── categories-types.ts     # Shared CategorySlug / CategoryName unions
 │   │   ├── deals.ts                # Daily affiliate deals (the "drops")
 │   │   └── promos.ts               # Promo codes
@@ -73,6 +75,9 @@ sleekdrops/
 │   ├── lib/
 │   │   ├── posts.ts                # Content-collection helpers
 │   │   ├── format.ts
+│   │   ├── llms-txt.mjs            # What /llms.txt says, and what "strongest" means
+│   │   ├── robots-policy.mjs       # The crawl policy, incl. the named AI agents
+│   │   ├── sitemap-policy.mjs      # Sitemap filter + lastmod
 │   │   └── seo.ts                  # Meta payload + JSON-LD builders
 │   ├── pages/                      # Astro page routes
 │   ├── scripts/                    # Client-side bootstrap (theme, TOC, progress)
@@ -80,6 +85,10 @@ sleekdrops/
 ├── scripts/
 │   ├── fetch-content.mjs           # Queries D1 at build time
 │   ├── generate-redirects.mjs      # Writes public/_redirects from .d1-cache
+│   ├── generate-ads-txt.mjs        # Writes public/ads.txt from the publisher id
+│   ├── generate-llms-txt.mjs       # Writes public/llms.txt + llms-full.txt
+│   ├── generate-robots.mjs         # Writes public/robots.txt (crawl policy)
+│   ├── indexnow-submit.mjs         # Post-deploy URL submission
 │   └── check-anchors.mjs           # Fails the build on dead in-page anchors
 ├── .d1-cache/                      # GITIGNORED — D1 fetch target
 ├── docs/                           # Engineering notes
@@ -99,6 +108,8 @@ sleekdrops/
 | Adding a new page | `src/pages/<route>.astro` |
 | Adding a new component | `src/components/<namespace>/<Name>.astro` |
 | Adding a new SEO schema | `src/lib/seo.ts` |
+| Changing the crawl policy or naming another AI agent | `src/lib/robots-policy.mjs` |
+| Changing what `/llms.txt` says or how articles are ranked | `src/lib/llms-txt.mjs` |
 
 ---
 
@@ -130,6 +141,7 @@ pnpm preview            # serve the production build
 pnpm check              # type-check only
 pnpm test               # node --test over src/**/*.test.ts
 pnpm check:anchors      # in-page anchors resolve in dist/ (also runs as part of build)
+pnpm generate:llms-txt  # rebuild public/llms.txt + llms-full.txt from src/content/blog
 ```
 
 For local dev, copy `.env.example` to `.env` and fill in `CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `CLOUDFLARE_D1_TOKEN`.

@@ -18,7 +18,7 @@ const meta = buildMeta({
   <LegalLayout
     eyebrow="Legal"
     titleHtml="Privacy <em>policy</em>."
-    updated="September 6, 2026"
+    updated="September 9, 2026"
     toc={[
       { href: '#summary',      label: 'Plain summary' },
       { href: '#scope',        label: 'Scope of this policy' },
@@ -41,21 +41,20 @@ const meta = buildMeta({
   >
     <div class="summary" id="summary">
       <strong>Plain summary</strong>
-      We host on Cloudflare, we use anonymous, privacy-friendly analytics that you can switch off at any time under <strong>Privacy preferences</strong> in the footer, we don't sell anything to advertisers, and we keep cookies and similar technologies, including local and session storage on your device, to a minimum: essential ones for your dark-mode preference and saved articles, analytics ones unless you switch analytics off, and advertising ones only if you opt in — with <strong>Advertising</strong> switched off no ad script is loaded at all. Most outbound product links are affiliate links — we earn a small commission at no extra cost to you. If you signed up for the newsletter you can leave any time with one click.
+      We host on Cloudflare, we use anonymous analytics that you can switch off at any time under <strong>Privacy preferences</strong> in the footer, and we keep browser storage to a minimum. Advertising is a separate opt-in; with <strong>Advertising</strong> switched off no ad script is loaded. Most outbound product links are affiliate links, which may earn us a small commission at no extra cost to you. Our newsletter is not operating yet, so this site currently collects no subscriber email addresses.
     </div>
 
     <h2 id="scope">Scope of this <em>policy</em></h2>
-    <p>This policy explains how SleekDrops ("we," "us," "our") collects, uses, discloses, and protects information when you visit <strong>sleekdrops.com</strong> or any subdomain we operate, subscribe to The Daily Drop newsletter, or contact us. It does not cover third-party websites we link to — once you click an outbound link, the destination's privacy policy governs your interaction with them.</p>
+    <p>This policy explains how SleekDrops ("we," "us," "our") collects, uses, discloses, and protects information when you visit <strong>sleekdrops.com</strong> or any subdomain we operate, or contact us by email. It does not cover third-party websites we link to — once you click an outbound link, the destination's privacy policy governs your interaction with them.</p>
     <p>By using SleekDrops you agree to the collection and use of information in accordance with this policy.</p>
 
     <h2 id="data">What we <em>collect</em></h2>
     <p>SleekDrops is a static publication. The site itself stores no personal data about you directly. The following limited information is collected by services we rely on:</p>
     <ul>
       <li><strong>Server logs.</strong> Our host (Cloudflare) automatically logs IP addresses, user-agent strings, and request paths for security, abuse prevention, and performance — standard for any website. We do not access or analyse these logs.</li>
-      <li><strong>Analytics.</strong> Unless you switch it off, we use <strong>DevTeam Analytics</strong> (and Google Analytics 4) for privacy-friendly product analytics, to understand which pages and deals are useful and which parts of the site people actually use. We record anonymous, aggregate events (page views; a small set of funnel interactions such as hero call-to-action clicks, which list of deals or promo codes was shown to you and how many cards it held, deal-card and promo-card clicks, outbound "View deal" clicks, and newsletter sign-ups; whether you reached the end of an article and roughly how long you spent actively reading it, as one of three coarse bands rather than a precise time; and how you interact with the site's own controls, namely switching between light and dark mode, using the share, copy-link or copy-code buttons, opening an image full-size, and following a table-of-contents link) together with non-identifying context only: the screen name, page path, deal, promo or post slug, brand, retailer, call-to-action label, placement, which list a card sat in and its position in that list, the heading of a table-of-contents link you follow, and whether you are reading in light or dark mode. Light or dark is the only thing we record about your display preference, and it is noted on each event so we can tell how the site is read overall. Each event also carries two randomly generated identifiers that exist purely to make the counts correct — one for the event itself, so a duplicate can be discarded rather than counted twice, and one for your current visit, so page views from one visit are grouped together. Personal data is stripped in your browser before any event is sent, so no email addresses, names, full search or query strings, or anything you type is ever collected; DevTeam Analytics and Google may derive approximate location (country/region) from your IP address. Analytics is on by default; you can switch it off at any time under <strong>Privacy preferences</strong> in the footer, and if your browser sends a Global Privacy Control / Do-Not-Track signal we never start it; see <a href="#cookies">Cookies &amp; tracking</a>.</li>
+      <li><strong>Analytics.</strong> Unless you switch it off, we use <strong>DevTeam Analytics</strong> (and Google Analytics 4) for product analytics, to understand which pages and deals are useful and which parts of the site people use. We record aggregate events (page views; hero call-to-action clicks; which deal or promo list was shown and how many cards it held; deal-card, promo-card and outbound clicks; whether you reached the end of an article and roughly how long you spent actively reading it, as one of three coarse bands; and use of controls such as theme, share, copy-link, copy-code, image and table-of-contents actions) together with limited context: the screen name, page path, content slug, brand, retailer, call-to-action label, placement, list position and light or dark theme. Each event carries a random event identifier for deduplication and a random visit identifier for grouping page views. Personal data is stripped in your browser before an event is sent, so no email addresses, names, full query strings or typed text are collected in the event payload; DevTeam Analytics and Google may derive approximate location from your IP address. Analytics is on by default; you can switch it off under <strong>Privacy preferences</strong>, and a Global Privacy Control or Do-Not-Track signal prevents it from starting.</li>
       <li><strong>Outbound affiliate clicks.</strong> When you follow one of our <code>/go/</code> product links we count the redirect on our own server, so we know how many people clicked a link even if analytics is blocked or switched off. That count records only which link was followed, which affiliate network it went to, and which storefront region your country resolved to — never your IP address, your browser, a cookie or any identifier for you — and it is the one thing on this page that does not depend on your consent, because it is a count of our own server's work rather than a measurement of you. Each click also carries a freshly generated random reference that is passed on to the retailer's affiliate network in the link, so that a commission the network reports back to us days later can be matched to the link that earned it. The reference is new for every click, is never derived from you or your device, and cannot be used to recognise you on a later visit or on another site.</li>
-      <li><strong>Newsletter.</strong> If you subscribe, we store your email address and (optionally) your first name with our mail provider, solely to deliver the newsletter.</li>
-      <li><strong>Contact form.</strong> If you write to us, we receive whatever information you choose to put in the message — typically a name, email, and the content of your question.</li>
+      <li><strong>Email.</strong> If you write to one of the addresses shown on the site, we receive your email address and whatever information you include in the message.</li>
     </ul>
     <p>We do not collect special-category personal data (health, biometric, political opinions, etc.), and we never knowingly collect data from children — see <a href="#children">Children's privacy</a>.</p>
 
@@ -64,11 +63,10 @@ const meta = buildMeta({
     <ul>
       <li>Operate the site, fix bugs, and keep things working;</li>
       <li>Understand which posts are useful (aggregate analytics only);</li>
-      <li>Send the newsletter to subscribers who asked to receive it;</li>
-      <li>Respond to questions submitted through the contact form;</li>
+      <li>Respond to messages sent to our published email addresses;</li>
       <li>Comply with legal obligations and prevent fraud or abuse.</li>
     </ul>
-    <p>We do not use your data for automated decision-making, behavioural advertising, profiling, or sale to data brokers. We do not train AI models on your data.</p>
+    <p>We do not use your data for automated decision-making, sell it to data brokers or train AI models on it. If you opt in to Advertising, Google may personalise ads as described under <a href="#ads">Advertising partners</a>.</p>
 
     <h2 id="cookies">Cookies &amp; <em>tracking</em></h2>
     <p>We use cookies and similar technologies, including local and session storage on your device. With analytics switched off we store only two first-party items besides your privacy choice (below), and neither of them is a cookie:</p>
@@ -84,19 +82,19 @@ const meta = buildMeta({
       <li><code>sd-exp</code> in browser local storage, which records only which version of a page layout or wording you were shown so we can compare them in aggregate.</li>
     </ul>
     <p>All four exist only to make the anonymous analytics countable — discarding a duplicate event, grouping one visit's page views, counting visits, and recording which layout you were shown — and none of them is used for advertising or for tracking you across other sites. Switch analytics off under <strong>Privacy preferences</strong> in the footer and <code>sd_sid</code>, <code>sd-exp</code>, the DevTeam Analytics device identifier and Google Analytics' <code>_ga</code> cookies are deleted the moment you do, and both analytics tools stop measuring straight away — you do not have to reload the page. If your browser sends a Global Privacy Control or Do-Not-Track signal we treat it as a decline and never start. You can change your choice at any time from <strong>Privacy preferences</strong> in the footer.</p>
-    <p>Affiliate networks (Amazon, Awin, CJ Affiliate, Impact, and similar) may set their own cookies on <strong>the destination retailer's domain</strong> once you click an outbound link. SleekDrops itself sets no advertising cookies; the ad partner below sets its own, and only once you have switched <strong>Advertising</strong> on.</p>
+    <p>Amazon may set its own cookies on <strong>the destination retailer's domain</strong> after you follow an affiliate link. SleekDrops itself sets no advertising cookies; the ad partner below sets its own, and only once you have switched <strong>Advertising</strong> on.</p>
     <p><strong>Advertising is a separate opt-in, off by default.</strong> Unless you switch <strong>Advertising</strong> on under <strong>Privacy preferences</strong>, no ad script is requested and no advertising cookie or storage is placed on your device — a decline, the default and a Global Privacy Control or Do-Not-Track signal are all treated the same way. If you do switch it on, Google AdSense is loaded and sets its own cookies and browser storage to serve and personalise what you see; see <a href="#ads">Advertising partners</a>. You can withdraw that choice at any time from <strong>Privacy preferences</strong> in the footer: no further ad script loads, and no unit served after that point is personalised.</p>
 
     <h2 id="affiliate">Affiliate <em>disclosure</em></h2>
     <p>In accordance with the United States Federal Trade Commission's 16 CFR Part 255 ("Guides Concerning the Use of Endorsements and Testimonials in Advertising"), we disclose the following:</p>
     <blockquote>
-      <p>SleekDrops is a participant in the Amazon Services LLC Associates Program and other affiliate programs (including Awin, CJ Affiliate, Impact, Sovrn Commerce, and Skimlinks). These programs are designed to provide a means for sites to earn advertising fees by advertising and linking to participating merchants. As an Amazon Associate, we earn from qualifying purchases.</p>
+      <p>SleekDrops is a participant in the Amazon Services LLC Associates Program, which provides a means for sites to earn advertising fees by linking to Amazon. As an Amazon Associate, we earn from qualifying purchases.</p>
     </blockquote>
     <p>When you click a product link on SleekDrops and complete a qualifying purchase within the retailer's cookie window, the retailer attributes the sale to us and pays us a small commission. <strong>The price you pay is the same whether you click our link or not</strong> — the retailer absorbs the commission out of their margin. We never see who you are, what you purchased, or your payment details. We only see that an order was attributed to SleekDrops.</p>
     <p>For full details on how we choose what to link to, how we research, and how affiliate links are labelled, see the <a href="/disclaimer">Affiliate disclaimer</a>.</p>
 
     <h2 id="ads">Advertising <em>partners</em></h2>
-    <p>SleekDrops is introducing third-party advertising: ad units are being rolled out across the site, so a page you are reading may or may not carry one yet. Wherever one appears, it is shown only to visitors who have switched <strong>Advertising</strong> on in <strong>Privacy preferences</strong> — with that switch off the ad script is never requested. Ads come from the following partner; this policy will be updated to name any other network we add:</p>
+    <p>SleekDrops is preparing to use third-party advertising. Once ad units are active, they will be shown only to visitors who have switched <strong>Advertising</strong> on in <strong>Privacy preferences</strong>; with that switch off the ad script is never requested. We plan to use the following partner and will update this policy before adding another network:</p>
     <ul>
       <li><strong>Google AdSense</strong> — uses cookies and similar technologies to serve ads based on prior visits to this and other websites, and is loaded only for a visitor who switched <strong>Advertising</strong> on. Google's use of advertising cookies enables it and its partners to serve ads to users based on their visit to our site and/or other sites on the Internet. Users may opt out of personalised advertising by visiting <a href="https://www.google.com/settings/ads" rel="noopener nofollow" target="_blank">Google Ads Settings</a>.</li>
     </ul>
@@ -109,18 +107,15 @@ const meta = buildMeta({
       <!-- TODO(privacy): confirm DevTeam Analytics' hosting/jurisdiction and add its privacy-policy URL before publishing — not verifiable from the codebase alone. -->
       <li><strong>DevTeam Analytics</strong> — privacy-friendly product analytics, used unless you switch analytics off to measure anonymous, aggregate usage. We strip personal data in your browser before sending, so raw page URLs and referrers never reach it.</li>
       <li><strong>Google Analytics 4</strong> (USA / global) - aggregate traffic measurement, loaded unless you switch analytics off, alongside DevTeam Analytics. We send page paths rather than full URLs so query strings never reach Google. Privacy policy: <a href="https://policies.google.com/privacy" rel="noopener nofollow" target="_blank">policies.google.com/privacy</a>.</li>
-      <li><strong>Email service provider</strong> — used to deliver The Daily Drop newsletter. Stores subscriber email addresses with appropriate Standard Contractual Clauses for international transfers where applicable.</li>
-      <li><strong>Affiliate networks</strong> — Amazon Associates, Awin, CJ Affiliate, Impact, Sovrn, Skimlinks. These are not processors of your personal data on our behalf; they are independent controllers that may receive limited information (such as a referring URL and a cookie ID) when you click an outbound affiliate link.</li>
+      <li><strong>Amazon Associates</strong> — an affiliate network and independent controller that may receive limited information, such as a referring URL and cookie ID, after you follow an affiliate link to Amazon.</li>
     </ul>
 
     <h2 id="newsletter">Newsletter</h2>
-    <p>If you subscribe to The Daily Drop, your email address is stored with our mail provider for the sole purpose of sending the newsletter. We use it for the daily newsletter and nothing else. Every email contains a one-click unsubscribe link. You can request deletion of your address at any time by emailing <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a>.</p>
-    <p>We do not share your email with affiliate partners, advertisers, or any third party other than the mail provider that delivers the newsletter.</p>
+    <p>The newsletter is marked “Coming soon” and has no sign-up form or mail provider. SleekDrops does not currently collect or store subscriber email addresses. We will update this policy with the provider, purpose, retention and unsubscribe details before enabling subscriptions.</p>
 
     <h2 id="retention">Data <em>retention</em></h2>
     <ul>
-      <li><strong>Newsletter subscribers:</strong> for as long as you remain subscribed, plus 30 days after unsubscribe (to honour deletion requests and prevent re-subscription errors).</li>
-      <li><strong>Contact form messages:</strong> up to 24 months, then deleted.</li>
+      <li><strong>Email messages:</strong> up to 24 months, then deleted.</li>
       <li><strong>Server logs:</strong> retained by Cloudflare per their default retention (typically 7–30 days).</li>
       <li><strong>Analytics:</strong> aggregate-only data; retained up to 36 months.</li>
     </ul>
@@ -134,16 +129,16 @@ const meta = buildMeta({
     <h2 id="rights-gdpr">EU/UK rights <em>(GDPR)</em></h2>
     <p>If you are in the European Economic Area, the United Kingdom, or Switzerland, you have the following rights with respect to your personal data:</p>
     <ul>
-      <li><strong>Access</strong> — request a copy of any personal data we hold about you (in practice: just your email, if subscribed).</li>
+      <li><strong>Access</strong> — request a copy of any personal data we hold about you, such as an email you sent us.</li>
       <li><strong>Rectification</strong> — ask us to correct inaccurate data.</li>
       <li><strong>Erasure</strong> — ask us to delete your data ("right to be forgotten").</li>
       <li><strong>Restriction</strong> — ask us to limit processing in certain circumstances.</li>
       <li><strong>Portability</strong> — receive your data in a structured, machine-readable format.</li>
       <li><strong>Objection</strong> — object to processing based on legitimate interests, including direct marketing.</li>
-      <li><strong>Withdraw consent</strong> at any time where processing is based on consent (e.g., unsubscribe from the newsletter).</li>
+      <li><strong>Withdraw consent</strong> at any time where processing is based on consent, including optional analytics or advertising.</li>
       <li><strong>Lodge a complaint</strong> with your local supervisory authority.</li>
     </ul>
-    <p>Our legal bases for processing are: <strong>consent</strong> (newsletter subscription, optional cookies), <strong>legitimate interests</strong> (operating the site, fraud prevention, aggregate analytics), and <strong>legal obligation</strong> (responding to lawful requests).</p>
+    <p>Our legal bases for processing are: <strong>consent</strong> (optional analytics and advertising), <strong>legitimate interests</strong> (operating the site, fraud prevention and responding to email), and <strong>legal obligation</strong> (responding to lawful requests).</p>
 
     <h2 id="rights-ca">California rights <em>(CCPA / CPRA)</em></h2>
     <p>If you are a California resident, the California Consumer Privacy Act ("CCPA") and California Privacy Rights Act ("CPRA") give you specific rights:</p>
@@ -162,9 +157,9 @@ const meta = buildMeta({
     <p>To opt out of any such sharing, or to exercise any other privacy right, email <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a> with the subject line "Privacy Request." We honour the Global Privacy Control (GPC) signal where technically feasible.</p>
 
     <h2 id="changes">Changes to this <em>policy</em></h2>
-    <p>We may update this policy from time to time to reflect changes in our practices or applicable law. When we do, we will update the "Last updated" date at the top of this page. Material changes will be announced in the newsletter and on the homepage for at least 14 days.</p>
+    <p>We may update this policy from time to time to reflect changes in our practices or applicable law. When we do, we will update the "Last updated" date at the top of this page. Material changes will be announced on the homepage for at least 14 days.</p>
 
     <h2 id="contact">Contact <em>us</em></h2>
-    <p>Questions about this policy, or want your data removed? Email <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a> or use the form on our <a href="/contact">contact page</a>. We aim to respond within five working days, and within 30 days for any formal access or deletion request under GDPR or CCPA.</p>
+    <p>Questions about this policy, or want your data removed? Email <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a>; the <a href="/contact">contact page</a> lists our other addresses. We aim to respond within five working days, and within 30 days for any formal access or deletion request under GDPR or CCPA.</p>
   </LegalLayout>
 </BaseLayout>

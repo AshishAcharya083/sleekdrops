@@ -1,8 +1,9 @@
 /**
- * Author registry. Single source of truth for bylines, roles, bios.
+ * Public byline registry.
  *
- * Posts reference authors by id in frontmatter (e.g. `author: mira`).
- * Add a new author here before publishing a post with their byline.
+ * Older D1 posts retain their original internal author ids. `getAuthor` maps
+ * those ids to the single public desk identity so old URLs keep rendering
+ * while readers see one accurate, accountable byline.
  */
 
 export interface Author {
@@ -14,57 +15,27 @@ export interface Author {
   bio: string;
   /** Optional initials override; defaults to first letters of name. */
   initials?: string;
-  /** Optional public profile link (Twitter/X, LinkedIn, personal site). */
+  /** Optional public profile link. */
   url?: string;
 }
 
 export const authors = {
-  mira: {
-    id: 'mira',
-    name: 'Mira Kapoor',
-    role: 'Senior reviews editor',
-    bio: 'Reviews homewares and the occasional kettle. Eight years at it; still counts cable management as a feature.',
-  },
-  theo: {
-    id: 'theo',
-    name: 'Theo Renn',
-    role: 'Audio & tech',
-    bio: 'Spent a decade in pro audio before writing about it. Will debate Sonos vs. Sonos with you.',
-  },
-  aiko: {
-    id: 'aiko',
-    name: 'Aiko Tanaka',
-    role: 'Health & wearables',
-    bio: 'Logs more sleep data than is reasonable. Honest about what the numbers actually mean.',
-  },
-  lina: {
-    id: 'lina',
-    name: 'Lina Voss',
-    role: 'Fashion & textiles',
-    bio: 'Trained as a tailor. Cares deeply about pilling, hand-feel, and the third-wash test.',
-  },
-  sam: {
-    id: 'sam',
-    name: 'Sam Ortiz',
-    role: 'Personal finance',
-    bio: "Reads the fine print so you don't. Used to model cashback economics for a fintech.",
-  },
-  beatriz: {
-    id: 'beatriz',
-    name: 'Beatriz Lima',
-    role: 'Travel & gear',
-    bio: 'Forty flights a year. Cares about what survives a real airport, not what a kitchen scale says.',
+  desk: {
+    id: 'desk',
+    name: 'SleekDrops Editorial Desk',
+    role: 'Editorial team',
+    bio: 'Researches products, prices and published evidence for Australian shoppers. Each recommendation states what we checked and when we have not tested a product ourselves.',
+    initials: 'SD',
   },
 } as const satisfies Record<string, Author>;
 
 export type AuthorId = keyof typeof authors;
 
+const LEGACY_AUTHOR_IDS = new Set(['mira', 'theo', 'aiko', 'lina', 'sam', 'beatriz']);
+
 export function getAuthor(id: string): Author {
-  const author = (authors as Record<string, Author>)[id];
-  if (!author) {
-    throw new Error(`Unknown author id: "${id}". Add them to src/data/authors.ts.`);
-  }
-  return author;
+  if (id === 'desk' || LEGACY_AUTHOR_IDS.has(id)) return authors.desk;
+  throw new Error(`Unknown author id: "${id}". Add it to src/data/authors.ts.`);
 }
 
 export function listAuthors(): Author[] {
