@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
-import type { ArticleDetail, ArticleSummary, KeywordPlan } from '../api';
+import type { ArticleDetail, ArticleSummary, KeywordPlan, ResearchDetail } from '../api';
 import { api, apiUpload, duration, fmtCost, fmtTime } from '../api';
 import { Badge } from '../components';
 import { HeroImageField } from '../HeroImageField';
@@ -62,6 +62,86 @@ const DIMENSION_HELP: Record<string, string> = {
   eeat: 'Experience, expertise, authority, trust — methodology, evidence, honest trade-offs.',
   links: 'The /go/ affiliate contract and the placement rules.',
 };
+
+/** The counts worth showing, in the order an operator reads them. */
+const EVIDENCE_COUNTS: Array<[string, string]> = [
+  ['primaryFacts', 'primary facts'],
+  ['expertFacts', 'expert facts'],
+  ['ownerFacts', 'owner facts'],
+  ['aggregatorFacts', 'aggregator facts'],
+  ['untieredFacts', 'untiered facts'],
+  ['testedClaims', 'tested claims'],
+  ['attributedOwnerComplaints', 'attributed owner complaints'],
+  ['aggregateFaultRates', 'aggregate fault rates'],
+  ['failureModes', 'failure modes'],
+  ['groundedExclusions', 'sourced buyer exclusions'],
+  ['datedPriceObservations', 'dated prices'],
+  ['products', 'products'],
+];
+
+/**
+ * The evidence density this piece was written from, as the deterministic gate
+ * measured it. A dossier that does not clear the bar never reaches the writer
+ * - the research stage stops the article and the shortfall is on the error
+ * banner above - so what this panel answers is the other question: an article
+ * that reads thin, and what its evidence actually looked like.
+ *
+ * The shortfall table renders whatever verdict the stored dossier carries; it
+ * is the panel's job to show the document, not to assume it passed.
+ */
+function EvidenceSection({ research }: { research: ResearchDetail }) {
+  const gate = research.sufficiency;
+  if (!gate) return null;
+  return (
+    <div className="section">
+      <h2>
+        Evidence <span className={`badge ${gate.pass ? 'green' : 'red'}`}>{gate.pass ? 'sufficient' : 'too thin'}</span>
+      </h2>
+      <div className="card">
+        <div className="row" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
+          {EVIDENCE_COUNTS.filter(([key]) => gate.counts[key] !== undefined).map(([key, label]) => (
+            <span className="badge" key={key}>
+              {label}: {gate.counts[key]}
+            </span>
+          ))}
+        </div>
+        <p className="muted" style={{ marginBottom: 0, fontSize: 12 }}>
+          Deterministic gate, run in code at the end of research. Checked {fmtTime(gate.checkedAt)}.
+          A {gate.postType} clears it by carrying attributed owner complaints, failure modes and
+          dated prices - the material a spec sheet cannot supply. A piece that came up short failed
+          at research instead, with the thin strata named on its error.
+        </p>
+      </div>
+      {gate.shortfalls.length > 0 && (
+        <div className="card table-scroll" tabIndex={0} role="region" aria-label="Evidence strata that came up short" style={{ marginTop: 8 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Stratum</th>
+                <th>Missing</th>
+                <th>Where it comes from</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gate.shortfalls.map((s) => (
+                <tr key={s.label}>
+                  <td className="mono">{s.stratum}</td>
+                  <td>
+                    {s.label}{' '}
+                    <span style={{ color: 'var(--red)' }}>
+                      {s.have}/{s.need}
+                    </span>
+                  </td>
+                  <td className="muted">{s.fix}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * What the piece is built to win, and why. Shown above the review because it
@@ -257,7 +337,11 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
             </div>
 
             {detail.article.error && (
-              <div className="error-banner" style={{ marginTop: 12 }}>
+              // pre-wrap because the evidence gate's message is a list: which
+              // stratum came up short, and where that evidence is gathered.
+              // Collapsed to one line it is unreadable at exactly the moment
+              // an operator needs to read it.
+              <div className="error-banner" style={{ marginTop: 12, whiteSpace: 'pre-wrap' }}>
                 {detail.article.error}
               </div>
             )}
@@ -294,6 +378,8 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                 </div>
               </div>
             )}
+
+            {detail.article.research && <EvidenceSection research={detail.article.research} />}
 
             {detail.article.keyword_plan && (
               <KeywordPlanSection plan={detail.article.keyword_plan} />

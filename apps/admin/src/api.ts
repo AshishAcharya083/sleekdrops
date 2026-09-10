@@ -126,10 +126,31 @@ export interface SeoReviewDetail {
   slop?: { score: number; words: number; findings: number };
 }
 
+/**
+ * The research stage's deterministic verdict, as the pipeline stamped it onto
+ * the dossier. The panel shows this because "research failed" on its own sends
+ * an operator back to re-run the same stage; the shortfall says which stratum
+ * was thin and where that evidence is actually gathered.
+ */
+export interface EvidenceSufficiency {
+  pass: boolean;
+  postType: string;
+  counts: Record<string, number>;
+  shortfalls: Array<{ stratum: string; label: string; have: number; need: number; fix: string }>;
+  message: string;
+  checkedAt: string;
+}
+
+/** Only the part of the dossier the panel renders. */
+export interface ResearchDetail {
+  /** Absent on dossiers written before the evidence gate existed. */
+  sufficiency?: EvidenceSufficiency;
+}
+
 export interface ArticleDetail {
   article: ArticleSummary & {
     hero_alt: string | null;
-    research: unknown;
+    research: ResearchDetail | null;
     keyword_plan: KeywordPlan | null;
     outline: unknown;
     draft_md: string | null;

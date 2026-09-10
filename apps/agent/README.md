@@ -10,7 +10,7 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 | # | Agent | Stage | What it does |
 | - | ----- | ----- | ------------ |
 | 1 | `topic_scout` | (out of band) | Sweeps the live web (Tavily) for trending products/topics **not covered before** (checks D1 posts + every prior suggestion), **verifies each candidate is still current** with its own search, writes suggestions for the admin |
-| 2 | `researcher` | research | Plans targeted searches, builds an evidence dossier: facts + source URLs, real Amazon links (non-Amazon "amazonUrl"s are dropped deterministically), keywords, competitor gap. **Every price and spec is checked against a primary source** before it is filed |
+| 2 | `researcher` | research | Plans and runs its searches in five strata (primary/manufacturer, independent expert, owner reviews and long-term complaints, price and availability, competing coverage) and fills each dossier field from its own stratum: tiered and dated facts, failure modes, who should not buy, attributed owner complaints, dated price observations, tested claims, products (non-Amazon "amazonUrl"s are dropped deterministically), keywords, competitor gap. **Every price and spec is checked against a primary source** before it is filed, and a **deterministic evidence gate** fails the article here rather than letting a spec-sheet dossier reach the writer |
 | 3 | `keyword_strategist` | keyword | **Reads the live SERP** for 4 candidate queries and picks the one we can win: intent, difficulty, zero-click risk, SERP features, the top 3 to beat, the gaps they leave, PAA questions, entities, snippet target, word-count target |
 | 4 | `outliner` | outline | SEO content brief executing that plan: ≤60-char title, dek, slug, H2/H3 outline, mandatory FAQ |
 | 5 | `writer` | write | Full markdown draft in the site voice; answer-first sections, sourced claims, products linked only as `/go/<slug>` with mandated placements (tables, per-product CTAs, conclusion) |
@@ -21,6 +21,14 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 | 10 | `publisher` | publish | Upserts D1 `posts` + `affiliate_links`, fires the `content-updated` dispatch → site rebuilds |
 
 Flow: `research → keyword → outline → write → seo_review ⇄ edit → assemble → image → publish`.
+
+An article that fails the evidence gate stops at `research` with `status =
+'failed'` and a message naming each thin stratum, what it found against what
+the post type needs, and where that evidence is actually gathered. The bar is
+per post type (a guide carries the full owner set, a trend article is held to
+sourcing depth) and eases for categories with no Australian owner corpus.
+Widen the topic brief or re-run research; there is nothing to fix in the draft,
+because there is no draft.
 With `publish_mode = approval` (default) the article parks at
 `waiting_approval` until you hit **Approve & publish** in the admin panel.
 Every agent prompt is grounded with today's date (Australia/Sydney) so years

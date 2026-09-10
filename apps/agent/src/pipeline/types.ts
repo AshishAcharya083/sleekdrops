@@ -90,9 +90,128 @@ export interface TopicSuggestion {
   sources: string[];
 }
 
+/**
+ * Where a claim came from, and therefore what it is worth. The researcher
+ * gathers in these strata and every fact is filed under one, because a spec
+ * off the maker's own page and a number lifted from someone's roundup are not
+ * the same evidence and must never be averaged into one undifferentiated list.
+ *
+ * 'unknown' is deliberate: a fact whose source we could not place is marked as
+ * such rather than quietly promoted to the tier around it.
+ */
+export type SourceTier = 'primary' | 'expert' | 'owner' | 'aggregator' | 'unknown';
+
+export interface DossierFact {
+  fact: string;
+  sourceUrl: string;
+  tier: SourceTier;
+  /** The date the source carries (YYYY, YYYY-MM or YYYY-MM-DD); null when undated. */
+  date: string | null;
+  /** Who said it, in a reader's words ("Choice", "Rtings", "Sony"); null when unnamed. */
+  publisher: string | null;
+}
+
+/** How much of the owner corpus a complaint speaks for. */
+export type ComplaintVolume = 'isolated' | 'recurring' | 'widespread' | 'unknown';
+
+/**
+ * How the complaint was reported: 'aggregate' is a published fault rate over a
+ * stated sample (Choice's member surveys report ownership this way), 'quoted'
+ * is what individual owners wrote. The distinction matters because one
+ * aggregate rate is better evidence than any number of picked-out quotes.
+ */
+export type ComplaintKind = 'quoted' | 'aggregate';
+
+/**
+ * What owners say goes wrong. This is the material a spec sheet cannot supply
+ * and the reason the research stage exists in this shape: volume separates one
+ * angry review from a pattern, recency separates a fixed fault from a live one.
+ */
+export interface OwnerComplaint {
+  product: string;
+  complaint: string;
+  volume: ComplaintVolume;
+  /** When owners were saying it (YYYY, YYYY-MM or YYYY-MM-DD); null when undated. */
+  recency: string | null;
+  /**
+   * How many owners said it, out of how many: "37 of 412 reviews",
+   * "1,076 owners surveyed". Null when the source publishes no denominator -
+   * and a complaint without one does not count toward the evidence bar.
+   */
+  denominator: string | null;
+  kind: ComplaintKind;
+  sourceUrl: string;
+}
+
+/** What breaks, and how long it takes. */
+export interface FailureMode {
+  product: string;
+  failure: string;
+  /** In owners' words: "after 6-12 months", "within the first week". */
+  timeframe: string;
+  sourceUrl: string;
+  tier: SourceTier;
+}
+
+/** A buyer this product is wrong for, and why. */
+export interface BuyerExclusion {
+  audience: string;
+  reason: string;
+  sourceUrl: string;
+}
+
+/**
+ * A price seen at a named retailer on a named day. Never printed as an Amazon
+ * price (the editorial rules forbid that); it is here so the piece can say
+ * what a product has cost and whether it is moving.
+ */
+export interface PriceObservation {
+  product: string;
+  value: number;
+  /** ISO 4217 code, or 'unknown' when the source did not say. */
+  currency: string;
+  retailer: string;
+  /** YYYY-MM-DD the price was seen; null when the source gives no date. */
+  dateChecked: string | null;
+  sourceUrl: string;
+}
+
+/** A measured result somebody published, with who measured it and when. */
+export interface TestedClaim {
+  claim: string;
+  /** Who ran the test, named. */
+  source: string;
+  year: number | null;
+  sourceUrl: string;
+}
+
+/** One stratum that came up short, and what to do about it. */
+export interface EvidenceShortfall {
+  stratum: string;
+  label: string;
+  have: number;
+  need: number;
+  fix: string;
+}
+
+/**
+ * The deterministic evidence gate's verdict, stamped onto the dossier after
+ * synthesis so an operator can see the evidence density a piece was written
+ * from - and, when it falls short, exactly which stratum was thin.
+ */
+export interface EvidenceSufficiency {
+  pass: boolean;
+  postType: string;
+  counts: Record<string, number>;
+  shortfalls: EvidenceShortfall[];
+  /** Operator-facing: what is missing and what to do next. */
+  message: string;
+  checkedAt: string;
+}
+
 export interface ResearchDossier {
   summary: string;
-  facts: Array<{ fact: string; sourceUrl: string }>;
+  facts: DossierFact[];
   products: Array<{
     name: string;
     brand: string;
@@ -101,9 +220,18 @@ export interface ResearchDossier {
     goSlug: string;
     notes: string;
   }>;
+  /** What breaks after the honeymoon, from owner and long-term coverage. */
+  failureModes: FailureMode[];
+  /** Buyers this product is wrong for - the honest half of a recommendation. */
+  whoShouldNotBuy: BuyerExclusion[];
+  ownerComplaints: OwnerComplaint[];
+  priceObservations: PriceObservation[];
+  testedClaims: TestedClaim[];
   keywords: { primary: string; secondary: string[] };
   competitorNotes: string;
   faqIdeas: Array<{ question: string; answerHint: string }>;
+  /** Stamped by the evidence gate at the end of research; absent on pre-gate dossiers. */
+  sufficiency?: EvidenceSufficiency;
 }
 
 /**
