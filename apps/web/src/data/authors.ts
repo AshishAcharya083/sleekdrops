@@ -1,37 +1,52 @@
 /**
  * Public byline registry.
  *
- * Every entry is an accountable editorial desk, never an invented person: no
- * fictional credentials, no claimed hands-on testing, no biography that would
- * not survive a manual review. What separates them is a beat and a house
- * voice, which is what a masthead actually separates.
+ * There is exactly one byline: `SleekDrops Editorial Team`, an accountable
+ * entity with an about page behind it. What varies per piece is the beat it
+ * was written on, which is a tag on that byline rather than a byline of its
+ * own. Named desks and "staff" bylines each promise a staffed team, and a
+ * masthead whose team does not exist is the failure mode that gets AI-assisted
+ * affiliate sites removed - so no invented people, no fictional credentials
+ * and no claimed hands-on testing live here.
  *
- * Older D1 posts retain their original internal author ids. `getAuthor` maps
- * those ids to the general desk so old URLs keep rendering while readers see
- * an accurate, accountable byline.
+ * Older D1 posts carry the internal author ids they were published with.
+ * `getAuthor` maps any id, legacy or beat, onto the one byline plus the beat
+ * tag, so old URLs keep rendering while readers see accurate attribution.
  *
- * The `voice` block mirrors AUTHORS in apps/agent/src/content/contract.ts,
- * which is what the pipeline's writer and editor prompts are built from. It
- * lives here as well so the two registries cannot drift: a desk that publishes
+ * The `voice` blocks mirror AUTHORS in apps/agent/src/content/contract.ts,
+ * which is what the pipeline's writer and editor prompts are built from. They
+ * live here as well so the two registries cannot drift: a beat that publishes
  * on the site but has no voice on the agent side writes in nobody's voice.
  */
 
-/** How a desk writes. Mirrors AuthorVoice in the agent's content contract. */
+/** How a beat writes. Mirrors AuthorVoice in the agent's content contract. */
 export interface AuthorVoice {
-  /** Sentence-rhythm habits - lengths, openings, where the desk breaks. */
+  /** Sentence-rhythm habits - lengths, openings, where this beat breaks. */
   rhythm: string;
-  /** The vocabulary this desk reaches for, and what it will not write. */
+  /** The vocabulary this beat reaches for, and what it will not write. */
   vocabulary: string;
   /** What it cares about - the thing it checks on every product, always. */
   cares: string;
-  /** A paragraph in this desk's voice. The writer matches its texture. */
+  /** A paragraph in this voice. The writer matches its texture. */
   specimen: string;
 }
 
+/** One beat of the editorial team: a voice to write in and a tag on the byline. */
+export interface EditorialBeat {
+  /** The id stored on a post. Mirrors an AUTHORS id in the agent contract. */
+  id: string;
+  /** The tag shown beside the byline. Empty on the house voice. */
+  label: string;
+  /** What this beat covers, and what it checks. Shown on the author card. */
+  focus: string;
+  voice: AuthorVoice;
+}
+
 export interface Author {
+  /** Always the editorial team's id - the byline is one entity, on every piece. */
   id: string;
   name: string;
-  /** Role / title shown next to the byline. */
+  /** Role shown next to the byline. */
   role: string;
   /** One-line bio for the article footer / author page. */
   bio: string;
@@ -39,17 +54,29 @@ export interface Author {
   initials?: string;
   /** Optional public profile link. */
   url?: string;
-  /** The desk's house voice, as the pipeline writes to it. */
+  /** The beat tag for this piece, when it was written on a specialist beat. */
+  beat?: string;
+  /** What that beat covers and checks. Set only alongside `beat`. */
+  focus?: string;
+  /** The beat's house voice, as the pipeline writes to it. */
   voice: AuthorVoice;
 }
 
-export const authors = {
+/** The one accountable byline. Its archive is every post on the site. */
+export const EDITORIAL_TEAM = {
+  id: 'desk',
+  name: 'SleekDrops Editorial Team',
+  role: 'Editorial team',
+  bio: 'Researches products, prices and published evidence for Australian shoppers. Each recommendation states what we checked and when we have not tested a product ourselves.',
+  initials: 'SD',
+} as const;
+
+export const beats = {
   desk: {
     id: 'desk',
-    name: 'SleekDrops Editorial Desk',
-    role: 'Editorial team',
-    bio: 'Researches products, prices and published evidence for Australian shoppers. Each recommendation states what we checked and when we have not tested a product ourselves.',
-    initials: 'SD',
+    label: '',
+    focus:
+      'Research-led coverage across every category on the site, held to the evidence we can actually show.',
     voice: {
       rhythm:
         'Medium sentences, 12-22 words, broken by a short one when a verdict lands. Paragraphs of two or three sentences. Never opens two consecutive paragraphs the same way.',
@@ -61,12 +88,11 @@ export const authors = {
         'The V15 is the one to buy if your floors are mostly hard. Choice measured 210AW on the high setting in 2026, and the run time holds up for a two-bedroom flat. Past that it stops being sensible: owners on ProductReview report the battery down to nine minutes by the second year, on 37 of 412 reviews. Carpet-heavy houses should look at the mains-powered options instead.',
     },
   },
-  'tech-desk': {
-    id: 'tech-desk',
-    name: 'SleekDrops Tech Desk',
-    role: 'Editorial team',
-    bio: 'Covers audio, computing, mobile and smart-home hardware. Checks every spec claim against a published measurement, and says which of two near-identical models is actually the one to buy here.',
-    initials: 'TD',
+  tech: {
+    id: 'tech',
+    label: 'Tech',
+    focus:
+      'Audio, computing, mobile and smart-home hardware. Every spec claim is checked against a published measurement.',
     voice: {
       rhythm:
         'Short and declarative. Most sentences under 15 words, with an occasional long one that carries a full spec. Opens sections with the number, not the wind-up.',
@@ -78,12 +104,11 @@ export const authors = {
         'The XM6 runs the QN3 processor and LDAC. Sony rates it at 30 hours with ANC on; RTINGS measured 28.5 in 2026, which is close enough to trust. The XM5 is the same headphone minus the new processor, and it is regularly A$120 less. If you are not listening on a hi-res source, the older one is the better buy and nothing about the spec sheet argues otherwise.',
     },
   },
-  'home-desk': {
-    id: 'home-desk',
-    name: 'SleekDrops Home Desk',
-    role: 'Editorial team',
-    bio: 'Covers kitchen, cleaning, furniture and clothing - the things that have to survive daily use. Reads owner reviews for what fails after six months, and reports the fault rate with its sample size.',
-    initials: 'HD',
+  home: {
+    id: 'home',
+    label: 'Home',
+    focus:
+      'Kitchen, cleaning, furniture and clothing - the things that have to survive daily use. Owner reviews are read for what fails after six months, and the fault rate is reported with its sample size.',
     voice: {
       rhythm:
         'Longer, plainer sentences that run 18-28 words, cut by a blunt five-word judgement. Reads like someone talking across a kitchen bench.',
@@ -95,12 +120,11 @@ export const authors = {
         'Air fryers are mostly the same box with a different fan, and the part that decides whether you keep using one is the basket coating. Owners report it flaking on the cheaper Kmart units inside a year, on 61 of 890 ProductReview entries. The Ninja costs more and its basket is heavier to lift out one-handed, which matters if you are draining hot oil over a sink. That trade is the whole decision.',
     },
   },
-  'value-desk': {
-    id: 'value-desk',
-    name: 'SleekDrops Value Desk',
-    role: 'Editorial team',
-    bio: 'Covers the money side of a purchase: RRP, running costs, warranty terms and what a policy actually pays out. Prices are stated with the retailer and the day they were checked.',
-    initials: 'VD',
+  value: {
+    id: 'value',
+    label: 'Value',
+    focus:
+      'The money side of a purchase: RRP, running costs, warranty terms and what a policy actually pays out. Prices are stated with the retailer and the day they were checked.',
     voice: {
       rhythm:
         'Arithmetic in the prose. Sentences build to a figure and stop there. Frequent two-sentence paragraphs, the second one the sum.',
@@ -112,29 +136,41 @@ export const authors = {
         'The RRP is A$399 and Philips warrants it for two years. Replacement heads are A$45 for a pack of four and the manual says to change them quarterly, so budget A$45 a year on top. Over the warranty term that is A$489 all in. The A$199 model takes the same heads, which makes the gap A$200 for a pressure sensor and a travel case.',
     },
   },
-} as const satisfies Record<string, Author>;
+} as const satisfies Record<string, EditorialBeat>;
 
-export type AuthorId = keyof typeof authors;
-
-const LEGACY_AUTHOR_IDS = new Set(['mira', 'theo', 'aiko', 'lina', 'sam', 'beatriz']);
+export type BeatId = keyof typeof beats;
 
 /**
- * The desk a stored author id publishes under. Legacy ids from before the
- * desks existed resolve to the general desk; anything else is returned
- * unchanged, so an unknown id matches no archive rather than throwing here.
+ * The beat a stored author id was written on. Legacy person ids from before
+ * the beats existed, and anything unrecognised, resolve to the house voice -
+ * the byline a reader sees on those posts is the same either way.
  */
-export function resolveAuthorId(id: string): string {
-  return LEGACY_AUTHOR_IDS.has(id) ? 'desk' : id;
+export function resolveBeat(id: string): EditorialBeat {
+  return (beats as Record<string, EditorialBeat>)[id] ?? beats.desk;
 }
 
+/**
+ * The byline for a stored author id: the editorial team, tagged with the beat
+ * the piece was written on and carrying that beat's voice.
+ */
 export function getAuthor(id: string): Author {
-  const author = (authors as Record<string, Author>)[resolveAuthorId(id)];
-  if (author) return author;
-  throw new Error(`Unknown author id: "${id}". Add it to src/data/authors.ts.`);
+  const beat = resolveBeat(id);
+  return {
+    ...EDITORIAL_TEAM,
+    beat: beat.label || undefined,
+    focus: beat.label ? beat.focus : undefined,
+    voice: beat.voice,
+  };
 }
 
+/** Every public byline. One entity, so one entry - and one author archive. */
 export function listAuthors(): Author[] {
-  return Object.values(authors);
+  return [getAuthor(EDITORIAL_TEAM.id)];
+}
+
+/** Every beat voice, for the drift check against the agent's registry. */
+export function listBeats(): EditorialBeat[] {
+  return Object.values(beats);
 }
 
 export function authorInitials(author: Author): string {

@@ -17,7 +17,7 @@
 // the writer than a manufactured contrarian claim it would then have to
 // defend with invented reasons.
 import { chatJson, requireKeys, UsageTracker } from '../llm/index.js';
-import { AUTHORS, authorById, defaultAuthorFor } from '../content/contract.js';
+import { AUTHORS, authorById, BYLINE_NAME, defaultAuthorFor } from '../content/contract.js';
 import { keywordPlanBrief, operatorBrief, siteContext, SOURCE_DISCIPLINE } from './context.js';
 import { ARTICLE_SHAPES, isArticleShape } from '../pipeline/types.js';
 import type { ArticleRow, ArticleShape, EditorialAngle, TopicRow } from '../pipeline/types.js';
@@ -92,8 +92,10 @@ ${Object.entries(ARTICLE_SHAPES)
   .map(([id, description]) => `  - ${id}: ${description}`)
   .join('\n')}
 
-BYLINE. Which desk should carry this, judged on the thesis and the beat.
-${AUTHORS.map((a) => `  - ${a.id}: ${a.name} - ${a.beat}. Cares about: ${a.voice.cares}`).join('\n')}
+BYLINE. The piece publishes as ${BYLINE_NAME} whatever you choose; what you
+are picking is which beat's voice writes it, judged on the thesis and the
+subject. The beat becomes a tag on the byline, never a byline of its own.
+${AUTHORS.map((a) => `  - ${a.id}: ${a.label || 'house voice'} - ${a.beat}. Cares about: ${a.voice.cares}`).join('\n')}
 
 Return JSON:
 {"thesis": string (one sentence, arguable, provable from the dossier),
@@ -104,7 +106,7 @@ Return JSON:
  "informationGain": [{"claim": string, "absentFrom": string (a competitor URL from the plan), "evidence": string (what in the dossier proves it)}],
  "shape": one of ${Object.keys(ARTICLE_SHAPES).map((s) => `"${s}"`).join(' | ')},
  "shapeRationale": string (1-2 sentences: why this shape beats the others here),
- "byline": one of ${AUTHORS.map((a) => `"${a.id}"`).join(' | ')},
+ "byline": one of ${AUTHORS.map((a) => `"${a.id}"`).join(' | ')} (the beat voice),
  "bylineRationale": string (one sentence)}`,
     },
     tracker,

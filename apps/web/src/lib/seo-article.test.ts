@@ -40,7 +40,7 @@ test('the article names its author page, its language and its own URL', () => {
   assert.equal(schema.inLanguage, 'en-AU');
   assert.deepEqual(schema.author, {
     '@type': 'Organization',
-    name: 'SleekDrops Editorial Desk',
+    name: 'SleekDrops Editorial Team',
     url: 'https://sleekdrops.com/author/desk',
   });
   assert.deepEqual(schema.mainEntityOfPage, {

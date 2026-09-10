@@ -118,8 +118,8 @@ ${plan?.paaQuestions?.length ? `- Answer these directly, as headings or FAQ entr
 
 Before you reply, reread your draft against the voice rules and the byline
 voice, and fix what you find. A draft that ships a banned word goes straight
-back to you, and one that reads like the generic house voice rather than
-${author.name} has not done the job either.
+back to you, and one that reads like the generic house voice rather than the
+${author.label || 'house'} beat has not done the job either.
 
 Reply with the markdown body only.`,
   });

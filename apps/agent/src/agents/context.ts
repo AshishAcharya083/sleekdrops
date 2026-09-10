@@ -1,6 +1,13 @@
 // Shared editorial context injected into every agent prompt — the pipeline
 // equivalent of devteam-platform's global agent instructions.
-import { AUTHORS, type AuthorProfile, CATEGORIES, POST_TYPES } from '../content/contract.js';
+import {
+  AUTHORS,
+  type AuthorProfile,
+  BYLINE_NAME,
+  bylineFor,
+  CATEGORIES,
+  POST_TYPES,
+} from '../content/contract.js';
 import { describeArticleShape } from '../pipeline/types.js';
 import type { EditorialAngle, KeywordPlan, TopicRow } from '../pipeline/types.js';
 
@@ -38,10 +45,12 @@ Post types the pipeline may produce: ${POST_TYPES.join(', ')}.
 - roundup: "Top N" listicle with clear scoring rationale.
 (Never produce postType "review" — reviews require weeks of hands-on use and are human-written.)
 
-Bylines. Every one is an accountable team desk, never an invented person:
-never claim hands-on testing, a personal history or a credential for any of
-them. The angle stage picks which desk carries a piece, on beat and thesis.
-${AUTHORS.map((a) => `- ${a.id}: ${a.name} — ${a.beat}`).join('\n')}
+Byline. Every piece publishes under one accountable entity, ${BYLINE_NAME},
+tagged with the beat it was written on. There are no named desks and no
+invented people: never claim hands-on testing, a personal history or a
+credential. The angle stage picks which beat voice carries a piece, on the
+beat and the thesis.
+${AUTHORS.map((a) => `- ${a.id}: ${a.label || 'house voice'} — ${a.beat}`).join('\n')}
 `.trim();
 }
 
@@ -365,20 +374,20 @@ same running order under both.`,
 }
 
 /**
- * The one desk's voice the writer is matching. Only the selected byline's
- * specimen goes into a prompt - handing a writer four voices produces the
- * average of them, which is the house voice we already have.
+ * The one voice the writer is matching. Only the commissioned beat's specimen
+ * goes into a prompt - handing a writer four voices produces the average of
+ * them, which is the house voice we already have.
  */
 export function authorVoiceBrief(author: AuthorProfile): string {
-  return `BYLINE VOICE - this piece is published as ${author.name} (${author.id}).
-Write it in that desk's voice, not the site's generic one.
+  return `BYLINE VOICE - this piece publishes as ${bylineFor(author)} (beat id: ${author.id}).
+Write it in that beat's voice, not the site's generic one.
 Beat: ${author.beat}
 Sentence rhythm: ${author.voice.rhythm}
 Vocabulary: ${author.voice.vocabulary}
-What this desk always checks: ${author.voice.cares}
+What this beat always checks: ${author.voice.cares}
 
-A paragraph in this desk's voice. Match its texture - sentence lengths, where
-it breaks, how it states a figure. Never reuse its facts: they are illustrative
+A paragraph in this voice. Match its texture - sentence lengths, where it
+breaks, how it states a figure. Never reuse its facts: they are illustrative
 and belong to another product.
 "${author.voice.specimen}"`;
 }

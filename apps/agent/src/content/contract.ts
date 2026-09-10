@@ -22,47 +22,66 @@ export const POST_TYPES = ['article', 'guide', 'roundup'] as const;
 export const MONETISED_INTENTS = new Set(['Commercial Investigation', 'Transactional']);
 
 /**
- * How one desk writes, as instructions a writer can actually follow.
+ * How one beat writes, as instructions a writer can actually follow.
  *
  * "Write in Mira's voice" produces the same prose as no instruction at all,
  * because a one-line persona carries no information about sentences. These
  * four fields do: a rhythm to imitate, words to reach for and words to avoid,
- * the question this desk always asks of a product, and a paragraph whose
+ * the question this beat always asks of a product, and a paragraph whose
  * texture the draft is matched against.
  */
 export interface AuthorVoice {
-  /** Sentence-rhythm habits - lengths, openings, where the desk breaks. */
+  /** Sentence-rhythm habits - lengths, openings, where this beat breaks. */
   rhythm: string;
-  /** The vocabulary this desk reaches for, and what it will not write. */
+  /** The vocabulary this beat reaches for, and what it will not write. */
   vocabulary: string;
   /** What it cares about - the thing it checks on every product, always. */
   cares: string;
-  /** A paragraph in this desk's voice. The writer matches its texture, not its subject. */
+  /** A paragraph in this voice. The writer matches its texture, not its subject. */
   specimen: string;
 }
 
+/**
+ * The one byline the pipeline publishes under.
+ *
+ * A named desk or a "staff" byline is a promise that a staffed team stands
+ * behind it, and a masthead whose team does not exist is what the publisher
+ * policies call misrepresentation - the Sports Illustrated and CNET failures
+ * both sit here. So there is one accountable entity on every piece, and the
+ * beat is a label on that byline rather than a second masthead. Nothing in
+ * this registry claims a person, a credential or hands-on testing.
+ */
+export const BYLINE_NAME = 'SleekDrops Editorial Team';
+
+/** One beat of the editorial team: a voice to write in and a tag on the byline. */
 export interface AuthorProfile {
   id: string;
-  name: string;
+  /** The beat tag shown beside the byline. Empty on the house voice. */
+  label: string;
+  /** What this beat covers, for the prompts. */
   beat: string;
-  /** Categories this desk owns. Empty means it covers everything (the fallback desk). */
+  /** Categories this beat owns. Empty means it covers everything (the fallback). */
   covers: readonly string[];
   voice: AuthorVoice;
 }
 
+/** How a piece is attributed: the team, tagged with the beat that wrote it. */
+export function bylineFor(author: AuthorProfile): string {
+  return author.label ? `${BYLINE_NAME} - ${author.label}` : BYLINE_NAME;
+}
+
 /**
- * The bylines the pipeline may publish under.
+ * The beat voices a piece may be commissioned in.
  *
- * Every one is a team byline, not an invented person: no fictional
- * credentials, no claimed hands-on testing, no biography that would not
- * survive a manual review. What separates them is what a masthead actually
- * separates - a beat and a house voice - which is enough for the byline to
- * change the prose without any of them pretending to be someone.
+ * What separates them is what a masthead actually separates - a beat and a
+ * house voice - which is enough for the choice to change the prose while the
+ * byline stays one accountable team. The `desk` id is the house voice and
+ * keeps its name because published posts and /author/desk already carry it.
  */
 export const AUTHORS: readonly AuthorProfile[] = [
   {
     id: 'desk',
-    name: 'SleekDrops Editorial Desk',
+    label: '',
     beat: 'Research-led product coverage across Tech, Home, Fashion, Health, Finance and Travel',
     covers: [],
     voice: {
@@ -77,8 +96,8 @@ export const AUTHORS: readonly AuthorProfile[] = [
     },
   },
   {
-    id: 'tech-desk',
-    name: 'SleekDrops Tech Desk',
+    id: 'tech',
+    label: 'Tech',
     beat: 'Audio, computing, mobile, wearables and smart-home hardware',
     covers: ['Tech'],
     voice: {
@@ -93,8 +112,8 @@ export const AUTHORS: readonly AuthorProfile[] = [
     },
   },
   {
-    id: 'home-desk',
-    name: 'SleekDrops Home Desk',
+    id: 'home',
+    label: 'Home',
     beat: 'Kitchen, cleaning, furniture and everything that has to survive daily use',
     covers: ['Home', 'Fashion'],
     voice: {
@@ -109,8 +128,8 @@ export const AUTHORS: readonly AuthorProfile[] = [
     },
   },
   {
-    id: 'value-desk',
-    name: 'SleekDrops Value Desk',
+    id: 'value',
+    label: 'Value',
     beat: 'Price, warranty, running costs and the money side of Health, Finance and Travel buys',
     covers: ['Finance', 'Travel', 'Health'],
     voice: {
@@ -126,16 +145,16 @@ export const AUTHORS: readonly AuthorProfile[] = [
   },
 ];
 
-/** The desk with this id, or null. Ids come out of a model, so nothing is assumed. */
+/** The beat voice with this id, or null. Ids come out of a model, so nothing is assumed. */
 export function authorById(id: unknown): AuthorProfile | null {
   return AUTHORS.find((a) => a.id === id) ?? null;
 }
 
 /**
- * The desk that owns a category, deterministically. This is the fallback when
- * the angle stage names a byline that does not exist - a beat match beats
- * defaulting everything to the generalist desk, which is how every piece ended
- * up in one voice in the first place.
+ * The beat that owns a category, deterministically. This is the fallback when
+ * the angle stage names a voice that does not exist - a beat match beats
+ * defaulting everything to the house voice, which is how every piece ended up
+ * sounding the same in the first place.
  */
 export function defaultAuthorFor(category: string): AuthorProfile {
   const match = AUTHORS.find((a) => a.covers.includes(category));

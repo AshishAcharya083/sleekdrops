@@ -215,8 +215,8 @@ export async function runStage(article: ArticleRow): Promise<void> {
         const angle = await runAngleEditor(article, topic, model!, tracker);
         await updateArticle(article.id, { editorial_angle: JSON.stringify(angle) });
         summary = angle.defensible
-          ? `"${angle.thesis}" - ${angle.shape} shape, ${angle.informationGain.length} claim(s) the top results miss, byline ${angle.byline}`
-          : `no defensible take recorded (${angle.weakness}) - ${angle.shape} shape, byline ${angle.byline}`;
+          ? `"${angle.thesis}" - ${angle.shape} shape, ${angle.informationGain.length} claim(s) the top results miss, ${angle.byline} beat`
+          : `no defensible take recorded (${angle.weakness}) - ${angle.shape} shape, ${angle.byline} beat`;
         next = { stage: 'outline', status: 'queued' };
         break;
       }

@@ -363,9 +363,9 @@ export interface EditorialAngle {
   shape: ArticleShape;
   /** Why this shape beats the others for this thesis and this SERP. */
   shapeRationale: string;
-  /** The byline the angle calls for - an id from the author registry. */
+  /** The beat voice the angle commissions this in - an id from the author registry. */
   byline: string;
-  /** Why this desk's voice fits this thesis and this beat. */
+  /** Why that beat's voice fits this thesis and this subject. */
   bylineRationale: string;
 }
 

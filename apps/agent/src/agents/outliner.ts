@@ -83,7 +83,7 @@ Return JSON:
   brief.slug = slugify(brief.slug || brief.seoTitle || article.title);
   // The byline belongs to the angle stage, which picked it against the thesis
   // and the beat; the outliner is not asked for one. An article that predates
-  // the angle stage falls back to the desk that owns its category.
+  // the angle stage falls back to the beat that owns its category.
   brief.author = (authorById(angle?.byline) ?? defaultAuthorFor(article.category)).id;
   // The plan's keyword is the decision of record: the outliner may reword the
   // title, but it does not get to re-target the piece.

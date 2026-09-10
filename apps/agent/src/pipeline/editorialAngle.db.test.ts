@@ -66,7 +66,7 @@ function anAngle(): EditorialAngle {
       ],
       shape: 'failure-led',
       shapeRationale: 'The failure data is the only thing the top three do not have.',
-      byline: 'home-desk',
+      byline: 'home',
       bylineRationale: 'A durability argument about a household appliance.',
     },
     { postType: 'guide', category: 'Home', competitorUrls: ['https://choice.com.au/vacuums'] },
@@ -149,7 +149,7 @@ test('the angle record survives JSONB and reaches the panel whole', { skip }, as
 
   assert.deepEqual(seen.editorial_angle, angle);
   assert.equal(seen.editorial_angle?.shape, 'failure-led');
-  assert.equal(seen.editorial_angle?.byline, 'home-desk');
+  assert.equal(seen.editorial_angle?.byline, 'home');
   assert.equal(seen.editorial_angle?.informationGain[0].absentFrom, 'https://choice.com.au/vacuums');
 
   // The same row is what the outliner, writer, editor and reviewer are handed.
@@ -163,7 +163,7 @@ test('the angle record survives JSONB and reaches the panel whole', { skip }, as
 
 test('an article with no defensible take says so to the panel and the prompts', { skip }, async () => {
   const angle = normaliseAngle(
-    { thesis: 'The Ninja is the pick.', defensible: false, weakness: 'No owner complaints were gathered.', shape: 'ranked-list', byline: 'home-desk' },
+    { thesis: 'The Ninja is the pick.', defensible: false, weakness: 'No owner complaints were gathered.', shape: 'ranked-list', byline: 'home' },
     { postType: 'roundup', category: 'Home', competitorUrls: [] },
   );
   const article = await insertArticle({

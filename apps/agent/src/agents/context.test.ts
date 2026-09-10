@@ -66,7 +66,7 @@ const angle: EditorialAngle = {
   ],
   shape: 'failure-led',
   shapeRationale: 'The failure data is what the top three do not have.',
-  byline: 'home-desk',
+  byline: 'home',
   bylineRationale: 'A durability argument about an appliance.',
 };
 
@@ -96,17 +96,17 @@ test('a piece with no defensible take tells the writer so, in as many words', ()
   assert.doesNotMatch(brief, /The machine every roundup ranks first/);
 });
 
-test('a voice brief carries one desk, never the roster', () => {
+test('a voice brief carries one beat, never the roster', () => {
   // The rule this protects: hand a writer four voices and it writes the
-  // average of them, which is the single house voice the bylines exist to
+  // average of them, which is the single house voice the beats exist to
   // break up.
-  const home = authorById('home-desk');
+  const home = authorById('home');
   assert.ok(home);
   const brief = authorVoiceBrief(home);
-  assert.match(brief, /published as SleekDrops Home Desk \(home-desk\)/);
+  assert.match(brief, /publishes as SleekDrops Editorial Team - Home \(beat id: home\)/);
   assert.ok(brief.includes(home.voice.specimen), 'the specimen is what the draft is matched against');
   assert.match(brief, /Never reuse its facts/, 'a specimen is texture, not a source');
-  for (const other of AUTHORS.filter((a) => a.id !== 'home-desk')) {
+  for (const other of AUTHORS.filter((a) => a.id !== 'home')) {
     assert.ok(!brief.includes(other.voice.specimen), `${other.id}'s specimen leaked into the prompt`);
   }
 });

@@ -128,6 +128,7 @@ export interface EditorialAngle {
   informationGain: Array<{ claim: string; absentFrom: string; evidence: string }>;
   shape: string;
   shapeRationale: string;
+  /** The beat voice the piece is written in - the byline itself is the team. */
   byline: string;
   bylineRationale: string;
 }

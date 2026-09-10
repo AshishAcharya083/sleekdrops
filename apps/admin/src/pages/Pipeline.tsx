@@ -254,7 +254,7 @@ function EditorialAngleSection({ angle }: { angle: EditorialAngle }) {
         <p style={{ marginTop: 0, fontSize: 15 }}>{angle.thesis || '(no thesis recorded)'}</p>
         <div className="row" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
           <span className="badge">shape: {angle.shape}</span>
-          <span className="badge">byline: {angle.byline}</span>
+          <span className="badge">beat: {angle.byline}</span>
           <span className="badge">
             {gain.length} claim{gain.length === 1 ? '' : 's'} the top results miss
           </span>
@@ -302,7 +302,7 @@ function EditorialAngleSection({ angle }: { angle: EditorialAngle }) {
         )}
         {angle.bylineRationale && (
           <p className="muted" style={{ marginTop: 0, marginBottom: 0, fontSize: 12 }}>
-            Byline: {angle.bylineRationale}
+            Beat: {angle.bylineRationale}
           </p>
         )}
       </div>

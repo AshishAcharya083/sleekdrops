@@ -244,7 +244,7 @@ draft: false                 # optional
 ```
 
 **Rules the assembler enforces:**
-- `author` must be one of the editorial desk ids in the main repo's `src/data/authors.ts` (`desk`, `tech-desk`, `home-desk`, `value-desk`) - the angle stage picks which desk carries a piece. Unknown ids fail the pipeline contract.
+- `author` must be one of the beat ids in the main repo's `src/data/authors.ts` (`desk`, `tech`, `home`, `value`) - every piece publishes under the one `SleekDrops Editorial Team` byline, and the beat the angle stage picks is a tag on it. Unknown ids fail the pipeline contract; the site renders any it has never seen under the house voice rather than breaking the build.
 - `cover` is one of `fill-1`…`fill-8` (placeholder gradient; v1 has no per-post hero image — see `docs/future_planning.md` for the R2 image plan when you add real images).
 - `slug` = filename (kebab-case, unique). If a file with that slug exists, append a disambiguator or skip (idempotency via `runId`).
 - Body `/go/<slug>` links must all have matching keys in `affiliate-links.json`.

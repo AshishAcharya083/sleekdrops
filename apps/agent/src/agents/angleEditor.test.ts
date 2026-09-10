@@ -32,7 +32,7 @@ function angle(overrides: Partial<EditorialAngle> = {}): EditorialAngle {
     ],
     shape: 'failure-led',
     shapeRationale: 'The failure data is the only thing the top three do not have.',
-    byline: 'home-desk',
+    byline: 'home',
     bylineRationale: 'A durability argument about a household appliance.',
     ...overrides,
   };
@@ -42,7 +42,7 @@ test('a well-formed angle passes through intact', () => {
   const out = normaliseAngle(angle(), opts);
   assert.equal(out.shape, 'failure-led');
   assert.equal(out.defensible, true);
-  assert.equal(out.byline, 'home-desk');
+  assert.equal(out.byline, 'home');
   assert.equal(out.informationGain.length, 1);
   assert.equal(out.weakness, '');
 });
@@ -74,16 +74,16 @@ test('a shape borrowed from Object.prototype is not a shape', () => {
   }
 });
 
-test('an unknown byline falls back to the desk that owns the category', () => {
-  assert.equal(normaliseAngle(angle({ byline: 'mira' }), opts).byline, 'home-desk');
+test('an unknown byline falls back to the beat that owns the category', () => {
+  assert.equal(normaliseAngle(angle({ byline: 'mira' }), opts).byline, 'home');
   assert.equal(
     normaliseAngle(angle({ byline: '' }), { ...opts, category: 'Tech' }).byline,
-    'tech-desk',
+    'tech',
   );
   assert.equal(
     normaliseAngle(angle({ byline: 'nobody' }), { ...opts, category: 'Sport' }).byline,
     'desk',
-    'a category no desk owns falls back to the general desk',
+    'a category no beat owns falls back to the house voice',
   );
 });
 
@@ -133,7 +133,7 @@ test('a fragment comes back as a complete record, never as undefined fields', ()
   assert.ok(Array.isArray(out.informationGain));
   assert.equal(out.informationGain.length, 0);
   assert.equal(out.shape, 'segmented-buyers');
-  assert.equal(out.byline, 'home-desk');
+  assert.equal(out.byline, 'home');
   assert.ok(out.weakness.length > 0, 'the panel always has something to show');
 });
 

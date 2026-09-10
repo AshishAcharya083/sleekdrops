@@ -8,7 +8,6 @@
  */
 
 import { getCollection, type CollectionEntry } from 'astro:content';
-import { resolveAuthorId } from '@data/authors';
 
 export type BlogPost = CollectionEntry<'blog'>;
 
@@ -42,11 +41,10 @@ export async function getPostsByCategory(category: string): Promise<BlogPost[]> 
 
 export async function getPostsByAuthor(authorId: string): Promise<BlogPost[]> {
   const posts = await getAllPosts();
-  // Each desk archive lists exactly what carries that byline. Older D1 rows
-  // keep the legacy author ids they were published with - they resolve to the
-  // general desk, which is the byline a reader sees on them - so this needs no
-  // destructive content rewrite.
-  return posts.filter((p) => resolveAuthorId(p.data.author) === authorId);
+  // The public desk owns the complete archive. Older D1 rows keep their legacy
+  // author ids so this rollout does not require a destructive content rewrite.
+  if (authorId === 'desk') return posts;
+  return posts.filter((p) => p.data.author === authorId);
 }
 
 export async function getPostsByTag(tag: string): Promise<BlogPost[]> {

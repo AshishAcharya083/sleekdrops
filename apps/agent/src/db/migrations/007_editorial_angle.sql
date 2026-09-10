@@ -26,4 +26,4 @@ COMMENT ON COLUMN articles.stage IS
   'research | keyword | angle | outline | write | seo_review | edit | assemble | image | publish | done';
 
 COMMENT ON COLUMN articles.editorial_angle IS
-  'Angle editor output: the thesis, the reader served, the contrarian take (or an explicit record that the evidence supports none), the information gain over the top-3 results, the structural shape and the byline. Null for articles that predate the angle stage.';
+  'Angle editor output: the thesis, the reader served, the contrarian take (or an explicit record that the evidence supports none), the information gain over the top-3 results, the structural shape and the beat voice it is written in. Null for articles that predate the angle stage.';
