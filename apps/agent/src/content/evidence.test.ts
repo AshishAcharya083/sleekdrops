@@ -3,7 +3,16 @@
 // that both are now checkable the same way twice.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { barFor, checkEvidence, countEvidence, normaliseDate, normaliseDossier } from './evidence.js';
+import {
+  assertEvidenceSufficient,
+  barFor,
+  checkEvidence,
+  countEvidence,
+  describeBar,
+  EvidenceGateError,
+  normaliseDate,
+  normaliseDossier,
+} from './evidence.js';
 import type { ResearchDossier } from '../pipeline/types.js';
 
 /** A guide dossier that clears every stratum, used as the baseline to break. */
@@ -13,6 +22,7 @@ function sufficientGuide(): ResearchDossier {
     sourceUrl: `https://example.com/${tier}/${n}`,
     tier,
     date: '2026-04-01',
+    publisher: 'Choice',
   });
   return {
     summary: 'Which cordless stick vacuum to buy in Australia, and which to avoid.',
@@ -33,7 +43,7 @@ function sufficientGuide(): ResearchDossier {
       tier: 'owner' as const,
     })),
     whoShouldNotBuy: [1, 2].map((n) => ({
-      audience: `buyer ${n}`,
+      audience: `anyone vacuuming a three-storey townhouse ${n}`,
       reason: 'the run time does not cover a three-bedroom house',
       sourceUrl: `https://productreview.com.au/w/${n}`,
     })),
@@ -42,6 +52,8 @@ function sufficientGuide(): ResearchDossier {
       complaint: `battery drops to nine minutes ${n}`,
       volume: 'recurring' as const,
       recency: '2026-03',
+      denominator: `${n}7 of 412 ProductReview reviews`,
+      kind: 'quoted' as const,
       sourceUrl: `https://reddit.com/r/vacuums/${n}`,
     })),
     priceObservations: [1, 2, 3].map((n) => ({
@@ -94,20 +106,20 @@ test('the flagged shape - plenty of specs, no owner experience - fails a guide',
   assert.ok(short.some((l) => l.includes('failure modes')));
   assert.ok(short.some((l) => l.includes('dated price observations')));
   assert.ok(short.some((l) => l.includes('tested claims')));
+  assert.ok(short.some((l) => l.includes('buyer exclusions')));
   // Actionable, not just a verdict: it names where each thin stratum lives.
-  assert.match(verdict.message, /owner complaints 0\/4/);
+  assert.match(verdict.message, /owner complaints with a named source and a denominator 0\/4/);
   assert.match(verdict.message, /productreview\.com\.au/i);
   assert.match(verdict.message, /- price:/);
 });
 
 test('every shortfall carries have, need and where to gather it', () => {
   const verdict = checkEvidence({ ...sufficientGuide(), ownerComplaints: [] }, 'guide');
-  const complaints = verdict.shortfalls.find((s) => s.label === 'owner complaints');
+  const complaints = verdict.shortfalls.find((s) => s.stratum === 'owner');
 
   assert.ok(complaints);
-  assert.equal(complaints.stratum, 'owner');
   assert.equal(complaints.have, 0);
-  assert.equal(complaints.need, barFor('guide').ownerComplaints);
+  assert.equal(complaints.need, barFor('guide').attributedOwnerComplaints);
   assert.match(complaints.fix, /ProductReview/);
 });
 
@@ -196,12 +208,177 @@ test('counting a legacy dossier written before the strata existed does not throw
   assert.equal(counts.competingCoverage, 0);
 });
 
+// ── What makes a complaint and an exclusion count ───────────────────────────
+// The counts are the whole point of the gate, so what they will and will not
+// accept is the behaviour worth pinning. Four hand-picked quotes with nothing
+// behind them is the anecdote-mining a no-sponsored-posts site cannot afford.
+
+test('a complaint with no denominator is not evidence of anything', () => {
+  const unattributed: ResearchDossier = {
+    ...sufficientGuide(),
+    ownerComplaints: sufficientGuide().ownerComplaints.map((c) => ({ ...c, denominator: null })),
+  };
+  const verdict = checkEvidence(unattributed, 'guide');
+
+  assert.equal(verdict.counts.ownerComplaints, 4);
+  assert.equal(verdict.counts.attributedOwnerComplaints, 0);
+  assert.equal(verdict.pass, false);
+});
+
+test('a complaint nobody can open is not evidence either', () => {
+  const unsourced: ResearchDossier = {
+    ...sufficientGuide(),
+    ownerComplaints: sufficientGuide().ownerComplaints.map((c) => ({ ...c, sourceUrl: 'reddit' })),
+  };
+  assert.equal(countEvidence(unsourced).attributedOwnerComplaints, 0);
+});
+
+test('one published fault rate stands in for the four quoted complaints', () => {
+  // How Choice actually reports ownership: 9% of 1,076 owners, field window
+  // published. That is better evidence than four quotes, not worse.
+  const aggregate: ResearchDossier = {
+    ...sufficientGuide(),
+    ownerComplaints: [
+      {
+        product: 'Dyson V15 Detect',
+        complaint: 'stops mid-clean',
+        volume: 'recurring',
+        recency: '2026-03',
+        denominator: '9% of 1,076 owners surveyed',
+        kind: 'aggregate',
+        sourceUrl: 'https://choice.com.au/reliability',
+      },
+    ],
+  };
+  const verdict = checkEvidence(aggregate, 'guide');
+
+  assert.equal(verdict.counts.attributedOwnerComplaints, 1);
+  assert.equal(verdict.counts.aggregateFaultRates, 1);
+  assert.equal(verdict.pass, true, verdict.message);
+});
+
+test('an aggregate with no field window does not substitute', () => {
+  const undated: ResearchDossier = {
+    ...sufficientGuide(),
+    ownerComplaints: [
+      {
+        product: 'Dyson V15 Detect',
+        complaint: 'stops mid-clean',
+        volume: 'recurring',
+        recency: null,
+        denominator: '9% of owners surveyed',
+        kind: 'aggregate',
+        sourceUrl: 'https://choice.com.au/reliability',
+      },
+    ],
+  };
+  const verdict = checkEvidence(undated, 'guide');
+
+  assert.equal(verdict.counts.aggregateFaultRates, 0);
+  assert.equal(verdict.pass, false);
+});
+
+test('exclusions that route nobody are dropped rather than counted', () => {
+  // The bar is one, so a padded second exclusion buys nothing - and a quota
+  // met with "not for everyone" is a claim about the product nobody checked.
+  const padded: ResearchDossier = {
+    ...sufficientGuide(),
+    whoShouldNotBuy: [
+      { audience: 'not for everyone', reason: 'it will not suit every single household out there', sourceUrl: 'https://x.test/a' },
+      { audience: 'beginners', reason: 'this one is a bit much for a first-time buyer', sourceUrl: 'https://x.test/b' },
+      { audience: 'anyone on a tight budget', reason: 'there are cheaper machines available elsewhere', sourceUrl: 'https://x.test/c' },
+      { audience: 'renters with no storage', reason: 'expensive', sourceUrl: 'https://x.test/d' },
+      { audience: 'renters with no storage', reason: 'the dock needs 40cm of wall and cannot be freestanding', sourceUrl: '' },
+    ],
+  };
+  const counts = countEvidence(padded);
+
+  assert.equal(counts.whoShouldNotBuy, 5);
+  assert.equal(counts.groundedExclusions, 0);
+  assert.equal(checkEvidence(padded, 'guide').pass, false);
+});
+
+test('one real exclusion clears the bar - a second is never forced', () => {
+  const one: ResearchDossier = {
+    ...sufficientGuide(),
+    whoShouldNotBuy: [sufficientGuide().whoShouldNotBuy[0]],
+  };
+  assert.equal(barFor('guide').groundedExclusions, 1);
+  assert.equal(checkEvidence(one, 'guide').pass, true);
+});
+
+test('a category with no Australian owner corpus keeps a floor, not the full set', () => {
+  // Health has no ProductReview depth and no member survey behind it. Holding
+  // a supplements guide to the vacuum bar produces invented owners, not real
+  // ones - so the floor drops and the piece has to disclose the small sample.
+  const oneComplaint: ResearchDossier = {
+    ...sufficientGuide(),
+    failureModes: sufficientGuide().failureModes.slice(0, 1),
+    ownerComplaints: sufficientGuide().ownerComplaints.slice(0, 1),
+    facts: [
+      ...sufficientGuide().facts.filter((f) => f.tier !== 'owner'),
+      sufficientGuide().facts.find((f) => f.tier === 'owner')!,
+    ],
+  };
+
+  assert.equal(checkEvidence(oneComplaint, 'guide', 'Health').pass, true);
+  assert.equal(checkEvidence(oneComplaint, 'guide', 'Home').pass, false);
+  // The floor is a floor, not an exemption: nothing at all still fails.
+  assert.equal(
+    checkEvidence({ ...oneComplaint, ownerComplaints: [] }, 'guide', 'Health').pass,
+    false,
+  );
+});
+
+test('the prompt is told the same numbers the gate enforces', () => {
+  // Printed from EVIDENCE_BAR, never written out beside it: a stage that fails
+  // a count nobody mentioned fails twice for the same reason.
+  const guide = describeBar('guide', 'Home');
+  assert.match(guide, /A guide in Home needs at least/);
+  assert.match(guide, new RegExp(`failure modes \\(${barFor('guide').failureModes}\\)`));
+  assert.match(
+    guide,
+    new RegExp(`denominator \\(${barFor('guide').attributedOwnerComplaints}\\)`),
+  );
+
+  // And the eased ones, where the bar itself is different.
+  const health = describeBar('guide', 'Health');
+  assert.match(health, /failure modes \(1\)/);
+  // Nothing the bar does not ask for is listed as a requirement.
+  assert.doesNotMatch(describeBar('article'), /failure modes/);
+});
+
+// ── The fail path ───────────────────────────────────────────────────────────
+
+test('a thin dossier throws the gate error, carrying the verdict', () => {
+  const thin = { ...sufficientGuide(), ownerComplaints: [], failureModes: [] };
+  assert.throws(
+    () => assertEvidenceSufficient(thin, 'guide'),
+    (err: unknown) => {
+      assert.ok(err instanceof EvidenceGateError);
+      assert.equal(err.sufficiency.pass, false);
+      assert.match(err.message, /Evidence is too thin to write a guide from/);
+      assert.match(err.message, /failure modes 0\/3/);
+      return true;
+    },
+  );
+  // Stamped even on the failure, so nothing has to recompute it to explain it.
+  assert.equal(thin.sufficiency?.pass, false);
+});
+
+test('a sufficient dossier comes back stamped with what it passed on', () => {
+  const dossier = assertEvidenceSufficient(sufficientGuide(), 'guide');
+  assert.equal(dossier.sufficiency?.pass, true);
+  assert.equal(dossier.sufficiency?.counts.attributedOwnerComplaints, 4);
+  assert.match(dossier.sufficiency?.checkedAt ?? '', /^\d{4}-\d{2}-\d{2}T/);
+});
+
 // ── Dossier normalisation ───────────────────────────────────────────────────
 
 test('an unrecognised tier is marked unknown, never promoted', () => {
   const dossier = normaliseDossier({
     facts: [
-      { fact: 'a', sourceUrl: 'https://x/a', tier: 'PRIMARY', date: '2026' },
+      { fact: 'a', sourceUrl: 'https://x/a', tier: 'PRIMARY', date: '2026', publisher: 'Sony' },
       { fact: 'b', sourceUrl: 'https://x/b', tier: 'manufacturer' },
       { fact: 'c', sourceUrl: 'https://x/c' },
     ],
@@ -209,6 +386,7 @@ test('an unrecognised tier is marked unknown, never promoted', () => {
 
   assert.deepEqual(dossier.facts.map((f) => f.tier), ['primary', 'unknown', 'unknown']);
   assert.deepEqual(dossier.facts.map((f) => f.date), ['2026', null, null]);
+  assert.deepEqual(dossier.facts.map((f) => f.publisher), ['Sony', null, null]);
 });
 
 test('a date only survives when the source actually gave one', () => {
@@ -216,7 +394,12 @@ test('a date only survives when the source actually gave one', () => {
   assert.equal(normaliseDate('2026-09'), '2026-09');
   assert.equal(normaliseDate('2026'), '2026');
   assert.equal(normaliseDate('2026-09-01T00:00:00Z'), '2026-09-01');
+  // Unpadded is a formatting slip, not a missing date - pad it rather than
+  // throwing away evidence the source actually carried.
+  assert.equal(normaliseDate('2026-9-1'), '2026-09-01');
+  assert.equal(normaliseDate('2026-9'), '2026-09');
   assert.equal(normaliseDate('recently'), null);
+  assert.equal(normaliseDate('2026-09-32'), null);
   assert.equal(normaliseDate('2026-13'), null);
   assert.equal(normaliseDate('1899'), null);
   assert.equal(normaliseDate(''), null);
@@ -242,11 +425,28 @@ test('prices are coerced to numbers and an unusable one is dropped', () => {
   assert.equal(dossier.priceObservations[1].dateChecked, null);
 });
 
+test('a price range reads as its low end, never as its digits concatenated', () => {
+  // "$1,299 - $1,499" stripped of punctuation is 12,991,499: a real number,
+  // dated and attributed, and nonsense in front of a reader.
+  const dossier = normaliseDossier({
+    priceObservations: [
+      { product: 'p', value: '$1,299 - $1,499', currency: 'AUD', retailer: 'JB Hi-Fi', dateChecked: '2026-09-01' },
+      { product: 'p', value: 'from A$1,149.00 at The Good Guys', currency: 'AUD', retailer: 'The Good Guys', dateChecked: '2026-9-1' },
+    ],
+  });
+
+  assert.deepEqual(
+    dossier.priceObservations.map((o) => [o.value, o.dateChecked]),
+    [[1299, '2026-09-01'], [1149, '2026-09-01']],
+  );
+});
+
 test('complaint volume and tested-claim years are validated, not trusted', () => {
   const dossier = normaliseDossier({
     ownerComplaints: [
-      { product: 'p', complaint: 'dies at 9 minutes', volume: 'Widespread', recency: '2026-03' },
-      { product: 'p', complaint: 'noisy', volume: 'a lot', recency: 'ages ago' },
+      { product: 'p', complaint: 'dies at 9 minutes', volume: 'Widespread', recency: '2026-03',
+        denominator: '37 of 412 reviews', kind: 'Aggregate' },
+      { product: 'p', complaint: 'noisy', volume: 'a lot', recency: 'ages ago', kind: 'hearsay' },
       { product: 'p', complaint: '   ' },
     ],
     testedClaims: [
@@ -258,6 +458,10 @@ test('complaint volume and tested-claim years are validated, not trusted', () =>
 
   assert.deepEqual(dossier.ownerComplaints.map((c) => c.volume), ['widespread', 'unknown']);
   assert.deepEqual(dossier.ownerComplaints.map((c) => c.recency), ['2026-03', null]);
+  // An unrecognised kind is 'quoted': the substitution rule only fires on a
+  // complaint that explicitly claims to be an aggregate.
+  assert.deepEqual(dossier.ownerComplaints.map((c) => c.kind), ['aggregate', 'quoted']);
+  assert.deepEqual(dossier.ownerComplaints.map((c) => c.denominator), ['37 of 412 reviews', null]);
   assert.deepEqual(dossier.testedClaims.map((t) => t.year), [2025, null]);
 });
 

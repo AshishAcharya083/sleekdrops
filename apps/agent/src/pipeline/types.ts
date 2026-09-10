@@ -107,10 +107,20 @@ export interface DossierFact {
   tier: SourceTier;
   /** The date the source carries (YYYY, YYYY-MM or YYYY-MM-DD); null when undated. */
   date: string | null;
+  /** Who said it, in a reader's words ("Choice", "Rtings", "Sony"); null when unnamed. */
+  publisher: string | null;
 }
 
 /** How much of the owner corpus a complaint speaks for. */
 export type ComplaintVolume = 'isolated' | 'recurring' | 'widespread' | 'unknown';
+
+/**
+ * How the complaint was reported: 'aggregate' is a published fault rate over a
+ * stated sample (Choice's member surveys report ownership this way), 'quoted'
+ * is what individual owners wrote. The distinction matters because one
+ * aggregate rate is better evidence than any number of picked-out quotes.
+ */
+export type ComplaintKind = 'quoted' | 'aggregate';
 
 /**
  * What owners say goes wrong. This is the material a spec sheet cannot supply
@@ -123,6 +133,13 @@ export interface OwnerComplaint {
   volume: ComplaintVolume;
   /** When owners were saying it (YYYY, YYYY-MM or YYYY-MM-DD); null when undated. */
   recency: string | null;
+  /**
+   * How many owners said it, out of how many: "37 of 412 reviews",
+   * "1,076 owners surveyed". Null when the source publishes no denominator -
+   * and a complaint without one does not count toward the evidence bar.
+   */
+  denominator: string | null;
+  kind: ComplaintKind;
   sourceUrl: string;
 }
 
@@ -179,7 +196,8 @@ export interface EvidenceShortfall {
 
 /**
  * The deterministic evidence gate's verdict, stamped onto the dossier after
- * synthesis so an operator can see exactly which stratum was thin.
+ * synthesis so an operator can see the evidence density a piece was written
+ * from - and, when it falls short, exactly which stratum was thin.
  */
 export interface EvidenceSufficiency {
   pass: boolean;
@@ -212,7 +230,7 @@ export interface ResearchDossier {
   keywords: { primary: string; secondary: string[] };
   competitorNotes: string;
   faqIdeas: Array<{ question: string; answerHint: string }>;
-  /** Set by the evidence gate in runStage; absent on pre-gate dossiers. */
+  /** Stamped by the evidence gate at the end of research; absent on pre-gate dossiers. */
   sufficiency?: EvidenceSufficiency;
 }
 

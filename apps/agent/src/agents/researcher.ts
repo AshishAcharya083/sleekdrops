@@ -15,7 +15,7 @@
 // tool is what the model uses on top of it to check the specifics that matter.
 import { chatJson, type ShapeCheck, UsageTracker } from '../llm/index.js';
 import { formatSearches, type SearchHit, tavilySearchMany } from '../tools/tavily.js';
-import { normaliseDossier } from './evidence.js';
+import { assertEvidenceSufficient, describeBar, normaliseDossier } from '../content/evidence.js';
 import { operatorBrief, siteContext, SOURCE_DISCIPLINE, VERIFICATION_RULES } from './context.js';
 import type { ArticleRow, ResearchDossier, TopicRow } from '../pipeline/types.js';
 
@@ -36,18 +36,21 @@ export const STRATA = [
   {
     key: 'expert',
     label: 'INDEPENDENT EXPERT REVIEWS',
-    brief: 'reviewers who measured something - Choice, Canstar Blue, lab tests, teardowns',
+    brief:
+      'reviewers who measured something themselves - Choice lab tests, RTINGS, teardowns, standards testing',
   },
   {
     key: 'owner',
     label: 'OWNER REVIEWS AND LONG-TERM COMPLAINTS',
     brief:
-      'ProductReview.com.au, Reddit, retailer one-star reviews, "after 6 months", "stopped working", warranty and return experiences',
+      'ProductReview.com.au, Choice member reliability surveys, Whirlpool Forums and OzBargain for tech, ' +
+      'Bunnings verified-purchase reviews for home, Reddit, "after 6 months", "stopped working", warranty and return experiences',
   },
   {
     key: 'price',
     label: 'PRICE AND AVAILABILITY',
-    brief: 'retailer listings with a price and a date, price history, stock status in Australia',
+    brief:
+      'named Australian retailer listings with a price and the day it was seen, price history, stock status',
   },
   {
     key: 'competing',
@@ -211,6 +214,21 @@ STRICT RULES:
 - DATE EVERY FACT THE SOURCE DATES. date is "YYYY-MM-DD", "YYYY-MM" or "YYYY"
   as the source gives it, and null when the source carries no date. Never
   invent one, and never fill it with today's date to look current.
+- NAME WHO SAID IT. publisher is the source in a reader's words - "Choice",
+  "Rtings", "Sony", "ProductReview.com.au" - and null when the page names no
+  publisher. It is what lets the article attribute the claim instead of
+  asserting it.
+- KNOW YOUR AUSTRALIAN SOURCES. Choice's member reliability surveys ARE owner
+  evidence (owner-assessed, brand-level, sample size published) - tier them
+  "owner" and carry the sample size. Choice's lab results are "expert".
+  Canstar Blue is a commissioned paid panel that licenses award logos to the
+  brands it rates: tier it "aggregator", never "expert" or "owner", and never
+  file it as a testedClaim. Retailer reviews (JB Hi-Fi, The Good Guys,
+  Bunnings) count only where the review is a verified purchase and is neither
+  syndicated from another market nor written for an incentive; store-service
+  ratings ("delivery was fast") are not product evidence at all. For Health
+  topics there is no strong Australian owner corpus - say the sample is small
+  rather than inflating it.
 - amazonUrl: an Amazon PRODUCT page URL (amazon.com.au or amazon.com, containing
   /dp/ or /gp/product/) that you have actually seen in the evidence or in a
   search result — else null. A retailer or news site URL is NEVER an amazonUrl,
@@ -221,9 +239,27 @@ STRICT RULES:
 - competitorNotes describes what the top pages cover and where they are thin.
   It is the one field allowed to discuss them, and even there: no facts lifted,
   no URLs that will end up in the body.
+- OWNER COMPLAINTS CARRY A DENOMINATOR. A complaint counts when it says how
+  much of the corpus it speaks for - "37 of 412 ProductReview reviews mention
+  it", "9% of 1,076 owners surveyed" - and links the page it came from. Set
+  kind: "aggregate" for a published fault rate over a stated sample (with the
+  field window in recency) and kind: "quoted" for individual owner reports.
+  One aggregate rate is worth more than four picked-out quotes, and the gate
+  accepts it in their place.
+- whoShouldNotBuy ROUTES A BUYER, it does not condemn the product. Each entry
+  names a concrete situation ("makes milk drinks for two or more people"), a
+  reason tied to something someone measured, and where possible the
+  alternative - and carries the sourceUrl that reason came from. One real
+  exclusion is the bar. Never pad to a second: "not for everyone", "not for
+  beginners" and "too expensive" route nobody and are dropped in code.
+- PRICES ARE DATED THE DAY THEY WERE SEEN. dateChecked is when you saw that
+  price on that retailer's listing, never the publication date of the piece
+  and never today's date on a price you did not open.
 - Thin is better than invented. A stratum with three real findings beats one
   with eight you padded, and the pipeline checks these counts in code after
   you reply - a fabricated complaint fails a human reader instead of a counter.
+
+${describeBar(article.post_type, article.category)}
 
 Evidence, grouped by stratum (the floor, not the ceiling - check what matters
 before you file it):
@@ -233,21 +269,29 @@ Return JSON:
 {"summary": string (what the piece should say, 3-5 sentences),
  "facts": [{"fact": string, "sourceUrl": string,
             "tier": "primary"|"expert"|"owner"|"aggregator"|"unknown",
-            "date": string|null}] (10-18 concrete facts, spread across tiers),
+            "date": string|null, "publisher": string|null}] (10-18 concrete
+           facts, spread across tiers),
  "products": [{"name": string, "brand": string, "approxPrice": string,
                "amazonUrl": string|null, "goSlug": string, "notes": string}],
  "failureModes": [{"product": string, "failure": string (what actually breaks),
                    "timeframe": string (e.g. "after 6-12 months"),
                    "sourceUrl": string, "tier": "owner"|"expert"|"primary"|"aggregator"|"unknown"}],
- "whoShouldNotBuy": [{"audience": string (a specific buyer), "reason": string, "sourceUrl": string}],
+ "whoShouldNotBuy": [{"audience": string (a concrete buyer situation),
+                      "reason": string (tied to a measured attribute, and the
+                                alternative where there is one),
+                      "sourceUrl": string}],
  "ownerComplaints": [{"product": string, "complaint": string,
                       "volume": "isolated"|"recurring"|"widespread"|"unknown"
                                 (how much of the owner corpus says it),
                       "recency": string|null (YYYY / YYYY-MM / YYYY-MM-DD of the
                                  reviews saying it, null if undated),
+                      "denominator": string|null ("37 of 412 reviews",
+                                     "9% of 1,076 owners surveyed"),
+                      "kind": "quoted"|"aggregate",
                       "sourceUrl": string}],
  "priceObservations": [{"product": string, "value": number, "currency": string (ISO, usually "AUD"),
-                        "retailer": string (named), "dateChecked": string (YYYY-MM-DD),
+                        "retailer": string (named), "dateChecked": string
+                        (YYYY-MM-DD you saw this price),
                         "sourceUrl": string}],
  "testedClaims": [{"claim": string (what was measured, with the figure),
                    "source": string (who tested it, named), "year": number|null,
@@ -262,7 +306,13 @@ Return JSON:
 
   // Normalize defensively - downstream link integrity, tiering and the
   // evidence gate all depend on this shape being real rather than claimed.
-  return normaliseDossier(dossier);
+  //
+  // Then the gate, in code, on the normalised dossier: a piece that cannot
+  // clear its stratum minimums stops here rather than spending the outline,
+  // write, review and edit stages producing spec recitation. The throw is the
+  // route to `failed` — runStage's catch writes the status, the message and
+  // releases the claim already, so there is no second failure path to keep.
+  return assertEvidenceSufficient(normaliseDossier(dossier), article.post_type, article.category);
 }
 
 /**

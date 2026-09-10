@@ -1,26 +1,32 @@
-// The evidence gate as the worker actually reaches it: runStage on a claimed
-// article row, against a real Postgres, then the same row read back through
-// the admin API the panel calls.
+// The evidence gate where it actually lands: a real Postgres row, and the
+// admin API the operator panel reads it back through.
 //
-// The unit tests in agents/evidence.test.ts prove the gate's arithmetic. They
-// cannot prove that a thin dossier is stored before the stage throws, that the
-// article lands on 'failed' with the shortfall on it, or that the panel can
-// see which stratum was thin - all of which only happen in SQL. Point
-// DATABASE_URL at a throwaway server to run these.
+// The unit tests in content/evidence.test.ts prove the gate's arithmetic and
+// that a thin dossier throws. They cannot prove that the throw becomes a
+// failed card with the shortfall on it, or that a stratified dossier survives
+// the JSONB round trip with its tiers, dates and publishers intact - both of
+// those only happen in SQL. Point DATABASE_URL at a throwaway server to run
+// these.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
+// Before config.js is loaded: the stage below is driven to failure by a Claude
+// model with no credential, and an inherited token would turn that into a live
+// model call from a test suite that must never make one.
+delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+delete process.env.ANTHROPIC_API_KEY;
 
-const { pool, q, setSetting } = await import('../db/pool.js');
+const { getSetting, pool, q, setSetting } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
 const { runStage } = await import('./runner.js');
 const { createApp } = await import('../api/server.js');
-const { normaliseDossier } = await import('../agents/evidence.js');
+const { assertEvidenceSufficient, checkEvidence, normaliseDossier } = await import(
+  '../content/evidence.js'
+);
 
 import type { ArticleRow, ResearchDossier } from './types.js';
-import type { Researcher } from './runner.js';
 
 const reachable = await pool
   .query('SELECT 1')
@@ -28,15 +34,19 @@ const reachable = await pool
   .catch(() => false);
 const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to run these';
 
+/** The admin panel can store a Claude token too; if one is there, stand down. */
+const credentialled =
+  reachable && (await getSetting<{ claude_token?: string }>('llm', {})).claude_token;
+const modelSkip = credentialled
+  ? 'the database carries a Claude token - this test must not reach a live model'
+  : skip;
+
 const app = createApp();
 const AUTH = { Authorization: 'Bearer test-admin-token' };
 
 before(async () => {
   if (!reachable) return;
   await migrate();
-  // Keep the stage off the Claude engine: modelFor refuses to start a Claude
-  // stage without a credential, and this test is about the gate, not the model.
-  await setSetting('models', { researcher: 'gemini-2.5-flash' });
 });
 
 after(async () => {
@@ -50,6 +60,7 @@ function richDossier(): ResearchDossier {
     sourceUrl: `https://example.com/${tier}/${n}`,
     tier,
     date: '2026-04-01',
+    publisher: tier === 'primary' ? 'Dyson' : 'Choice',
   });
   return normaliseDossier({
     summary: 'Which cordless stick vacuum to buy, and which to walk away from.',
@@ -60,19 +71,21 @@ function richDossier(): ResearchDossier {
     ],
     products: [
       { name: 'Dyson V15 Detect', brand: 'Dyson', approxPrice: 'RRP A$1,549',
-        amazonUrl: null, goSlug: 'dyson-v15-detect', notes: '' },
+        amazonUrl: 'https://thegoodguys.com.au/dyson-v15', goSlug: 'Dyson V15 Detect!', notes: '' },
     ],
     failureModes: [1, 2, 3].map((n) => ({
       product: 'Dyson V15 Detect', failure: `clutch slips ${n}`,
       timeframe: 'after 6-12 months', sourceUrl: `https://productreview.com.au/f/${n}`, tier: 'owner',
     })),
-    whoShouldNotBuy: [1, 2].map((n) => ({
-      audience: `buyer ${n}`, reason: 'run time does not cover a three-bedroom house',
-      sourceUrl: `https://productreview.com.au/w/${n}`,
-    })),
+    whoShouldNotBuy: [
+      { audience: 'anyone vacuuming a three-storey townhouse',
+        reason: 'the run time does not cover a three-bedroom house in one charge',
+        sourceUrl: 'https://productreview.com.au/w/1' },
+    ],
     ownerComplaints: [1, 2, 3, 4].map((n) => ({
       product: 'Dyson V15 Detect', complaint: `battery drops to nine minutes ${n}`,
-      volume: 'recurring', recency: '2026-03', sourceUrl: `https://reddit.com/r/vacuums/${n}`,
+      volume: 'recurring', recency: '2026-03', denominator: `${n}7 of 412 reviews`,
+      kind: 'quoted', sourceUrl: `https://reddit.com/r/vacuums/${n}`,
     })),
     priceObservations: [1, 2, 3].map((n) => ({
       product: 'Dyson V15 Detect', value: 1149 + n, currency: 'AUD',
@@ -89,125 +102,125 @@ function richDossier(): ResearchDossier {
   });
 }
 
-/** A claimed article sitting at the research stage, exactly as the worker leaves it. */
-async function claimedArticle(postType = 'guide'): Promise<ArticleRow> {
+async function insertArticle(fields: Record<string, unknown> = {}): Promise<ArticleRow> {
+  const keys = ['title', 'category', 'post_type', ...Object.keys(fields)];
+  const values = [
+    `Best cordless stick vacuums ${randomUUID().slice(0, 8)}`,
+    'Home',
+    'guide',
+    ...Object.values(fields),
+  ];
   const [row] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, claimed_by, claimed_at)
-     VALUES ($1, 'Home', $2, 'research', 'running', 'test-worker', now()) RETURNING *`,
-    [`Best cordless stick vacuums ${randomUUID().slice(0, 8)}`, postType],
+    `INSERT INTO articles (${keys.join(', ')}) VALUES (${keys.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING *`,
+    values,
   );
   return row;
 }
-
-const researcherReturning =
-  (dossier: ResearchDossier): Researcher =>
-  async () =>
-    // A fresh copy per call: runStage stamps `sufficiency` onto what it gets.
-    JSON.parse(JSON.stringify(dossier)) as ResearchDossier;
 
 async function reload(id: string): Promise<ArticleRow> {
   return (await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [id]))[0];
 }
 
-test('a thin dossier fails the article instead of reaching the writer', { skip }, async () => {
-  const article = await claimedArticle('guide');
-  const specsOnly = {
-    ...richDossier(),
-    failureModes: [],
-    whoShouldNotBuy: [],
-    ownerComplaints: [],
-    priceObservations: [],
-    testedClaims: [],
-  };
+test('a stage that throws leaves the card failed, explained and unclaimed', { skip: modelSkip }, async () => {
+  // This is the route the gate's EvidenceGateError takes out of runResearcher:
+  // runStage has no second failure path, so what an operator sees on a thin
+  // dossier is whatever the thrown message says. Driving it with a stage that
+  // refuses to start (a Claude model with no credential) proves that route
+  // against a real row without a live model or a live Tavily.
+  await setSetting('models', { researcher: 'claude-opus-4-6' });
+  const article = await insertArticle({
+    stage: 'research', status: 'running', claimed_by: 'test-worker', claimed_at: new Date(),
+  });
 
-  await runStage(article, researcherReturning(specsOnly));
+  try {
+    await runStage(article);
+  } finally {
+    await setSetting('models', {});
+  }
 
   const failed = await reload(article.id);
   assert.equal(failed.status, 'failed');
-  assert.equal(failed.stage, 'research', 'a failed gate must not advance the stage');
-  assert.match(failed.error ?? '', /Evidence is too thin to write a guide from/);
-  assert.match(failed.error ?? '', /owner complaints 0\/4/);
-  assert.match(failed.error ?? '', /productreview\.com\.au/i);
-  assert.equal(failed.claimed_by ?? null, null, 'the claim is released so retry can pick it up');
-
-  // The dossier is stored even though the stage failed - that is what makes
-  // the shortfall inspectable instead of only "research failed".
-  assert.equal(failed.research?.sufficiency?.pass, false);
-  assert.equal(failed.research?.sufficiency?.counts.primaryFacts, 4);
-  assert.equal(failed.research?.sufficiency?.counts.ownerComplaints, 0);
-  assert.ok(
-    failed.research?.sufficiency?.shortfalls.some((s) => s.stratum === 'price'),
-    'the price stratum shortfall is recorded',
+  assert.equal(failed.stage, 'research', 'a failed stage must not advance the article');
+  assert.match(
+    failed.error ?? '',
+    /researcher is set to run on claude-opus-4-6/,
+    'the thrown message reaches the card verbatim',
   );
+  assert.equal(failed.claimed_by ?? null, null, 'the claim is released so retry can pick it up');
 
   const [session] = await q<{ status: string; error: string }>(
     `SELECT status, error FROM agent_sessions WHERE article_id = $1 AND agent = 'researcher'`,
     [article.id],
   );
   assert.equal(session.status, 'failed');
-  assert.match(session.error, /Evidence is too thin/);
+  assert.equal(session.error, failed.error);
 });
 
-test('a stratified dossier passes the gate and moves to the keyword stage', { skip }, async () => {
-  const article = await claimedArticle('guide');
-
-  await runStage(article, researcherReturning(richDossier()));
-
-  const passed = await reload(article.id);
-  assert.equal(passed.status, 'queued');
-  assert.equal(passed.stage, 'keyword');
-  assert.equal(passed.error ?? null, null);
-  assert.equal(passed.research?.sufficiency?.pass, true);
-  assert.deepEqual(passed.research?.sufficiency?.shortfalls, []);
-  assert.equal(passed.research?.ownerComplaints.length, 4);
-  assert.equal(passed.research?.priceObservations[0].currency, 'AUD');
-
-  const [session] = await q<{ status: string; summary: string }>(
-    `SELECT status, summary FROM agent_sessions WHERE article_id = $1 AND agent = 'researcher'`,
-    [article.id],
-  );
-  assert.equal(session.status, 'done');
-  assert.match(session.summary, /4 primary \/ 3 expert \/ 3 owner \/ 0 untiered/);
-  assert.match(session.summary, /4 owner complaint\(s\)/);
-});
-
-test('the same dossier is enough for an article and not for a guide', { skip }, async () => {
-  const trendPiece = {
+test('the message a failed card carries names the thin stratum and the fix', { skip }, async () => {
+  // What the operator would actually read, written to the column the panel
+  // renders. The gate produces it; runStage only relays it.
+  const specsOnly = {
     ...richDossier(),
-    failureModes: [],
-    whoShouldNotBuy: [],
-    priceObservations: [],
-    testedClaims: [],
-    ownerComplaints: richDossier().ownerComplaints.slice(0, 1),
+    failureModes: [], whoShouldNotBuy: [], ownerComplaints: [],
+    priceObservations: [], testedClaims: [],
   };
-
-  const asArticle = await claimedArticle('article');
-  await runStage(asArticle, researcherReturning(trendPiece));
-  assert.equal((await reload(asArticle.id)).stage, 'keyword');
-
-  const asGuide = await claimedArticle('guide');
-  await runStage(asGuide, researcherReturning(trendPiece));
-  assert.equal((await reload(asGuide.id)).status, 'failed');
-});
-
-test('the panel can read why the article failed on evidence', { skip }, async () => {
-  const article = await claimedArticle('guide');
-  await runStage(article, researcherReturning({ ...richDossier(), ownerComplaints: [] }));
+  const gate = checkEvidence(specsOnly, 'guide', 'Home');
+  const article = await insertArticle({
+    stage: 'research', status: 'failed', error: gate.message,
+  });
 
   const res = await app.fetch(
     new Request(`http://localhost/api/articles/${article.id}`, { headers: AUTH }),
   );
   assert.equal(res.status, 200);
-  const body = (await res.json()) as { article: ArticleRow };
+  const { article: seen } = (await res.json()) as { article: ArticleRow };
 
-  assert.equal(body.article.status, 'failed');
-  const sufficiency = body.article.research?.sufficiency;
-  assert.ok(sufficiency, 'the dossier the panel renders carries the gate verdict');
-  assert.equal(sufficiency.pass, false);
-  assert.equal(sufficiency.postType, 'guide');
-  assert.deepEqual(
-    sufficiency.shortfalls.map((s) => [s.stratum, s.have, s.need]),
-    [['owner', 0, 4]],
+  assert.equal(seen.status, 'failed');
+  assert.match(seen.error ?? '', /Evidence is too thin to write a guide from/);
+  assert.match(seen.error ?? '', /owner complaints with a named source and a denominator 0\/4/);
+  assert.match(seen.error ?? '', /dated price observations 0\/3/);
+  assert.match(seen.error ?? '', /ProductReview\.com\.au/i);
+});
+
+test('a stratified dossier survives JSONB with its tiers, dates and publishers', { skip }, async () => {
+  // The panel and (once it lands) the sources block read these keys back out
+  // of the column. A round trip that quietly drops `publisher` or flattens
+  // `sufficiency` would only ever show up here.
+  const dossier = assertEvidenceSufficient(richDossier(), 'guide', 'Home');
+  const article = await insertArticle({
+    stage: 'keyword', status: 'queued', research: JSON.stringify(dossier),
+  });
+
+  const res = await app.fetch(
+    new Request(`http://localhost/api/articles/${article.id}`, { headers: AUTH }),
   );
-  assert.match(sufficiency.checkedAt, /^\d{4}-\d{2}-\d{2}T/);
+  const { article: seen } = (await res.json()) as { article: ArticleRow };
+  const research = seen.research;
+
+  assert.ok(research);
+  assert.deepEqual(research.facts[0], {
+    fact: 'primary fact 1',
+    sourceUrl: 'https://example.com/primary/1',
+    tier: 'primary',
+    date: '2026-04-01',
+    publisher: 'Dyson',
+  });
+  assert.equal(research.ownerComplaints.length, 4);
+  assert.equal(research.ownerComplaints[0].denominator, '17 of 412 reviews');
+  assert.equal(research.priceObservations[0].currency, 'AUD');
+
+  const gate = research.sufficiency;
+  assert.ok(gate, 'the dossier the panel renders carries the gate verdict');
+  assert.equal(gate.pass, true);
+  assert.equal(gate.postType, 'guide');
+  assert.deepEqual(gate.shortfalls, []);
+  assert.equal(gate.counts.attributedOwnerComplaints, 4);
+  assert.equal(gate.counts.datedPriceObservations, 3);
+  assert.match(gate.checkedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+  // The two behaviours the assembler and SLE-62's picks depend on, through
+  // the same round trip: a normalised slug, and a non-Amazon URL dropped.
+  assert.equal(research.products[0].goSlug, 'dyson-v15-detect');
+  assert.equal(research.products[0].amazonUrl, null);
+  assert.match(research.products[0].notes, /non-Amazon URL dropped/);
 });

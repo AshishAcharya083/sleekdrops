@@ -71,18 +71,23 @@ const EVIDENCE_COUNTS: Array<[string, string]> = [
   ['aggregatorFacts', 'aggregator facts'],
   ['untieredFacts', 'untiered facts'],
   ['testedClaims', 'tested claims'],
-  ['ownerComplaints', 'owner complaints'],
+  ['attributedOwnerComplaints', 'attributed owner complaints'],
+  ['aggregateFaultRates', 'aggregate fault rates'],
   ['failureModes', 'failure modes'],
-  ['whoShouldNotBuy', 'who should not buy'],
+  ['groundedExclusions', 'sourced buyer exclusions'],
   ['datedPriceObservations', 'dated prices'],
   ['products', 'products'],
 ];
 
 /**
- * Why the research stage passed or stopped. A failed card used to say only
- * that research failed, which sends an operator back to re-run the same stage
- * and get the same dossier; this names the thin stratum and where that
- * evidence is gathered.
+ * The evidence density this piece was written from, as the deterministic gate
+ * measured it. A dossier that does not clear the bar never reaches the writer
+ * - the research stage stops the article and the shortfall is on the error
+ * banner above - so what this panel answers is the other question: an article
+ * that reads thin, and what its evidence actually looked like.
+ *
+ * The shortfall table renders whatever verdict the stored dossier carries; it
+ * is the panel's job to show the document, not to assume it passed.
  */
 function EvidenceSection({ research }: { research: ResearchDetail }) {
   const gate = research.sufficiency;
@@ -101,9 +106,10 @@ function EvidenceSection({ research }: { research: ResearchDetail }) {
           ))}
         </div>
         <p className="muted" style={{ marginBottom: 0, fontSize: 12 }}>
-          Deterministic gate, run in code after the dossier was synthesised. Checked{' '}
-          {fmtTime(gate.checkedAt)}. A {gate.postType} that clears it carries owner complaints,
-          failure modes and dated prices - the material a spec sheet cannot supply.
+          Deterministic gate, run in code at the end of research. Checked {fmtTime(gate.checkedAt)}.
+          A {gate.postType} clears it by carrying attributed owner complaints, failure modes and
+          dated prices - the material a spec sheet cannot supply. A piece that came up short failed
+          at research instead, with the thin strata named on its error.
         </p>
       </div>
       {gate.shortfalls.length > 0 && (
@@ -331,7 +337,11 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
             </div>
 
             {detail.article.error && (
-              <div className="error-banner" style={{ marginTop: 12 }}>
+              // pre-wrap because the evidence gate's message is a list: which
+              // stratum came up short, and where that evidence is gathered.
+              // Collapsed to one line it is unreadable at exactly the moment
+              // an operator needs to read it.
+              <div className="error-banner" style={{ marginTop: 12, whiteSpace: 'pre-wrap' }}>
                 {detail.article.error}
               </div>
             )}

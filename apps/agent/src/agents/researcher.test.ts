@@ -10,7 +10,7 @@ const complete: ResearchDossier = {
   summary: 'The 2026 Galaxy Z line, and which of the three to buy.',
   facts: [
     { fact: 'Announced 22 July 2026', sourceUrl: 'https://news.samsung.com/au/x',
-      tier: 'primary', date: '2026-07-22' },
+      tier: 'primary', date: '2026-07-22', publisher: 'Samsung' },
   ],
   products: [
     { name: 'Galaxy Z Fold 8', brand: 'Samsung', approxPrice: 'A$2,699',

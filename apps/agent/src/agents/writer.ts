@@ -62,16 +62,6 @@ Research dossier (your ONLY source of facts — every one of these has been
 checked against a primary source already, so use it and never reach past it):
 ${JSON.stringify(article.research, null, 2)}
 
-The dossier is gathered in strata, and the owner-experience strata are the
-reason this piece can say anything a spec sheet cannot. Spend real words on
-failureModes, ownerComplaints (say how widespread and how recent), testedClaims
-(name who measured it and when) and whoShouldNotBuy - a recommendation that
-never names who should walk away is the templated reading we are fixing. Each
-fact carries a tier: attribute a "primary" fact to the maker, an "expert" one
-to the reviewer who measured it, an "owner" one to owners. A fact tiered
-"unknown" or "aggregator" is not load-bearing - leave it out rather than
-attributing it to a source you cannot name.
-
 The dossier's competitorNotes tell you what the pages you are outranking cover.
 They are there so you can be better, not so you can borrow: no competing
 article gets named, quoted, linked or paraphrased in the body, and none of them
