@@ -201,15 +201,33 @@ test('the article names its list of picks as what the page is about', () => {
   });
 });
 
-test('a pick carries no price, because the page never prints one', () => {
-  // The research states an approximate/RRP figure that no reader ever sees.
-  // Marking it up would describe content that is not on the page, and would
-  // put a stale number into search results as this page's authoritative price.
+test("every priced pick carries an Offer in the post's own currency", () => {
+  const list = node(buildArticleSchema(guide(), author, HEADINGS), 'ItemList');
+  const elements = list.itemListElement as Node[];
+
+  assert.deepEqual((elements[0].item as Node).offers, {
+    '@type': 'Offer',
+    priceCurrency: 'AUD',
+    price: '1199',
+    availability: 'https://schema.org/InStock',
+    url: 'https://sleekdrops.com/go/shark-detect-pro',
+  });
+  // The price as the dossier stated it, whatever shape it came in.
+  assert.equal(((elements[1].item as Node).offers as Node).price, '1099.00');
+  // No figure in the research, so no Offer rather than an invented one.
+  assert.equal('offers' in (elements[2].item as Node), false);
+
   const json = JSON.stringify(buildArticleSchema(guide(), author, HEADINGS));
-  assert.ok(!json.includes('offers'), 'no Offer node on a page with no price');
-  assert.ok(!json.includes('1199'), "the dossier's figure never reaches the markup");
-  assert.ok(!json.includes('priceCurrency'));
-  assert.ok(!json.includes('USD'));
+  assert.ok(!json.includes('USD'), 'the currency comes from the post, never a hardcoded USD');
+});
+
+test('a guide written before the currency field existed still prices its picks in AUD', () => {
+  const list = node(
+    buildArticleSchema(guide({ currency: undefined }), author, HEADINGS),
+    'ItemList',
+  );
+  const offer = ((list.itemListElement as Node[])[0].item as Node).offers as Node;
+  assert.equal(offer.priceCurrency, 'AUD');
 });
 
 test('no rating is applied to a product we earn commission on', () => {

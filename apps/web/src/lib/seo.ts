@@ -150,12 +150,11 @@ function citationNode(source: SourceData): WebPage {
 /**
  * The number out of a price as it was stated ("A$2,699", "around $180"). Null
  * when there is no number in it — an offer with an invented price is worse
- * than no offer at all.
+ * than no offer at all, so a pick or product with no parseable figure simply
+ * ships no `offers`.
  *
  * A currency symbol wins over any other number in the string, so "2026 model,
  * $199" prices the model at 199 rather than at the year.
- *
- * Only ever applied to a price the page itself displays; see `productNode`.
  */
 function parsePrice(stated: string | undefined): string | null {
   const cleaned = stated?.replace(/,/g, '');
@@ -361,25 +360,42 @@ function pickAnchors(body: string, headings: PostHeading[]): Map<string, string>
 }
 
 /**
- * A recommended pick as a Product node.
+ * The Offer behind a pick: the researched figure in the post's own currency,
+ * pointing at the `/go/` hop that is the only destination the site has. Null
+ * when the research stated no parseable number: an Offer with no price is not
+ * a product entity, and an invented one is worse.
  *
- * Deliberately carries no `offers`. The research states an approximate or RRP
- * figure, the page never prints it, and Google's structured-data policies
- * require markup to describe content the reader can actually see — a price
- * that exists only in the markup is the pattern they suppress rich results
- * for, and an Amazon-derived figure baked into a static build would breach the
- * Associates 24-hour refresh rule besides. If a live, displayed price ever
- * lands on the page, an Offer mirroring it exactly is the change to make.
- *
- * No `aggregateRating` either: we earn commission on this product, so a rating
- * we award ourselves is the self-serving markup the same guidelines exclude.
+ * The figure is the dossier's approximate/RRP price, which the body itself no
+ * longer prints (see `docs/seo-ai-discoverability-review-2026-09.md` §3.3), so
+ * it is a stated-at-publication price rather than a live one.
  */
-function productNode(pick: PickData, pageUrl: string): ProductSchema {
+function offerNode(pick: PickData, currency: string): Offer | null {
+  const price = parsePrice(pick.price);
+  if (price === null) return null;
+  return {
+    '@type': 'Offer',
+    priceCurrency: currency,
+    price,
+    availability: 'https://schema.org/InStock',
+    url: absoluteUrl(`/go/${pick.goSlug}`),
+  };
+}
+
+/**
+ * A recommended pick as a Product node, with the Offer that makes it a
+ * resolvable product entity rather than a bare name.
+ *
+ * No `aggregateRating`: we earn commission on this product, so a rating we
+ * award ourselves is the self-serving markup Google's guidelines exclude.
+ */
+function productNode(pick: PickData, pageUrl: string, currency: string): ProductSchema {
+  const offers = offerNode(pick, currency);
   return {
     '@type': 'Product',
     '@id': `${pageUrl}#pick-${pick.goSlug}`,
     name: pick.name,
     ...(pick.brand ? { brand: { '@type': 'Brand', name: pick.brand } } : {}),
+    ...(offers ? { offers } : {}),
   };
 }
 
@@ -397,6 +413,9 @@ function buildPickList(
 
   const url = postUrl(post);
   const anchors = pickAnchors(post.body, headings);
+  // The post says what it is priced in; AUD only as the fallback for a post
+  // written before the field existed.
+  const currency = post.data.currency ?? DEFAULT_CURRENCY;
   return {
     id: `${url}#picks`,
     node: {
@@ -412,7 +431,7 @@ function buildPickList(
           '@type': 'ListItem',
           position: index + 1,
           ...(anchor ? { url: `${url}#${anchor}` } : {}),
-          item: productNode(pick, url),
+          item: productNode(pick, url, currency),
         };
       }),
     },

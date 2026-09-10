@@ -74,9 +74,9 @@ export const pickSchema = z.object({
   name: z.string().min(1),
   brand: z.string().min(1).optional(),
   /**
-   * As the research stated it, e.g. "A$229". Approximate and undisplayed, so
-   * it is deliberately NOT emitted as an `offers.price` (see src/lib/seo.ts);
-   * it is here for the editorial surfaces that show a figure beside the pick.
+   * As the research stated it, e.g. "A$229". The digits are parsed out into
+   * the pick's `offers.price` (see src/lib/seo.ts); a pick with no parseable
+   * figure ships no Offer.
    */
   price: z.string().min(1).optional(),
   goSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
@@ -133,7 +133,7 @@ export const blogFrontmatterSchema = z
     entities: z.array(z.string().min(1)).optional(),
     /** Recommended products — the ItemList on guides and roundups. */
     picks: z.array(pickSchema).optional(),
-    /** ISO 4217 code any price this post displays is quoted in. */
+    /** ISO 4217 code every price this post quotes is in. */
     currency: z.string().min(1).default('AUD'),
     featured: z.boolean().default(false),
     draft: z.boolean().default(false),

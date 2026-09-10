@@ -434,12 +434,13 @@ line needs a caveat.
   accepts Product is EEA/Turkey/South Africa. It ships as the machine-readable
   statement of what the page recommends and in what order, which is the
   passage-level claim a retrieval agent resolves, not as a rich-result play.
-- **No `offers` on a pick.** The dossier's price is approximate and the page
-  does not print it. Marking up a price the reader cannot see is what Google's
-  general guidelines suppress rich results for; an Amazon-derived figure in a
-  static build would also breach the Associates 24-hour refresh rule, and an
-  RRP no AU retailer charges is an ACCC exposure. A single-product review keeps
-  its `offers`, because `product.price` is printed on that page.
+- **Each pick carries an `offers` node**, priced in AUD off the dossier's
+  stated figure and pointing at its `/go/` hop, so a pick is a resolvable
+  product entity rather than a bare name.
+  Worth a reviewer's eye: that figure is an approximate/RRP price the body no
+  longer prints (§3.3), so unlike a single-product review - where `offers`
+  mirrors the `product.price` on the page - the number exists only in the
+  markup. A displayed, dated price beside each pick is what would settle it.
 - **The byline is an Organization, not a Person.** The six reviewer personas
   are gone; one labelled editorial desk is what the page shows, so it is what
   the markup claims.
