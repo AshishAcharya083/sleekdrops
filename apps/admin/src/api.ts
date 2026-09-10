@@ -163,10 +163,25 @@ export interface SeoReviewDetail {
   pass: boolean;
   issues: Array<{ severity: string; issue: string; fix: string }>;
   summary: string;
-  /** Per-axis scores. Absent on reviews written before dimensional scoring. */
-  dimensions?: { seo: number; geo: number; voice: number; eeat: number; links: number };
+  /**
+   * Per-axis scores. Absent on reviews written before dimensional scoring, and
+   * carrying the pre-rebuild axes (seo, geo, voice, eeat, links) on reviews
+   * written before the reviewer graded against competitors. Kept as an open
+   * record so the panel renders whichever axes a review actually has.
+   */
+  dimensions?: Record<string, number>;
   /** Deterministic anti-slop scan that ran before the model saw the draft. */
   slop?: { score: number; words: number; findings: number };
+  /** What the piece adds over the top results the keyword stage captured. */
+  competitorDelta?: {
+    comparedWith: string[];
+    additions: Array<{ claim: string; absentFrom: string; evidence: string }>;
+    duplicated: string[];
+    verdict: string;
+    notes: string;
+  };
+  /** Specifics checked against the dossier, and how many it did not carry. */
+  claimAudit?: { checked: number; unsupported: number };
 }
 
 /**

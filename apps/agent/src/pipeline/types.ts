@@ -427,23 +427,53 @@ export interface SeoReview {
   summary: string;
   /**
    * Per-dimension scores. One number hid which axis was failing, so an editor
-   * pass had to guess; these say whether the problem is search, citability,
-   * voice, trust or the affiliate contract.
+   * pass had to guess.
+   *
+   * The axes are what a demanding editor would grade, not what our own writing
+   * rules cover: the old set (seo, geo, voice, eeat, links) scored the draft
+   * against the checklist the writer was handed, which rewarded conformity to
+   * the template. Voice left the set entirely - the deterministic scanner
+   * measures it, and the composite is capped by that score.
+   *
+   * Optional, and reviews written before the restructure carry the old keys.
+   * Every consumer renders whatever keys it finds rather than naming them.
    */
   dimensions?: {
-    /** Classic search: keyword placement, headings, intent match, depth. */
-    seo: number;
-    /** Generative-engine citability: extractable answers, sourcing, entities. */
-    geo: number;
-    /** Reads human. Mirrors the deterministic anti-slop scan. */
-    voice: number;
-    /** Experience, expertise, authority, trust. */
-    eeat: number;
+    /** Specifics traceable to the dossier, sourced by name, dated where it matters. */
+    evidence: number;
+    /** Does the piece argue something and pay for it - real cons, a named loser. */
+    position: number;
+    /** Fit to the structure shape it was commissioned in, not the house skeleton. */
+    structure: number;
+    /** What a generative engine can lift: extractable answers, entities, FAQ, recency. */
+    citability: number;
     /** /go/ link contract and placement rules. */
     links: number;
   };
   /** Deterministic anti-slop scan, run before the model sees the draft. */
   slop?: { score: number; words: number; findings: number };
+  /**
+   * What this piece gives a reader that the keyword plan's captured top
+   * results do not. Absent when the plan captured no competitors to grade
+   * against, and on reviews written before the delta pass existed.
+   */
+  competitorDelta?: {
+    comparedWith: string[];
+    additions: Array<{ claim: string; absentFrom: string; evidence: string }>;
+    duplicated: string[];
+    verdict: 'adds-substantially' | 'adds-marginally' | 'adds-nothing';
+    notes: string;
+  };
+  /** Specifics checked against the dossier; the unsupported ones are filed as issues. */
+  claimAudit?: { checked: number; unsupported: number };
+  /** Whether the piece argues anything, and whether its cons cost the buyer something. */
+  positionCheck?: {
+    takesStance: boolean;
+    stance: string;
+    recommendsEverythingEqually: boolean;
+    picks: Array<{ pick: string; cons: string[]; hedged: boolean }>;
+    notes: string;
+  };
   /** Set by the runner when revision rounds ran out but we shipped anyway. */
   forcedThrough?: boolean;
 }
