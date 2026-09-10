@@ -106,6 +106,29 @@ test('editorial hubs are listed only once there is content to list', () => {
   assert.equal(some.filter('https://sleekdrops.com/about'), true, 'everything else is untouched');
 });
 
+test('a desk archive is listed only once that desk has published something', () => {
+  // Beat desks land empty and fill up as the pipeline publishes under them. An
+  // archive with nothing in it is as thin as a one-post tag page, so it stays
+  // out until it lists something; the page noindexes itself on the same test.
+  const policy = createSitemapPolicy([
+    post('a', { pubDate: '2026-08-01', author: 'tech-desk' }),
+    post('b', { pubDate: '2026-08-02', author: 'mira' }),
+  ]);
+  assert.equal(policy.filter('https://sleekdrops.com/author/tech-desk'), true);
+  assert.equal(policy.filter('https://sleekdrops.com/author/value-desk'), false);
+  assert.equal(
+    policy.filter('https://sleekdrops.com/author/desk'),
+    true,
+    'the legacy ids older posts carry resolve onto the general desk',
+  );
+  const techOnly = createSitemapPolicy([post('a', { pubDate: '2026-08-01', author: 'tech-desk' })]);
+  assert.equal(
+    techOnly.filter('https://sleekdrops.com/author/desk'),
+    false,
+    'the general desk is listed only when it has an archive of its own',
+  );
+});
+
 test('time-sensitive deal and promo hubs are not advertised in the sitemap', () => {
   const policy = createSitemapPolicy([post('a', { pubDate: '2026-08-01' })]);
   assert.equal(policy.filter('https://sleekdrops.com/deals'), false);
@@ -130,8 +153,9 @@ test('lastmod follows the content each route lists', () => {
   assert.equal(lastmod('/category/home'), '2026-08-20');
   assert.equal(lastmod('/tag/australia'), '2026-09-04');
   assert.equal(lastmod('/tag/bluetooth-speakers'), '2026-05-30');
-  assert.equal(lastmod('/author/desk'), '2026-09-04');
+  assert.equal(lastmod('/author/desk'), '2026-09-04', 'the legacy ids resolve onto the general desk');
   assert.equal(lastmod('/author/mira'), undefined, 'legacy author archives are no longer public routes');
+  assert.equal(lastmod('/author/tech-desk'), undefined, 'a desk with nothing published has no date');
   assert.equal(lastmod('/guides'), '2026-08-20');
   assert.equal(lastmod('/reviews'), undefined, 'nothing listed, nothing changed');
   assert.equal(lastmod('/about'), undefined, 'static pages carry no date we can vouch for');

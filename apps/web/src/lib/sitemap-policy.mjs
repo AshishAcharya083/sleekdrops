@@ -26,6 +26,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { resolveAuthorId } from '../data/authors.ts';
+
 /** A tag page needs this many live posts before it is worth a crawler's time. */
 export const MIN_TAG_POSTS = 3;
 
@@ -135,6 +137,10 @@ export function createSitemapPolicy(posts) {
   const byTag = group((post) => post.tags.map(slugify));
   const byCategory = group((post) => (post.category ? [slugify(post.category)] : []));
   const byType = group((post) => [post.postType]);
+  // Keyed by the desk a post publishes under, so the legacy ids older posts
+  // carry land on the archive that actually lists them - the same mapping
+  // `getPostsByAuthor` uses, so the sitemap and the page cannot disagree.
+  const byAuthor = group((post) => (post.author ? [resolveAuthorId(post.author)] : []));
 
   const pathOf = (url) => {
     const pathname = url.startsWith('http') ? new URL(url).pathname : url;
@@ -169,6 +175,9 @@ export function createSitemapPolicy(posts) {
       if (tag !== undefined) return isIndexableTag(byTag.get(tag)?.length ?? 0);
       if (new RegExp(`^/reviews${PAGE_SUFFIX}$`).test(path)) return (byType.get('review')?.length ?? 0) > 0;
       if (new RegExp(`^/guides${PAGE_SUFFIX}$`).test(path)) return (byType.get('guide')?.length ?? 0) > 0;
+      // A desk archive with nothing in it is as thin as a one-post tag page.
+      const author = first(/^\/author\/([^/]+)$/, path);
+      if (author !== undefined) return (byAuthor.get(author)?.length ?? 0) > 0;
       if (path === '/deals' || path === '/promos') return false;
       return true;
     },

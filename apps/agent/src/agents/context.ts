@@ -1,7 +1,8 @@
 // Shared editorial context injected into every agent prompt — the pipeline
 // equivalent of devteam-platform's global agent instructions.
-import { AUTHORS, CATEGORIES, POST_TYPES } from '../content/contract.js';
-import type { KeywordPlan, TopicRow } from '../pipeline/types.js';
+import { AUTHORS, type AuthorProfile, CATEGORIES, POST_TYPES } from '../content/contract.js';
+import { describeArticleShape } from '../pipeline/types.js';
+import type { EditorialAngle, KeywordPlan, TopicRow } from '../pipeline/types.js';
 
 /** Today in the audience's timezone (Australia/Sydney), e.g. "2026-07-13". */
 export function todayInSydney(): string {
@@ -37,7 +38,9 @@ Post types the pipeline may produce: ${POST_TYPES.join(', ')}.
 - roundup: "Top N" listicle with clear scoring rationale.
 (Never produce postType "review" — reviews require weeks of hands-on use and are human-written.)
 
-Authors (pick whoever fits the beat):
+Bylines. Every one is an accountable team desk, never an invented person:
+never claim hands-on testing, a personal history or a credential for any of
+them. The angle stage picks which desk carries a piece, on beat and thesis.
 ${AUTHORS.map((a) => `- ${a.id}: ${a.name} — ${a.beat}`).join('\n')}
 `.trim();
 }
@@ -311,4 +314,71 @@ export function keywordPlanBrief(plan: KeywordPlan | null): string {
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+/**
+ * The editorial angle for a downstream prompt. The outliner, writer, editor
+ * and reviewer all get this, and all get the same view of it - one record of
+ * what the piece is trying to do, rather than four stages each inferring it
+ * from the dossier and arriving somewhere slightly different.
+ *
+ * When the angle stage found no defensible take it says so here, in those
+ * words. A writer told "there is no contrarian take, compete on evidence" runs
+ * a completeness play; a writer told nothing invents a position and defends it
+ * with whatever is to hand, which is the failure mode this whole stage exists
+ * to prevent.
+ */
+export function editorialAngleBrief(angle: EditorialAngle | null): string {
+  if (!angle) return '';
+  const parts = [
+    'EDITORIAL ANGLE - decided before the piece was outlined. This is what the',
+    'article argues, and every stage after it is held to this record.',
+    `Thesis: ${angle.thesis}`,
+    `Reader served: ${angle.reader}`,
+  ];
+  parts.push(
+    angle.defensible
+      ? `The take - what a reader would not get from the top results: ${angle.contrarianTake}`
+      : `NO DEFENSIBLE CONTRARIAN TAKE. ${angle.weakness}
+Do not manufacture one. This piece competes on evidence the top results do not
+carry - completeness, sourcing and honest exclusions - and it says nothing it
+cannot prove. An invented position is the one thing worse than no position.`,
+  );
+  if (angle.informationGain.length > 0) {
+    parts.push(
+      `What this piece says that the top results do not - land every one of these:\n${angle.informationGain
+        .map(
+          (g) =>
+            `  - ${g.claim}${g.absentFrom ? ` (absent from ${g.absentFrom})` : ''}${g.evidence ? `\n    Evidence: ${g.evidence}` : ''}`,
+        )
+        .join('\n')}`,
+    );
+  }
+  parts.push(
+    `Structural shape: ${angle.shape} - ${describeArticleShape(angle.shape)}`,
+    `Why this shape: ${angle.shapeRationale}`,
+    `Do NOT fall back to the house skeleton. The shape above is the silhouette
+this piece takes; a reader who reads two SleekDrops articles must not feel the
+same running order under both.`,
+  );
+  return parts.join('\n');
+}
+
+/**
+ * The one desk's voice the writer is matching. Only the selected byline's
+ * specimen goes into a prompt - handing a writer four voices produces the
+ * average of them, which is the house voice we already have.
+ */
+export function authorVoiceBrief(author: AuthorProfile): string {
+  return `BYLINE VOICE - this piece is published as ${author.name} (${author.id}).
+Write it in that desk's voice, not the site's generic one.
+Beat: ${author.beat}
+Sentence rhythm: ${author.voice.rhythm}
+Vocabulary: ${author.voice.vocabulary}
+What this desk always checks: ${author.voice.cares}
+
+A paragraph in this desk's voice. Match its texture - sentence lengths, where
+it breaks, how it states a figure. Never reuse its facts: they are illustrative
+and belong to another product.
+"${author.voice.specimen}"`;
 }

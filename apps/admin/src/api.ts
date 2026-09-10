@@ -115,6 +115,23 @@ export interface KeywordPlan {
   rejected: Array<{ keyword: string; reason: string }>;
 }
 
+/**
+ * The angle stage's record - what the piece argues, decided before it was
+ * outlined. Mirrors EditorialAngle in the agent app.
+ */
+export interface EditorialAngle {
+  thesis: string;
+  reader: string;
+  defensible: boolean;
+  contrarianTake: string;
+  weakness: string;
+  informationGain: Array<{ claim: string; absentFrom: string; evidence: string }>;
+  shape: string;
+  shapeRationale: string;
+  byline: string;
+  bylineRationale: string;
+}
+
 export interface SeoReviewDetail {
   score: number;
   pass: boolean;
@@ -152,6 +169,7 @@ export interface ArticleDetail {
     hero_alt: string | null;
     research: ResearchDetail | null;
     keyword_plan: KeywordPlan | null;
+    editorial_angle: EditorialAngle | null;
     outline: unknown;
     draft_md: string | null;
     seo_review: SeoReviewDetail | null;

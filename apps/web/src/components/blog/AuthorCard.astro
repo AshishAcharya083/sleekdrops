@@ -7,6 +7,9 @@ import { authorInitials, type Author } from '@data/authors';
  */
 export interface Props { author: Author; }
 const { author } = Astro.props;
+// "the Tech Desk", not "the SleekDrops Tech Desk" - the masthead is already
+// on the page above this card.
+const deskName = author.name.replace(/^SleekDrops /, '');
 ---
 <aside class="author-card">
   <div class="avatar" aria-hidden="true">{authorInitials(author)}</div>
@@ -14,7 +17,7 @@ const { author } = Astro.props;
     <div class="role">{author.role}</div>
     <h4>{author.name}</h4>
     <p>{author.bio}</p>
-    <a href={`/author/${author.id}`}>All posts by the Editorial Desk →</a>
+    <a href={`/author/${author.id}`}>All posts by the {deskName} →</a>
   </div>
 </aside>
 

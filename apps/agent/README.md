@@ -12,15 +12,16 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 | 1 | `topic_scout` | (out of band) | Sweeps the live web (Tavily) for trending products/topics **not covered before** (checks D1 posts + every prior suggestion), **verifies each candidate is still current** with its own search, writes suggestions for the admin |
 | 2 | `researcher` | research | Plans and runs its searches in five strata (primary/manufacturer, independent expert, owner reviews and long-term complaints, price and availability, competing coverage) and fills each dossier field from its own stratum: tiered and dated facts, failure modes, who should not buy, attributed owner complaints, dated price observations, tested claims, products (non-Amazon "amazonUrl"s are dropped deterministically), keywords, competitor gap. **Every price and spec is checked against a primary source** before it is filed, and a **deterministic evidence gate** fails the article here rather than letting a spec-sheet dossier reach the writer |
 | 3 | `keyword_strategist` | keyword | **Reads the live SERP** for 4 candidate queries and picks the one we can win: intent, difficulty, zero-click risk, SERP features, the top 3 to beat, the gaps they leave, PAA questions, entities, snippet target, word-count target |
-| 4 | `outliner` | outline | SEO content brief executing that plan: ≤60-char title, dek, slug, H2/H3 outline, mandatory FAQ |
-| 5 | `writer` | write | Full markdown draft in the site voice; answer-first sections, sourced claims, products linked only as `/go/<slug>` with mandated placements (tables, per-product CTAs, conclusion) |
-| 6 | `seo_reviewer` | seo_review | Deterministic anti-slop scan **first**, then a scored review across five dimensions (search / generative-engine / voice / E-E-A-T / links) → pass/fail verdict. **Fact-checks the riskiest claims** against live sources as part of E-E-A-T |
-| 7 | `editor` | edit | Surgical revision resolving the reviewer's issues, the voice-scan findings and any admin feedback (loops with the reviewer, bounded by `max_revision_rounds`) |
-| 8 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
-| 9 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter. Stands down entirely when the operator attached their own image, and skips itself when `GCS_IMAGES_BUCKET` is unset |
-| 10 | `publisher` | publish | Upserts D1 `posts` + `affiliate_links`, fires the `content-updated` dispatch → site rebuilds |
+| 4 | `angle_editor` | angle | **Decides what the piece argues** before it is outlined: the thesis, the specific reader, the contrarian or non-obvious take, what this piece says that the top-3 results do not, the structural shape and the byline. Grounded in the dossier and the plan's competitor reads only — a topic with no defensible take is **recorded as having none** rather than given a fabricated one |
+| 5 | `outliner` | outline | SEO content brief executing that plan: ≤60-char title, dek, slug, H2/H3 outline, mandatory FAQ |
+| 6 | `writer` | write | Full markdown draft in the site voice; answer-first sections, sourced claims, products linked only as `/go/<slug>` with mandated placements (tables, per-product CTAs, conclusion) |
+| 7 | `seo_reviewer` | seo_review | Deterministic anti-slop scan **first**, then a scored review across five dimensions (search / generative-engine / voice / E-E-A-T / links) → pass/fail verdict. **Fact-checks the riskiest claims** against live sources as part of E-E-A-T |
+| 8 | `editor` | edit | Surgical revision resolving the reviewer's issues, the voice-scan findings and any admin feedback (loops with the reviewer, bounded by `max_revision_rounds`) |
+| 9 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
+| 10 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter. Stands down entirely when the operator attached their own image, and skips itself when `GCS_IMAGES_BUCKET` is unset |
+| 11 | `publisher` | publish | Upserts D1 `posts` + `affiliate_links`, fires the `content-updated` dispatch → site rebuilds |
 
-Flow: `research → keyword → outline → write → seo_review ⇄ edit → assemble → image → publish`.
+Flow: `research → keyword → angle → outline → write → seo_review ⇄ edit → assemble → image → publish`.
 
 An article that fails the evidence gate stops at `research` with `status =
 'failed'` and a message naming each thin stratum, what it found against what
@@ -131,7 +132,7 @@ Every LLM call goes through `src/llm/`, which routes on the model id:
 | Engine | Models | Runs | Auth |
 | --- | --- | --- | --- |
 | **Gemini** (Google ADK) | everything not `claude-*` (default `gemini-2.5-flash`) | image agent, plus every other stage when the toggle says so | admin-set AI Studio key → Vertex ADC (`GOOGLE_GENAI_USE_VERTEXAI=true`, keyless on Cloud Run) → `GEMINI_API_KEY` |
-| **Claude subscription** (Claude Agent SDK) | `claude-*` (default **`claude-opus-5`**) | every stage that runs a prompt: topic scout, researcher, keyword strategist, outliner, writer, SEO reviewer, editor — switchable in Settings | `claude setup-token` → paste in admin Settings, or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` in `.env` |
+| **Claude subscription** (Claude Agent SDK) | `claude-*` (default **`claude-opus-5`**) | every stage that runs a prompt: topic scout, researcher, keyword strategist, angle editor, outliner, writer, SEO reviewer, editor — switchable in Settings | `claude setup-token` → paste in admin Settings, or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` in `.env` |
 
 The subscription token only works through the Agent SDK/CLI — it is not an API
 key, which is why the Claude engine is a separate execution path.
@@ -182,7 +183,7 @@ source rather than a snippet. On Gemini it is Google Search grounding, which
 costs the forced-JSON response type — those stages ask for JSON in the prompt
 and lean on `extractJson`, which already handles a fenced reply.
 
-**The writer, the editor and the outliner have no web access, deliberately.**
+**The angle editor, the outliner, the writer and the editor have no web access, deliberately.**
 They work from the dossier the research and review stages verified. A writer
 that could search would pull in sources nobody reviewed and reach for the
 competing articles sitting at the top of every result page — the pages the

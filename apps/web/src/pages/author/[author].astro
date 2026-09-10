@@ -19,10 +19,22 @@ interface Props { author: Author; }
 const { author } = Astro.props;
 const posts: BlogPost[] = await getPostsByAuthor(author.id);
 
+// "SleekDrops Tech Desk" with the masthead italicised, whatever the desk is
+// called. Escaped because the hero renders it with set:html.
+const escape = (value: string) =>
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const titleHtml = author.name.startsWith('SleekDrops ')
+  ? `<em>SleekDrops</em> ${escape(author.name.slice('SleekDrops '.length))}`
+  : escape(author.name);
+
 const meta = buildMeta({
   title: `${author.name} — ${author.role}`,
   description: author.bio,
   pathname: `/author/${author.id}`,
+  // A desk that has not published yet has an archive with nothing in it, which
+  // is a thin page however accurate its bio. Noindex until it lists something;
+  // the sitemap leaves the same pages out, on the same test.
+  noindex: posts.length === 0,
 });
 ---
 <BaseLayout
@@ -43,7 +55,7 @@ const meta = buildMeta({
 
   <ListingHero
     eyebrow={author.role}
-    titleHtml="<em>SleekDrops</em> Editorial Desk"
+    titleHtml={titleHtml}
     dek={author.bio}
     stats={[
       { num: String(posts.length), lbl: 'Posts' },

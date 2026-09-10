@@ -3,6 +3,7 @@
 export type Stage =
   | 'research'
   | 'keyword'
+  | 'angle'
   | 'outline'
   | 'write'
   | 'seo_review'
@@ -33,6 +34,8 @@ export interface ArticleRow {
   research: ResearchDossier | null;
   /** Live SERP read: which keyword we're built to win, and what it takes. */
   keyword_plan: KeywordPlan | null;
+  /** What the piece argues, who for, and the shape that argument takes. */
+  editorial_angle: EditorialAngle | null;
   outline: ContentBrief | null;
   draft_md: string | null;
   seo_review: SeoReview | null;
@@ -273,6 +276,97 @@ export interface KeywordPlan {
   metaDescription: string;
   /** Candidates that lost, and why — shown in the admin panel. */
   rejected: Array<{ keyword: string; reason: string }>;
+}
+
+/**
+ * The structural shapes a piece may take. The list exists to stop every
+ * article on the site coming out of one skeleton: a "best X" guide that opens
+ * with the winner and defends it is a different document from one that splits
+ * by buyer, and a reader who reads two of ours should not feel the same
+ * silhouette under both.
+ *
+ * The value is a one-line description because it is rendered straight into the
+ * outliner's prompt - the shape has to arrive as an instruction, not as an id.
+ */
+export const ARTICLE_SHAPES = {
+  'verdict-first':
+    'Open with the single pick and spend the piece defending it; every other contender is a counter-argument to answer.',
+  'segmented-buyers':
+    'One section per kind of buyer. The pick changes per segment and the piece says who each one is wrong for.',
+  'head-to-head':
+    'Two or three contenders argued against each other, axis by axis, on the things that actually decide it.',
+  'failure-led':
+    'Lead with what goes wrong and how long it takes to go wrong; the recommendation is whatever survives that.',
+  'cost-of-ownership':
+    'Lead with what the thing costs over its life - RRP, consumables, warranty, resale - and rank on that.',
+  'question-led':
+    'Walk the reader question chain in the order a buyer actually asks it, answering each before the next.',
+  'ranked-list':
+    'A ranked list with the scoring rationale stated - only when the SERP genuinely rewards a list and nothing else fits.',
+} as const;
+
+export type ArticleShape = keyof typeof ARTICLE_SHAPES;
+
+/**
+ * A shape we actually publish. `Object.hasOwn`, not `in`: a record read back
+ * out of JSONB carries whatever string is in the column, and `'constructor' in
+ * ARTICLE_SHAPES` is true.
+ */
+export function isArticleShape(value: unknown): value is ArticleShape {
+  return typeof value === 'string' && Object.hasOwn(ARTICLE_SHAPES, value);
+}
+
+/** The shape as an instruction, for a prompt or the panel. Empty when unknown. */
+export function describeArticleShape(shape: string): string {
+  return isArticleShape(shape) ? ARTICLE_SHAPES[shape] : '';
+}
+
+/** One thing this piece says that a named top-3 result does not, and its proof. */
+export interface InformationGain {
+  /** The claim, in the piece's own words. */
+  claim: string;
+  /** The competitor URL that does not carry it, from the keyword plan. */
+  absentFrom: string;
+  /** What in the dossier supports it - a fact, a complaint, a failure mode. */
+  evidence: string;
+}
+
+/**
+ * What the piece argues, decided before a word of it is written.
+ *
+ * This stage exists because coverage is not curation. The outliner turns a
+ * dossier into sections and the writer fills them, and the result reads as
+ * complete and says nothing - which is exactly what a human reviewer calls
+ * "automatically generated material lacking meaningful review or curation".
+ * A thesis recorded up front is the thing every later stage can be held to.
+ *
+ * `defensible: false` is a first-class outcome, not a failure. Some topics
+ * genuinely have no contrarian take the evidence supports, and a fabricated
+ * one is worse than none: it is an invented position defended with invented
+ * reasons. A piece recorded as indefensible competes on evidence instead, and
+ * says so to every downstream stage.
+ */
+export interface EditorialAngle {
+  /** The one arguable claim the piece makes. A sentence someone could dispute. */
+  thesis: string;
+  /** The specific reader served - a situation, not a demographic. */
+  reader: string;
+  /** The non-obvious or contrarian take, grounded in the dossier. Empty when there is none. */
+  contrarianTake: string;
+  /** True when the evidence supports a real position; false records that it does not. */
+  defensible: boolean;
+  /** When not defensible: what the evidence was missing. Empty otherwise. */
+  weakness: string;
+  /** What we say that the top-3 results do not. */
+  informationGain: InformationGain[];
+  /** The structural shape the piece takes, from ARTICLE_SHAPES. */
+  shape: ArticleShape;
+  /** Why this shape beats the others for this thesis and this SERP. */
+  shapeRationale: string;
+  /** The byline the angle calls for - an id from the author registry. */
+  byline: string;
+  /** Why this desk's voice fits this thesis and this beat. */
+  bylineRationale: string;
 }
 
 export interface ContentBrief {

@@ -9,14 +9,9 @@ import assert from 'node:assert/strict';
 
 import { buildArticleSchema } from './seo.ts';
 import type { BlogPost } from './posts.ts';
-import type { Author } from '@data/authors';
+import { getAuthor } from '../data/authors.ts';
 
-const author: Author = {
-  id: 'desk',
-  name: 'SleekDrops Editorial Desk',
-  role: 'Editorial team',
-  bio: 'Research-led coverage.',
-};
+const author = getAuthor('desk');
 
 const post = {
   slug: 'harman-kardon-luna-2',

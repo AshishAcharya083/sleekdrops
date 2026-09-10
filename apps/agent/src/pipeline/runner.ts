@@ -13,6 +13,7 @@ import {
   llmSettings,
   UsageTracker,
 } from '../llm/index.js';
+import { runAngleEditor } from '../agents/angleEditor.js';
 import { runAssembler } from '../agents/assembler.js';
 import { runEditor } from '../agents/editor.js';
 import { runImageAgent } from '../agents/imageAgent.js';
@@ -24,9 +25,11 @@ import { runSeoReviewer } from '../agents/seoReviewer.js';
 import { runWriter } from '../agents/writer.js';
 import type { ArticleRow, Stage, TopicRow } from './types.js';
 
-const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
+/** The agent that runs each stage. A stage missing here has no named session. */
+export const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
   research: 'researcher',
   keyword: 'keyword_strategist',
+  angle: 'angle_editor',
   outline: 'outliner',
   write: 'writer',
   seo_review: 'seo_reviewer',
@@ -37,7 +40,7 @@ const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
 };
 
 /** Stages that run deterministic code — no LLM chat, no model to pick. */
-const NO_LLM_AGENTS = new Set(['assembler', 'publisher']);
+export const NO_LLM_AGENTS = new Set(['assembler', 'publisher']);
 
 /**
  * Every agent that runs a prompt. All of them follow the admin engine toggle,
@@ -49,10 +52,11 @@ const NO_LLM_AGENTS = new Set(['assembler', 'publisher']);
  * everything downstream then spends its budget on, so leaving it on the cheap
  * model saved the least valuable tokens in the pipeline.
  */
-const ENGINE_AGENTS = new Set([
+export const ENGINE_AGENTS = new Set([
   'topic_scout',
   'researcher',
   'keyword_strategist',
+  'angle_editor',
   'outliner',
   'writer',
   'seo_reviewer',
@@ -201,6 +205,18 @@ export async function runStage(article: ArticleRow): Promise<void> {
           );
         }
         summary = `"${plan.primaryKeyword}" — ${plan.intent}, ${plan.difficulty} difficulty, ${plan.zeroClickRisk} zero-click risk, ${plan.wordCountTarget} words, ${plan.contentGaps.length} gap(s) to exploit`;
+        next = { stage: 'angle', status: 'queued' };
+        break;
+      }
+      case 'angle': {
+        const topic = article.topic_id
+          ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
+          : null;
+        const angle = await runAngleEditor(article, topic, model!, tracker);
+        await updateArticle(article.id, { editorial_angle: JSON.stringify(angle) });
+        summary = angle.defensible
+          ? `"${angle.thesis}" - ${angle.shape} shape, ${angle.informationGain.length} claim(s) the top results miss, byline ${angle.byline}`
+          : `no defensible take recorded (${angle.weakness}) - ${angle.shape} shape, byline ${angle.byline}`;
         next = { stage: 'outline', status: 'queued' };
         break;
       }
