@@ -1,4 +1,12 @@
 // Row shapes and inter-agent data contracts (the session.state equivalents).
+//
+// `StructureShape` is the structure library's record (content/shapes.ts),
+// imported under an alias because `ArticleShape` here is the id vocabulary the
+// angle stage picks from and the library's record is the body behind one of
+// those ids.
+import type { ArticleShape as StructureShape } from '../content/shapes.js';
+
+export type { StructureShape };
 
 export type Stage =
   | 'research'
@@ -36,6 +44,14 @@ export interface ArticleRow {
   keyword_plan: KeywordPlan | null;
   /** What the piece argues, who for, and the shape that argument takes. */
   editorial_angle: EditorialAngle | null;
+  /**
+   * The silhouette this piece was built to, from the structure library. The
+   * record of a decision: which sections it carries, how they are ordered and
+   * named, how many extractable passages it spends. Null for articles outlined
+   * before the library existed - every consumer treats that as the old
+   * universal skeleton.
+   */
+  structure_shape: StructureShape | null;
   outline: ContentBrief | null;
   draft_md: string | null;
   seo_review: SeoReview | null;
@@ -380,8 +396,28 @@ export interface ContentBrief {
   secondaryKeywords: string[];
   tags: string[];
   wordCountTarget: number;
-  sections: Array<{ heading: string; points: string[] }>;
+  sections: Array<{
+    heading: string;
+    points: string[];
+    /** The structure-library section kind this heading executes, when a shape drove it. */
+    kind?: string;
+    /**
+     * True when this section spends one of the article's extractable passages.
+     * Capped at the shape's passage budget by the outliner, so the flag is a
+     * decision the writer can be held to rather than a hint.
+     */
+    extractable?: boolean;
+  }>;
   faq: Array<{ question: string }>;
+  /**
+   * The structure library shape this brief executes. Optional: a brief written
+   * before the library existed carries none, and every prompt that reads one
+   * falls back to the universal skeleton. Embedded in the brief (as well as
+   * living in its own column) because the writer and the SEO reviewer both
+   * serialise the whole brief into their prompt, so this is what carries the
+   * shape downstream.
+   */
+  structureShape?: StructureShape;
 }
 
 export interface SeoReview {

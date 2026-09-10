@@ -100,7 +100,10 @@ Editorial rules (non-negotiable):
 - Disclose honestly: if we haven't lab-tested the products, say the piece is an
   editorial synthesis of specs, owner reviews, and expert coverage.
 - Structure for scanability: short paragraphs, descriptive H2/H3 headings,
-  comparison tables for multi-product pieces, a "how we picked" section.
+  comparison tables for multi-product pieces. Say what the piece rests on -
+  which evidence, what was excluded - where the piece's shape puts it, and
+  under that shape's own heading. "How we picked" is not a section every
+  article owes the reader.
 `.trim();
 
 /**
@@ -200,8 +203,11 @@ SEO requirements:
  * verifiable sourcing serve both), so this block sits alongside SEO_RULES
  * rather than replacing it. Where they pull apart — Google rewards
  * comprehensive coverage, generative engines prefer short extractable text —
- * the resolution is comprehensive content with an extractable answer at the
- * top of every section.
+ * the resolution is comprehensive content carrying a small number of
+ * extractable answers, spent on the sections that answer a query. Which
+ * sections those are, and how many, is the piece's structure shape
+ * (content/shapes.ts), not a constant here: one block under every heading is
+ * how every article on the site ended up with the same silhouette.
  *
  * Method from the superseo `write-content` GEO reference, itself built on
  * Aggarwal et al., "GEO: Generative Engine Optimization" (KDD 2024).
@@ -209,22 +215,35 @@ SEO requirements:
 export const GEO_RULES = `
 Generative-engine rules (how the piece earns a citation in ChatGPT, Claude,
 Perplexity and AI Overviews — not only a Google ranking):
-- ANSWER FIRST. Every major H2 opens with a self-contained 40-60 word answer to
-  the question that heading implies, before any build-up. An answer buried in
-  the third paragraph does not get cited. Then expand with the detail.
+- EXTRACTABLE ANSWERS, on a budget. What a generative engine retrieves is a
+  passage, not a page: a self-contained answer to a question somebody typed,
+  quotable with nothing around it. So a piece carries a handful of those - the
+  sections that genuinely answer a query open with one, at the top of the
+  section, never buried in a third paragraph. The piece's own shape says how
+  many and how long; where no shape is recorded, take it as three or four of
+  40-60 words. What it is not is a fixed block under every heading. That reads
+  as a template to a human reviewer, and a page of interchangeable blocks gives
+  an engine nothing to prefer between them.
 - CLAIM + EVIDENCE, always paired. "Battery life runs to 30 hours with ANC on
   (Sony, 2026 spec sheet)" is citable. "Battery life is excellent" is not.
   Attribute by name and year — "according to research" is worthless.
 - NAME ENTITIES. Specific products, brands, chipsets, standards, RRPs,
   retailers. "Coolblue, Bol.com and Zalando" beats "many retailers". Generative
   engines build knowledge graphs out of named entities; unnamed ones vanish.
-- QUESTION-SHAPED HEADINGS where natural, each answered immediately in an
-  extractable block. Cover the who/what/when/where/why/how variants that matter.
-- FAQ section with 3-5 real questions, each answered in 40-60 words. Answer
-  engines quote a clean question/answer pair far more readily than the same
-  answer buried in prose, so the FAQ is mandatory, not optional. (Google
-  stopped showing FAQ rich results in May 2026; the section earns citations,
-  not a rich result, and the site's FAQPage markup is incidental.)
+- QUESTION-SHAPED HEADINGS where natural, each answered immediately underneath
+  rather than after a run-up - and the ones inside the passage budget answered
+  in an extractable block. Cover the who/what/when/where/why/how variants that
+  matter.
+- FAQ where the piece's shape carries one, and where it does the reader some
+  good: real long-tail questions the body does not already answer, 3-5 of them,
+  each answered in the passage word range. Answer engines quote a clean
+  question/answer pair far more readily than the same answer buried in prose,
+  and the site builds its FAQPage markup by parsing the visible "## FAQ"
+  section - so where a shape requires one it is not optional, and it is written
+  as "## FAQ" with "### Question?" headings. Where the shape omits it (a piece
+  whose every heading is already a question), do not bolt one on to restate the
+  article. (Google stopped showing FAQ rich results in May 2026; the section
+  earns citations, not a rich result.)
 - RECENCY. State when a spec or availability claim was checked, and the year of
   any RRP. Engines weight freshness heavily, and a dated claim is more citable
   than a vague one.
@@ -288,6 +307,17 @@ WRITE LIKE THIS INSTEAD:
   otherwise.
 - Do not summarise a section at the end of it unless it ran three subsections
   or more.
+
+NEVER BUILD THE HOUSE SKELETON. There is no single running order every piece on
+this site takes, and a reader who opens two of our articles must not recognise
+the silhouette of the first under the second:
+- No standard opening. The piece's shape says how this one opens; "If you want
+  the short answer, buy the X" is one opening among several, not the opening.
+- No identical block under every heading. Sections that answer a query carry an
+  extractable answer; the rest start however that section needs to start.
+- No section that fires by reflex. A methodology section, an FAQ and a closing
+  verdict each appear where the shape carries them, under that shape's own
+  heading, and are left out where it does not.
 `.trim();
 
 /**
