@@ -22,8 +22,14 @@
 // opening with the same move, and claims carrying no numbers. Worse, a scan of
 // one draft in isolation can never see the thing an AdSense reviewer sees
 // first - that every article on the site opens the same way. So the scan also
-// takes an optional corpus of already-published bodies and measures n-gram and
-// opening-line overlap against it.
+// takes an optional corpus of already-published bodies and measures verbatim
+// runs, n-gram overlap and opening-line overlap against it.
+//
+// House text is handled by registry rather than by allowance (HOUSE_BLOCKS):
+// the disclosure and the pointer at the standing methodology page are removed
+// from both sides before any similarity is measured, and the disclosure is
+// asserted by presence instead - each endorsement needs its own, so repeating
+// it is correct and absence is the defect.
 //
 // Everything here stays synchronous, deterministic and offline: the corpus is
 // passed in (see content/corpus.ts), never fetched, so the scan can run on
@@ -41,7 +47,9 @@ export type SlopCategory =
   /** Numbers, model names, dates and named sources per 100 words. */
   | 'specificity'
   /** Overlap with previously published articles. */
-  | 'repetition';
+  | 'repetition'
+  /** Required house text: present, verbatim, and never counted as repetition. */
+  | 'disclosure';
 
 export interface SlopFinding {
   category: SlopCategory;
@@ -60,7 +68,7 @@ export interface SlopReport {
   /** 0-100, 100 = clean. Below 70 is a high-severity failure. */
   score: number;
   findings: SlopFinding[];
-  /** Prose word count the density rules were measured against. */
+  /** Prose word count of the draft, which the per-1,000-word budgets scale with. */
   words: number;
 }
 
@@ -486,46 +494,75 @@ export const SCAN_THRESHOLDS = {
   /** Sections that must share an opening frame before it counts, and their share. */
   sectionFrameRepeats: 3,
   sectionFrameShare: 0.6,
-  /** Below this word count a density read is noise. */
+  /**
+   * Body-copy words needed before a density or presence read is anything but
+   * noise. Spec tables are not body copy and are excluded from both sides of
+   * every density below, so a table of figures cannot carry a vague article.
+   */
   minWordsForSpecificity: 300,
-  /** Numbers, model names, dates and named sources wanted per 100 words. */
-  specificityPer100: 1.5,
+  /**
+   * Verifiable specifics (prices, model designations, measured quantities,
+   * dates, named sources) wanted per 100 words of body copy.
+   *
+   * Calibrated against the AU category leaders rather than against our own
+   * prose, which is the trap: CHOICE and Canstar Blue run 5-14 per 100 words
+   * in verdict and test-result passages and about 2 in their thinnest
+   * methodology boilerplate, which blends to 3-5 across a whole article once
+   * intro, explainer and FAQ prose are counted. 3.0 is the floor of that band.
+   */
+  specificityPer100: 3,
+  /**
+   * ...and no window of this many consecutive words may fall below
+   * `specificityWindowPer100`, so an article cannot pass on one dense
+   * paragraph bolted to several of filler.
+   */
+  specificityWindowWords: 150,
+  specificityWindowPer100: 1,
   /** A paragraph this long with no specific of any kind gets anchored. */
   bareParagraphWords: 40,
 
   /** Words per shingle for the cross-corpus n-gram comparison. */
   ngramSize: 5,
-  /** Shingles the draft needs before overlap ratios mean anything. */
+  /** Unregistered shingles the draft needs before overlap ratios mean anything. */
   minDraftShingles: 40,
   /**
-   * Share of the draft's shingles that may reappear in one published article.
-   * Two unrelated articles in one category share a few per cent, and the
-   * maximum over thirty of them is higher than over five, so the gate sits
-   * well clear of that: a real near-duplicate runs past 20%.
+   * An unbroken run of this many words shared verbatim with one published
+   * article is a lifted passage, whatever the totals say. Publication-ethics
+   * practice draws the line at a sentence-length run, and similarity tooling
+   * matches on runs rather than on a global percentage.
    */
-  maxArticleOverlap: 0.1,
-  /** Share that may reappear anywhere in the corpus. */
-  maxCorpusOverlap: 0.25,
+  verbatimRunWords: 25,
   /**
-   * A shingle in at least this share of the corpus is site furniture (the
-   * disclaimer, the CTA line) rather than repetition, and is excluded - the
-   * editorial rules require those, so flagging them would only thrash.
-   * Needs `minDocsForBoilerplate` documents before the share means anything.
+   * Share of the draft's remaining body words - remaining meaning after the
+   * registered house blocks are removed from both sides - that may also
+   * appear in the published corpus. The house voice is budgeted in words by
+   * HOUSE_BLOCKS, not as a share of the draft, because a percentage allowance
+   * simultaneously excuses 280 words of padding on a flagship guide and flags
+   * the required disclosure on a short one.
    */
-  boilerplateDocShare: 0.6,
-  minDocsForBoilerplate: 5,
+  maxSharedWordShare: 0.05,
   /**
-   * How much of a draft may be site furniture before the furniture is the
-   * article: whichever is larger of this share and `stockPhrasingFloor`
-   * shingles. The floor is what keeps the metric honest on a short piece,
-   * where the required disclaimer alone is a tenth of the text.
+   * Unregistered phrasing in at least this share of the corpus is house voice
+   * that nobody registered: the fix is to register it or move it to a
+   * standing page, so it gets its own finding rather than the recycling one.
+   * Needs `minDocsForUbiquity` documents before the share means anything.
    */
-  stockPhrasingAllowance: 0.1,
-  stockPhrasingFloor: 60,
+  ubiquitousDocShare: 0.6,
+  minDocsForUbiquity: 5,
   /** Token overlap between two opening paragraphs before they are one opening. */
   maxOpeningSimilarity: 0.45,
   /** Opening tokens compared. */
   openingTokens: 30,
+
+  /**
+   * The cap is on the registry, not on the draft. Observed leader practice is
+   * a constant absolute budget - a material-connection line, a rating-scale
+   * note and a one-sentence pointer at the standing methodology page - that
+   * does not grow with article length. A fifth block, or a longer one, is the
+   * signal to move that content to a page and link it.
+   */
+  houseBlockCount: 4,
+  houseBlockWords: 200,
 };
 
 type BlockKind = 'paragraph' | 'heading' | 'list' | 'table';
@@ -688,27 +725,155 @@ function sectionOpenings(list: Block[]): SectionOpening[] {
   return out;
 }
 
+/** Prices, in any currency the site quotes. */
+const PRICE_MARKER = String.raw`(?:AU?\$|US\$|\$|€|£)\s?\d[\d,]*(?:\.\d+)?`;
+
+/** Model designations: AF160, XM6, V15, WH-1000XM5. */
+const MODEL_MARKER = String.raw`\b[A-Z][A-Za-z]*-?\d[\dA-Za-z-]*\b`;
+
+/**
+ * Attribution to somebody with a name - the maker, a lab, a named tester.
+ * Thin affiliate copy reliably lacks these; the category leaders reliably
+ * carry them, which is why the article-level check below asks for one.
+ */
+const ATTRIBUTION_MARKER = [
+  // Case is not optional in this marker set - a model designation is defined
+  // by its capital - so an attribution that opens a sentence carries its own.
+  String.raw`\b(?:[Aa]ccording\s+to|[Aa]s\s+measured\s+by|[Tt]ested\s+by|[Rr]eviewed\s+by|[Aa]s\s+reported\s+by|[Rr]ated\s+by|[Pp]ublished\s+by|[Aa]s\s+listed\s+by)\s+[A-Z][\w.'-]*`,
+  String.raw`\b[A-Z][A-Za-z]+(?:'s)?\s+(?:rates?|rated|quotes?|quoted|publishes|published|lists?|listed|claims?|specifies|specified|measured|reports?)\b`,
+  String.raw`\b[A-Z][A-Za-z]+(?:'s)?\s+(?:spec(?:ification)?\s+sheet|data\s+sheet|test\s+(?:results?|bench)|lab|listing|manual|warranty\s+terms)\b`,
+].join('|');
+
+/** A date a claim can be checked against: a year, or a month and a day. */
+const DATE_MARKER = [
+  String.raw`\b(?:19|20)\d{2}\b`,
+  String.raw`\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\b`,
+].join('|');
+
 /**
  * What "specific" looks like to a regex: prices, model designations, measured
  * quantities, years and dates, and attributions to a named source. Ordered so
  * a model number matches as a model number rather than as a bare figure.
+ *
+ * Deliberately not one shape of specific: CHOICE ships measured quantities
+ * from its own lab while Canstar Blue is survey-based and nearly all of its
+ * specifics are prices, model designations and survey statistics. A gate that
+ * demanded measurements alone would fail a page readers plainly treat as
+ * authoritative.
  */
 const SPECIFICITY_MARKERS = new RegExp(
   [
-    // Prices, in any currency the site quotes.
-    String.raw`(?:AU?\$|US\$|\$|€|£)\s?\d[\d,]*(?:\.\d+)?`,
-    // Model designations: AF160, XM6, V15, WH-1000XM5.
-    String.raw`\b[A-Z][A-Za-z]*-?\d[\dA-Za-z-]*\b`,
-    // Measured quantities.
-    String.raw`\b\d+(?:[.,]\d+)?\s*(?:%|°C|(?:mm|cm|km|kg|g|ml|l|litres?|liters?|kW|W|watts?|Wh|mAh|dB|rpm|hours?|hrs?|h|minutes?|mins?|seconds?|secs?|years?|months?|weeks?|days?|inch(?:es)?|star|stars)\b)`,
-    // Years and dates.
-    String.raw`\b(?:19|20)\d{2}\b`,
-    String.raw`\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\b`,
-    // Attribution to somebody with a name.
-    String.raw`\b(?:according\s+to|as\s+measured\s+by|tested\s+by|reviewed\s+by|as\s+reported\s+by|rated\s+by)\s+[A-Z][\w.'-]*`,
+    PRICE_MARKER,
+    MODEL_MARKER,
+    // Measured quantities. One word may sit between the figure and its unit
+    // ("500 charge cycles"), and a hyphen counts as the space ("2-year").
+    String.raw`\b\d+(?:[.,]\d+)?\s*(?:%|°C)`,
+    String.raw`\b\d+(?:[.,]\d+)?(?:[\s-][a-z]+)?[\s-](?:mm|cm|km|kg|g|ml|l|litres?|liters?|kW|W|watts?|AW|Wh|mAh|Pa|kPa|GB|TB|Hz|kHz|dB|rpm|cycles?|hours?|hrs?|h|minutes?|mins?|seconds?|secs?|years?|months?|weeks?|days?|inch(?:es)?|stars?)\b`,
+    // Decimal ratings - the site's own scale, "4.3 out of 5".
+    String.raw`\b\d(?:\.\d)?\s*(?:\/|out\s+of\s+)\s*5\b`,
+    DATE_MARKER,
+    ATTRIBUTION_MARKER,
   ].join('|'),
   'g',
 );
+
+// ---------------------------------------------------------------------------
+// The house-block registry
+// ---------------------------------------------------------------------------
+
+/**
+ * The four kinds of text a publisher legitimately repeats word for word in
+ * every article. Publication ethics treats exactly this as a named carve-out -
+ * mandated disclosures and boilerplate method descriptions are acceptable
+ * reuse - and the FTC requires the material-connection disclosure on every
+ * endorsement, because a reader may not have seen any earlier post.
+ */
+export type HouseBlockTag =
+  | 'disclosure'
+  | 'methodology-pointer'
+  | 'editorial-independence'
+  | 'rating-scale';
+
+export interface HouseBlock {
+  id: string;
+  tag: HouseBlockTag;
+  /** Bumped when the wording changes, so a draft can be told which one to use. */
+  version: number;
+  /** The exact string. Registered text is removed before any similarity is computed. */
+  text: string;
+}
+
+/**
+ * House text, registered rather than allowanced.
+ *
+ * A percentage allowance misfires in both directions: 10% of a 2,800-word
+ * guide is more verbatim repetition than any category leader actually uses,
+ * and 10% of a 350-word deal post cannot hold a compliant disclosure. So the
+ * registry is a fixed set of exact strings, each removed from BOTH sides of
+ * the corpus comparison, and the budget below caps the registry rather than
+ * the draft.
+ *
+ * Every entry restates an existing editorial rule (see agents/context.ts) or
+ * an existing page on the site; the registry is where the wording is frozen so
+ * it can be exempted, asserted and versioned in one place. Depth belongs on a
+ * standing page - the methodology entry is a pointer, not the method.
+ */
+export const HOUSE_BLOCKS: HouseBlock[] = [
+  {
+    id: 'no-hands-on-testing',
+    tag: 'disclosure',
+    version: 1,
+    text: 'This is editorial synthesis from published specifications, retailer listings and owner reviews. We have not run these products through a lab.',
+  },
+  {
+    id: 'how-we-picked-pointer',
+    tag: 'methodology-pointer',
+    version: 1,
+    text: 'We start from what is actually sold in Australia, cut anything without a published spec sheet, and read the 1-star reviews before the 5-star ones. Our full method is on the disclaimer page.',
+  },
+  {
+    id: 'editorial-independence',
+    tag: 'editorial-independence',
+    version: 1,
+    text: 'No brand pays for a place on this site, and no brand sees a piece before it is published.',
+  },
+  {
+    id: 'decimal-ratings',
+    tag: 'rating-scale',
+    version: 1,
+    text: 'Ratings are decimal out of 5 and describe how a product performs for the buyer this piece is written for, not against every product ever made.',
+  },
+];
+
+/** Words of registered house text. Capped by `SCAN_THRESHOLDS.houseBlockWords`. */
+export function houseBlockWords(entries: HouseBlock[] = HOUSE_BLOCKS): number {
+  return countWords(entries.map((entry) => entry.text));
+}
+
+/** Lowercase, punctuation-free form, for comparing a draft against a block. */
+function normalise(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[^a-z0-9'$%. ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Something the reader can recognise as the no-hands-on disclosure, whatever
+ * words it ended up in. Presence is what the check asserts; the registered
+ * wording is what it asks for.
+ */
+const DISCLOSURE_EQUIVALENT =
+  /\b(?:editorial\s+synthesis|have\s+not\s+(?:lab-)?tested|haven(?:'|’)?t\s+(?:lab-)?tested|not\s+(?:run|put)\s+these[\s\S]{0,60}?through\s+a\s+lab|no\s+hands-on\s+testing|without\s+hands-on\s+testing)\b/i;
+
+/** An affiliate link in the raw markdown - the signal that a page earns commission. */
+const AFFILIATE_LINK = /\]\(\/go\/[a-z0-9][a-z0-9-]*\)/i;
+
+/** The same link, capturing the product slug. */
+const AFFILIATE_SLUG = /\]\(\/go\/([a-z0-9][a-z0-9-]*)\)/gi;
 
 interface ProseToken {
   word: string;
@@ -739,6 +904,8 @@ function proseTokens(lines: string[]): ProseToken[] {
 interface Shingle {
   key: string;
   line: number;
+  /** Token index it starts at, so consecutive shingles can be recognised. */
+  index: number;
 }
 
 /**
@@ -753,13 +920,55 @@ function shingles(tokens: ProseToken[], size: number): Shingle[] {
     out.push({
       key: tokens.slice(i, i + size).map((t) => t.word).join(' '),
       line: tokens[i].line,
+      index: i,
     });
   }
   return out;
 }
 
-function shingleSet(markdown: string, size: number): Set<string> {
-  return new Set(shingles(proseTokens(proseLines(markdown ?? '')), size).map((s) => s.key));
+function shingleSet(lines: string[], size: number): Set<string> {
+  return new Set(shingles(proseTokens(lines), size).map((s) => s.key));
+}
+
+/**
+ * Prose for the cross-corpus metrics, with the anchor text of affiliate links
+ * dropped. "Check the price on Amazon" is mandated by the link-placement
+ * rules and appears on every page by design, so counting it as repetition
+ * would flag the one thing the article is required to say.
+ */
+function repetitionLines(markdown: string): string[] {
+  return proseLines((markdown ?? '').replace(/\[[^\]]*\]\(\/go\/[^)]*\)/g, ' '));
+}
+
+/** Words on each 1-based line that belong to a registered house block. */
+function registeredWordsByLine(lines: string[]): Map<number, number> {
+  const tokens = proseTokens(lines);
+  const registered = registeredShingles();
+  const covered = new Set<number>();
+  for (const shingle of shingles(tokens, SCAN_THRESHOLDS.ngramSize)) {
+    if (!registered.has(shingle.key)) continue;
+    for (let i = 0; i < SCAN_THRESHOLDS.ngramSize; i++) covered.add(shingle.index + i);
+  }
+  const byLine = new Map<number, number>();
+  for (const index of covered) {
+    const line = tokens[index].line;
+    byLine.set(line, (byLine.get(line) ?? 0) + 1);
+  }
+  return byLine;
+}
+
+/** Every 5-word sequence of the registered house blocks. Computed once. */
+let registeredKeys: Set<string> | null = null;
+function registeredShingles(): Set<string> {
+  if (!registeredKeys) {
+    registeredKeys = new Set<string>();
+    for (const block of HOUSE_BLOCKS) {
+      for (const key of shingleSet(proseLines(block.text), SCAN_THRESHOLDS.ngramSize)) {
+        registeredKeys.add(key);
+      }
+    }
+  }
+  return registeredKeys;
 }
 
 /** The first `openingTokens` words of the running prose. */
@@ -800,6 +1009,10 @@ const WEIGHTS: Record<SlopCategory, { each: number; cap: number }> = {
   uniformity: { each: 2, cap: 9 },
   specificity: { each: 1, cap: 12 },
   repetition: { each: 1, cap: 12 },
+  // A presence check, not a density: three points for a paraphrase, nine for
+  // no disclosure at all. Enough that the editor fixes it in the round it is
+  // raised, never enough to route a draft back on its own.
+  disclosure: { each: 3, cap: 9 },
 };
 
 /**
@@ -817,7 +1030,8 @@ export function slopSeverity(finding: SlopFinding): 'high' | 'medium' | 'low' {
     // on one of them would spend the loop on prose the reader will not notice.
     finding.category === 'uniformity' ||
     finding.category === 'specificity' ||
-    finding.category === 'repetition'
+    finding.category === 'repetition' ||
+    finding.category === 'disclosure'
   ) {
     return 'medium';
   }
@@ -825,6 +1039,7 @@ export function slopSeverity(finding: SlopFinding): 'high' | 'medium' | 'low' {
 }
 
 export function detectSlop(markdown: string, options?: SlopScanOptions): SlopReport {
+  const raw = (markdown ?? '').split('\n');
   const lines = proseLines(markdown ?? '');
   const words = countWords(lines);
   const findings: SlopFinding[] = [];
@@ -904,8 +1119,9 @@ export function detectSlop(markdown: string, options?: SlopScanOptions): SlopRep
   }
 
   findings.push(...structureFindings(lines, spans));
-  findings.push(...specificityFindings(lines, words));
-  findings.push(...corpusFindings(lines, options?.corpus ?? []));
+  findings.push(...specificityFindings(raw, lines));
+  findings.push(...disclosureFindings(raw, lines));
+  findings.push(...corpusFindings(markdown ?? '', options?.corpus ?? []));
 
   let penalty = 0;
   for (const finding of findings) {
@@ -1008,44 +1224,295 @@ function structureFindings(lines: string[], spans: SentenceSpan[]): SlopFinding[
 }
 
 /**
- * Specificity density. Adjectives are free; numbers, model names, dates and
- * named sources are what a writer only has if somebody did the work. The
- * finding anchors on the paragraphs carrying none at all, so the fix has
- * somewhere to land.
+ * Body copy: the prose, with spec tables and registered house blocks blanked
+ * out and line numbers kept.
+ *
+ * A table of figures must not be able to carry a vague article; a heading is
+ * navigation, so a model designation parked in an H2 cannot either; and the
+ * mandated house text - the disclosure, the pointer at the standing
+ * methodology page - carries no specifics by nature and is not the writer's
+ * to make specific. Both sides of every density below are measured on what is
+ * left, which is the writing this piece is actually responsible for.
  */
-function specificityFindings(lines: string[], words: number): SlopFinding[] {
+function bodyCopyLines(lines: string[]): string[] {
+  const house = registeredWordsByLine(lines);
+  return lines.map((line, i) => {
+    const table = /^\s*\|/.test(line);
+    const heading = /^\s*#{1,6}\s/.test(line);
+    const registered = (house.get(i + 1) ?? 0) >= countWords([line]);
+    return table || heading || registered ? '' : line;
+  });
+}
+
+function countMarkers(text: string): number {
+  SPECIFICITY_MARKERS.lastIndex = 0;
+  return (text.match(SPECIFICITY_MARKERS) ?? []).length;
+}
+
+function hasSpecific(text: string): boolean {
+  SPECIFICITY_MARKERS.lastIndex = 0;
+  return SPECIFICITY_MARKERS.test(text);
+}
+
+/** A stretch of body copy whose specificity density falls below the floor. */
+interface ThinStretch {
+  line: number;
+  text: string;
+}
+
+/**
+ * Rolling windows of `specificityWindowWords` consecutive body words, so an
+ * article cannot pass the article-level gate on one dense paragraph bolted to
+ * several of filler. Overlapping thin windows are merged, so the editor gets
+ * one anchor per thin passage rather than one per window.
+ */
+function thinStretches(lines: string[]): ThinStretch[] {
   const T = SCAN_THRESHOLDS;
-  if (words < T.minWordsForSpecificity) return [];
+  const rows = lines
+    .map((line, i) => ({ line: i + 1, text: line, words: countWords([line]), markers: countMarkers(line) }))
+    .filter((row) => row.words > 0);
 
-  const markers = scan(lines, SPECIFICITY_MARKERS);
+  const out: ThinStretch[] = [];
+  let last = -1;
+  let end = 0;
+  let words = 0;
+  let markers = 0;
+  for (let start = 0; start < rows.length; start++) {
+    if (end < start) {
+      end = start;
+      words = 0;
+      markers = 0;
+    }
+    while (end < rows.length && words < T.specificityWindowWords) {
+      words += rows[end].words;
+      markers += rows[end].markers;
+      end += 1;
+    }
+    // The tail of an article is not a window: judging the last 40 words on
+    // their own would flag every conclusion.
+    if (words < T.specificityWindowWords) break;
+    if ((markers / words) * 100 < T.specificityWindowPer100 && rows[start].line > last) {
+      out.push({ line: rows[start].line, text: rows[start].text });
+      last = rows[end - 1].line;
+    }
+    words -= rows[start].words;
+    markers -= rows[start].markers;
+  }
+  return out;
+}
+
+/** A heading and the body lines under it, from the raw markdown. */
+interface RawSection {
+  heading: string;
+  /** 1-based line of the heading. */
+  line: number;
+  from: number;
+  to: number;
+}
+
+function rawSections(raw: string[]): RawSection[] {
+  // The opening is a section too: it is where the "buy the X" answer lives,
+  // and it carries a link as often as any H2 does.
+  const out: RawSection[] = [{ heading: 'the opening', line: 1, from: 1, to: raw.length }];
+  for (const [i, line] of raw.entries()) {
+    const heading = /^\s*#{2,6}\s+(.*)$/.exec(line);
+    if (!heading) continue;
+    out[out.length - 1].to = i;
+    out.push({ heading: heading[1].trim(), line: i + 1, from: i + 1, to: raw.length });
+  }
+  return out.filter((section) => section.to >= section.from);
+}
+
+interface ProductPick {
+  slug: string;
+  /** 1-based line of the first link to this product. */
+  line: number;
+  hasPrice: boolean;
+  hasModel: boolean;
+}
+
+/**
+ * The products this piece earns on, found through the affiliate links rather
+ * than by guessing at prose: a /go/ slug is the site's own record that a
+ * passage sells something. Each owes the reader a price and an exact model
+ * designation, which is what a category-leader page always carries and thin
+ * affiliate copy never does.
+ *
+ * Judged across every section that links the product, not section by section:
+ * the link-placement rules have the conclusion link each pick a second time,
+ * and a verdict line is not the place to restate the RRP.
+ */
+function productPicks(raw: string[], lines: string[]): ProductPick[] {
+  const price = new RegExp(PRICE_MARKER, 'g');
+  const model = new RegExp(MODEL_MARKER, 'g');
+  const picks = new Map<string, ProductPick>();
+
+  for (const section of rawSections(raw)) {
+    const linked = new Map<string, number>();
+    for (const [offset, line] of raw.slice(section.from - 1, section.to).entries()) {
+      AFFILIATE_SLUG.lastIndex = 0;
+      for (const match of line.matchAll(AFFILIATE_SLUG)) {
+        const slug = match[1].toLowerCase();
+        if (!linked.has(slug)) linked.set(slug, section.from + offset);
+      }
+    }
+    if (linked.size === 0) continue;
+
+    // Prose lines, so a /go/ slug or an image URL cannot pass as a model
+    // designation; tables kept, because a comparison row is a fair place for
+    // the price to live.
+    const text = lines.slice(section.from - 1, section.to).join(' ');
+    price.lastIndex = 0;
+    model.lastIndex = 0;
+    const hasPrice = price.test(text);
+    const hasModel = model.test(text);
+
+    for (const [slug, line] of linked) {
+      const seen = picks.get(slug);
+      if (seen) {
+        seen.hasPrice = seen.hasPrice || hasPrice;
+        seen.hasModel = seen.hasModel || hasModel;
+      } else {
+        picks.set(slug, { slug, line, hasPrice, hasModel });
+      }
+    }
+  }
+  return [...picks.values()];
+}
+
+/**
+ * Specificity, measured the way the AU category leaders actually write.
+ *
+ * Four checks, four findings, because the fix for each is different: the
+ * article-level density, the rolling window that stops one dense paragraph
+ * carrying an article of filler, a price and a model designation for every
+ * product we earn on, and one dated named source for the piece.
+ *
+ * All four are density or presence reads over a whole article, so all four
+ * wait for `minWordsForSpecificity` words of body copy: below that a deal post
+ * would be judged on a paragraph.
+ */
+function specificityFindings(raw: string[], lines: string[]): SlopFinding[] {
+  const T = SCAN_THRESHOLDS;
+  const out: SlopFinding[] = [];
+
+  // Spec tables are excluded from both sides of the density: a table of
+  // figures must not be able to carry a vague article.
+  const body = bodyCopyLines(lines);
+  const words = countWords(body);
+  if (words < T.minWordsForSpecificity) return out;
+
+  const markers = scan(body, SPECIFICITY_MARKERS);
   const budget = Math.ceil((T.specificityPer100 * words) / 100);
-  if (markers.count >= budget) return [];
-
-  const paragraphs = blocks(lines).filter((b) => b.kind === 'paragraph');
-  const hasSpecific = (text: string): boolean => {
-    SPECIFICITY_MARKERS.lastIndex = 0;
-    return SPECIFICITY_MARKERS.test(text);
-  };
-  const bare = paragraphs.filter((p) => p.words >= T.bareParagraphWords && !hasSpecific(p.text));
-  // Anchored on the paragraphs carrying nothing specific; failing that, on the
-  // longest ones, and failing even that (a draft of nothing but tables) on
-  // whatever block comes first, so the finding always points somewhere.
-  const byLength = [...paragraphs].sort((a, b) => b.words - a.words);
-  const fallback = blocks(lines).slice(0, 1);
-  const anchors = (bare.length > 0 ? bare : byLength.length > 0 ? byLength : fallback).slice(
-    0,
-    EXAMPLES_PER_RULE,
-  );
-
-  const per100 = (markers.count / words) * 100;
-  return [
-    {
+  if (markers.count < budget) {
+    const paragraphs = blocks(body).filter((b) => b.kind === 'paragraph');
+    const bare = paragraphs.filter((p) => p.words >= T.bareParagraphWords && !hasSpecific(p.text));
+    // Anchored on the paragraphs carrying nothing specific; failing that, on
+    // the longest ones, and failing even that on whatever block comes first,
+    // so the finding always points somewhere.
+    const byLength = [...paragraphs].sort((a, b) => b.words - a.words);
+    const fallback = blocks(lines).slice(0, 1);
+    const anchors = (bare.length > 0 ? bare : byLength.length > 0 ? byLength : fallback).slice(
+      0,
+      EXAMPLES_PER_RULE,
+    );
+    const per100 = (markers.count / words) * 100;
+    out.push({
       category: 'specificity',
       rule: 'Thin specificity density',
       matches: anchors.map((p) => excerpt(p.text, 60)),
       lines: anchors.map((p) => p.line),
       count: budget - markers.count,
-      fix: `${markers.count} specifics (numbers, model designations, dates, named sources) in ${words} words - ${per100.toFixed(1)} per 100, want ${T.specificityPer100}. ${bare.length > 0 ? `${bare.length} paragraph(s) carry none at all, starting at the lines above. ` : ''}Replace the adjectives with the figure from the dossier and name who measured it.`,
+      fix: `${markers.count} specifics (numbers, model designations, dates, named sources) in ${words} words of body copy - ${per100.toFixed(1)} per 100, want ${T.specificityPer100}. ${bare.length > 0 ? `${bare.length} paragraph(s) carry none at all, starting at the lines above. ` : ''}Replace the adjectives with the figure from the dossier and name who published it. Spec tables do not count towards this.`,
+    });
+  }
+
+  const thin = thinStretches(body);
+  if (thin.length > 0) {
+    const shown = thin.slice(0, EXAMPLES_PER_RULE);
+    out.push({
+      category: 'specificity',
+      rule: 'Thin passage',
+      matches: shown.map((stretch) => excerpt(stretch.text, 60)),
+      lines: shown.map((stretch) => stretch.line),
+      count: thin.length,
+      fix: `${thin.length} passage(s) of ${T.specificityWindowWords} words carry fewer than ${T.specificityWindowPer100} specific(s) per 100 words. An article does not pass on one dense paragraph: give each of these a figure, a model designation or a dated source, or cut it.`,
+    });
+  }
+
+  const picks = productPicks(raw, lines);
+  const incomplete = picks.filter((pick) => !pick.hasPrice || !pick.hasModel);
+  if (incomplete.length > 0) {
+    const shown = incomplete.slice(0, EXAMPLES_PER_RULE);
+    out.push({
+      category: 'specificity',
+      rule: 'Product without a price or a model designation',
+      matches: shown.map(
+        (pick) =>
+          `/go/${pick.slug} (missing ${[
+            pick.hasPrice ? '' : 'price',
+            pick.hasModel ? '' : 'model designation',
+          ]
+            .filter(Boolean)
+            .join(' and ')})`,
+      ),
+      lines: shown.map((pick) => pick.line),
+      count: incomplete.length,
+      fix: `${incomplete.length} of ${picks.length} linked product(s) are covered without their exact model designation ("Ninja AF160", not "the Ninja") or without a price. Add both where the product is covered. The price is the manufacturer's RRP with its source and year - never an Amazon price, which the Associates terms do not let us print.`,
+    });
+  }
+
+  const named = new RegExp(ATTRIBUTION_MARKER);
+  const date = new RegExp(DATE_MARKER);
+  const dated = sentenceSpans(body).filter(
+    (span) => named.test(span.text) && date.test(span.text),
+  );
+  if (dated.length === 0) {
+    const first = blocks(body)[0];
+    out.push({
+      category: 'specificity',
+      rule: 'No dated, named source',
+      matches: first ? [excerpt(first.text, 60)] : [],
+      lines: [first?.line ?? 1],
+      count: 1,
+      fix: 'No sentence names a source and dates it. Every category-leading review carries at least one - "Dyson rates the V15 at 60 minutes in its 2026 spec sheet", "according to CHOICE\'s 2026 test" - and thin affiliate copy carries none. Attribute one load-bearing claim to whoever published it, in the same sentence as the year.',
+    });
+  }
+
+  return out;
+}
+
+/**
+ * The one block that must repeat verbatim in every article.
+ *
+ * This is the inverse of the repetition metrics below, and deliberately so:
+ * the FTC's position is that each endorsement needs its own disclosure,
+ * because a reader may not have seen an earlier post, so the failure mode here
+ * is absence, never repetition. The commission disclosure itself is page
+ * furniture the site renders beside the links; what the body owes the reader
+ * is the hands-on disclosure - that nobody here put these products on a bench.
+ */
+function disclosureFindings(raw: string[], lines: string[]): SlopFinding[] {
+  const T = SCAN_THRESHOLDS;
+  const block = HOUSE_BLOCKS.find((entry) => entry.tag === 'disclosure');
+  if (!block) return [];
+  if (countWords(bodyCopyLines(lines)) < T.minWordsForSpecificity) return [];
+  if (!raw.some((line) => AFFILIATE_LINK.test(line))) return [];
+
+  const body = normalise(lines.join(' '));
+  if (body.includes(normalise(block.text))) return [];
+
+  const reworded = DISCLOSURE_EQUIVALENT.test(lines.join(' '));
+  const anchor = blocks(lines).at(-1);
+  return [
+    {
+      category: 'disclosure',
+      rule: reworded ? 'Affiliate disclosure reworded' : 'Affiliate disclosure missing',
+      matches: [block.text],
+      lines: [anchor?.line ?? 1],
+      // Absence is the defect; a reworded one is a smaller defect than none.
+      count: reworded ? 1 : 3,
+      fix: `This piece links products we earn on${reworded ? ' and discloses that it was not hands-on tested, but not in the registered wording' : ' but never says we have not tested them'}. Add the registered ${block.tag} block (v${block.version}) verbatim: "${block.text}" - registered house text is exempt from the repetition metrics, a paraphrase is not.`,
     },
   ];
 }
@@ -1053,82 +1520,140 @@ function specificityFindings(lines: string[], words: number): SlopFinding[] {
 /**
  * Cross-corpus repetition. Everything above judges one draft in isolation,
  * which is exactly what let the site converge on a single voice: each article
- * passed on its own. These two metrics are the only ones that can see it.
+ * passed on its own. These metrics are the only ones that can see it.
+ *
+ * The registered house blocks come out of both sides first, so what is
+ * measured is the phrasing nobody approved: a lifted passage, a recycled
+ * article, or a house frame that has never been registered and should either
+ * be registered or moved to a standing page.
  */
-function corpusFindings(lines: string[], corpus: CorpusArticle[]): SlopFinding[] {
+function corpusFindings(markdown: string, corpus: CorpusArticle[]): SlopFinding[] {
   const T = SCAN_THRESHOLDS;
   const usable = corpus.filter((doc) => doc && typeof doc.body === 'string' && doc.body.trim() !== '');
   if (usable.length === 0) return [];
 
   const out: SlopFinding[] = [];
-  const draftShingles = shingles(proseTokens(lines), T.ngramSize);
-  const published = usable.map((doc) => ({ doc, keys: shingleSet(doc.body, T.ngramSize) }));
+  const lines = repetitionLines(markdown);
+  const tokens = proseTokens(lines);
+  const draft = shingles(tokens, T.ngramSize);
+  const registered = registeredShingles();
+  const published = usable.map((doc) => ({
+    doc,
+    keys: shingleSet(repetitionLines(doc.body), T.ngramSize),
+  }));
 
-  if (draftShingles.length >= T.minDraftShingles) {
-    const seen = new Map<string, Shingle>();
-    for (const shingle of draftShingles) if (!seen.has(shingle.key)) seen.set(shingle.key, shingle);
+  // Registered house text is removed from numerator and denominator before
+  // anything is measured, so it cannot contribute to a flag at any length.
+  const registeredWords = new Set<number>();
+  for (const shingle of draft) {
+    if (!registered.has(shingle.key)) continue;
+    for (let i = 0; i < T.ngramSize; i++) registeredWords.add(shingle.index + i);
+  }
+  const remainingWords = tokens.length - registeredWords.size;
+  const unregistered = draft.filter((shingle) => !registered.has(shingle.key));
 
-    // Phrasing that turns up in most published articles is site furniture -
-    // the disclaimer, the CTA line - which the editorial rules require, so it
-    // is excluded from the comparisons below rather than thrashing every
-    // draft. Past a point that stops being true: an article whose phrasing is
-    // a tenth house-standard is not carrying furniture, it is the sameness
-    // itself, and that gets its own finding.
-    const furnitureAt = Math.ceil(T.boilerplateDocShare * published.length);
-    const furniture: Shingle[] = [];
-    const unique: Shingle[] = [];
-    for (const shingle of seen.values()) {
-      const ubiquitous =
-        published.length >= T.minDocsForBoilerplate &&
-        published.filter((p) => p.keys.has(shingle.key)).length >= furnitureAt;
-      (ubiquitous ? furniture : unique).push(shingle);
+  // Measured on what is left, so the gate is on what is left: a deal post
+  // that is mostly its required disclosure has nothing to compare.
+  if (unregistered.length >= T.minDraftShingles) {
+    const inDocs = new Map<string, number>();
+    for (const shingle of unregistered) {
+      if (inDocs.has(shingle.key)) continue;
+      inDocs.set(shingle.key, published.filter((p) => p.keys.has(shingle.key)).length);
     }
+    const ubiquitousAt = Math.ceil(T.ubiquitousDocShare * published.length);
+    const isUbiquitous = (key: string): boolean =>
+      published.length >= T.minDocsForUbiquity && (inDocs.get(key) ?? 0) >= ubiquitousAt;
 
-    const stockShare = furniture.length / seen.size;
-    const stockBudget = Math.max(T.stockPhrasingFloor, T.stockPhrasingAllowance * seen.size);
-    if (furniture.length > stockBudget) {
-      const shown = furniture.slice(0, EXAMPLES_PER_RULE);
+    /** Share of the remaining body words these shingles cover. */
+    const share = (list: Shingle[]): number => {
+      if (remainingWords <= 0) return 0;
+      const covered = new Set<number>();
+      for (const shingle of list) {
+        for (let i = 0; i < T.ngramSize; i++) {
+          if (!registeredWords.has(shingle.index + i)) covered.add(shingle.index + i);
+        }
+      }
+      return covered.size / remainingWords;
+    };
+
+    const distinct = (list: Shingle[]): Shingle[] => {
+      const seen = new Set<string>();
+      return list.filter((shingle) => !seen.has(shingle.key) && seen.add(shingle.key));
+    };
+
+    // A run of consecutive shared sequences is a lifted passage - the thing a
+    // percentage total hides, because 25 words in a row is a paragraph nobody
+    // rewrote whatever the article's overall overlap says.
+    const longestRun = (keys: Set<string>): { length: number; at: number } => {
+      let best = { length: 0, at: 0 };
+      let length = 0;
+      let at = 0;
+      for (const [i, shingle] of draft.entries()) {
+        const contiguous = length > 0 && draft[i - 1].index === shingle.index - 1;
+        if (keys.has(shingle.key) && !registered.has(shingle.key)) {
+          length = contiguous ? length + 1 : 1;
+          if (!contiguous) at = i;
+        } else {
+          length = 0;
+        }
+        if (length > best.length) best = { length, at };
+      }
+      return best;
+    };
+
+    const runs = published
+      .map((p) => ({ doc: p.doc, run: longestRun(p.keys) }))
+      .map((entry) => ({ ...entry, words: entry.run.length === 0 ? 0 : entry.run.length + T.ngramSize - 1 }))
+      .sort((a, b) => b.words - a.words);
+    const worstRun = runs[0];
+    if (worstRun && worstRun.words >= T.verbatimRunWords) {
+      const from = draft[worstRun.run.at].index;
+      const passage = tokens.slice(from, from + worstRun.words).map((t) => t.word).join(' ');
       out.push({
         category: 'repetition',
-        rule: 'House phrasing repeated site-wide',
-        matches: shown.map((s) => s.key),
-        lines: shown.map((s) => s.line),
-        count: furniture.length,
-        fix: `${Math.round(stockShare * 100)}% of this draft's ${T.ngramSize}-word sequences appear in most of the last ${published.length} published articles (allowance ${Math.round(T.stockPhrasingAllowance * 100)}%, which covers the disclaimer and the CTA lines). This is the sameness a reader notices across two of our pages: rewrite the recurring frames, keeping only the wording the editorial rules actually require.`,
+        rule: 'Verbatim passage recycled from a published article',
+        matches: [excerpt(passage, 120)],
+        lines: [draft[worstRun.run.at].line],
+        count: worstRun.words,
+        fix: `${worstRun.words} consecutive words here also run word for word in "${worstRun.doc.slug}" (limit ${T.verbatimRunWords}). Rewrite the passage from the evidence rather than from the earlier article, or - if it is house text every piece owes the reader - register it in HOUSE_BLOCKS so it is exempt everywhere.`,
       });
     }
 
-    if (unique.length >= T.minDraftShingles) {
-      const perArticle = published
-        .map((p) => ({ doc: p.doc, shared: unique.filter((s) => p.keys.has(s.key)) }))
-        .sort((a, b) => b.shared.length - a.shared.length);
-      const worst = perArticle[0];
-      const worstRatio = worst.shared.length / unique.length;
-      const anywhere = unique.filter((s) => published.some((p) => p.keys.has(s.key)));
-      const corpusRatio = anywhere.length / unique.length;
+    // Deduped only for reporting: `share` needs every occurrence, because it
+    // measures the words these sequences cover, not how many of them there are.
+    const ubiquitous = unregistered.filter((shingle) => isUbiquitous(shingle.key));
+    const houseShare = share(ubiquitous);
+    if (houseShare >= T.maxSharedWordShare) {
+      const distinctHouse = distinct(ubiquitous);
+      const shown = distinctHouse.slice(0, EXAMPLES_PER_RULE);
+      out.push({
+        category: 'repetition',
+        rule: 'House phrasing repeated site-wide',
+        matches: shown.map((shingle) => shingle.key),
+        lines: shown.map((shingle) => shingle.line),
+        count: distinctHouse.length,
+        fix: `${Math.round(houseShare * 100)}% of this draft's unregistered body words also appear in most of the last ${published.length} published articles (limit ${Math.round(T.maxSharedWordShare * 100)}%). This is the sameness a reader meets on the second page they open. Either rewrite these frames in this article's own terms, or - if every piece genuinely owes the reader this text - shorten it to a pointer at a standing page and register that pointer in HOUSE_BLOCKS (budget ${T.houseBlockCount} blocks, ${T.houseBlockWords} words).`,
+      });
+    }
 
-      if (worstRatio >= T.maxArticleOverlap || corpusRatio >= T.maxCorpusOverlap) {
-        const shown = (worstRatio >= T.maxArticleOverlap ? worst.shared : anywhere).slice(
-          0,
-          EXAMPLES_PER_RULE,
-        );
-        const reasons = [
-          worstRatio >= T.maxArticleOverlap
-            ? `${Math.round(worstRatio * 100)}% of them also appear in "${worst.doc.slug}"`
-            : '',
-          corpusRatio >= T.maxCorpusOverlap
-            ? `${Math.round(corpusRatio * 100)}% appear somewhere in the last ${published.length} published articles`
-            : '',
-        ].filter(Boolean);
-        out.push({
-          category: 'repetition',
-          rule: `Recycled phrasing from published articles`,
-          matches: shown.map((s) => s.key),
-          lines: shown.map((s) => s.line),
-          count: (worstRatio >= T.maxArticleOverlap ? worst.shared : anywhere).length,
-          fix: `Of this draft's ${unique.length} distinct ${T.ngramSize}-word sequences, ${reasons.join(' and ')}. Rewrite those passages in this article's own terms - a reader who lands on two of our pages must not meet the same sentences twice.`,
-        });
-      }
+    const recycled = unregistered.filter(
+      (shingle) => (inDocs.get(shingle.key) ?? 0) > 0 && !isUbiquitous(shingle.key),
+    );
+    const recycledShare = share(recycled);
+    if (recycledShare >= T.maxSharedWordShare) {
+      const perDoc = published
+        .map((p) => ({ doc: p.doc, shared: recycled.filter((shingle) => p.keys.has(shingle.key)) }))
+        .sort((a, b) => b.shared.length - a.shared.length);
+      const worst = perDoc[0];
+      const shown = distinct(worst.shared.length > 0 ? worst.shared : recycled).slice(0, EXAMPLES_PER_RULE);
+      out.push({
+        category: 'repetition',
+        rule: 'Recycled phrasing from published articles',
+        matches: shown.map((shingle) => shingle.key),
+        lines: shown.map((shingle) => shingle.line),
+        count: distinct(recycled).length,
+        fix: `${Math.round(recycledShare * 100)}% of this draft's unregistered body words already appear in the last ${published.length} published articles (limit ${Math.round(T.maxSharedWordShare * 100)}%), most of it in "${worst.doc.slug}". Rewrite those passages in this article's own terms - a reader who lands on two of our pages must not meet the same sentences twice.`,
+      });
     }
   }
 
@@ -1136,7 +1661,7 @@ function corpusFindings(lines: string[], corpus: CorpusArticle[]): SlopFinding[]
   if (draftOpening.size >= 8) {
     const similar = usable
       .map((doc) => {
-        const opening = new Set(openingTokens(proseLines(doc.body)));
+        const opening = new Set(openingTokens(repetitionLines(doc.body)));
         return {
           doc,
           similarity: jaccard(draftOpening, opening),

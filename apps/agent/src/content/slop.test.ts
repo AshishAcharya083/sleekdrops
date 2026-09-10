@@ -7,14 +7,25 @@ import assert from 'node:assert/strict';
 import {
   detectSlop,
   formatSlopReport,
+  houseBlockWords,
   proseLines,
   slopSeverity,
+  HOUSE_BLOCKS,
+  SCAN_THRESHOLDS,
   SLOP_PASS_SCORE,
   type CorpusArticle,
+  type HouseBlockTag,
 } from './slop.js';
 
 /** Rule names hit by a draft, for terse assertions. */
 const rules = (md: string): string[] => detectSlop(md).findings.map((f) => f.rule);
+
+/** The registered wording of a house block, as an article must carry it. */
+function block(tag: HouseBlockTag): string {
+  const found = HOUSE_BLOCKS.find((entry) => entry.tag === tag);
+  assert.ok(found, `no registered house block tagged ${tag}`);
+  return found.text;
+}
 
 test('clean product prose scores full marks', () => {
   const draft = `## Our pick
@@ -270,11 +281,11 @@ number we could argue with rather than a light that guesses.
 ## The pick: Dyson V15 Detect Absolute
 
 Dyson rates the V15 at 60 minutes on the eco setting with the fluffy head
-attached, which is the figure printed on the box and the figure almost nobody
-sees. Owner reviews on Amazon Australia put the realistic number closer to 45
-once you switch to the carpet head, and roughly 9 minutes in boost. Neither
-figure is a lie; they are answers to different questions, and the box answers
-the easier one.
+attached, a number its 2026 spec sheet still prints and one almost nobody
+sees. Owner reviews on Amazon Australia put the realistic figure closer to 45
+once you switch to the carpet head, and roughly 9 minutes at the 240 air watts
+boost draws. Neither number is a lie; they are answers to different questions,
+and the box answers the easier one.
 
 That gap matters more than it sounds. A three-bedroom house takes about 20
 minutes of real cleaning, so the eco figure is fine and the boost figure is a
@@ -315,7 +326,7 @@ breaks first. Three complaints came up again and again: clogged filters, bin
 seals that split, and batteries that stop holding charge in the second year.
 
 This is editorial synthesis from published specifications, retailer listings
-and owner reviews. We have not run these machines through a lab.
+and owner reviews. We have not run these products through a lab.
 
 ## FAQ
 
@@ -361,14 +372,15 @@ The WX-021 sells for $229 RRP, which is the lowest here, and it is the only one
 of the four with a physical line-in. It does less, and what it does it keeps
 doing: our unit is three years old and still on its first firmware.`;
 
-/** Section every published article carries by instruction, so it is not repetition. */
+/**
+ * The house section every published article carries, built from the registered
+ * blocks - so it is required text rather than repetition, at any draft length.
+ */
 const HOUSE_METHOD = `## How we picked
 
-We started from every model sold through Amazon Australia in March 2026, then
-cut anything without a published spec sheet or a user-replaceable battery.
+${block('methodology-pointer')}
 
-This is editorial synthesis from published specifications, retailer listings and
-owner reviews. We have not run these products through a lab.`;
+${block('disclosure')}`;
 
 const published = (slug: string, body: string): CorpusArticle => ({
   slug,
@@ -542,7 +554,7 @@ test('a near-duplicate of a published article is caught, phrase by phrase', () =
   const report = detectSlop(NEAR_DUPLICATE, { corpus: CORPUS });
   const ngram = report.findings.find((f) => f.rule === 'Recycled phrasing from published articles');
   assert.ok(ngram);
-  assert.match(ngram.fix, /also appear in "best-portable-bluetooth-speakers"/);
+  assert.match(ngram.fix, /most of it in "best-portable-bluetooth-speakers"/);
   assert.ok(ngram.matches.some((m) => m.includes('in australia right now buy')));
   assert.ok(ngram.lines.every((line) => line > 0));
 
@@ -552,9 +564,11 @@ test('a near-duplicate of a published article is caught, phrase by phrase', () =
   assert.deepEqual(opening.lines, [1]);
 });
 
-test('an unrelated draft is not flagged, even sharing the house methodology', () => {
-  // Every published article carries "How we picked" and the disclaimer by
-  // instruction, so those n-grams are furniture, not repetition.
+test('registered house blocks are exempt, at any draft length', () => {
+  // Every published article carries the disclosure and the methodology
+  // pointer by instruction - the FTC's position is that a disclosure must
+  // repeat on every endorsement - so registered text is removed from both
+  // sides before anything is measured, and cannot be flagged at any length.
   const withHouseMethod = `${VARIED}\n\n${HOUSE_METHOD}`;
   assert.deepEqual(
     detectSlop(withHouseMethod, { corpus: CORPUS }).findings.filter(
@@ -562,6 +576,38 @@ test('an unrelated draft is not flagged, even sharing the house methodology', ()
     ),
     [],
   );
+
+  // A short piece is where a percentage allowance breaks: 10% of a 350-word
+  // deal post cannot hold a compliant disclosure. A word budget on the
+  // registry can.
+  const shortPost = `The Ninja AF160 dropped to $179 at Amazon Australia this morning, down from
+the $229 RRP Ninja lists. It holds 5.7 litres.
+
+${HOUSE_METHOD}`;
+  const houseCorpus = CORPUS.map((doc) => ({ ...doc, body: `${doc.body}\n\n${HOUSE_METHOD}` }));
+  assert.deepEqual(
+    detectSlop(shortPost, { corpus: houseCorpus }).findings.filter(
+      (f) => f.category === 'repetition',
+    ),
+    [],
+  );
+});
+
+test('the house-block registry stays inside its own budget', () => {
+  // The cap belongs on the registry, not on the draft: a fifth block, or a
+  // longer one, is the signal to move that text to a standing page and link
+  // it. This assertion is the only thing enforcing that.
+  assert.ok(
+    HOUSE_BLOCKS.length <= SCAN_THRESHOLDS.houseBlockCount,
+    `${HOUSE_BLOCKS.length} registered blocks, budget ${SCAN_THRESHOLDS.houseBlockCount}`,
+  );
+  assert.ok(
+    houseBlockWords() <= SCAN_THRESHOLDS.houseBlockWords,
+    `${houseBlockWords()} registered words, budget ${SCAN_THRESHOLDS.houseBlockWords}`,
+  );
+  assert.equal(new Set(HOUSE_BLOCKS.map((b) => b.id)).size, HOUSE_BLOCKS.length);
+  assert.ok(HOUSE_BLOCKS.every((b) => b.version >= 1));
+  assert.ok(HOUSE_BLOCKS.some((b) => b.tag === 'disclosure'), 'the disclosure block is required');
 });
 
 test('an article never has to be compared against itself to stay clean', () => {
@@ -591,7 +637,10 @@ test('no single new metric drags a draft below the pass mark on its own', () => 
   assert.ok(sections.score >= SLOP_PASS_SCORE, `section shape scored ${sections.score}`);
 
   const thin = detectSlop(VARIED.replace(/\d/g, 'x'));
-  assert.deepEqual(thin.findings.map((f) => f.category), ['specificity']);
+  assert.ok(
+    thin.findings.every((f) => f.category === 'specificity'),
+    thin.findings.map((f) => f.rule).join(', '),
+  );
   assert.ok(thin.score >= SLOP_PASS_SCORE, `thin specificity scored ${thin.score}`);
 
   const duplicate = detectSlop(NEAR_DUPLICATE, { corpus: CORPUS });
@@ -602,12 +651,17 @@ test('no single new metric drags a draft below the pass mark on its own', () => 
 test('every new finding carries line numbers and a fix, like every old one', () => {
   const findings = [
     ...detectSlop(TEMPLATED).findings,
+    ...detectSlop(WITH_LINKS).findings,
+    ...detectSlop(COMPLETE_PICKS.replace(WRAPPED_DISCLOSURE, 'We picked six.')).findings,
     ...detectSlop(NEAR_DUPLICATE, { corpus: CORPUS }).findings,
   ];
   const v2 = findings.filter((f) =>
-    ['uniformity', 'specificity', 'repetition'].includes(f.category),
+    ['uniformity', 'specificity', 'repetition', 'disclosure'].includes(f.category),
   );
-  assert.ok(v2.length >= 4, `expected the v2 metrics to fire: ${v2.map((f) => f.rule).join(', ')}`);
+  assert.ok(
+    new Set(v2.map((f) => f.category)).size === 4,
+    `expected every v2 category to fire: ${v2.map((f) => f.rule).join(', ')}`,
+  );
   for (const finding of v2) {
     assert.ok(finding.lines.length > 0, `${finding.rule} has no line numbers`);
     assert.ok(finding.lines.every((line) => Number.isInteger(line) && line > 0));
@@ -632,10 +686,10 @@ test('the scan stays fast enough to run on every review round', () => {
   assert.ok(elapsed < 1000, `took ${elapsed.toFixed(0)}ms against 30 published articles`);
 });
 
-test('phrasing the whole site shares is flagged once it outgrows the furniture', () => {
-  // The disclaimer and the CTA lines are required, so a draft is allowed to
-  // carry them. A draft that is mostly house frames is not carrying furniture,
-  // it is the site-wide sameness the AdSense review actually described.
+test('house phrasing nobody registered is flagged, and named as registrable', () => {
+  // Registered text is exempt everywhere; unregistered house voice repeated
+  // across the site is the sameness the AdSense review actually described,
+  // and the fix is to register it or move it to a standing page.
   const STOCK_FRAME = `Before we get to the picks, a word on how this guide is put together and what
 it is for. We look at what the makers publish, what the retailers list on the
 day of writing, and what owners say went wrong after the first six months. We
@@ -651,9 +705,10 @@ so treat every figure here as the recommended price rather than the shelf price.
   );
   assert.ok(finding);
   assert.match(finding.fix, /appear in most of the last 5 published articles/);
+  assert.match(finding.fix, /register that pointer in HOUSE_BLOCKS/);
   assert.ok(finding.lines.every((line) => line > 0));
 
-  // The methodology block on its own stays inside the allowance.
+  // The registered methodology block, carried by every article, stays clean.
   assert.equal(
     detectSlop(`${VARIED}\n\n${HOUSE_METHOD}`, { corpus: CORPUS }).findings.some(
       (f) => f.rule === 'House phrasing repeated site-wide',
@@ -662,13 +717,239 @@ so treat every figure here as the recommended price rather than the shelf price.
   );
 });
 
-test('a draft with no paragraphs at all still gets a finding it can act on', () => {
-  const rows = Array.from(
-    { length: 30 },
-    () => '| A machine | a long description of what the machine does | and a note |',
-  ).join('\n');
-  const tableOnly = `## Comparison\n\n| Model | What it is | Notes |\n| --- | --- | --- |\n${rows}`;
-  const finding = detectSlop(tableOnly).findings.find((f) => f.category === 'specificity');
+/** VARIED as it ships: the same piece with its affiliate links in place. */
+const WITH_LINKS = VARIED.replace(
+  'The catch is weight. At 3.1 kg',
+  '[Check the price on Amazon](/go/dyson-v15-detect-absolute)\n\nThe catch is weight. At 3.1 kg',
+).replace(
+  'Where it loses is the head.',
+  '[See it on Amazon](/go/shark-detect-pro)\n\nWhere it loses is the head.',
+);
+
+/** The same piece with a price and an exact model designation in every pick. */
+const COMPLETE_PICKS = WITH_LINKS.replace(
+  'Dyson rates the V15 at 60 minutes',
+  'Dyson lists the V15 Detect Absolute at $1,449 RRP and rates it at 60 minutes',
+).replace('Shark sells the Detect Pro for $599 RRP.', 'Shark sells the Detect Pro IW3611 for $599 RRP.');
+
+test('every product we earn on owes a price and a model designation', () => {
+  // The /go/ slug is the site's own record that a passage sells something, so
+  // it is what the check keys on rather than guessing at prose.
+  const finding = detectSlop(WITH_LINKS).findings.find(
+    (f) => f.rule === 'Product without a price or a model designation',
+  );
   assert.ok(finding);
-  assert.deepEqual(finding.lines, [1]);
+  assert.equal(finding.count, 2);
+  assert.ok(finding.matches.some((m) => m === '/go/dyson-v15-detect-absolute (missing price)'));
+  assert.ok(finding.matches.some((m) => m === '/go/shark-detect-pro (missing model designation)'));
+  assert.ok(finding.lines.every((line) => line > 0));
+  assert.match(finding.fix, /never an Amazon price/);
+
+  assert.equal(
+    detectSlop(COMPLETE_PICKS).findings.some((f) => f.category === 'specificity'),
+    false,
+    detectSlop(COMPLETE_PICKS).findings.map((f) => f.rule).join(', '),
+  );
+});
+
+test('a pick is judged across every section that links it, not section by section', () => {
+  // The link-placement rules have the conclusion link each pick a second
+  // time, and a verdict line is not the place to restate the RRP.
+  const withVerdict = `${COMPLETE_PICKS}
+
+## The verdict
+
+Buy the Dyson. [Check the price on Amazon](/go/dyson-v15-detect-absolute)`;
+  assert.equal(
+    detectSlop(withVerdict).findings.some(
+      (f) => f.rule === 'Product without a price or a model designation',
+    ),
+    false,
+  );
+
+  // A product linked only from the opening is still covered, though: the
+  // opening is where the "buy the X" answer lives.
+  const introOnly = `Buy the house-brand stick vacuum if all you want is cheap.
+[See it on Amazon](/go/house-brand-stick-vacuum)
+
+${COMPLETE_PICKS.replace(/^[\s\S]*?## The pick/, '## The pick')}`;
+  const finding = detectSlop(introOnly).findings.find(
+    (f) => f.rule === 'Product without a price or a model designation',
+  );
+  assert.ok(finding);
+  assert.deepEqual(finding.matches, ['/go/house-brand-stick-vacuum (missing price and model designation)']);
+  assert.deepEqual(finding.lines, [2]);
+});
+
+test('one dense paragraph cannot carry an article of filler', () => {
+  const filler = `## What to expect from a stick vacuum
+
+The way a vacuum feels in the hand is the part nobody can tell you about, and
+it is the part you will notice every single week. Weight matters, but so does
+where the weight sits, and the two are not the same thing at all.
+
+Storage is the other quiet problem. A wall dock needs a wall, and the wall you
+want is usually the one with the switchboard on it, so most people end up
+leaning the thing in a cupboard and hoping.
+
+Then there is the noise. Nobody lists it, everybody notices it, and the
+difference between a machine you use daily and one you resent is often nothing
+more interesting than how much it whines on hard floors early in the morning.`;
+
+  const finding = detectSlop(`${VARIED}\n\n${filler}`).findings.find(
+    (f) => f.rule === 'Thin passage',
+  );
+  assert.ok(finding);
+  assert.ok(finding.lines.every((line) => line > 0));
+  assert.match(finding.fix, /150 words/);
+
+  assert.equal(
+    detectSlop(VARIED).findings.some((f) => f.rule === 'Thin passage'),
+    false,
+  );
+});
+
+/** 12 words, no specifics. */
+const FILLER_SENTENCE = 'The seal around the bin is the part owners complain about first.';
+/** 12 words, three specifics: a brand attribution, a model and a price. */
+const SPECIFIC_SENTENCE = 'Ninja lists the AF160 at $229 RRP in its 2026 catalogue.';
+
+/** A draft where every `every`-th sentence carries three verifiable specifics. */
+function calibrationDraft(sentences: number, every: number): string {
+  const out: string[] = ['## What we found', ''];
+  for (let i = 0; i < sentences; i++) {
+    out.push(i % every === 0 ? SPECIFIC_SENTENCE : FILLER_SENTENCE);
+    if (i % 3 === 2) out.push('');
+  }
+  return out.join('\n');
+}
+
+test('the specificity gate is calibrated to the category leaders, not to our own prose', () => {
+  // CHOICE and Canstar Blue run 5-14 specifics per 100 words in verdict and
+  // test-result prose and about 2 in their thinnest methodology boilerplate,
+  // which blends to 3-5 over a whole article. A draft at 2.1 per 100 cleared
+  // the old 1.5 gate; it is exactly the copy the AdSense reviewer called
+  // templated, so it does not clear this one.
+  assert.equal(SCAN_THRESHOLDS.specificityPer100, 3);
+
+  const thin = detectSlop(calibrationDraft(30, 16)).findings.find(
+    (f) => f.rule === 'Thin specificity density',
+  );
+  assert.ok(thin, 'a draft at roughly 2 specifics per 100 words must not pass');
+  assert.match(thin.fix, /2\.\d per 100, want 3/);
+
+  const leaderDensity = detectSlop(calibrationDraft(30, 5)).findings.some(
+    (f) => f.rule === 'Thin specificity density',
+  );
+  assert.equal(leaderDensity, false, 'leader density must pass');
+});
+
+test('an article with no dated, named source is told to add one', () => {
+  const undated = VARIED.replace('a number its 2026 spec sheet still prints', 'a number the box prints');
+  const finding = detectSlop(undated).findings.find((f) => f.rule === 'No dated, named source');
+  assert.ok(finding);
+
+  // The example in the fix has to be text that actually satisfies the check,
+  // or the editor is sent round the loop twice.
+  const asFixed = undated.replace(
+    'Dyson rates the V15 at 60 minutes',
+    'According to CHOICE, the 2026 tests put the V15 at 60 minutes',
+  );
+  assert.equal(
+    detectSlop(asFixed).findings.some((f) => f.rule === 'No dated, named source'),
+    false,
+  );
+  assert.equal(finding.count, 1);
+  assert.ok(finding.lines.every((line) => line > 0));
+
+  assert.equal(
+    detectSlop(VARIED).findings.some((f) => f.rule === 'No dated, named source'),
+    false,
+    'one dated attribution is enough',
+  );
+});
+
+/** The registered disclosure, wrapped the way an article's markdown wraps it. */
+const WRAPPED_DISCLOSURE = `This is editorial synthesis from published specifications, retailer listings
+and owner reviews. We have not run these products through a lab.`;
+
+test('the fixtures carry the registered disclosure, wrapping aside', () => {
+  assert.equal(WRAPPED_DISCLOSURE.replace(/\s+/g, ' '), block('disclosure'));
+  assert.ok(VARIED.includes(WRAPPED_DISCLOSURE));
+});
+
+test('the disclosure is asserted by presence, never flagged as repetition', () => {
+  // Inverted on purpose: the FTC's position is that each endorsement needs its
+  // own disclosure, because a reader may not have seen an earlier post. So
+  // repeating it is correct and absence is the defect.
+  assert.deepEqual(
+    detectSlop(COMPLETE_PICKS).findings.filter((f) => f.category === 'disclosure'),
+    [],
+  );
+
+  const reworded = COMPLETE_PICKS.replace(
+    WRAPPED_DISCLOSURE,
+    'This piece is editorial synthesis. Nobody here put these vacuums on a bench.',
+  );
+  const soft = detectSlop(reworded).findings.find((f) => f.category === 'disclosure');
+  assert.ok(soft);
+  assert.equal(soft.rule, 'Affiliate disclosure reworded');
+  assert.ok(soft.fix.includes(block('disclosure')), 'the fix quotes the registered wording');
+  assert.ok(soft.lines.every((line) => line > 0));
+
+  const missing = COMPLETE_PICKS.replace(WRAPPED_DISCLOSURE, 'We picked six and cut the rest.');
+  const hard = detectSlop(missing).findings.find((f) => f.category === 'disclosure');
+  assert.ok(hard);
+  assert.equal(hard.rule, 'Affiliate disclosure missing');
+  assert.ok(hard.count > soft.count, 'no disclosure at all costs more than a paraphrase');
+  assert.notEqual(slopSeverity(hard), 'high');
+  assert.ok(detectSlop(missing).score >= SLOP_PASS_SCORE, 'and still never fails a draft alone');
+});
+
+test('a page with no affiliate link is not asked for an affiliate disclosure', () => {
+  assert.equal(
+    detectSlop(VARIED).findings.some((f) => f.category === 'disclosure'),
+    false,
+  );
+});
+
+test('a paragraph lifted from a published article is caught as a run', () => {
+  // The check a percentage total hides: 25 words in a row is a paragraph
+  // nobody rewrote, whatever the article's overall overlap says.
+  const lifted = `A 5.7 litre basket clears a whole chicken, which the 4 litre Kmart unit cannot.
+Ninja quotes 75 minutes at 200C before the coating starts to discolour, and the
+owner reviews back that up.`;
+  const draft = `${VARIED}\n\n## On capacity\n\n${lifted}`;
+
+  const finding = detectSlop(draft, { corpus: CORPUS }).findings.find(
+    (f) => f.rule === 'Verbatim passage recycled from a published article',
+  );
+  assert.ok(finding);
+  assert.ok(finding.count >= SCAN_THRESHOLDS.verbatimRunWords, `run of ${finding.count} words`);
+  assert.match(finding.fix, /"best-air-fryers"/);
+  assert.ok(finding.lines.every((line) => line > 0));
+
+  assert.equal(
+    detectSlop(VARIED, { corpus: CORPUS }).findings.some(
+      (f) => f.rule === 'Verbatim passage recycled from a published article',
+    ),
+    false,
+  );
+});
+
+test('a spec table cannot carry a vague article', () => {
+  // The table is where the leaders put their figures, and it is also where a
+  // thin article hides: 40 numbers in a grid above 500 words that say
+  // nothing. Both sides of the density are measured on body copy only.
+  const rows = Array.from(
+    { length: 12 },
+    (_, i) => `| Model ${i}00 | $${200 + i * 10} | ${4 + i} hours | 2026 |`,
+  ).join('\n');
+  const table = `## How they compare\n\n| Model | RRP | Runtime | Released |\n| --- | --- | --- | --- |\n${rows}`;
+  const vague = TEMPLATED.replace('## FAQ', `${table}\n\n## FAQ`);
+
+  const finding = detectSlop(vague).findings.find((f) => f.rule === 'Thin specificity density');
+  assert.ok(finding, 'the table must not lift the density');
+  assert.match(finding.fix, /Spec tables do not count towards this/);
+  assert.ok(finding.lines.every((line) => line > 0));
 });
