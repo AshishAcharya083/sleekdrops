@@ -233,7 +233,7 @@ dek: "..."                   # required, one-sentence subhead
 category: "Tech"             # required, one of the 6 exactly
 postType: "guide"            # article | guide | roundup  (NOT review)
 kind: "Comparison"           # optional human label badge
-author: "theo"               # required, MUST be an id from the fixed roster (main repo authors.ts)
+author: "desk"               # required, the public SleekDrops Editorial Desk byline
 tags: ["anker", "power bank"]
 pubDate: "2026-05-30"        # required
 readTime: 9                  # required, integer minutes
@@ -244,7 +244,7 @@ draft: false                 # optional
 ```
 
 **Rules the assembler enforces:**
-- `author` must be an existing id in the main repo's `src/data/authors.ts` (the roster is fixed: `mira`, `theo`, `aiko`, `lina`, `sam`, `beatriz`). Pick the author whose beat matches the category. Do **not** invent authors — unknown id fails the build.
+- `author` must be `desk`, matching the public SleekDrops Editorial Desk entry in the main repo's `src/data/authors.ts`. Unknown ids fail the pipeline contract.
 - `cover` is one of `fill-1`…`fill-8` (placeholder gradient; v1 has no per-post hero image — see `docs/future_planning.md` for the R2 image plan when you add real images).
 - `slug` = filename (kebab-case, unique). If a file with that slug exists, append a disambiguator or skip (idempotency via `runId`).
 - Body `/go/<slug>` links must all have matching keys in `affiliate-links.json`.
@@ -330,7 +330,7 @@ One post per category per day, deep and people-first — not a farm.
 
 - [ ] Never fabricate a price; verify against the live merchant page.
 - [ ] Never write a raw merchant URL in a post/data file — always `/go/<slug>`.
-- [ ] Never invent an author id — use the existing `authors.ts` roster.
+- [ ] Use `author: "desk"` — the single public SleekDrops Editorial Desk byline.
 - [ ] Never auto-publish a single-product `review` (needs real hands-on testing).
 - [ ] Cons column always full; name a winner; cite real signals (E-E-A-T).
 - [ ] One excellent post/day over volume (avoid scaled-content-abuse penalties).

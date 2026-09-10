@@ -10,6 +10,7 @@ import PostGrid from '@components/blog/PostGrid.astro';
 import Newsletter from '@components/layout/Newsletter.astro';
 import { getAllPosts, getFeaturedPost } from '@lib/posts';
 import { getActiveDeals, todaysDrop } from '@data/deals';
+import { SITE_DESCRIPTION } from '@data/site';
 import { buildHomeSchema, buildMeta } from '@lib/seo';
 import { formatMedium } from '@lib/format';
 import { resolveHeroSecondaryCta, resolveDropPanelAction } from '@lib/hero-cta';
@@ -43,9 +44,8 @@ const secondaryCta = resolveHeroSecondaryCta({
 const dropPanelAction = resolveDropPanelAction(secondaryCta);
 
 const meta = buildMeta({
-  title: 'Exclusive deals dropping daily',
-  description:
-    'SleekDrops publishes independent product reviews, side-by-side comparisons and buying guides for Australian shoppers. No paid placements, quietly opinionated.',
+  title: 'Independent buying guides for Australia',
+  description: SITE_DESCRIPTION,
   pathname: '/',
 });
 ---
@@ -54,10 +54,10 @@ const meta = buildMeta({
     <div class="container">
       <div class="hero-grid">
         <div>
-          <Eyebrow accent dot>Daily drop · {today}</Eyebrow>
-          <h1>Exclusive deals,<br />dropping <em>daily</em>.</h1>
+          <Eyebrow accent dot>Independent editorial · {today}</Eyebrow>
+          <h1>Buy better,<br />with <em>evidence</em>.</h1>
           <p class="lede">
-            Honest reviews, side-by-side comparisons, and the quiet luxury of a buying guide that doesn't try to sell you anything. We research, we compare, you decide.
+            Independent product research, side-by-side comparisons, and the quiet luxury of a buying guide that doesn't try to sell you anything. We research, we compare, you decide.
           </p>
           <div class="hero-actions">
             <Button
