@@ -6,6 +6,7 @@ import type {
   EditorialAngle,
   KeywordPlan,
   ResearchDetail,
+  StructureShape,
 } from '../api';
 import { api, apiUpload, duration, fmtCost, fmtTime } from '../api';
 import { Badge } from '../components';
@@ -310,6 +311,47 @@ function EditorialAngleSection({ angle }: { angle: EditorialAngle }) {
   );
 }
 
+/**
+ * Which silhouette the piece was built to. Small on purpose: the operator
+ * question this answers is "why does this one not look like the last one", and
+ * the running order plus where the shape came from answers it.
+ */
+function StructureShapeSection({ shape }: { shape: StructureShape }) {
+  const { passages, words } = shape.passageBudget;
+  return (
+    <div className="section">
+      <h2>Structure</h2>
+      <div className="card">
+        <div className="row" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
+          <span className="badge">{shape.name}</span>
+          <span className="badge">
+            {passages} extractable answer{passages === 1 ? '' : 's'} · {words.min}-{words.max} words
+          </span>
+          <span className="badge">FAQ: {shape.faq}</span>
+          {shape.selectedBy && <span className="badge">from the {shape.selectedBy}</span>}
+        </div>
+        <p className="muted" style={{ marginTop: 0, fontSize: 13, whiteSpace: 'pre-wrap' }}>
+          <strong>Opening:</strong> {shape.openingStyle}
+        </p>
+        <ul style={{ marginTop: 0, fontSize: 13 }}>
+          {shape.sections.map((section) => (
+            <li key={section.kind}>
+              {section.label}
+              <span className="muted">
+                {' '}
+                - {section.slot}
+                {section.required ? '' : ', optional'}
+                {section.repeats ? ', repeats' : ''}
+                {section.carriesAnswer ? ', extractable answer' : ''}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 function PlanList({ label, items }: { label: string; items: string[] }) {
   if (!items || items.length === 0) return null;
   return (
@@ -474,6 +516,10 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
 
             {detail.article.editorial_angle && (
               <EditorialAngleSection angle={detail.article.editorial_angle} />
+            )}
+
+            {detail.article.structure_shape && (
+              <StructureShapeSection shape={detail.article.structure_shape} />
             )}
 
             {detail.article.seo_review && (

@@ -3,6 +3,7 @@
 // article to its next stage. Verdict-driven, bounded revision loop —
 // a light version of devteam-platform's card lane pattern.
 import { MONETISED_INTENTS } from '../content/contract.js';
+import { describeShapeSelection } from '../content/shapes.js';
 import { getSetting, q } from '../db/pool.js';
 import {
   claudeConfigured,
@@ -223,12 +224,18 @@ export async function runStage(article: ArticleRow): Promise<void> {
       case 'outline': {
         const brief = await runOutliner(article, model!, tracker);
         brief.slug = await uniqueSlug(article.id, brief.slug);
+        // The shape goes in its own column as well as inside the brief: the
+        // brief is what carries it into the writer and reviewer prompts, the
+        // column is the record of the decision an operator can see and query.
+        // Both are written here so they can never disagree.
+        const shape = brief.structureShape ?? null;
         await updateArticle(article.id, {
           outline: JSON.stringify(brief),
+          structure_shape: shape ? JSON.stringify(shape) : null,
           slug: brief.slug,
           title: brief.seoTitle,
         });
-        summary = `"${brief.seoTitle}" — ${brief.sections?.length ?? 0} sections, target ${brief.wordCountTarget} words`;
+        summary = `"${brief.seoTitle}" — ${shape ? `${describeShapeSelection(shape)}, ` : ''}${brief.sections?.length ?? 0} sections, target ${brief.wordCountTarget} words`;
         next = { stage: 'write', status: 'queued' };
         break;
       }

@@ -133,6 +133,31 @@ export interface EditorialAngle {
   bylineRationale: string;
 }
 
+/**
+ * The structure library shape a piece was outlined to - which sections it
+ * carries, in what order, under what names, and how many extractable passages
+ * it spends. Mirrors ArticleShape in the agent app. Null on articles outlined
+ * before the library existed.
+ */
+export interface StructureShape {
+  id: string;
+  name: string;
+  openingStyle: string;
+  passageBudget: { passages: number; words: { min: number; max: number } };
+  faq: 'required' | 'optional' | 'omit';
+  sections: Array<{
+    kind: string;
+    label: string;
+    required: boolean;
+    slot: string;
+    purpose: string;
+    carriesAnswer: boolean;
+    repeats?: boolean;
+  }>;
+  /** Which record decided it: the angle, the SERP read, or the fallback. */
+  selectedBy?: string;
+}
+
 export interface SeoReviewDetail {
   score: number;
   pass: boolean;
@@ -171,6 +196,7 @@ export interface ArticleDetail {
     research: ResearchDetail | null;
     keyword_plan: KeywordPlan | null;
     editorial_angle: EditorialAngle | null;
+    structure_shape: StructureShape | null;
     outline: unknown;
     draft_md: string | null;
     seo_review: SeoReviewDetail | null;

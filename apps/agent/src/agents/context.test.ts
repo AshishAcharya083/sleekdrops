@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { authorVoiceBrief, editorialAngleBrief, operatorBrief } from './context.js';
+import {
+  ANTI_SLOP_RULES,
+  authorVoiceBrief,
+  EDITORIAL_RULES,
+  editorialAngleBrief,
+  GEO_RULES,
+  operatorBrief,
+} from './context.js';
 import { AUTHORS, authorById } from '../content/contract.js';
 import type { EditorialAngle, TopicRow } from '../pipeline/types.js';
 
@@ -109,4 +116,38 @@ test('a voice brief carries one beat, never the roster', () => {
   for (const other of AUTHORS.filter((a) => a.id !== 'home')) {
     assert.ok(!brief.includes(other.voice.specimen), `${other.id}'s specimen leaked into the prompt`);
   }
+});
+
+// The shared blocks reach the writer, the editor and the reviewer. While they
+// carried one universal skeleton, every piece on the site was written to it -
+// which is the sameness the structure library exists to break.
+
+test('the GEO rules ask for a passage budget, not a block under every heading', () => {
+  assert.match(GEO_RULES, /EXTRACTABLE ANSWERS, on a budget/);
+  assert.match(GEO_RULES, /The piece's own shape says how\s+many and how long/);
+  assert.doesNotMatch(GEO_RULES, /Every major H2 opens/);
+  // Still honest for a piece with no shape recorded: the citability principle
+  // survives, it is the uniform realisation of it that does not.
+  assert.match(GEO_RULES, /where no shape is recorded, take it as three or\s+four/);
+  assert.match(GEO_RULES, /CLAIM \+ EVIDENCE, always paired/);
+  assert.match(GEO_RULES, /NAME ENTITIES/);
+  assert.match(GEO_RULES, /RECENCY/);
+});
+
+test('the FAQ rule defers to the shape but still holds where the schema is built', () => {
+  assert.match(GEO_RULES, /FAQ where the piece's shape carries one/);
+  assert.match(GEO_RULES, /where a shape requires one it is not\s+optional/);
+  assert.match(GEO_RULES, /"## FAQ" with "### Question\?" headings/);
+  assert.doesNotMatch(GEO_RULES, /the FAQ is mandatory, not optional/);
+});
+
+test('no shared block prescribes a "how we picked" section on every piece', () => {
+  assert.doesNotMatch(EDITORIAL_RULES, /a "how we picked" section/);
+  assert.match(EDITORIAL_RULES, /is not a section every\s+article owes the reader/);
+});
+
+test('the voice rules name the house skeleton as a thing not to build', () => {
+  assert.match(ANTI_SLOP_RULES, /NEVER BUILD THE HOUSE SKELETON/);
+  assert.match(ANTI_SLOP_RULES, /No identical block under every heading/);
+  assert.match(ANTI_SLOP_RULES, /No section that fires by reflex/);
 });
