@@ -487,7 +487,7 @@ the argument; a ranking without one is a list.`,
     passageBudget: { passages: 3, words: { min: 40, max: 60 } },
     faq: 'required',
     postTypes: ['roundup', 'guide'],
-    serpFormats: ['listicle', 'ranked', 'top 10', 'best of', 'list'],
+    serpFormats: ['listicle', 'ranked', 'top 10', 'best of', 'list', 'roundup'],
     sections: [
       {
         kind: 'ranking',
@@ -583,6 +583,31 @@ const SHAPE_BY_INTENT: Record<string, ShapeId> = {
   Transactional: 'verdict-first',
 };
 
+/**
+ * Does this winning format name this shape? A fragment has to land on a whole
+ * word: substring matching read "Ranked listicle of the best TVs" as a
+ * head-to-head, because "vs" sits inside "TVs" - and "fix" inside "fixture",
+ * "value" inside "valuable". A hyphen counts as part of a word here, so
+ * "single" does not fire on "single-serve" while the hyphenated fragments
+ * ("head-to-head", "how-to") still match themselves. A trailing plural counts:
+ * the SERP says "reviews" and "running costs".
+ */
+function formatNames(format: string, shape: ArticleShape): boolean {
+  return shape.serpFormats.some((fragment) => fragmentPattern(fragment).test(format));
+}
+
+const WORD_CHAR = '[a-z0-9-]';
+const FRAGMENT_PATTERNS = new Map<string, RegExp>();
+
+function fragmentPattern(fragment: string): RegExp {
+  const cached = FRAGMENT_PATTERNS.get(fragment);
+  if (cached) return cached;
+  const escaped = fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`(?<!${WORD_CHAR})${escaped}(?:e?s)?(?!${WORD_CHAR})`);
+  FRAGMENT_PATTERNS.set(fragment, pattern);
+  return pattern;
+}
+
 export interface ShapeSelectionInput {
   postType: string;
   /** The angle record. Its `shape` is the decision of record when it fits. */
@@ -623,9 +648,7 @@ export function selectShape(input: ShapeSelectionInput): ArticleShape {
 
   const format = (input.winningFormat ?? '').toLowerCase();
   if (format) {
-    const fromFormat = offered.find((shape) =>
-      shape.serpFormats.some((fragment) => format.includes(fragment)),
-    );
+    const fromFormat = offered.find((shape) => formatNames(format, shape));
     if (fromFormat) return { ...fromFormat, selectedBy: 'format' };
   }
 

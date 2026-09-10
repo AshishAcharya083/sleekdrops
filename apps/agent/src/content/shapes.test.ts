@@ -189,6 +189,47 @@ test('the winning format picks the shape when there is no angle', () => {
   }
 });
 
+test('a format fragment has to land on a whole word, not inside one', () => {
+  // "vs" sits inside "TVs", "fix" inside "fixture", "value" inside "valuable".
+  // A substring read sends a listicle of many products to a shape whose
+  // running order argues two contenders axis by axis, and the SEO reviewer
+  // then files the format mismatch and burns a revision round on it.
+  const cases: Array<[string, string]> = [
+    ['Ranked listicle of the best TVs', 'ranked-list'],
+    ['best OLED TVs roundup', 'ranked-list'],
+    ['Best SUVs list', 'ranked-list'],
+    ['Top 10 EVs', 'ranked-list'],
+  ];
+  for (const [winningFormat, expected] of cases) {
+    const shape = selectShape({ postType: 'guide', angle: null, winningFormat });
+    assert.equal(shape.id, expected, `"${winningFormat}" should select ${expected}`);
+    assert.equal(shape.selectedBy, 'format');
+  }
+});
+
+test('a whole-word format fragment still matches plurals and hyphenated fragments', () => {
+  const cases: Array<[string, string]> = [
+    ['expert reviews', 'verdict-first'],
+    ['buying guides', 'segmented-buyers'],
+    ['running costs breakdown', 'cost-of-ownership'],
+    ['head-to-head', 'head-to-head'],
+    ['how-to', 'question-led'],
+  ];
+  for (const [winningFormat, expected] of cases) {
+    const shape = selectShape({ postType: 'guide', angle: null, winningFormat });
+    assert.equal(shape.id, expected, `"${winningFormat}" should select ${expected}`);
+  }
+});
+
+test('a format the library does not name falls through rather than half-matching', () => {
+  // Every one of these contains a fragment as a substring: "single-serve",
+  // "fixture", "valuable", "TVs".
+  for (const winningFormat of ['single-serve fixture guide', 'valuable TVs writeup']) {
+    const shape = selectShape({ postType: 'guide', angle: null, winningFormat, intent: null });
+    assert.equal(shape.selectedBy, 'rotation', `"${winningFormat}" matched a shape on a substring`);
+  }
+});
+
 test('the search intent decides when the format says nothing recognisable', () => {
   const shape = selectShape({
     postType: 'guide',
