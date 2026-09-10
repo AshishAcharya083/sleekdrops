@@ -21,6 +21,13 @@ export const POST_TYPES = ['article', 'guide', 'roundup'] as const;
  */
 export const MONETISED_INTENTS = new Set(['Commercial Investigation', 'Transactional']);
 
+/**
+ * Currency every price the site quotes is in — the home market is HOME_REGION
+ * ('au') and always has been. It rides through frontmatter so a schema builder
+ * never has to assume one.
+ */
+export const HOME_CURRENCY = 'AUD';
+
 export const AUTHORS = [
   {
     id: 'desk',
@@ -28,6 +35,33 @@ export const AUTHORS = [
     beat: 'Research-led product coverage across Tech, Home, Fashion, Health, Finance and Travel',
   },
 ] as const;
+
+/**
+ * A source behind the article, carried into the page's JSON-LD `citation`.
+ * `date` is reserved for the researcher's per-fact publication date and is
+ * left unset today.
+ */
+export const sourceSchema = z.object({
+  url: z.string().url(),
+  publisher: z.string().min(1).optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+/**
+ * A product the article recommends, one per /go/ slug the body actually links.
+ * Becomes an ItemList -> Product node on guides and roundups.
+ */
+export const pickSchema = z.object({
+  name: z.string().min(1),
+  brand: z.string().min(1).optional(),
+  /**
+   * As the dossier stated it, e.g. "A$229". The site parses the digits out of
+   * it into the pick's `offers.price`, quoted in `currency` - see `offerNode`
+   * in apps/web/src/lib/seo.ts.
+   */
+  price: z.string().min(1).optional(),
+  goSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+});
 
 export const frontmatterSchema = z.object({
   title: z.string().min(1),
@@ -43,6 +77,12 @@ export const frontmatterSchema = z.object({
   cover: z.enum(['fill-1', 'fill-2', 'fill-3', 'fill-4', 'fill-5', 'fill-6', 'fill-7', 'fill-8']),
   heroImage: z.string().url().optional(),
   heroAlt: z.string().optional(),
+  // Structured-data inputs. All optional: every post published before this
+  // existed carries none of them and must keep validating.
+  sources: z.array(sourceSchema).optional(),
+  entities: z.array(z.string().min(1)).optional(),
+  picks: z.array(pickSchema).optional(),
+  currency: z.string().min(1).default(HOME_CURRENCY),
   featured: z.boolean().default(false),
   draft: z.boolean().default(false),
 });

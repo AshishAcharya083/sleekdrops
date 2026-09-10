@@ -414,6 +414,37 @@ Two "Ignore" items shipped anyway, for reasons this audit did not weigh.
   per-agent opt-out, has to read. §3.8 still holds: Cloudflare's bot toggles,
   not this file, decide whether those agents reach the origin at all.
 
+### Decided since: the entity graph (2026-09-10)
+
+Two of the three `buildReviewSchema` defects §2 row 1 lists are fixed, §3.9's
+thrown-away rich data now reaches the page, and that row's "never on roundups"
+line needs a caveat.
+
+- **The graph, and the two defects.** Every post now ships one `@graph` -
+  publisher, site, page, byline and article as `@id`-referencing nodes - with
+  `wordCount`, `about`/`mentions` from the keyword plan's entities and
+  `citation` from the dossier's source URLs, all carried through frontmatter.
+  `buildReviewSchema` no longer hard-codes USD (the currency rides through
+  frontmatter as AUD) and no longer awards itself an `AggregateRating` of one
+  review. Its `Offer.url` still points at the robots-blocked `/go/` hop - that
+  one stands, and is the only destination the site has.
+- **Guides and roundups emit `ItemList` + `Product`.** §2 row 1 is still right
+  that this earns no product snippet and no carousel: the classic ItemList
+  carousel covers Recipe, Course, Movie and Restaurant only, and the beta that
+  accepts Product is EEA/Turkey/South Africa. It ships as the machine-readable
+  statement of what the page recommends and in what order, which is the
+  passage-level claim a retrieval agent resolves, not as a rich-result play.
+- **Each pick carries an `offers` node**, priced in AUD off the dossier's
+  stated figure and pointing at its `/go/` hop, so a pick is a resolvable
+  product entity rather than a bare name.
+  Worth a reviewer's eye: that figure is an approximate/RRP price the body no
+  longer prints (§3.3), so unlike a single-product review - where `offers`
+  mirrors the `product.price` on the page - the number exists only in the
+  markup. A displayed, dated price beside each pick is what would settle it.
+- **The byline is an Organization, not a Person.** The six reviewer personas
+  are gone; one labelled editorial desk is what the page shows, so it is what
+  the markup claims.
+
 ---
 
 ## 6. Sources
