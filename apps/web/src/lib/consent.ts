@@ -7,18 +7,15 @@
  * privacy-signal boolean and acts on the result; `./ads` feeds it the same two
  * things for the advertising category.
  *
- * The model, since September 2026, is opt-out for analytics and opt-in for ads,
- * with no prompt of any kind:
+ * The model, since September 2026, is opt-in for analytics. Advertising consent
+ * is collected by Google's certified CMP and is not decided by this record:
  *
- *  - Anonymous analytics is ON by default. The site is Australian, where the
- *    Privacy Act does not condition first-party, aggregate analytics on a prior
- *    opt-in, and the banner that used to ask was the first thing a visitor
- *    arriving from a search result saw. It can be switched off at any time from
- *    the footer's Privacy preferences, and the withdrawal path clears everything
- *    the grant stored.
- *  - Advertising is OFF by default and stays an explicit opt-in: the ad tag writes
- *    cookies and device storage the moment it runs, which is the thing ePrivacy
- *    conditions on consent for visitors it reaches.
+ *  - Analytics is OFF until the visitor enables it from Privacy preferences.
+ *    Withdrawal clears everything the grant stored and sends a Consent Mode v2
+ *    denial to Google Analytics.
+ *  - The legacy `ads` field stays readable so existing version-2 records migrate
+ *    safely, but it is always denied here. AdSense and its certified CMP own the
+ *    advertising decision independently.
  *  - A Global Privacy Control / Do-Not-Track signal switches every category off,
  *    over the default and over a stored grant alike.
  */
@@ -50,11 +47,11 @@ export type ConsentCategory = (typeof CONSENT_CATEGORIES)[number];
 export type ConsentGrants = Record<ConsentCategory, ConsentStatus>;
 
 /**
- * What applies when the visitor has decided nothing: anonymous analytics on,
- * advertising off. Also what a stored record falls back to for a category it
- * does not mention.
+ * What applies when the visitor has decided nothing: every non-essential site
+ * purpose is off. Also what a stored record falls back to for a category it does
+ * not mention.
  */
-export const DEFAULT_GRANTS: ConsentGrants = { analytics: 'granted', ads: 'denied' };
+export const DEFAULT_GRANTS: ConsentGrants = { analytics: 'denied', ads: 'denied' };
 
 export interface ConsentRecord {
   v: number;
