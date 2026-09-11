@@ -1,0 +1,33 @@
+---
+import { adsEnv } from '@lib/ads-env';
+
+/**
+ * Production AdSense bootstrap.
+ *
+ * Loading Google's publisher tag is what lets the certified Google CMP display
+ * the European regulations message configured in AdSense. The privacy-policy
+ * route opts out in BaseLayout because Google requires the policy page itself
+ * to be free of the ad tag / Funding Choices message.
+ */
+const { client } = adsEnv();
+const src = client
+  ? `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(client)}`
+  : '';
+---
+
+{client && (
+  <>
+    <script is:inline>
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+      window.gtag('consent', 'default', {
+        analytics_storage: 'denied',
+        ad_storage: 'denied',
+        ad_user_data: 'denied',
+        ad_personalization: 'denied',
+        wait_for_update: 500
+      });
+    </script>
+    <script is:inline async crossorigin="anonymous" src={src}></script>
+  </>
+)}

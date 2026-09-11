@@ -59,6 +59,19 @@ const meta = buildMeta({
     </div>
   </section>
 
+  <section class="accountability">
+    <div class="container accountability-grid">
+      <div>
+        <Eyebrow>Publisher accountability</Eyebrow>
+        <h2>Who is responsible for <em>SleekDrops</em>.</h2>
+      </div>
+      <div>
+        <p><strong>SleekDrops is an independently operated Australian digital publication.</strong> The SleekDrops Editorial Team is the accountable publisher byline for every article; beat labels describe subject coverage, not invented people or credentials.</p>
+        <p>Corrections are handled at <a href="mailto:corrections@sleekdrops.com">corrections@sleekdrops.com</a>, editorial questions at <a href="mailto:desk@sleekdrops.com">desk@sleekdrops.com</a>, and privacy requests at <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a>.</p>
+      </div>
+    </div>
+  </section>
+
   <section class="team">
     <div class="container">
       <div class="team-head">
@@ -153,6 +166,13 @@ const meta = buildMeta({
   }
 
   .team { padding: 80px 0; border-bottom: 1px solid var(--hairline); }
+  .accountability { padding: 72px 0; border-bottom: 1px solid var(--hairline); }
+  .accountability-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; }
+  .accountability h2 { font-family: var(--font-display); font-size: clamp(38px, 4vw, 56px); line-height: 1.05; font-weight: 400; color: var(--ink); margin: 14px 0 0; }
+  .accountability h2 em { font-style: italic; }
+  .accountability p { margin: 0 0 16px; color: var(--muted); font-size: 16px; line-height: 1.65; }
+  .accountability strong, .accountability a { color: var(--ink); }
+  @media (max-width: 900px) { .accountability-grid { grid-template-columns: 1fr; gap: 28px; } }
   .team-head {
     display: flex;
     justify-content: space-between;

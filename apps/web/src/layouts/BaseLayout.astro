@@ -3,6 +3,7 @@ import SEOHead from '@components/seo/SEOHead.astro';
 import Header from '@components/layout/Header.astro';
 import Footer from '@components/layout/Footer.astro';
 import PrivacyPreferences from '@components/layout/PrivacyPreferences.astro';
+import GoogleConsent from '@components/ads/GoogleConsent.astro';
 import '@styles/tokens.css';
 import '@styles/global.css';
 import type { Thing, WithContext } from 'schema-dts';
@@ -35,9 +36,11 @@ export interface Props extends MetaPayload {
    * non-PII; values that are undefined are dropped.
    */
   pageProps?: Record<string, string | undefined>;
+  /** Disable Google's ad/CMP bootstrap on pages Google requires to stay tag-free. */
+  allowAdvertising?: boolean;
 }
 
-const { schema, active, progress = false, screen, pageProps, ...meta } = Astro.props;
+const { schema, active, progress = false, screen, pageProps, allowAdvertising = true, ...meta } = Astro.props;
 
 const pageView = screen
   ? {
@@ -52,6 +55,7 @@ const pageView = screen
 <html lang="en">
   <head>
     <SEOHead {...meta} schema={schema} />
+    {allowAdvertising && <GoogleConsent />}
   </head>
   <body class="page" data-page-view={pageView ? JSON.stringify(pageView) : undefined}>
     {progress && <div class="progress-bar" aria-hidden="true" />}

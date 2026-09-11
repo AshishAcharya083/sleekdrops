@@ -97,7 +97,7 @@ The names are DevTeam's canonical ones, so the platform, this repo's settings, a
 
 If a value is ever missing, re-run the publish from the DevTeam project's **Config** tab (**Sync to GitHub**) rather than pasting one in — a hand-entered key goes stale the next time the project re-provisions.
 
-Both deploy workflows pass the analytics pair into the web build as `PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY` / `PUBLIC_DEVTEAM_ANALYTICS_HOST`; the admin panel reads the same two repo settings under its own `VITE_` prefix, so both apps report into one project.
+Both public-site workflows keep the DevTeam processor disabled until public privacy, jurisdiction and retention terms are available. The admin panel may still read the repo settings under its own `VITE_` prefix for authenticated internal use.
 
 | Repo setting                                | Kind         | What it is                                                                          |
 | ------------------------------------------- | ------------ | ------------------------------------------------------------------------------------ |
@@ -106,9 +106,7 @@ Both deploy workflows pass the analytics pair into the web build as `PUBLIC_DEVT
 
 An empty key disables the DevTeam sink silently after one warning; GA4 is unaffected.
 
-The same pair is also uploaded to the Pages project as **runtime** variables, by a `wrangler pages secret put` step in each deploy workflow (`--env preview` on develop, `--env production` on production).
-That step exists because the `PUBLIC_` values above are inlined into the browser bundle by Vite and never reach a Pages Function, and `functions/go/[slug].js` — which counts the outbound affiliate click, the site's primary conversion — reads them from `context.env` at request time.
-Both go up as secrets because wrangler has no command for a plain-text Pages variable and a secret reads back through `context.env` identically; nothing is committed to `wrangler.toml` or to the repo, an empty value is skipped, and an empty key leaves the Function's sink off while the 302 is still served.
+The pair is not uploaded to Pages Functions. The deployed `/go` route explicitly supplies no telemetry credentials; affiliate redirects and attribution continue to work without sending click data to this processor.
 
 ### Google Analytics 4 (required for GA4 to count anything)
 
