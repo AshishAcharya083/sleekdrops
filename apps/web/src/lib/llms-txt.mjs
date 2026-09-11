@@ -178,6 +178,10 @@ export function toArticleRecord(slug, data, body, now = new Date()) {
     tags: Array.isArray(data.tags) ? data.tags.map(frontmatterText).filter(Boolean) : [],
     pubDate,
     updatedDate,
+    /** When a human last read the piece against its sources; null before we logged it. */
+    lastReviewed: asDate(data.lastReviewed),
+    /** How many sources the page lists - the evidence an agent can go and check. */
+    sourceCount: Array.isArray(data.sources) ? data.sources.length : 0,
     readTime: Number.isFinite(data.readTime) ? Number(data.readTime) : null,
     featured: data.featured === true,
     live: data.draft !== true && pubDate !== null && pubDate.getTime() <= now.getTime(),
@@ -361,10 +365,12 @@ function preamble({ siteName, description, details, deployment, marker, generate
 function siteDetails(siteUrl) {
   return [
     'Written for Australian shoppers: prices are in AUD and availability is checked on the',
-    'date shown on each page. Picks are an editorial synthesis of manufacturer specs, owner',
-    'reviews and expert coverage rather than a hands-on lab test. Pages carry affiliate',
-    'links, disclosed on the page; a commission never decides a recommendation',
-    `(${siteUrl}/disclaimer).`,
+    'date shown on each page. SleekDrops does not test products: a pick is an editorial',
+    'synthesis of independent test results, manufacturer specs and owner reports, and each',
+    `article lists those sources with their publisher and date (${siteUrl}/how-we-research).`,
+    `Articles are AI-assisted and human-reviewed (${siteUrl}/ai-disclosure), and carry the`,
+    'date an editor last checked them. Pages carry affiliate links, disclosed on the page; a',
+    `commission never decides a recommendation (${siteUrl}/disclaimer).`,
   ];
 }
 
@@ -458,6 +464,8 @@ export function buildLlmsTxt({
     '## About this site',
     '',
     linkLine('About', `${site}/about`, 'who writes this site and how a pick is made'),
+    linkLine('How we research', `${site}/how-we-research`, 'the evidence standard behind every recommendation, and what we do not do'),
+    linkLine('AI disclosure', `${site}/ai-disclosure`, 'which parts of an article are AI-assisted, and what an editor checks'),
     linkLine('Affiliate disclaimer', `${site}/disclaimer`, 'how the site is funded and how links are labelled'),
     linkLine('Privacy', `${site}/privacy`, 'what is collected and what is not'),
     linkLine('RSS feed', `${site}/rss.xml`, 'new articles as they publish'),
@@ -478,6 +486,8 @@ function articleFacts(article, url) {
     `- Type: ${article.postType}`,
     ...(article.pubDate ? [`- Published: ${isoDay(article.pubDate)}`] : []),
     ...(article.updatedDate ? [`- Updated: ${isoDay(article.updatedDate)}`] : []),
+    ...(article.lastReviewed ? [`- Last reviewed by an editor: ${isoDay(article.lastReviewed)}`] : []),
+    ...(article.sourceCount > 0 ? [`- Sources listed on the page: ${article.sourceCount}`] : []),
     `- Length: ${article.wordCount} words${article.readTime ? `, ${article.readTime} min read` : ''}`,
     ...(article.tags.length > 0 ? [`- Tags: ${article.tags.join(', ')}`] : []),
   ];

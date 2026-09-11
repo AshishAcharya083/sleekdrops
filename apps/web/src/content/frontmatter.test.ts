@@ -83,6 +83,44 @@ test('a pick whose goSlug could not resolve to a /go/ route is refused', () => {
   }
 });
 
+test("a source's tier and part-dated publication date survive intact", () => {
+  // The researcher dates a source to whatever precision it published one, and
+  // files it under a tier - both ride into the visible sources block, so both
+  // have to reach the collection unaltered.
+  const parsed = blogFrontmatterSchema.parse({
+    ...assemblerOutput,
+    lastReviewed: '2026-09-11',
+    sources: [
+      { url: 'https://www.choice.com.au/vacuums', publisher: 'Choice', date: '2026-03-14', tier: 'expert' },
+      { url: 'https://www.dyson.com.au/v15', publisher: 'Dyson', date: '2026', tier: 'primary' },
+      { url: 'https://forum.example/thread', publisher: 'forum.example', tier: 'unknown' },
+    ],
+  });
+
+  assert.deepEqual(
+    parsed.sources?.map((source) => [source.date, source.tier]),
+    [
+      ['2026-03-14', 'expert'],
+      ['2026', 'primary'],
+      [undefined, 'unknown'],
+    ],
+  );
+  // Distinct from pubDate and updatedDate: this is when a human last checked it.
+  assert.equal(parsed.lastReviewed?.toISOString(), '2026-09-11T00:00:00.000Z');
+  assert.equal(parsed.pubDate.toISOString(), '2026-09-10T00:00:00.000Z');
+});
+
+test('a tier the site cannot render, or a date it cannot read, is refused', () => {
+  for (const source of [
+    { url: 'https://a.example/1', tier: 'trusted' },
+    { url: 'https://a.example/1', date: 'March 2026' },
+    { url: 'https://a.example/1', date: '2026-3' },
+  ]) {
+    const result = blogFrontmatterSchema.safeParse({ ...assemblerOutput, sources: [source] });
+    assert.equal(result.success, false, `${JSON.stringify(source)} should be rejected`);
+  }
+});
+
 test('a source that is not an absolute URL is refused', () => {
   const result = blogFrontmatterSchema.safeParse({
     ...assemblerOutput,

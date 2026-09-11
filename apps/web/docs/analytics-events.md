@@ -128,6 +128,8 @@ Every page under `src/pages` passes a `screen`, so no `Page Viewed` arrives unna
 | `contact` | `/contact` |
 | `privacy` | `/privacy` |
 | `disclaimer` | `/disclaimer` |
+| `how-we-research` | `/how-we-research` |
+| `ai-disclosure` | `/ai-disclosure` |
 | `not-found` | the 404 page |
 
 The five names in use before this pass (`home`, `blog-listing`, `blog-post`, `deals-listing`, `deal-detail`) are unchanged, so their history is continuous.

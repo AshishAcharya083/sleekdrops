@@ -21,5 +21,5 @@ export const collections = { blog };
 
 // Re-exported so components keep importing their frontmatter types from the
 // collection they belong to.
-export { pickSchema, productSchema, sourceSchema } from './frontmatter';
-export type { BlogFrontmatter, PickData, ProductData, SourceData } from './frontmatter';
+export { pickSchema, productSchema, sourceSchema, sourceTiers } from './frontmatter';
+export type { BlogFrontmatter, PickData, ProductData, SourceData, SourceTier } from './frontmatter';

@@ -5,7 +5,9 @@ import Breadcrumbs from '@components/seo/Breadcrumbs.astro';
 import Badge from '@components/ui/Badge.astro';
 import IconButton from '@components/ui/IconButton.astro';
 import ArticleBody from '@components/article/ArticleBody.astro';
-import EvidencePanel from '@components/article/EvidencePanel.astro';
+import EvidenceRail from '@components/article/EvidenceRail.astro';
+import Sources from '@components/article/Sources.astro';
+import TrustStack from '@components/article/TrustStack.astro';
 import Verdict from '@components/article/Verdict.astro';
 import TableOfContents from '@components/article/TableOfContents.astro';
 import AdUnit from '@components/ads/AdUnit.astro';
@@ -18,7 +20,8 @@ import { getAllPosts, getRelatedPosts, type BlogPost } from '@lib/posts';
 import { authorInitials, getAuthor } from '@data/authors';
 import { getCategory } from '@data/categories';
 import { buildFaqSchema, buildMeta, buildPostSchema, extractFaq } from '@lib/seo';
-import { emphasiseLastWord, formatLong } from '@lib/format';
+import { emphasiseLastWord, formatLong, formatMedium } from '@lib/format';
+import { reviewStatus, sourceCountLabel } from '@lib/sources';
 
 export const getStaticPaths = (async () => {
   const posts = await getAllPosts();
@@ -61,6 +64,13 @@ const meta = buildMeta({
 // (removed May 2026), so it ships as-is rather than being relied on. Posts
 // without an FAQ section (most of the older hand-written pieces) emit no block.
 const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractFaq(post.body))];
+// What the collapsed rail says on a phone, so the reader knows what is behind
+// it before opening it.
+const review = reviewStatus(post.data);
+const asideSummary = [
+  post.data.sources?.length ? sourceCountLabel(post.data.sources.length) : 'sources inline',
+  `${review.inferred ? 'updated' : 'reviewed'} ${formatMedium(review.date)}`,
+].join(' · ');
 ---
 <BaseLayout
   {...meta}
@@ -116,6 +126,13 @@ const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractF
         </div>
       </div>
 
+      <TrustStack
+        pubDate={post.data.pubDate}
+        updatedDate={post.data.updatedDate}
+        lastReviewed={post.data.lastReviewed}
+        reviewedBy={author.name}
+      />
+
       {hasAffiliateLinks && <AffiliateDisclosure variant="inline" />}
 
       <div
@@ -137,11 +154,30 @@ const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractF
           {product && <ProsConsList pros={product.pros} cons={product.cons} />}
           {hasAffiliateLinks && <AffiliateDisclosure />}
         </ArticleBody>
-        <EvidencePanel sources={post.data.sources} highStakes={highStakes} />
+        <Sources sources={post.data.sources} highStakes={highStakes} />
       </div>
 
       <aside class="article-aside">
-        <TableOfContents headings={headings} />
+        {/* On phones and tablets the rail reflows above the prose, where a
+            screenful of metadata otherwise sits between the headline and the
+            first paragraph. It collapses into one row there, and the island at
+            the foot of this file opens it on the desktop layout. */}
+        <details class="aside-details" data-aside-details>
+          <summary>
+            <span class="summary-label">On this page &amp; evidence</span>
+            <span class="summary-meta">{asideSummary}</span>
+            <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </summary>
+          <div class="aside-inner">
+            <TableOfContents headings={headings} />
+            <EvidenceRail
+              sources={post.data.sources}
+              pubDate={post.data.pubDate}
+              updatedDate={post.data.updatedDate}
+              lastReviewed={post.data.lastReviewed}
+            />
+          </div>
+        </details>
         <AdUnit placement="sidebar" />
       </aside>
     </div>
@@ -268,7 +304,58 @@ const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractF
     align-items: start;
   }
   @media (max-width: 1000px) {
-    .article-grid { grid-template-columns: 1fr; gap: 48px; }
+    .article-grid { grid-template-columns: 1fr; gap: 40px; }
+    /* The rail stops being a column here. Its contents become rows of the
+       article grid so the collapsed evidence row can sit under the trust
+       stack, where a reader is still deciding whether to trust the piece -
+       rather than a screenful of metadata before the first paragraph, or a
+       jump list stranded under the article. */
+    .article-aside { display: contents; }
+    .aside-details { order: -1; }
+  }
+
+  /* The jump list and the evidence summary, behind one row on a phone. The
+     element ships closed so a visitor without JavaScript is never left with
+     content a stylesheet hid; the island below opens it on the wide layout,
+     where the rail is a sidebar rather than a screen of metadata between the
+     headline and the first paragraph. */
+  .aside-details { border-bottom: 1px solid var(--hairline); }
+  .aside-details > summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    padding: 10px 0;
+    cursor: pointer;
+    list-style: none;
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+  .aside-details > summary::-webkit-details-marker { display: none; }
+  .aside-details .summary-label { font-weight: 700; }
+  .aside-details .summary-meta {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .aside-details .chevron {
+    width: 16px;
+    height: 16px;
+    margin-left: auto;
+    stroke: var(--muted);
+    stroke-width: 1.8;
+    fill: none;
+    transition: transform var(--dur-base) var(--ease-out);
+  }
+  .aside-details[open] .chevron { transform: rotate(180deg); }
+  @media (prefers-reduced-motion: reduce) {
+    .aside-details .chevron { transition: none; }
+  }
+  @media (min-width: 1001px) {
+    /* Open on the desktop layout, where the summary would only be a control
+       for something already permanently visible. */
+    .aside-details[open] > summary { display: none; }
+    .aside-details[open] { border-bottom: 0; }
   }
 
   .article-aside {
@@ -287,3 +374,21 @@ const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractF
     scrollbar-gutter: stable;
   }
 </style>
+
+<script>
+  /**
+   * The evidence rail is a sidebar from 1001px up and a collapsed row below it.
+   * The element ships closed - the honest default for a phone, and the state
+   * that needs no stylesheet to be readable - and this opens it on the wide
+   * layout, where the old always-open sidebar is what belongs.
+   */
+  const rail = document.querySelector<HTMLDetailsElement>('[data-aside-details]');
+  if (rail) {
+    const wide = window.matchMedia('(min-width: 1001px)');
+    const sync = () => {
+      rail.open = wide.matches;
+    };
+    sync();
+    wide.addEventListener('change', sync);
+  }
+</script>

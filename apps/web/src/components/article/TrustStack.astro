@@ -1,0 +1,204 @@
+---
+import { reviewStatus, REVIEW_INTERVAL_DAYS } from '@lib/sources';
+import { formatLong } from '@lib/format';
+
+/**
+ * TrustStack — the four lines under an article's byline that say how the piece
+ * was made: when a human last reviewed it, what changed at the last update,
+ * what we do and do not do, and how AI is used here.
+ *
+ * They sit above the fold, beside the claims they qualify, rather than in a
+ * policy page nobody opens — which is what the ACCC's 2023 sweep faulted, and
+ * what an ad reviewer looking for "meaningful review or curation" is looking
+ * for. The affiliate disclosure is a separate component and stays separate:
+ * it answers a different question (who pays us) from these (what we checked).
+ *
+ * A post published before the pipeline logged reviews has no `lastReviewed`.
+ * The stamp then shows its last editorial update and says that is what it is,
+ * because claiming a review nobody recorded is the exact failure this whole
+ * surface exists to avoid.
+ */
+export interface Props {
+  pubDate: Date;
+  updatedDate?: Date;
+  lastReviewed?: Date;
+  /** The accountable byline, named in the stamp. */
+  reviewedBy: string;
+}
+
+const { pubDate, updatedDate, lastReviewed, reviewedBy } = Astro.props;
+const review = reviewStatus({ pubDate, updatedDate, lastReviewed });
+const reviewMonths = Math.round(REVIEW_INTERVAL_DAYS / 30);
+// One sentence, composed here rather than out of three conditional fragments
+// in the markup, where the whitespace between them lands in front of commas.
+const stampNote = [
+  review.inferred
+    ? 'this piece predates our review log, so the date shown is its last editorial pass'
+    : `by the ${reviewedBy}`,
+  review.due
+    ? `a re-check is due: we revisit every recommendation at least every ${reviewMonths} months`
+    : '',
+]
+  .filter(Boolean)
+  .join(', and ');
+// An update line only says something the stamp above it does not: a piece
+// updated on the day it published, or on the day it was last reviewed, has
+// nothing to add.
+const updated =
+  updatedDate &&
+  updatedDate.getTime() !== pubDate.getTime() &&
+  updatedDate.getTime() !== review.date.getTime()
+    ? updatedDate
+    : undefined;
+---
+
+<div class="trust-stack">
+  <p class:list={['review-stamp', review.due && 'review-stamp--due']}>
+    {review.due ? (
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    ) : (
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+    )}
+    <span class="stamp-label">{review.inferred ? 'Last updated' : 'Last reviewed'}</span>
+    <time class="stamp-date" datetime={review.date.toISOString().slice(0, 10)}>
+      {formatLong(review.date)}
+    </time>
+    <span class="stamp-by">{stampNote}</span>
+    <a href="/how-we-research">How we research</a>
+  </p>
+
+  {updated && (
+    <p class="update-flash">
+      <span class="flash-label">Updated</span>
+      <time datetime={updated.toISOString().slice(0, 10)}>{formatLong(updated)}</time>
+      <span>— re-researched and re-checked against the sources listed at the foot of this page.</span>
+    </p>
+  )}
+
+  <p class="independence">
+    <strong>We do not test products.</strong> Nothing here is bought, borrowed or
+    supplied for review. Every recommendation is built from published
+    specifications, independent test results and owner reports, each one listed
+    and linked at the foot of the page. No brand pays for a place, and no brand
+    sees a piece before it runs.
+  </p>
+
+  <p class="ai-note">
+    <span class="ai-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M12 3v4"/><path d="M12 17v4"/><path d="M3 12h4"/><path d="M17 12h4"/><circle cx="12" cy="12" r="4"/></svg>
+    </span>
+    <span>
+      <strong>AI-assisted, human-reviewed.</strong> Research and the first draft
+      are produced with AI tools; an editor checks every claim against the
+      sources below and signs the piece off before it publishes.
+      <a href="/ai-disclosure">Our AI disclosure</a>.
+    </span>
+  </p>
+</div>
+
+<style>
+  /* One measure for all four blocks: a ch-based width resolves differently at
+     each of their font sizes, which staggered their right edges. */
+  .trust-stack {
+    display: grid;
+    gap: 12px;
+    margin-top: 24px;
+    max-width: 640px;
+  }
+  .trust-stack > * { max-width: 100%; }
+
+  .review-stamp {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 16px;
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--success);
+    border-radius: 0 var(--r-md) var(--r-md) 0;
+    background: var(--surface);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    margin: 0;
+  }
+  .review-stamp svg {
+    width: 16px;
+    height: 16px;
+    stroke: var(--success);
+    stroke-width: 1.9;
+    fill: none;
+    flex-shrink: 0;
+  }
+  .review-stamp .stamp-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--success);
+  }
+  .review-stamp .stamp-date {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .review-stamp .stamp-by { color: var(--muted); }
+  .review-stamp a {
+    color: var(--ink);
+    text-decoration-color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .review-stamp--due {
+    border-left-color: var(--warning);
+    background: var(--warning-soft);
+  }
+  .review-stamp--due svg { stroke: var(--warning); }
+  .review-stamp--due .stamp-label { color: var(--warning); }
+
+  .update-flash {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+  .update-flash .flash-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .update-flash time { font-family: var(--font-mono); color: var(--ink-2); }
+
+  .independence,
+  .ai-note {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+  .independence strong,
+  .ai-note strong { color: var(--ink-2); font-weight: 700; }
+
+  .ai-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .ai-note .ai-mark { flex-shrink: 0; padding-top: 2px; }
+  .ai-note svg {
+    width: 15px;
+    height: 15px;
+    stroke: var(--accent);
+    stroke-width: 1.7;
+    fill: none;
+  }
+  .ai-note a,
+  .independence a { color: var(--ink-2); text-underline-offset: 3px; }
+</style>

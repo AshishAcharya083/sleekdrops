@@ -98,7 +98,12 @@ Editorial rules (non-negotiable):
   link is written as /go/<kebab-product-slug> (e.g. /go/sony-wh-1000xm6).
   The same product always reuses the same /go/ slug.
 - Disclose honestly: if we haven't lab-tested the products, say the piece is an
-  editorial synthesis of specs, owner reviews, and expert coverage.
+  editorial synthesis of specs, owner reviews, and expert coverage. The site
+  carries a standing methodology page and an AI-assistance disclosure, both
+  linked from every article, so the body never has to stand in for them - and
+  never overstates them. Never write "we tested", "our testers", "in our
+  testing", "we tried", "hands-on" or anything else that claims use of a
+  product nobody here has touched.
 - Structure for scanability: short paragraphs, descriptive H2/H3 headings,
   comparison tables for multi-product pieces. Say what the piece rests on -
   which evidence, what was excluded - where the piece's shape puts it, and
@@ -131,6 +136,12 @@ Sources — non-negotiable:
   version of someone else's paragraph. The reader chose this page over that one.
 - A claim you cannot trace to a primary source is either cut or hedged in plain
   words — "Sony has not published a figure" beats a borrowed number.
+- Citations are markers, not links. A claim drawn from a numbered source in the
+  dossier carries its marker in square brackets after the sentence's full stop
+  ("RTINGS measured 28.5 hours in 2026.[3]"); the site turns each marker into a
+  link to that entry in the article's visible sources list. Keep every marker a
+  draft already carries, never renumber them — the numbering belongs to the
+  dossier, not to the draft — and never write a source URL in the body.
 `.trim();
 
 /**

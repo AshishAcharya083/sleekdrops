@@ -53,14 +53,32 @@ export const productSchema = z.object({
 export type ProductData = z.infer<typeof productSchema>;
 
 /**
+ * What kind of evidence a source is. Mirrors `SourceTier` in the agent's
+ * pipeline/types.ts, the vocabulary the researcher files each fact under.
+ */
+export const sourceTiers = ['primary', 'expert', 'owner', 'aggregator', 'unknown'] as const;
+
+export type SourceTier = (typeof sourceTiers)[number];
+
+/**
  * A source behind the article, written by the agent's assembler from the
- * research dossier. Feeds JSON-LD `citation` in src/lib/seo.ts. `date` is
- * reserved for the researcher's per-fact publication date and is unset today.
+ * research dossier. It is rendered in the visible sources block at the foot of
+ * the article and mirrored into JSON-LD `citation` in src/lib/seo.ts.
+ *
+ * `date` carries whatever precision the source itself publishes - a spec sheet
+ * dated to the day, a lab result to the month, a standard to the year - because
+ * padding a year out to a day would invent a fact. `tier` is carried even when
+ * it is `unknown`: a source the researcher could not place is shown as unplaced
+ * rather than quietly promoted.
+ *
+ * `publisher` is optional only so posts already in D1 keep validating; the
+ * assembler always writes one, falling back to the source's hostname.
  */
 export const sourceSchema = z.object({
   url: z.string().url(),
   publisher: z.string().min(1).optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date: z.string().regex(/^\d{4}(?:-\d{2}(?:-\d{2})?)?$/).optional(),
+  tier: z.enum(sourceTiers).optional(),
 });
 
 export type SourceData = z.infer<typeof sourceSchema>;
@@ -109,6 +127,12 @@ export const blogFrontmatterSchema = z
     tags: z.array(z.string()).default([]),
     pubDate: z.coerce.date(),
     updatedDate: z.coerce.date().optional(),
+    /**
+     * When a human last reviewed the piece against its sources - a different
+     * promise from when it was published or last edited, and shown as such.
+     * Optional: every post published before the assembler stamped one has none.
+     */
+    lastReviewed: z.coerce.date().optional(),
     readTime: z.number().int().positive(),
     cover: z.enum([
       'fill-1',

@@ -4,6 +4,8 @@
 // change this too, or published rows will fail the site build.
 import { z } from 'zod';
 
+import { SOURCE_TIERS } from './sources.js';
+
 export const CATEGORIES = ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel'] as const;
 
 // `review` is deliberately absent: reviews require hands-on testing and are
@@ -169,14 +171,23 @@ export function defaultAuthorFor(category: string): AuthorProfile {
 }
 
 /**
- * A source behind the article, carried into the page's JSON-LD `citation`.
- * `date` is reserved for the researcher's per-fact publication date and is
- * left unset today.
+ * A source behind the article: one row of the visible sources block, and one
+ * `citation` node in the page's JSON-LD.
+ *
+ * `date` is whatever precision the source itself publishes - a spec sheet
+ * dated to the day, a lab test dated to the month, a standard dated to the
+ * year - because rounding a year up to a day is an invented fact. `tier` says
+ * what kind of evidence it is, 'unknown' included: a source the researcher
+ * could not place is shown as unplaced rather than quietly promoted.
+ *
+ * `publisher` stays optional so the posts already in D1 keep validating; the
+ * assembler always writes one (sources.ts falls back to the hostname).
  */
 export const sourceSchema = z.object({
   url: z.string().url(),
   publisher: z.string().min(1).optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date: z.string().regex(/^\d{4}(?:-\d{2}(?:-\d{2})?)?$/).optional(),
+  tier: z.enum(SOURCE_TIERS).optional(),
 });
 
 /**
@@ -205,6 +216,12 @@ export const frontmatterSchema = z.object({
   tags: z.array(z.string()).min(1),
   pubDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   updatedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  /**
+   * When a human last reviewed the piece against its sources. Distinct from
+   * pubDate and updatedDate, and optional because every post published before
+   * the assembler stamped one carries none.
+   */
+  lastReviewed: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   readTime: z.number().int().positive(),
   cover: z.enum(['fill-1', 'fill-2', 'fill-3', 'fill-4', 'fill-5', 'fill-6', 'fill-7', 'fill-8']),
   heroImage: z.string().url().optional(),
