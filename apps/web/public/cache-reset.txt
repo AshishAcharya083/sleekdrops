@@ -1,0 +1,2 @@
+This file exists only for the header attached to it in public/_headers.
+See src/lib/redirect-cache-reset.ts.

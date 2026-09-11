@@ -12,7 +12,7 @@
     "dev": "node scripts/fetch-content.mjs && astro dev",
     "start": "node scripts/fetch-content.mjs && astro dev",
     "prebuild": "node scripts/fetch-content.mjs && node scripts/generate-redirects.mjs && node scripts/generate-ads-txt.mjs && node --experimental-strip-types scripts/generate-llms-txt.mjs && node scripts/generate-robots.mjs",
-    "build": "astro check && astro build && node --experimental-strip-types scripts/check-anchors.mjs",
+    "build": "astro check && astro build && node --experimental-strip-types scripts/check-anchors.mjs && node scripts/mirror-trailing-slash.mjs",
     "check:anchors": "node --experimental-strip-types scripts/check-anchors.mjs",
     "preview": "astro preview",
     "astro": "astro",

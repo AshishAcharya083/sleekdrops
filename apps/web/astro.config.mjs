@@ -31,6 +31,13 @@ export default defineConfig({
     // sitemap and the JSON-LD all name - answered with a 308 to /blog/<slug>/.
     // Google indexed the slash form as a result. Astro's own docs note that
     // `trailingSlash` does not reach prerendered output; the file layout does.
+    //
+    // Reversing that 308 is also what stranded returning visitors in
+    // ERR_TOO_MANY_REDIRECTS against the one their browser had already cached,
+    // so scripts/mirror-trailing-slash.mjs copies each page to its directory
+    // form after the build and both URLs answer 200. Pages still serves the
+    // slash-less file for the slash-less request, so the canonical URL is
+    // unchanged - see src/lib/trailing-slash-mirror.mjs.
     format: 'file',
   },
   integrations: [

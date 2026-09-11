@@ -35,6 +35,17 @@
 # (PUBLIC_DEVTEAM_ANALYTICS_HOST, PUBLIC_DEVTEAM_FLAGS_HOST) that this static
 # file cannot know; script-src, which is what governs code execution, is not
 # widened that way.
+
+# One-time recovery from the September 2026 trailing-slash redirect loop: a
+# browser that cached both directions of the old 308 bounces between /x and /x/
+# without contacting the server, and `Clear-Site-Data: "cache"` is the only
+# thing that makes it let go. src/lib/redirect-cache-reset.ts fetches this once
+# per browser and explains the whole mechanism; delete this rule, that module,
+# its call in src/scripts/chrome.ts and public/cache-reset.txt together.
+/cache-reset.txt
+  Clear-Site-Data: "cache"
+  Cache-Control: no-store
+
 /*
   Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://*.google-analytics.com https://pagead2.googlesyndication.com https://*.googlesyndication.com https://*.googleadservices.com https://*.googletagservices.com https://*.doubleclick.net https://adservice.google.com https://www.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; frame-src https://*.googlesyndication.com https://*.doubleclick.net https://www.google.com; connect-src 'self' https:
   X-Content-Type-Options: nosniff

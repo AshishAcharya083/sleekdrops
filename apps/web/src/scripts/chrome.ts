@@ -45,6 +45,7 @@ import {
   READ_ACTIVE_MS,
 } from '@lib/read-completion';
 import { newEventId } from '@lib/visit';
+import { resetRedirectCache } from '@lib/redirect-cache-reset';
 import { getFeatureValue, subscribe as onExperimentsChanged } from '@lib/experiments';
 import {
   applyNavExperimentItems,
@@ -71,6 +72,18 @@ if (!window.__sdChromeInit) {
   } catch {
     /* error capture is best-effort - never let it break the page */
   }
+
+  /* Let go of the September 2026 trailing-slash redirects, once per browser.
+     A visitor who cached both directions of that 308 pair loops between /x and
+     /x/ inside their own cache and never reaches us, so the articles they had
+     read before the URL shape changed answer ERR_TOO_MANY_REDIRECTS - but the
+     homepage, which never redirected, still loads and runs this. Fire and
+     forget: nothing on the page waits for it. See @lib/redirect-cache-reset. */
+  void resetRedirectCache({
+    read: (key) => localStorage.getItem(key),
+    write: (key, value) => localStorage.setItem(key, value),
+    request: (url) => fetch(url, { cache: 'no-store' }),
+  });
 
   /* ---- Product analytics ----------------------------------------------
    * All tracking is wired declaratively from the DOM (matching the rest of
