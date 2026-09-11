@@ -7,13 +7,12 @@ import DealCard from '@components/affiliate/DealCard.astro';
 import CategoryStrip from '@components/layout/CategoryStrip.astro';
 import FeaturedPost from '@components/blog/FeaturedPost.astro';
 import PostGrid from '@components/blog/PostGrid.astro';
-import Newsletter from '@components/layout/Newsletter.astro';
 import { getAllPosts, getFeaturedPost } from '@lib/posts';
 import { getActiveDeals, todaysDrop } from '@data/deals';
 import { SITE_DESCRIPTION } from '@data/site';
 import { buildHomeSchema, buildMeta } from '@lib/seo';
 import { formatMedium } from '@lib/format';
-import { resolveHeroSecondaryCta, resolveDropPanelAction } from '@lib/hero-cta';
+import { resolveHeroSecondaryCta } from '@lib/hero-cta';
 import { EVENTS } from '@lib/analytics';
 import { listViewProps } from '@lib/listing';
 
@@ -24,7 +23,9 @@ const [posts, featured, activeDeals] = await Promise.all([
 ]);
 const deals = activeDeals.slice(0, 3);
 
-const latest = posts.filter((p) => p.slug !== featured?.slug).slice(0, 6);
+const heroPost = todaysDrop ? undefined : (featured ?? posts[0]);
+const highlightedSlug = heroPost?.slug ?? featured?.slug;
+const latest = posts.filter((p) => p.slug !== highlightedSlug).slice(0, 6);
 const today = formatMedium(new Date());
 
 /* The primary hero CTA's label is the reference A/B experiment: it renders
@@ -41,7 +42,6 @@ const secondaryCta = resolveHeroSecondaryCta({
   hasActiveDrop: todaysDrop !== undefined,
   archivedDealCount: activeDeals.length,
 });
-const dropPanelAction = resolveDropPanelAction(secondaryCta);
 
 const meta = buildMeta({
   title: 'Independent buying guides for Australia',
@@ -75,14 +75,28 @@ const meta = buildMeta({
             )}
           </div>
         </div>
-        <DropPanel emptyAction={dropPanelAction} />
+        {todaysDrop ? (
+          <DropPanel />
+        ) : heroPost ? (
+          <aside class="hero-feature">
+            <div>
+              <Eyebrow>Featured guide</Eyebrow>
+              <h2>{heroPost.data.title}</h2>
+              <p>{heroPost.data.dek}</p>
+            </div>
+            <div class="hero-feature__foot">
+              <span>{heroPost.data.readTime} min read</span>
+              <Button href={`/blog/${heroPost.slug}`} variant="accent" arrow>Read the guide</Button>
+            </div>
+          </aside>
+        ) : null}
       </div>
     </div>
   </section>
 
   <CategoryStrip />
 
-  {featured && <FeaturedPost post={featured} />}
+  {todaysDrop && featured && <FeaturedPost post={featured} />}
 
   <section class="block">
     <div class="container">
@@ -118,8 +132,6 @@ const meta = buildMeta({
     </div>
   </section>
   )}
-
-  <Newsletter />
 </BaseLayout>
 
 <style>
@@ -154,6 +166,48 @@ const meta = buildMeta({
     margin: 0 0 32px;
   }
   .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  .hero-feature {
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 24px;
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero-feature::after {
+    content: "";
+    position: absolute;
+    width: 220px;
+    height: 220px;
+    right: -60px;
+    bottom: -60px;
+    background: radial-gradient(circle, rgba(228, 119, 87, 0.25), transparent 70%);
+  }
+  .hero-feature :global(.eyebrow) { color: var(--paper); opacity: 0.65; }
+  .hero-feature h2 {
+    font-family: var(--font-display);
+    font-size: clamp(30px, 3.3vw, 44px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    font-weight: 400;
+    color: var(--paper);
+    margin: 16px 0 14px;
+  }
+  .hero-feature p { color: var(--paper); opacity: 0.72; line-height: 1.55; margin: 0; }
+  .hero-feature__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 28px;
+    position: relative;
+    z-index: 1;
+  }
+  .hero-feature__foot span { font-size: 12px; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.1em; }
 
   section.block {
     padding: 80px 0;

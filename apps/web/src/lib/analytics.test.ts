@@ -464,9 +464,9 @@ test('two module copies in one document share one client, and so open one sessio
   const tab = openTab();
   loadPage(tab, '/');
 
-  // The preferences island boots and applies the default (analytics on); the
-  // chrome bundle boots too and reads the same decision back.
-  banner.boot();
+  // The visitor explicitly enables analytics; the second entry point reads the
+  // same stored decision back.
+  banner.grantConsent();
   chrome.boot();
   chrome.trackPageView({ referrer: '' });
   banner.track(HERO_CTA, { cta: 'Read the latest' });
@@ -492,9 +492,8 @@ test('a page view buffered by one module copy is flushed by the other, once', as
   assert.equal(buffered.length, 1, 'the page view must be buffered until the decision is applied');
   const bufferedId = buffered[0]?.props?.event_id;
 
-  banner.boot();
-  // A second boot - the other entry point, or the visitor re-saving their
-  // preferences - must not re-flush it.
+  // The explicit opt-in drains what arrived before the decision. A second boot
+  // must not re-flush it.
   banner.grantConsent();
   chrome.boot();
   await flush();
@@ -705,11 +704,9 @@ test('the ad partner is loaded only for a visitor who saved the advertising opt-
   assert.equal(ads.loadAds(), false);
   assert.deepEqual(adPartnerTags(first.scripts), [], 'no ad tag on an analytics-only grant');
   assert.equal(first.window.adsbygoogle?.requestNonPersonalizedAds, 1);
-  assert.deepEqual(
-    queuedConsentSignals(first.window),
-    [],
-    'and the gate does not rest on a Consent Mode signal',
-  );
+  assert.deepEqual(queuedConsentSignals(first.window), [
+    ['consent', 'update', { analytics_storage: 'granted' }],
+  ]);
 
   // The dialog saved with the Advertising switch on, on the page after it.
   const opted = loadPage(tab, '/deals');
@@ -734,7 +731,9 @@ test('the ad partner is loaded only for a visitor who saved the advertising opt-
   assert.equal(ads.isAdsGranted(), false);
   assert.equal(ads.loadAds(), false);
   assert.deepEqual(adPartnerTags(declined.scripts), []);
-  assert.deepEqual(queuedConsentSignals(declined.window), []);
+  assert.deepEqual(queuedConsentSignals(declined.window), [
+    ['consent', 'update', { analytics_storage: 'denied' }],
+  ]);
 });
 
 test('a record written under the previous policy is honoured for what it decided', async () => {
@@ -974,7 +973,7 @@ test('the page view reaches GA4 once, as GA4 own page_view', async () => {
 
 test('a page view buffered before consent still reaches GA4 when it is granted', async () => {
   // The first-load path: chrome.ts records the view before the preferences island
-  // has booted, and the boot (the default grant) loads the tag and then drains the
+  // has booted, and an explicit grant loads the tag and then drains the
   // buffer. An order that drained first would lose the site's only page view for
   // that document in GA4.
   const tab = openTab();
@@ -983,7 +982,7 @@ test('a page view buffered before consent still reaches GA4 when it is granted',
   chrome.trackPageView({ referrer: '', screen: 'home' });
   assert.deepEqual(gtagEventNames(window), [], 'nothing may reach GA4 before the decision is applied');
 
-  banner.boot();
+  banner.grantConsent();
   await flush();
 
   assert.deepEqual(gtagEventNames(window), ['page_view']);

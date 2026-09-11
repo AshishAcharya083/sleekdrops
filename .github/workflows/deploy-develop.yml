@@ -64,7 +64,7 @@ jobs:
           # second copy of the site competing with the real one in the index.
           # Aimed at the production host instead, every develop page tells a
           # crawler that the canonical version of it lives there.
-          SITE_URL: https://sleekdrops.pages.dev
+          SITE_URL: https://sleekdrops.com
           # Marks this build a preview, which noindexes every page it renders and
           # publishes a robots.txt that advertises no sitemap.
           #
@@ -80,18 +80,11 @@ jobs:
           # (apps/web/src/lib/site-env.test.ts) rather than by hoping.
           PUBLIC_SITE_ENV: preview
           NODE_ENV: production
-          # DevTeam Analytics - public ingest key (dtp_) + ingest host. The key is
-          # ingest-only and safe to expose; PUBLIC_ hands it to the Astro build so
-          # the analytics + logging sink is active.
-          #
-          # Held in repo settings rather than inline: re-provisioning a project on
-          # DevTeam mints a NEW analytics project and key, and the old key keeps
-          # returning 202 from an orphaned project. A hardcoded key therefore goes
-          # stale silently - the site looks healthy while the Analytics tab reads a
-          # different project and shows nothing. The admin panel reads the same two
-          # settings, so both apps always report into one project.
-          PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY: ${{ secrets.DEVTEAM_ANALYTICS_INGEST_KEY }}
-          PUBLIC_DEVTEAM_ANALYTICS_HOST: ${{ vars.DEVTEAM_ANALYTICS_HOST }}
+          # Disabled on every public deployment until the processor publishes
+          # verifiable privacy, jurisdiction and retention terms. GA4 remains
+          # available behind the site's explicit analytics opt-in.
+          PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY: ''
+          PUBLIC_DEVTEAM_ANALYTICS_HOST: ''
           # In-app feedback widget - develop only. It is a visible control on the
           # page, so production stays without it until we have looked at it here.
           PUBLIC_DEVTEAM_ANALYTICS_FEEDBACK: 'true'
@@ -109,8 +102,8 @@ jobs:
           #
           # An empty value (or anything that is not a `G-` measurement id)
           # disables GA4 silently after one console warning: gtag.js is never
-          # requested and no `_ga` cookie is written. The DevTeam sink is
-          # unaffected, and so is the rest of the site.
+          # requested and no `_ga` cookie is written. The rest of the site is
+          # unaffected.
           PUBLIC_GA4_ID: ${{ vars.GA4_MEASUREMENT_ID }}
           # DevTeam A/B Testing - flag-delivery host + per-environment client key.
           # Held in repo settings for the same reason as the ingest key above: the
@@ -160,40 +153,6 @@ jobs:
           # Pages deploy token also has D1 read permission.
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm --filter @sleekdrops/web build
-
-      # The build-time PUBLIC_ values above are inlined into the browser bundle
-      # by Vite and never reach a Pages Function. functions/go/[slug].js counts
-      # the outbound affiliate click - the site's primary conversion - and reads
-      # its ingest key and host from context.env, which is the Pages *runtime*
-      # environment. That environment is set here, from the same repo secret and
-      # variable, so a re-provisioned analytics project rotates both halves at
-      # once and neither is ever committed.
-      #
-      # `pages secret put` for both: wrangler has no command for a plain-text
-      # Pages variable, and a secret reads back through context.env identically.
-      # An empty value is skipped rather than uploaded - the Function disables
-      # its sink silently on an empty key and still serves the 302.
-      - name: Publish the analytics runtime config to Pages Functions (develop)
-        working-directory: apps/web
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          PROJECT_NAME: ${{ secrets.CLOUDFLARE_PROJECT_NAME }}
-          PAGES_ENV: preview
-          DEVTEAM_ANALYTICS_INGEST_KEY: ${{ secrets.DEVTEAM_ANALYTICS_INGEST_KEY }}
-          DEVTEAM_ANALYTICS_HOST: ${{ vars.DEVTEAM_ANALYTICS_HOST }}
-        run: |
-          set -euo pipefail
-          put() {
-            if [ -z "${2:-}" ]; then
-              echo "::notice::$1 is empty - the /go Function's analytics sink stays off"
-              return 0
-            fi
-            printf '%s' "$2" | pnpm exec wrangler pages secret put "$1" \
-              --project-name "$PROJECT_NAME" --env "$PAGES_ENV"
-          }
-          put DEVTEAM_ANALYTICS_INGEST_KEY "$DEVTEAM_ANALYTICS_INGEST_KEY"
-          put DEVTEAM_ANALYTICS_HOST "$DEVTEAM_ANALYTICS_HOST"
 
       - name: Deploy to Cloudflare Pages (develop)
         uses: cloudflare/wrangler-action@v3

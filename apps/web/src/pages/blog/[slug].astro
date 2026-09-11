@@ -5,6 +5,7 @@ import Breadcrumbs from '@components/seo/Breadcrumbs.astro';
 import Badge from '@components/ui/Badge.astro';
 import IconButton from '@components/ui/IconButton.astro';
 import ArticleBody from '@components/article/ArticleBody.astro';
+import EvidencePanel from '@components/article/EvidencePanel.astro';
 import Verdict from '@components/article/Verdict.astro';
 import TableOfContents from '@components/article/TableOfContents.astro';
 import AdUnit from '@components/ads/AdUnit.astro';
@@ -41,6 +42,7 @@ const stampYear = new Date(post.data.pubDate).getFullYear();
 // under the byline on any page that carries one - which is every pipeline post,
 // and any hand-written one with a /go/ link in the body.
 const hasAffiliateLinks = product !== undefined || /\/go\//.test(post.body);
+const highStakes = post.data.category === 'Health' || post.data.category === 'Finance';
 
 const meta = buildMeta({
   title: post.data.title,
@@ -127,13 +129,16 @@ const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractF
     </header>
 
     <div class="article-grid">
-      <ArticleBody>
-        {product && <Verdict product={product} postSlug={post.slug} />}
-        <Content />
-        {product && <ProductCallout product={product} postSlug={post.slug} />}
-        {product && <ProsConsList pros={product.pros} cons={product.cons} />}
-        {hasAffiliateLinks && <AffiliateDisclosure />}
-      </ArticleBody>
+      <div class="article-main">
+        <ArticleBody>
+          {product && <Verdict product={product} postSlug={post.slug} />}
+          <Content />
+          {product && <ProductCallout product={product} postSlug={post.slug} />}
+          {product && <ProsConsList pros={product.pros} cons={product.cons} />}
+          {hasAffiliateLinks && <AffiliateDisclosure />}
+        </ArticleBody>
+        <EvidencePanel sources={post.data.sources} highStakes={highStakes} />
+      </div>
 
       <aside class="article-aside">
         <TableOfContents headings={headings} />

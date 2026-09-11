@@ -381,7 +381,7 @@ test('the route file is wiring only - the generated table into the handler', () 
   );
   assert.match(route, /import links from '\.\.\/_data\/affiliate-links\.mjs';/);
   assert.match(route, /import \{ handleRedirect \} from '\.\.\/_lib\/redirect\.mjs';/);
-  assert.match(route, /export function onRequest\(context\) \{\s*return handleRedirect\(context, links\);\s*\}/);
+  assert.match(route, /export function onRequest\(context\) \{\s*return handleRedirect\(\{ \.\.\.context, env: \{\} \}, links\);\s*\}/);
 });
 
 test('the Function and the site taxonomy name the same server-side event', () => {

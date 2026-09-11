@@ -17,8 +17,8 @@ const record = (grants: ConsentGrants, v: number = POLICY_VERSION, ts = 1) => ({
 /** A record as policy version 1 wrote it: one status, for analytics, no categories. */
 const legacy = (status: 'granted' | 'denied') => JSON.stringify({ v: 1, status, ts: 123 });
 
-test('the site default is anonymous analytics on, advertising off', () => {
-  assert.deepEqual(DEFAULT_GRANTS, { analytics: 'granted', ads: 'denied' });
+test('the site default keeps every non-essential category off', () => {
+  assert.deepEqual(DEFAULT_GRANTS, { analytics: 'denied', ads: 'denied' });
 });
 
 test('parseConsent reads a per-category record', () => {
@@ -35,10 +35,10 @@ test('a category the record does not mention takes the site default', () => {
     grants: { analytics: 'granted', ads: 'denied' },
     ts: 1,
   });
-  // Analytics was never put to this visitor either, and its default is on.
+  // Analytics was never put to this visitor either, and its default is off.
   assert.deepEqual(parseConsent(JSON.stringify({ v: 2, grants: { ads: 'granted' }, ts: 1 })), {
     v: 2,
-    grants: { analytics: 'granted', ads: 'granted' },
+    grants: { analytics: 'denied', ads: 'granted' },
     ts: 1,
   });
 });
@@ -110,9 +110,9 @@ test('a stored record applies each category silently and independently', () => {
   });
 });
 
-test('no stored record applies the site default: analytics on, ads off, nothing pending', () => {
+test('no stored record applies the site default: analytics and ads off', () => {
   assert.deepEqual(resolveConsent(null, false), {
-    effects: { analytics: 'grant', ads: 'deny' },
+    effects: { analytics: 'deny', ads: 'deny' },
   });
 });
 

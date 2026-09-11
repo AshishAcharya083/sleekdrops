@@ -2,11 +2,11 @@
  * Analytics - the single entry point for product tracking, and the wiring that
  * gates it behind the visitor's consent choice.
  *
- * Anonymous analytics is on by default and can be switched off; nothing is ever
- * prompted for. `boot()` reads the decision in force - the stored record, or the
- * site default when there is none - and applies it. Every event is queued in an
+ * Analytics is off by default and starts only after a visitor enables it under
+ * Privacy preferences. `boot()` reads the decision in force - the stored record, or the
+ * privacy-preserving default when there is none - and applies it. Every event is queued in an
  * in-memory buffer until that has happened; on grant the buffer flushes and
- * subsequent events send live, on deny (a stored opt-out, or a GPC/DNT signal)
+ * subsequent events send live, on deny (the default, a stored opt-out, or a GPC/DNT signal)
  * the buffer is dropped and nothing is ever sent. Every outgoing payload -
  * buffered or live - runs through the central PII scrub() first. A withdrawal
  * arriving after a grant - the footer's preferences control makes that reachable on
@@ -20,8 +20,8 @@
  * That record holds one decision per purpose category, and this module acts on
  * exactly one of them - `analytics`. The advertising category is written here
  * too, because a single record is what keeps the categories in step, but it is
- * read and enforced by `./ads`, which has no dependency on this module or on the
- * analytics SDKs.
+ * retained only for backwards compatibility. Google's certified CMP owns the
+ * advertising decision.
  *
  * Two sinks hang off that one gate and off one payload. `send()` scrubs an event
  * once and hands the result to the DevTeam client and, through the `./ga`
@@ -520,8 +520,8 @@ export function trackPageView(props?: EventProps): void {
 /**
  * The analytics consent decision in force for this document, or null while the
  * visitor has not made one. Read by the preferences dialog so reopening it shows
- * what is actually in effect rather than the opt-in default. The advertising
- * category has its own reader, `isAdsGranted` in `./ads`.
+ * what is actually in effect rather than the opt-in default. Advertising
+ * consent is managed separately by Google's certified CMP.
  */
 export function consentStatus(): ConsentStatus | null {
   const decision = scope().decision;
@@ -532,9 +532,8 @@ export function consentStatus(): ConsentStatus | null {
  * Persist an explicit per-category decision and enforce it.
  *
  * The record is the only place a category is decided, so this is the one writer:
- * the advertising category has no runtime effect here (`./ads` reads the same
- * record on the pages that carry a slot), but it is written in the same object
- * as the analytics one so a save can never leave the two out of step.
+ * the legacy advertising field has no runtime effect here and stays denied;
+ * Google's certified CMP owns that separate decision.
  */
 export function setConsent(grants: ConsentGrants): void {
   writeConsent(grants);

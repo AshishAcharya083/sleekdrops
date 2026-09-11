@@ -1,0 +1,68 @@
+---
+import type { SourceData } from '../../content/config';
+
+export interface Props {
+  sources?: SourceData[];
+  highStakes?: boolean;
+}
+
+const { sources = [], highStakes = false } = Astro.props;
+const hostLabel = (url: string): string => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+};
+---
+
+<section class="evidence" aria-labelledby="evidence-title">
+  <h2 id="evidence-title">Sources &amp; editorial limits</h2>
+  <p>
+    SleekDrops researches published specifications, expert coverage and owner
+    reports; it does not claim laboratory testing unless an article says so.
+    Product availability and prices can change after the date shown above.
+  </p>
+  {highStakes && (
+    <p class="evidence__warning">
+      <strong>Important:</strong> This article is general consumer research, not
+      medical or financial advice, and has not been reviewed by a clinician or
+      licensed financial adviser. Check decisions with a qualified professional.
+    </p>
+  )}
+  {sources.length > 0 ? (
+    <ol>
+      {sources.map((source) => (
+        <li>
+          <a href={source.url} target="_blank" rel="noopener nofollow">
+            {source.publisher ?? hostLabel(source.url)}
+          </a>
+          {source.date && <span> · {source.date}</span>}
+        </li>
+      ))}
+    </ol>
+  ) : (
+    <p class="evidence__note">
+      Source links for this earlier article appear inline in the text. If a link
+      is unavailable or a claim needs correction, email
+      {' '}<a href="mailto:corrections@sleekdrops.com">corrections@sleekdrops.com</a>.
+    </p>
+  )}
+</section>
+
+<style>
+  .evidence {
+    margin-top: 48px;
+    padding: 28px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    background: var(--surface-2);
+  }
+  h2 { margin: 0 0 12px; font-family: var(--font-display); font-size: 28px; font-weight: 500; color: var(--ink); }
+  p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
+  p + p, p + ol { margin-top: 16px; }
+  .evidence__warning { padding: 14px 16px; border-left: 3px solid var(--warning); background: var(--warning-soft); color: var(--ink-2); }
+  ol { margin-bottom: 0; padding-left: 1.2rem; display: grid; gap: 8px; }
+  li { color: var(--muted); font-size: 14px; }
+  a { color: var(--ink); text-underline-offset: 3px; }
+</style>

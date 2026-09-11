@@ -197,6 +197,18 @@ function requestNonPersonalizedAds(): void {
 export function loadAds(): boolean {
   if (typeof window === 'undefined' || typeof document === 'undefined') return false;
 
+  // Production preloads the publisher tag so Google's certified CMP can show
+  // its consent message before any slot is requested. In that configuration
+  // Google owns the advertising decision; the site's legacy per-category gate
+  // must not remove otherwise valid contextual slots from beneath it.
+  const existing = typeof document.querySelector === 'function'
+    ? document.querySelector(`script[src^="${ADS_SCRIPT_SRC}"]`)
+    : null;
+  if (existing) {
+    adsState().loaded = true;
+    return true;
+  }
+
   const mode = adsMode();
   if (mode === 'none') return false;
 
