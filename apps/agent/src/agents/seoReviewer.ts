@@ -18,6 +18,7 @@ import { chatJson, UsageTracker } from '../llm/index.js';
 import { detectSlop, formatSlopReport, slopSeverity, SLOP_PASS_SCORE } from '../content/slop.js';
 import {
   ANTI_SLOP_RULES,
+  editorialAngleBrief,
   GEO_RULES,
   keywordPlanBrief,
   LINK_PLACEMENT_RULES,
@@ -39,6 +40,8 @@ export async function runSeoReviewer(
   const draft = article.draft_md ?? '';
   const plan = article.keyword_plan;
   const planBrief = keywordPlanBrief(plan);
+  const angle = article.editorial_angle;
+  const angleBrief = editorialAngleBrief(angle);
 
   // Deterministic first, so the model reviews prose we have already measured.
   const slop = detectSlop(draft);
@@ -53,7 +56,7 @@ export async function runSeoReviewer(
       search: true,
       prompt: `You are a strict SEO + editorial reviewer. Score this draft against the brief
 and the keyword plan.
-${planBrief ? `\n${planBrief}\n` : ''}
+${angleBrief ? `\n${angleBrief}\n` : ''}${planBrief ? `\n${planBrief}\n` : ''}
 Brief:
 ${JSON.stringify(article.outline, null, 2)}
 
@@ -86,7 +89,25 @@ Score these dimensions 0-100 each:
    site builds FAQPage schema from it — a missing or malformed FAQ is a
    high-severity issue)? Are recency signals present?
 3. voice — reads as a person. Judge against the scan above plus: positions
-   taken, rhythm varied, no section-summary padding.
+   taken, rhythm varied, no section-summary padding.${
+     angle
+       ? `
+   Score the angle too, because it is the difference between coverage and
+   curation. ${
+     angle.defensible
+       ? `Does the draft actually argue "${angle.thesis}", or does it
+   cover the topic and retreat to "it depends"? A piece that never says which
+   option loses has not landed its thesis, and that is a high-severity issue.
+   Does it land the claims the top results do not carry, listed above?`
+       : `This piece was recorded as having no defensible contrarian
+   take, so it must not have invented one. A confident position the dossier
+   does not support is a high-severity issue: name the claim and the evidence
+   it lacks.`
+   }
+   Does the draft hold the "${angle.shape}" shape it was commissioned in, or
+   has it collapsed back into the house skeleton?`
+       : ''
+   }
 4. eeat — methodology ("how we picked"), specific evidence, honest trade-offs,
    a non-empty cons list per pick, the editorial-synthesis disclaimer present,
    nothing invented beyond the dossier. FACT-CHECK THIS DIMENSION, do not just

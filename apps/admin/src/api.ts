@@ -115,6 +115,49 @@ export interface KeywordPlan {
   rejected: Array<{ keyword: string; reason: string }>;
 }
 
+/**
+ * The angle stage's record - what the piece argues, decided before it was
+ * outlined. Mirrors EditorialAngle in the agent app.
+ */
+export interface EditorialAngle {
+  thesis: string;
+  reader: string;
+  defensible: boolean;
+  contrarianTake: string;
+  weakness: string;
+  informationGain: Array<{ claim: string; absentFrom: string; evidence: string }>;
+  shape: string;
+  shapeRationale: string;
+  /** The beat voice the piece is written in - the byline itself is the team. */
+  byline: string;
+  bylineRationale: string;
+}
+
+/**
+ * The structure library shape a piece was outlined to - which sections it
+ * carries, in what order, under what names, and how many extractable passages
+ * it spends. Mirrors ArticleShape in the agent app. Null on articles outlined
+ * before the library existed.
+ */
+export interface StructureShape {
+  id: string;
+  name: string;
+  openingStyle: string;
+  passageBudget: { passages: number; words: { min: number; max: number } };
+  faq: 'required' | 'optional' | 'omit';
+  sections: Array<{
+    kind: string;
+    label: string;
+    required: boolean;
+    slot: string;
+    purpose: string;
+    carriesAnswer: boolean;
+    repeats?: boolean;
+  }>;
+  /** Which record decided it: the angle, the SERP read, or the fallback. */
+  selectedBy?: string;
+}
+
 export interface SeoReviewDetail {
   score: number;
   pass: boolean;
@@ -126,11 +169,34 @@ export interface SeoReviewDetail {
   slop?: { score: number; words: number; findings: number };
 }
 
+/**
+ * The research stage's deterministic verdict, as the pipeline stamped it onto
+ * the dossier. The panel shows this because "research failed" on its own sends
+ * an operator back to re-run the same stage; the shortfall says which stratum
+ * was thin and where that evidence is actually gathered.
+ */
+export interface EvidenceSufficiency {
+  pass: boolean;
+  postType: string;
+  counts: Record<string, number>;
+  shortfalls: Array<{ stratum: string; label: string; have: number; need: number; fix: string }>;
+  message: string;
+  checkedAt: string;
+}
+
+/** Only the part of the dossier the panel renders. */
+export interface ResearchDetail {
+  /** Absent on dossiers written before the evidence gate existed. */
+  sufficiency?: EvidenceSufficiency;
+}
+
 export interface ArticleDetail {
   article: ArticleSummary & {
     hero_alt: string | null;
-    research: unknown;
+    research: ResearchDetail | null;
     keyword_plan: KeywordPlan | null;
+    editorial_angle: EditorialAngle | null;
+    structure_shape: StructureShape | null;
     outline: unknown;
     draft_md: string | null;
     seo_review: SeoReviewDetail | null;

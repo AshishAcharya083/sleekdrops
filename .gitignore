@@ -14,6 +14,8 @@ dist/
 apps/web/public/_redirects
 apps/web/public/ads.txt
 apps/web/public/robots.txt
+apps/web/public/llms.txt
+apps/web/public/llms-full.txt
 apps/web/functions/_data/
 apps/web/.d1-cache/
 apps/web/.cms-cache/
