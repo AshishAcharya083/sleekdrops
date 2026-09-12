@@ -9,7 +9,7 @@ import type {
   StructureShape,
 } from '../api';
 import { api, apiUpload, duration, fmtCost, fmtTime } from '../api';
-import { Badge } from '../components';
+import { ApiErrorBanner, Badge } from '../components';
 import { HeroImageField } from '../HeroImageField';
 import { usePoll } from '../hooks';
 
@@ -27,7 +27,7 @@ export function Pipeline() {
 
   return (
     <>
-      {error && <div className="error-banner">API unreachable: {error}</div>}
+      <ApiErrorBanner error={error} />
       <div className="board">
         {LANES.map((lane) => {
           const items = articles.filter((a) => lane.stages.includes(a.stage));
