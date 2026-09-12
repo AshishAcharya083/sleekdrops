@@ -1,3 +1,5 @@
+import { describeApiError, type ApiError } from './api-error';
+
 const STATUS_COLOR: Record<string, string> = {
   done: 'green',
   published: 'green',
@@ -22,6 +24,21 @@ export function Stat({ label, value, sub }: { label: string; value: string | num
       <h3>{label}</h3>
       <div className="big">{value}</div>
       {sub && <div className="sub">{sub}</div>}
+    </div>
+  );
+}
+
+/**
+ * The banner every polling tab shows when a request fails. It renders above the
+ * data the tab is already holding rather than replacing it, and the sentence
+ * comes from the failure's kind, so a rejected admin token, a stopped agent and
+ * a 5xx never read as the same problem.
+ */
+export function ApiErrorBanner({ error }: { error: ApiError | null }) {
+  if (!error) return null;
+  return (
+    <div className="error-banner" role="alert">
+      {describeApiError(error)}
     </div>
   );
 }

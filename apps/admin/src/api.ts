@@ -2,10 +2,13 @@
 // into the header bar is stored in localStorage and sent as a bearer.
 //
 // This is also the panel's single fetch chokepoint, so it is where the client
-// trace id goes out as X-Trace-Id and where every request failure is logged and
-// reported with a stack trace. The agent's log lines for the same request carry
-// that id, so a client error in the Analytics tab leads straight to them.
+// trace id goes out as X-Trace-Id, where every request failure is logged and
+// reported with a stack trace, and where that failure is classified (see
+// api-error.ts) so a tab can tell a rejected token from a stopped server. The
+// agent's log lines for the same request carry that id, so a client error in
+// the Analytics tab leads straight to them.
 import { TRACE_HEADER, captureError, getTraceId, log } from './analytics';
+import { ApiError, apiErrorFromResponse } from './api-error';
 
 /** A markdown reference the operator supplied (uploaded file or pasted block). */
 export interface ReferenceMaterial {
@@ -91,6 +94,12 @@ export interface Overview {
   recentSessions: Session[];
   publishMode: string;
   workerEnabled: boolean;
+  /**
+   * Sections whose query failed: the agent answers with the ones that worked
+   * and names the rest here instead of collapsing the whole page to a 500.
+   * Absent on an agent older than that change.
+   */
+  failedSections?: string[];
 }
 
 /** Keyword strategist output — mirrors KeywordPlan in the agent app. */
@@ -293,15 +302,20 @@ async function request<T>(path: string, init: RequestInit, headers: Record<strin
   try {
     res = await fetch(`${getApiBase()}${path}`, { ...init, headers });
   } catch (e) {
+    // Reported as an ApiError so the banner can say "unreachable" rather than
+    // guess, but it keeps the thrown value's message and stack: the message is
+    // what the error-report dedupe keys on, and the stack is where it happened.
+    const error = new ApiError(e instanceof Error ? e.message : String(e), { kind: 'unreachable' });
+    if (e instanceof Error && e.stack) error.stack = e.stack;
     const attributes = { route: path, method, source: 'api', duration_ms: elapsed(started) };
     log('error', `api request unreachable ${method} ${path}`, attributes);
-    captureError(e, attributes);
-    throw e;
+    captureError(error, attributes);
+    throw error;
   }
 
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string; traceId?: string };
-    const error = new Error(body.error ?? `HTTP ${res.status}`);
+    const error = apiErrorFromResponse(res, body, TRACE_HEADER);
     const attributes = {
       route: path,
       method,
@@ -310,7 +324,7 @@ async function request<T>(path: string, init: RequestInit, headers: Record<strin
       duration_ms: elapsed(started),
       // The agent returns its trace id on uncaught errors and echoes it on every
       // response, so the report points at the exact server-side log lines.
-      server_trace_id: body.traceId ?? res.headers.get(TRACE_HEADER) ?? undefined,
+      server_trace_id: error.traceId ?? undefined,
     };
     log('error', `api request failed ${method} ${path}`, attributes);
     captureError(error, attributes);

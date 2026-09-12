@@ -241,11 +241,13 @@ pnpm --filter @sleekdrops/agent test
 ```
 
 Most suites are pure logic and need nothing running.
-The two API suites are contract tests over the real Hono app:
-`server.test.ts` points at an unreachable database on purpose (tracing, auth and
-the upload guards all answer before a query), while `usage.db.test.ts` needs a
-live one - SQL that reads fine in review still only fails on a server - and
-skips itself when no `DATABASE_URL` answers.
+The API suites are contract tests over the real Hono app:
+`server.test.ts` points at an unreachable database on purpose (tracing, auth,
+the upload guards and the overview's degraded answer all resolve without a
+working query), while `usage.db.test.ts` and `overview.db.test.ts` need a live
+one - SQL that reads fine in review still only fails on a server, and a
+partially failing overview only exists there - and skip themselves when no
+`DATABASE_URL` answers.
 Give it one with `pnpm db:up` (then
 `DATABASE_URL=postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent`);
 CI runs it against a Postgres service container.
