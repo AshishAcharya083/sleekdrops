@@ -234,10 +234,23 @@ const navItems: NavItem[] = [
     }
     .mobile-nav a:hover,
     .mobile-nav a.active { color: var(--ink); background: var(--surface-2); }
+    /* Own rows under a rule, rather than filling whatever cell of the section
+       grid happens to be free next: these are standing documents, not another
+       place to browse, and an odd number of sections was landing one of them
+       beside "Contact". */
     .mobile-nav a.nav-meta {
+      grid-column: 1 / -1;
+      margin-top: 8px;
+      border-top: 1px solid var(--hairline);
       font-size: 13px;
       font-weight: 500;
       color: var(--muted);
+    }
+    /* Only the first of the run carries the rule that separates it from the
+       sections; the second sits directly under it. */
+    .mobile-nav a.nav-meta + a.nav-meta {
+      margin-top: 0;
+      border-top: 0;
     }
   }
 </style>

@@ -80,7 +80,7 @@ test('the date rides through at the precision the source published it', () => {
   );
 });
 
-test('an unplaced source stays visibly unplaced rather than being promoted', () => {
+test('an unattributed source keeps the unknown tier rather than being promoted', () => {
   const sources = articleSources([
     fact({ sourceUrl: 'https://sony.com.au/spec', tier: 'primary' }),
     fact({ sourceUrl: 'https://forum.example/thread', tier: 'unknown' }),

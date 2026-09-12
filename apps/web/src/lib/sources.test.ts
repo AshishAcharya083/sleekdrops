@@ -3,7 +3,7 @@
  *
  * The rules pinned here are the ones a trust surface fails on quietly: the
  * numbering has to survive untouched (the body's citation markers point at it),
- * a missing date or an unplaced source has to stay visible rather than being
+ * a missing date or an unattributed source has to stay visible rather than being
  * tidied away, and a review date has to be a review date rather than the
  * publication date wearing a different label.
  */
@@ -12,12 +12,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  agoLabel,
   displayUrl,
+  FAST_REVIEW_INTERVAL_DAYS,
   formatSourceDate,
+  reviewIntervalDays,
   reviewStatus,
   REVIEW_INTERVAL_DAYS,
   sourceCountLabel,
   toSourceEntries,
+  unverifiedCount,
 } from './sources.ts';
 import { buildArticleSchema } from './seo.ts';
 import type { BlogPost } from './posts.ts';
@@ -64,10 +68,20 @@ test('every row is attributed, dated where the source dated itself, and labelled
   assert.equal(sony.publisher, 'sony.com.au');
   assert.equal(sony.linkLabel, 'sony.com.au/spec');
 
-  // The two states that must stay visible rather than being tidied away.
-  assert.equal(forum.tierLabel, 'Unplaced');
-  assert.match(forum.caution ?? '', /could not establish who published this/);
-  assert.match(sony.caution ?? '', /no publication date/);
+  // The two states that must stay visible rather than being tidied away, each
+  // named for what is missing and each saying what it does not support.
+  assert.equal(forum.tierLabel, 'Publisher not identified');
+  assert.match(forum.caution ?? '', /could not confirm who publishes this page/);
+  assert.match(forum.caution ?? '', /nothing here rests on it alone/);
+  assert.match(sony.caution ?? '', /no publication or update date/);
+  assert.match(sony.caution ?? '', /does not count toward this article/);
+});
+
+test('the count above the list says how many rows are marked', () => {
+  // A reader should meet the gaps in the summary rather than find them after
+  // scrolling - an unannounced weak row reads as something we tried to bury.
+  assert.equal(unverifiedCount(toSourceEntries(sources)), 2);
+  assert.equal(unverifiedCount(toSourceEntries([sources[0]])), 0);
 });
 
 test('a year-only date is shown as a year, and nonsense as no date at all', () => {
@@ -131,6 +145,38 @@ test('a review older than the published cadence reads as due', () => {
 
   assert.equal(reviewStatus({ pubDate, lastReviewed: stale }, now).due, true);
   assert.equal(reviewStatus({ pubDate, lastReviewed: fresh }, now).due, false);
+});
+
+test('the cadence a piece is held to is its category\'s, not one interval for the site', () => {
+  // The commitment is published per category, so the same date is current in
+  // Home and overdue in Tech - and each piece derives its own next-check date.
+  const now = new Date('2026-09-11T00:00:00Z');
+  const lastReviewed = new Date(now.getTime() - 200 * 24 * 60 * 60 * 1000);
+
+  assert.equal(reviewIntervalDays('Tech'), FAST_REVIEW_INTERVAL_DAYS);
+  assert.equal(reviewIntervalDays('Home'), REVIEW_INTERVAL_DAYS);
+  assert.equal(reviewIntervalDays(undefined), REVIEW_INTERVAL_DAYS);
+
+  assert.equal(reviewStatus({ pubDate, lastReviewed, category: 'Tech' }, now).due, true);
+  assert.equal(reviewStatus({ pubDate, lastReviewed, category: 'Home' }, now).due, false);
+
+  const home = reviewStatus({ pubDate, lastReviewed, category: 'Home' }, now);
+  assert.equal(
+    home.nextDue.toISOString().slice(0, 10),
+    new Date(lastReviewed.getTime() + REVIEW_INTERVAL_DAYS * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10),
+  );
+});
+
+test('an overdue piece states how long ago it was checked rather than warning', () => {
+  // The stamp keeps its colour past the cadence and swaps in a specific figure:
+  // a vague warning lowers trust without telling a shopper anything to act on.
+  assert.equal(agoLabel(0), '0 days ago');
+  assert.equal(agoLabel(1), '1 day ago');
+  assert.equal(agoLabel(35), '1 month ago');
+  assert.equal(agoLabel(425), '14 months ago');
+  assert.equal(agoLabel(800), '2 years ago');
 });
 
 // ── The visible list and the emitted markup are one list ─────────────────────

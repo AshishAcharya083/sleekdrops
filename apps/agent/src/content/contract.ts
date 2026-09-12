@@ -178,7 +178,7 @@ export function defaultAuthorFor(category: string): AuthorProfile {
  * dated to the day, a lab test dated to the month, a standard dated to the
  * year - because rounding a year up to a day is an invented fact. `tier` says
  * what kind of evidence it is, 'unknown' included: a source the researcher
- * could not place is shown as unplaced rather than quietly promoted.
+ * could not place is shown as such rather than quietly promoted.
  *
  * `publisher` stays optional so the posts already in D1 keep validating; the
  * assembler always writes one (sources.ts falls back to the hostname).

@@ -2,7 +2,13 @@
 import BaseLayout from '@layouts/BaseLayout.astro';
 import LegalLayout from '@components/article/LegalLayout.astro';
 import { buildCategorySchema, buildMeta } from '@lib/seo';
-import { REVIEW_INTERVAL_DAYS, TIER_LABELS, TIER_ORDER } from '@lib/sources';
+import {
+  FAST_MOVING_CATEGORIES,
+  FAST_REVIEW_INTERVAL_DAYS,
+  REVIEW_INTERVAL_DAYS,
+  TIER_LABELS,
+  TIER_ORDER,
+} from '@lib/sources';
 import type { SourceTier } from '../content/config';
 
 /**
@@ -18,6 +24,7 @@ import type { SourceTier } from '../content/config';
  * then ignore.
  */
 const reviewMonths = Math.round(REVIEW_INTERVAL_DAYS / 30);
+const fastMonths = Math.round(FAST_REVIEW_INTERVAL_DAYS / 30);
 
 /**
  * What each source tier is, and what it may be used for. Typed against the
@@ -42,8 +49,8 @@ const tiers: Record<SourceTier, { what: string; use: string }> = {
     use: 'Context only — a price history or a spec cross-check, never the sole support for a claim.',
   },
   unknown: {
-    what: 'A source we could not place: no named publisher, or no stated method behind the figure.',
-    use: 'Shown in the sources block marked as unplaced, so you can weigh it as lightly as we did.',
+    what: 'A page whose publisher we could not confirm, or which states no method behind its figure.',
+    use: 'Listed and marked in the sources block, because we read it - but no recommendation rests on one of these alone.',
   },
 };
 
@@ -62,7 +69,7 @@ const meta = buildMeta({
   <LegalLayout
     eyebrow="Editorial method"
     titleHtml="How we <em>research</em>."
-    updated="September 11, 2026"
+    updated="September 12, 2026"
     toc={[
       { href: '#summary', label: 'Plain summary' },
       { href: '#not-tested', label: 'What we do not do' },
@@ -123,13 +130,34 @@ const meta = buildMeta({
     <p>Two things follow. A product with thin evidence behind it cannot score highly here, however good it may be; and no score on this site should be read as our having used the product. If you want the underlying evidence rather than the summary, it is listed at the foot of every article.</p>
 
     <h2 id="dates">Dates and <em>re-checks</em></h2>
-    <p>Three dates appear on an article and they mean different things:</p>
+    <p>Four dates appear on an article and they mean different things:</p>
     <ul>
       <li><strong>Published</strong> — when the article first went live.</li>
       <li><strong>Updated</strong> — when its text last changed.</li>
       <li><strong>Last reviewed</strong> — when the article was last rebuilt from its research and checked against those sources, before an editor signed it off. This is the date under the byline, and it is the one worth checking.</li>
+      <li><strong>Next check due</strong> - when we have committed to look at it again, derived from the last review and the category's cadence below.</li>
     </ul>
-    <p>We re-check every recommendation at least every {reviewMonths} months, and sooner when a product is discontinued, superseded or recalled. Past that interval an article's stamp turns amber and says a re-check is due, rather than hiding it. Articles published before we logged reviews show their last editorial pass instead, and say that is what it is.</p>
+    <p>The re-check interval is a commitment we make per category rather than per article, because what makes evidence go stale is the category rather than the piece. Every article states its own next check date under the byline and again at the foot of its sources.</p>
+    <table>
+      <thead>
+        <tr><th>Category</th><th>How often</th><th>Why</th></tr>
+      </thead>
+      <tbody>
+        {Object.entries(FAST_MOVING_CATEGORIES).map(([category, why]) => (
+          <tr>
+            <td><strong>{category}</strong></td>
+            <td>Every {fastMonths} months</td>
+            <td>{why}</td>
+          </tr>
+        ))}
+        <tr>
+          <td><strong>Everything else</strong></td>
+          <td>Every {reviewMonths} months</td>
+          <td>Home, Fashion and Health products change slowly, and the evidence behind them is republished on roughly an annual cycle.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>We also re-check sooner, outside the cadence, when a product is discontinued, superseded or recalled. When an article does slip past its interval, its stamp says how long ago the last check was and that prices and models may have moved since - a fact you can act on. We do not put a warning colour over it: an overdue re-check is our failure to keep a schedule, not a defect we have found in the article, and dressing it as one would tell you something is wrong without telling you what. Amber on this site is reserved for evidence you can weigh - a source we could not attribute, a figure we could not date. Articles published before we logged reviews show their last editorial pass instead, and say that is what it is.</p>
 
     <h2 id="ai">AI <em>assistance</em></h2>
     <p>Research and drafting on this site are AI-assisted and human-reviewed. Because that is a material fact about how the words in front of you were produced, it has its own page rather than a line in this one: read the <a href="/ai-disclosure">AI-assistance disclosure</a>.</p>

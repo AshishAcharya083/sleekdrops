@@ -106,6 +106,13 @@ const { eyebrow, titleHtml, updated, toc } = Astro.props;
   .legal-nav li.active a { color: var(--ink); font-weight: 600; }
   .legal-nav a:hover { color: var(--ink); }
 
+  /* Both tracks hold something wider than a phone - the pill strip, and the
+     methodology page's tables - and a grid item's automatic minimum size is
+     its min-content width. Without this the track grows to fit and takes the
+     whole document sideways instead of scrolling inside the strip or table. */
+  .legal-nav,
+  .legal-body { min-width: 0; }
+
   .legal-body {
     max-width: 64ch;
     font-family: var(--font-body);

@@ -1,6 +1,6 @@
 ---
-import { reviewStatus, REVIEW_INTERVAL_DAYS } from '@lib/sources';
-import { formatLong } from '@lib/format';
+import { agoLabel, reviewStatus } from '@lib/sources';
+import { formatLong, formatMonth } from '@lib/format';
 
 /**
  * TrustStack — the four lines under an article's byline that say how the piece
@@ -17,30 +17,38 @@ import { formatLong } from '@lib/format';
  * The stamp then shows its last editorial update and says that is what it is,
  * because claiming a review nobody recorded is the exact failure this whole
  * surface exists to avoid.
+ *
+ * There is one stamp, not a healthy one and an alarmed one. Past the category's
+ * cadence it keeps its colour and changes its sentence to the fact behind the
+ * miss - how long ago the last check was, and that prices and models move. A
+ * warning banner over a stale date lowers trust in the article without telling
+ * the reader anything they can act on; the specific figure does not.
  */
 export interface Props {
   pubDate: Date;
   updatedDate?: Date;
   lastReviewed?: Date;
+  /** The category this piece is filed under - it sets the re-check cadence. */
+  category?: string;
   /** The accountable byline, named in the stamp. */
   reviewedBy: string;
 }
 
-const { pubDate, updatedDate, lastReviewed, reviewedBy } = Astro.props;
-const review = reviewStatus({ pubDate, updatedDate, lastReviewed });
-const reviewMonths = Math.round(REVIEW_INTERVAL_DAYS / 30);
-// One sentence, composed here rather than out of three conditional fragments
-// in the markup, where the whitespace between them lands in front of commas.
-const stampNote = [
-  review.inferred
-    ? 'this piece predates our review log, so the date shown is its last editorial pass'
-    : `by the ${reviewedBy}`,
-  review.due
-    ? `a re-check is due: we revisit every recommendation at least every ${reviewMonths} months`
-    : '',
-]
-  .filter(Boolean)
-  .join(', and ');
+const { pubDate, updatedDate, lastReviewed, category, reviewedBy } = Astro.props;
+const review = reviewStatus({ pubDate, updatedDate, lastReviewed, category });
+// Who signed it off, or why there is no sign-off to name. Composed here rather
+// than as conditional fragments in the markup, where the whitespace between
+// them lands in front of the punctuation.
+const stampNote = review.inferred
+  ? 'this piece predates our review log, so the date shown is its last editorial pass'
+  : `by the ${reviewedBy}`;
+// Past the cadence the stamp states the fact rather than accusing itself: how
+// long ago the check was, and what may have moved since. A shopper can act on
+// that. The forward-looking date is only shown while it is still ahead of us -
+// a "next check due" in the past would be the vague warning this replaces.
+const staleNote = review.due
+  ? `Last checked ${agoLabel(review.daysSince)} - prices and models may have changed since.`
+  : null;
 // An update line only says something the stamp above it does not: a piece
 // updated on the day it published, or on the day it was last reviewed, has
 // nothing to add.
@@ -53,17 +61,18 @@ const updated =
 ---
 
 <div class="trust-stack">
-  <p class:list={['review-stamp', review.due && 'review-stamp--due']}>
-    {review.due ? (
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-    ) : (
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
-    )}
+  <p class="review-stamp">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
     <span class="stamp-label">{review.inferred ? 'Last updated' : 'Last reviewed'}</span>
     <time class="stamp-date" datetime={review.date.toISOString().slice(0, 10)}>
       {formatLong(review.date)}
     </time>
     <span class="stamp-by">{stampNote}</span>
+    {/* Forward-looking and neutral, so the cadence is a commitment a reader can
+        hold us to rather than something only visible once we have missed it. */}
+    {staleNote
+      ? <span class="stamp-stale">{staleNote}</span>
+      : <span class="stamp-next">Next check due {formatMonth(review.nextDue)}</span>}
     <a href="/how-we-research">How we research</a>
   </p>
 
@@ -144,18 +153,21 @@ const updated =
     font-weight: 500;
   }
   .review-stamp .stamp-by { color: var(--muted); }
+  .review-stamp .stamp-next {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  /* Same weight and colour as the rest of the stamp: the sentence is doing the
+     work, and a warning treatment would tell a reader something is wrong
+     without telling them what. */
+  .review-stamp .stamp-stale { color: var(--ink-2); }
   .review-stamp a {
     color: var(--ink);
     text-decoration-color: var(--accent);
     font-weight: 600;
     white-space: nowrap;
   }
-  .review-stamp--due {
-    border-left-color: var(--warning);
-    background: var(--warning-soft);
-  }
-  .review-stamp--due svg { stroke: var(--warning); }
-  .review-stamp--due .stamp-label { color: var(--warning); }
 
   .update-flash {
     display: flex;

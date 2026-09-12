@@ -134,12 +134,6 @@ import AdUnit from '@components/ads/AdUnit.astro';
   }
 
   /* GFM tables — pipe-table syntax in markdown. */
-  .article-body :global(.table-wrap) {
-    margin: 2em 0;
-    overflow-x: auto;
-    border: 1px solid var(--hairline);
-    border-radius: 12px;
-  }
   .article-body :global(table) {
     width: 100%;
     border-collapse: collapse;
@@ -176,7 +170,10 @@ import AdUnit from '@components/ads/AdUnit.astro';
     letter-spacing: 0.02em;
     text-transform: uppercase;
   }
-  .article-body :global(tbody tr:last-child td) { border-bottom: 0; }
+  /* `th` as well as `td`: a table with a row header in the first column keeps
+     a hairline under its last row otherwise, which reads as a missing row. */
+  .article-body :global(tbody tr:last-child td),
+  .article-body :global(tbody tr:last-child th) { border-bottom: 0; }
   .article-body :global(tbody tr:hover) {
     background: color-mix(in srgb, var(--accent) 4%, transparent);
   }

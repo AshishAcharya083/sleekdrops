@@ -1,5 +1,5 @@
 ---
-import { sourceCountLabel, toSourceEntries } from '@lib/sources';
+import { sourceCountLabel, toSourceEntries, unverifiedCount } from '@lib/sources';
 import type { SourceData } from '../../content/config';
 
 /**
@@ -8,9 +8,11 @@ import type { SourceData } from '../../content/config';
  * The rows are the research dossier's own sources, in its order, so entry 3
  * here is what the body's `[3]` marker points at (see lib/rehype-citations.mjs).
  * Each row carries the publisher, what kind of evidence it is and the date the
- * source itself published, and says plainly when one of those is missing —
- * an undated or unplaced source is shown as such rather than dropped, because
- * hiding the weak evidence is how a sources list stops being one.
+ * source itself published, and says plainly when one of those is missing - an
+ * undated source, or one whose publisher we could not confirm, is shown as such
+ * rather than dropped, because hiding the weak evidence is how a sources list
+ * stops being one. The count above the list says how many are marked, so a
+ * reader meets the gaps in the summary rather than discovering them.
  *
  * A post with no sources renders the block's honest empty state instead: older
  * hand-written pieces carry their links inline and were published before the
@@ -20,23 +22,36 @@ export interface Props {
   sources?: SourceData[];
   /** Health and Finance pieces carry the "this is not advice" line as well. */
   highStakes?: boolean;
+  /** The review stamp's date, repeated at the foot where the evidence is. */
+  reviewedLabel?: string;
+  reviewedOn?: string;
+  /** When this category's next re-check falls due. */
+  nextCheck?: string;
 }
 
-const { sources = [], highStakes = false } = Astro.props;
+const { sources = [], highStakes = false, reviewedLabel, reviewedOn, nextCheck } = Astro.props;
 const entries = toSourceEntries(sources);
+const unverified = unverifiedCount(entries);
 ---
 
 <section class="sources" aria-labelledby="sources-title">
   <div class="sources-head">
     <h2 id="sources-title">Sources</h2>
-    {entries.length > 0 && <span class="sources-count">{sourceCountLabel(entries.length)}</span>}
+    {entries.length > 0 && (
+      <span class="sources-count">
+        {sourceCountLabel(entries.length)}
+        {unverified > 0 && ` · ${unverified} we could not fully verify`}
+      </span>
+    )}
   </div>
 
   {entries.length > 0 && (
     <p class="sources-intro">
       SleekDrops does not test products. Every claim here rests on published
       specifications, independent test results, and owner reports — listed below
-      so you can check them yourself. <a href="/how-we-research">How we research</a>.
+      so you can check them yourself.
+      {unverified > 0 && ` ${unverified === 1 ? 'One of them we could' : `${unverified} of them we could`} not fully attribute or date; ${unverified === 1 ? 'it is' : 'they are'} marked below, and no recommendation rests on ${unverified === 1 ? 'it' : 'them'} alone.`}
+      {' '}<a href="/how-we-research">How we research</a>.
     </p>
   )}
 
@@ -57,7 +72,7 @@ const entries = toSourceEntries(sources);
             <div class="src-top">
               <span class="src-publisher">{entry.publisher}</span>
               {entry.tierLabel && (
-                <span class:list={['src-kind', entry.tier === 'unknown' && 'src-kind--unplaced']}>
+                <span class:list={['src-kind', entry.tier === 'unknown' && 'src-kind--unattributed']}>
                   {entry.tierLabel}
                 </span>
               )}
@@ -66,7 +81,7 @@ const entries = toSourceEntries(sources);
               {entry.linkLabel}
             </a>
             <div class="src-dates">
-              <span>{entry.dateLabel ? `Published ${entry.dateLabel}` : 'No publication date'}</span>
+              <span>{entry.dateLabel ? `Published ${entry.dateLabel}` : 'No date shown'}</span>
             </div>
             {entry.caution && (
               <p class="src-note">
@@ -84,6 +99,14 @@ const entries = toSourceEntries(sources);
       sit inline in the text. If a link is unavailable or a claim needs
       correction, email
       {' '}<a href="mailto:corrections@sleekdrops.com">corrections@sleekdrops.com</a>.
+    </p>
+  )}
+
+  {reviewedOn && (
+    <p class="sources-checked">
+      <span class="checked-label">{reviewedLabel}</span>
+      <span class="checked-date">{reviewedOn}</span>
+      {nextCheck && <span class="checked-next">Next check due {nextCheck}</span>}
     </p>
   )}
 
@@ -187,7 +210,7 @@ const entries = toSourceEntries(sources);
     color: var(--muted);
     white-space: nowrap;
   }
-  .src-kind--unplaced {
+  .src-kind--unattributed {
     background: var(--warning-soft);
     border-color: var(--warning-soft);
     color: var(--warning);
@@ -232,6 +255,26 @@ const entries = toSourceEntries(sources);
     flex-shrink: 0;
     margin-top: 2px;
   }
+
+  /* The same neutral line the byline carries, repeated where the evidence is:
+     a reader who scrolled to check the sources should not have to scroll back
+     to find out when they were last checked. */
+  .sources-checked {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 16px 0 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .sources-checked .checked-label {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .sources-checked .checked-date { color: var(--ink-2); }
 
   .sources-foot {
     display: flex;

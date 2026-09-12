@@ -1,6 +1,6 @@
 ---
 import { reviewStatus, sourceCountLabel, TIER_LABELS, TIER_ORDER } from '@lib/sources';
-import { formatMedium } from '@lib/format';
+import { formatMedium, formatMonth } from '@lib/format';
 import type { SourceData } from '../../content/config';
 
 /**
@@ -15,10 +15,12 @@ export interface Props {
   pubDate: Date;
   updatedDate?: Date;
   lastReviewed?: Date;
+  /** The category this piece is filed under - it sets the re-check cadence. */
+  category?: string;
 }
 
-const { sources = [], pubDate, updatedDate, lastReviewed } = Astro.props;
-const review = reviewStatus({ pubDate, updatedDate, lastReviewed });
+const { sources = [], pubDate, updatedDate, lastReviewed, category } = Astro.props;
+const review = reviewStatus({ pubDate, updatedDate, lastReviewed, category });
 // Only the tiers this piece actually cites, strongest evidence first.
 const tierCounts = TIER_ORDER.map((tier) => ({
   tier,
@@ -51,8 +53,19 @@ const undated = sources.filter((source) => !source.date).length;
     )}
     <div class="row">
       <dt>{review.inferred ? 'Last updated' : 'Last reviewed'}</dt>
-      <dd class:list={[review.due && 'caution']}>{formatMedium(review.date)}</dd>
+      {/* Never amber: a re-check we owe is our problem, not a defect in the
+          evidence. The amber in this rail counts sources a reader can weigh. */}
+      <dd>{formatMedium(review.date)}</dd>
     </div>
+    {/* Only while it is still ahead of us. Once the date has passed, the review
+        stamp under the byline says how long ago the last check was - repeating
+        it here as a second date row would read as a third, different date. */}
+    {!review.due && (
+      <div class="row">
+        <dt>Next check</dt>
+        <dd>{formatMonth(review.nextDue)}</dd>
+      </div>
+    )}
   </dl>
   <p class="rail-links">
     <a href="/how-we-research">How we research</a>

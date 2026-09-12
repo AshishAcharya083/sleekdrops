@@ -68,8 +68,8 @@ export type SourceTier = (typeof sourceTiers)[number];
  * `date` carries whatever precision the source itself publishes - a spec sheet
  * dated to the day, a lab result to the month, a standard to the year - because
  * padding a year out to a day would invent a fact. `tier` is carried even when
- * it is `unknown`: a source the researcher could not place is shown as unplaced
- * rather than quietly promoted.
+ * it is `unknown`: a source whose publisher the researcher could not confirm is
+ * shown as such rather than quietly promoted.
  *
  * `publisher` is optional only so posts already in D1 keep validating; the
  * assembler always writes one, falling back to the source's hostname.
