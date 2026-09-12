@@ -21,8 +21,8 @@
  *
  * The analytics SDKs themselves are bootstrapped separately by the
  * PrivacyPreferences island, which applies the visitor's stored decision (or the
- * site default: analytics off) to the DevTeam + GA4
- * sinks; track() here simply buffers until that has happened.
+ * deployment default) to the DevTeam + GA4 sinks; track() here simply buffers
+ * until that has happened.
  */
 
 import {

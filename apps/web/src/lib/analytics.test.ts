@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { createAnalytics, type AnalyticsClient } from '@getdevteam/analytics-web';
 
 import type { AnalyticsScope } from './analytics-scope.ts';
-import { CONSENT_KEY, POLICY_VERSION, parseConsent } from './consent.ts';
+import { CONSENT_KEY, POLICY_VERSION, parseConsent, type ConsentStatus } from './consent.ts';
 
 /**
  * The one thing the real module cannot resolve outside a Vite build: the ingest
@@ -41,10 +41,16 @@ import { CONSENT_KEY, POLICY_VERSION, parseConsent } from './consent.ts';
  * without this the module under test would have no client at all.
  */
 let devteamKey = 'dtp_test';
+let defaultConsent: ConsentStatus = 'denied';
 
 mock.module(new URL('./analytics-env.ts', import.meta.url).href, {
   namedExports: {
-    analyticsEnv: () => ({ key: devteamKey, host: 'http://analytics.test' }),
+    analyticsEnv: () => ({
+      key: devteamKey,
+      host: 'http://analytics.test',
+      feedback: false,
+      defaultConsent,
+    }),
   },
 });
 
@@ -420,6 +426,7 @@ const linesSaying = (text: string): string[] =>
 
 beforeEach(() => {
   consoleLines.length = 0;
+  defaultConsent = 'denied';
 });
 
 test('REPRODUCTION: two loads in one visit are what produced the reported four events', async () => {
@@ -481,6 +488,25 @@ test('two module copies in one document share one client, and so open one sessio
   assert.equal(distinct(tab.events.map((event) => event.session_id)).length, 1);
 });
 
+test('a configured preview starts analytics silently when no decision is stored', async () => {
+  const tab = openTab();
+  loadPage(tab, '/');
+  defaultConsent = 'granted';
+
+  chrome.trackPageView({ referrer: '' });
+  banner.boot();
+  await flush();
+
+  assert.deepEqual(names(tab), [SESSION_START, PAGE_VIEW]);
+  assert.equal(chrome.consentStatus(), 'granted');
+  assert.equal(
+    tab.local.has(CONSENT_KEY),
+    false,
+    'the deployment default must not be stored as if the visitor chose it',
+  );
+  assert.equal(linesSaying('analytics enabled').length, 1);
+});
+
 test('a page view buffered by one module copy is flushed by the other, once', async () => {
   const tab = openTab();
   loadPage(tab, '/');
@@ -521,7 +547,7 @@ test('the grant path runs once per document, however many entry points call it',
   assert.equal(countOf(tab, SESSION_START), 1);
   assert.equal(ga4Tags(scripts).length, 1, 'one GA4 tag per document');
   assert.equal(
-    logsSaying(tab, 'consent granted').length,
+    logsSaying(tab, 'analytics enabled').length,
     1,
     'the grant path must run once per document, not once per caller',
   );
@@ -631,7 +657,7 @@ test('a second decline is a no-op, not a second withdrawal', async () => {
   assert.equal(documentScope()?.decision, 'denied');
   assert.deepEqual(tab.events, []);
   assert.equal(
-    linesSaying('consent denied').length,
+    linesSaying('analytics disabled').length,
     1,
     'the deny path must run once per document, not once per caller',
   );

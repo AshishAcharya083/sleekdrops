@@ -15,11 +15,11 @@ interface ImportMetaEnv {
    * sink silently after one warning.
    */
   readonly PUBLIC_GA4_ID?: string;
-  /** DevTeam Analytics public ingest key (dtp_...). Empty disables the sink. */
+  /** DevTeam Analytics public ingest key (dtp_...). Ignored by production builds. */
   readonly PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY?: string;
   /** DevTeam Analytics ingest host. Defaults to http://localhost:6080. */
   readonly PUBLIC_DEVTEAM_ANALYTICS_HOST?: string;
-  /** `true` renders the DevTeam in-app feedback widget. Anything else hides it. */
+  /** `true` renders DevTeam feedback in configured non-production builds. */
   readonly PUBLIC_DEVTEAM_ANALYTICS_FEEDBACK?: string;
   /** DevTeam A/B Testing flag-delivery host. Empty disables experiments. */
   readonly PUBLIC_DEVTEAM_FLAGS_HOST?: string;
