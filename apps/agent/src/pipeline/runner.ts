@@ -24,7 +24,7 @@ import { runPublisher } from '../agents/publisher.js';
 import { runResearcher } from '../agents/researcher.js';
 import { runSeoReviewer } from '../agents/seoReviewer.js';
 import { runWriter } from '../agents/writer.js';
-import type { ArticleRow, Stage, TopicRow } from './types.js';
+import type { ArticleRow, SeoReview, Stage, TopicRow } from './types.js';
 
 /** The agent that runs each stage. A stage missing here has no named session. */
 export const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
@@ -92,6 +92,52 @@ export async function modelFor(agent: string): Promise<string> {
     throw new Error(`${agent} is set to run on ${pick}. ${CLAUDE_NOT_CONFIGURED}`);
   }
   return pick;
+}
+
+/**
+ * The axes in the order an operator reads them: the current set first, the
+ * pre-rebuild ones after. Needed because JSONB does not preserve key order - a
+ * review read back out of the column comes out sorted by key length - and
+ * because a review written before the restructure still has to render its own
+ * keys instead of five "undefined"s.
+ */
+const DIMENSION_ORDER = [
+  'evidence',
+  'position',
+  'structure',
+  'citability',
+  'links',
+  'seo',
+  'geo',
+  'voice',
+  'eeat',
+];
+
+const dimensionRank = (name: string): number => {
+  const at = DIMENSION_ORDER.indexOf(name);
+  return at === -1 ? DIMENSION_ORDER.length : at;
+};
+
+/** The seo_review session line an operator reads in the panel. */
+export function summariseReview(review: SeoReview): string {
+  const dims = review.dimensions
+    ? ` [${Object.entries(review.dimensions)
+        .sort(([a], [b]) => dimensionRank(a) - dimensionRank(b) || a.localeCompare(b))
+        .map(([name, value]) => `${name} ${value}`)
+        .join(' · ')}]`
+    : '';
+  const slop = review.slop
+    ? `, slop scan ${review.slop.score}/100 (${review.slop.findings} finding(s))`
+    : '';
+  const delta = review.competitorDelta
+    ? `, vs top ${review.competitorDelta.comparedWith.length}: ${review.competitorDelta.verdict}`
+    : '';
+  const claims = review.claimAudit
+    ? `, ${review.claimAudit.unsupported}/${review.claimAudit.checked} specifics unsupported`
+    : '';
+  return `score ${review.score}/100${dims}, ${review.pass ? 'PASS' : 'FAIL'} (${review.issues.length} issues)${delta}${claims}${slop}${
+    review.forcedThrough ? ' - max revisions reached, proceeding' : ''
+  }`;
 }
 
 async function updateArticle(id: string, fields: Record<string, unknown>): Promise<void> {
@@ -256,11 +302,7 @@ export async function runStage(article: ArticleRow): Promise<void> {
           review.forcedThrough = true;
         }
         await updateArticle(article.id, { seo_review: JSON.stringify(review) });
-        const dims = review.dimensions
-          ? ` [seo ${review.dimensions.seo} · geo ${review.dimensions.geo} · voice ${review.dimensions.voice} · eeat ${review.dimensions.eeat} · links ${review.dimensions.links}]`
-          : '';
-        const slop = review.slop ? `, slop scan ${review.slop.score}/100 (${review.slop.findings} finding(s))` : '';
-        summary = `score ${review.score}/100${dims}, ${review.pass ? 'PASS' : 'FAIL'} (${review.issues.length} issues)${slop}${review.forcedThrough ? ' — max revisions reached, proceeding' : ''}`;
+        summary = summariseReview(review);
         next =
           review.pass || review.forcedThrough
             ? { stage: 'assemble', status: 'queued' }
