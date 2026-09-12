@@ -143,14 +143,15 @@ The names are DevTeam's canonical ones, so the platform, this repo's settings, a
 
 If a value is ever missing, re-run the publish from the DevTeam project's **Config** tab (**Sync to GitHub**) rather than pasting one in — a hand-entered key goes stale the next time the project re-provisions.
 
-Both public-site workflows keep the DevTeam processor disabled until public privacy, jurisdiction and retention terms are available. The admin panel may still read the repo settings under its own `VITE_` prefix for authenticated internal use.
+The develop workflow passes the DevTeam key and host into its non-production build. A configured develop build starts anonymous analytics without a prompt, while a stored opt-out or GPC/DNT signal still disables it.
+The production workflow passes literal empty values, and `src/lib/analytics-env.ts` independently discards a key from any build marked `PUBLIC_SITE_ENV=production`. The live `sleekdrops.com` build therefore cannot initialise the DevTeam SDK even if someone later wires a production secret into the workflow by mistake.
 
 | Repo setting                                | Kind         | What it is                                                                          |
 | ------------------------------------------- | ------------ | ------------------------------------------------------------------------------------ |
 | `DEVTEAM_ANALYTICS_INGEST_KEY`              | **secret**   | The project's ingest key (`dtp_…`). Ingest-only.                                    |
 | `DEVTEAM_ANALYTICS_HOST`                    | **variable** | The platform's ingest host, e.g. `https://ingest.analytics.internal.getdevteam.ai`. |
 
-An empty key disables the DevTeam sink silently after one warning; GA4 is unaffected.
+An empty key disables the DevTeam sink. GA4 is unaffected.
 
 The pair is not uploaded to Pages Functions. The deployed `/go` route explicitly supplies no telemetry credentials; affiliate redirects and attribution continue to work without sending click data to this processor.
 
