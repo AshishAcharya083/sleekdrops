@@ -60,31 +60,6 @@ const { eyebrow, titleHtml, updated, toc } = Astro.props;
     gap: 64px;
     padding: 64px 0 96px;
   }
-  @media (max-width: 900px) {
-    .legal-layout { grid-template-columns: 1fr; gap: 24px; padding: 32px 0 64px; }
-    /* The section list stops being a rail and becomes a scrollable strip of
-       pills under the title, which is the only shape that fits a phone without
-       burying the document under its own table of contents. */
-    .legal-nav { position: static; }
-    .legal-nav h6 { margin-bottom: 12px; }
-    .legal-nav ul {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      padding-bottom: 4px;
-      scrollbar-width: thin;
-      -webkit-overflow-scrolling: touch;
-    }
-    .legal-nav li {
-      border-left: 0;
-      border: 1px solid var(--hairline);
-      border-radius: var(--r-full);
-      padding: 8px 14px;
-      white-space: nowrap;
-      flex: 0 0 auto;
-    }
-    .legal-nav li.active { border-color: var(--ink); }
-  }
   .legal-nav { position: sticky; top: 100px; align-self: start; }
   .legal-nav h6 {
     font-family: var(--font-body);
@@ -105,6 +80,35 @@ const { eyebrow, titleHtml, updated, toc } = Astro.props;
   .legal-nav a { color: var(--muted); text-decoration: none; }
   .legal-nav li.active a { color: var(--ink); font-weight: 600; }
   .legal-nav a:hover { color: var(--ink); }
+
+  /* Below the rail breakpoint the section list stops being a rail and becomes a
+     scrollable strip of pills under the title, which is the only shape that fits
+     a phone without burying the document under its own table of contents.
+     It must also stop being sticky: pinned at `top: 100px` over a one-column
+     layout it floats above the prose, and an anchor jump lands the heading
+     underneath it. This block sits *after* the base rules above deliberately -
+     they have the same specificity, so source order is what decides it. */
+  @media (max-width: 900px) {
+    .legal-layout { grid-template-columns: 1fr; gap: 24px; padding: 32px 0 64px; }
+    .legal-nav { position: static; }
+    .legal-nav h6 { margin-bottom: 12px; }
+    .legal-nav ul {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      scrollbar-width: thin;
+      -webkit-overflow-scrolling: touch;
+    }
+    .legal-nav li {
+      border: 1px solid var(--hairline);
+      border-radius: var(--r-full);
+      padding: 8px 14px;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+    .legal-nav li.active { border-color: var(--ink); }
+  }
 
   /* Both tracks hold something wider than a phone - the pill strip, and the
      methodology page's tables - and a grid item's automatic minimum size is
