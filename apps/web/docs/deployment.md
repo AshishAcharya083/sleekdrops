@@ -39,11 +39,56 @@ The build runs `pnpm prebuild` (which generates `public/_redirects` from `src/da
 
 `astro.config.mjs` sets `build.format: 'file'`, so a page is written as
 `blog/<slug>.html` and Cloudflare Pages serves it at `/blog/<slug>` - the form the
-canonical tag, the sitemap, the RSS feed and the JSON-LD all name. With Astro's
-default directory layout Pages 308-redirected every one of those URLs to the
-trailing-slash form, and Google indexed the slash form. After a deploy,
-`curl -I https://sleekdrops.com/blog/<slug>` must return 200 and the slash form
-must redirect back to it.
+canonical tag, the sitemap, the RSS feed and the JSON-LD all name.
+With Astro's default directory layout Pages 308-redirected every one of those URLs to the
+trailing-slash form, and Google indexed the slash form.
+
+**Both forms answer 200; neither redirects.**
+`apps/web/functions/_middleware.js` (logic in `functions/_lib/canonical.mjs`) serves a
+trailing-slash request the canonical slash-less asset through `env.ASSETS.fetch`, passing
+the asset's own status, body and headers - the `public/_headers` policy included - straight
+back.
+Everything else falls through to `next()` untouched: canonical URLs, the site root, `/go/*`
+(which belongs to the affiliate Function) and any non-GET request.
+The duplicate URL still consolidates on the canonical tag, so the slash-less form remains the
+one indexed.
+
+Why the slash form is not simply redirected back, which is the obvious fix and the wrong one:
+**reversing a permanent redirect needs a 200 leg, or it closes a loop.**
+A 308 is cached by the browser and by the edge indefinitely, so after the flip above, every
+client holding the *old* `/blog/<slug>` → `/blog/<slug>/` redirect met a server insisting on
+the reverse, with no 200 anywhere in the chain - Chrome's `ERR_TOO_MANY_REDIRECTS`, on
+roughly half of page loads, clearing only when Chrome dropped the poisoned entry.
+The stale leg lives in the client, so it cannot be redirected away: a 302 or 307 in place of
+the 308 closes exactly the same loop.
+One leg answering 200 is the only thing that breaks it without asking every visitor to clear
+their cache.
+The cost is that a root middleware runs on every request the project serves, so
+`public/_routes.json` keeps the hashed build output (`/_astro/*`) and the fonts out of it -
+neither can ever be a trailing-slash page, and they are the bulk of the requests.
+Everything else, `/go/*` included, stays on `/*` and reaches its Function as before; excluding
+a path there would silently take its Function offline, which is what
+`src/lib/canonical-url.test.ts` pins.
+
+The edge's own copy of a stale redirect is cleared by the **Purge the Cloudflare edge cache**
+step in both deploy workflows, which `POST`s `purge_everything` to the zone after the deploy
+and fails the run if the purge does not return 200.
+It needs `CLOUDFLARE_ZONE_ID` (Cloudflare → the zone → Overview → Zone ID) and a
+`CLOUDFLARE_API_TOKEN` carrying **Zone → Cache Purge → Purge** on top of its Pages scopes;
+with no zone id set it warns and skips, which is the state of the develop deploy while it is
+served from the bare `*.pages.dev` host - that is Cloudflare's zone, not this account's, and
+cannot be purged.
+
+After a deploy, all four forms must answer at most one hop and end in 200:
+
+```
+curl -sIL https://sleekdrops.com/blog             # 200
+curl -sIL https://sleekdrops.com/blog/            # 200, served by the middleware
+curl -sIL https://sleekdrops.com/blog/<slug>      # 200
+curl -sIL https://sleekdrops.com/blog/<slug>/     # 200, served by the middleware
+```
+
+A 3xx on any of them is the regression this section exists to prevent.
 
 The sitemap carries a `lastmod` per URL, derived from post dates by
 `src/lib/sitemap-policy.mjs` (a post's `updatedDate ?? pubDate`; the newest post a
@@ -88,6 +133,7 @@ Add these in **Settings → Secrets and variables → Actions → Repository sec
 | `CLOUDFLARE_API_TOKEN`     | Cloudflare → My Profile → API Tokens → Create Token → template **"Edit Cloudflare Workers"** *or* a custom token with **Account → Cloudflare Pages: Edit**. |
 | `CLOUDFLARE_ACCOUNT_ID`    | Cloudflare dashboard right sidebar of any zone, or **Workers & Pages → Overview**.                               |
 | `CLOUDFLARE_PROJECT_NAME`  | The name of the Pages project you created — e.g. `sleekdrops` (used in the wrangler command).                    |
+| `CLOUDFLARE_ZONE_ID`       | Cloudflare → the zone serving this environment → Overview → **Zone ID**. Used by the post-deploy cache purge; unset means the purge warns and skips (see *Canonical URLs* above). |
 
 ### DevTeam Analytics (required for the analytics + logging sink)
 
@@ -257,6 +303,7 @@ When creating `CLOUDFLARE_API_TOKEN`, scope it to:
 
 - **Account: Cloudflare Pages → Edit**
 - **Account: Account Settings → Read** (required by wrangler-action)
+- **Zone: Cache Purge → Purge**, for the zone in `CLOUDFLARE_ZONE_ID` (the post-deploy purge)
 - Account resource scoped to *your* account only
 
 Avoid the "Global API Key" — it has no scope limits.
