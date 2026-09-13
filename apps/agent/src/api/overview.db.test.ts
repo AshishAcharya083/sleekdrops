@@ -41,7 +41,9 @@ async function getOverview(): Promise<{ status: number; body: OverviewBody }> {
   return { status: res.status, body: (await res.json()) as OverviewBody };
 }
 
-/** A scout session: the sweep has no article, only the run it belongs to. */
+/** A scout session: the sweep has no article, only the run it belongs to.
+ *  The run is seeded finished on purpose - a 'running' scout_runs row holds
+ *  the scout lock, and this fixture must not take it from a parallel test. */
 let scoutRunId = '';
 
 before(async () => {
@@ -51,7 +53,9 @@ before(async () => {
     "INSERT INTO topics (title, norm_title, category, post_type) VALUES ($1, $1, 'Tech', 'article')",
     [AGENT],
   );
-  const [run] = await q<{ id: string }>('INSERT INTO scout_runs DEFAULT VALUES RETURNING id');
+  const [run] = await q<{ id: string }>(
+    "INSERT INTO scout_runs (status, ended_at) VALUES ('done', now()) RETURNING id",
+  );
   scoutRunId = run.id;
   await q(
     `INSERT INTO agent_sessions (agent, scout_run_id, status, cost_usd, tokens_input, tokens_output)

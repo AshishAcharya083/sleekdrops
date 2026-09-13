@@ -199,7 +199,10 @@ stopped.
 
 - **Topic scout**: runs on a schedule (Settings → *Autonomous topic scout*,
   default daily; in-process scheduler, no external cron needed). It skips a
-  sweep while 30+ suggestions sit untriaged.
+  sweep while 30+ suggestions sit untriaged, and while another sweep holds the
+  scout lock - a live sweep renews `scout_runs.heartbeat_at`, and a run that
+  has not renewed for 30 minutes has lost the lock and gets swept to `failed`.
+  The Topics tab shows who holds the lock and can release it by hand.
 - **Article pipeline**: fully autonomous once you approve topics — the worker
   polls Postgres (the light pub/sub) and drives every stage to completion.
 - **Publishing**: gated on your approval by default (`publish_mode=approval`);
@@ -214,11 +217,14 @@ stopped.
 - `agent_sessions` — one row per agent run: model, tokens in/out, cost USD,
   duration, summary/error
 - `settings` — publish_mode, per-agent models, revision cap, worker toggle
-- `scout_runs` — one row per topic sweep
+- `scout_runs` — one row per topic sweep; a `running` row is the scout lock,
+  leased by `heartbeat_at` so a sweep that died with its instance cannot hold
+  it forever
 
 The worker claims queued articles with `FOR UPDATE SKIP LOCKED` (atomic,
 multi-process safe), runs the stage's agent, records the session, and routes
-the article onward. Stranded `running` rows are re-queued on startup.
+the article onward. Stranded `running` rows are re-queued on startup, on the
+same pass that releases expired scout locks.
 
 ## Run it
 

@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { getSetting, q } from '../db/pool.js';
 import { runStage } from './runner.js';
+import { recoverStaleScoutRuns } from './scout.js';
 import type { ArticleRow } from './types.js';
 
 const workerId = `worker-${randomUUID().slice(0, 8)}`;
@@ -56,7 +57,7 @@ export function stopWorker(): void {
   stopped = true;
 }
 
-/** Recover articles stranded in 'running' by a previous crashed process. */
+/** Recover work stranded in 'running' by a previous crashed process. */
 export async function recoverStranded(): Promise<void> {
   const rows = await q(
     `UPDATE articles SET status = 'queued', claimed_by = NULL, claimed_at = NULL, updated_at = now()
@@ -68,4 +69,8 @@ export async function recoverStranded(): Promise<void> {
     `UPDATE agent_sessions SET status = 'failed', error = 'process restarted mid-run', ended_at = now()
      WHERE status = 'running' AND started_at < now() - interval '30 minutes'`,
   );
+  // A scout sweep is not an article, but it strands the same way, so its lock
+  // is released on this pass and on the same threshold. The scheduler repeats
+  // it every tick, for a process that lives long enough to strand one itself.
+  await recoverStaleScoutRuns();
 }
