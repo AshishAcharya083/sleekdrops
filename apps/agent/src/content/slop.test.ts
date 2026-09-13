@@ -133,7 +133,13 @@ test('metronomic rhythm is flagged, varied rhythm is not', () => {
     'The Apple earbuds sound thin and sharp today.',
     'The Jabra buds sound muddy and weak today.',
   ].join(' ');
-  assert.ok(rules(flat).includes('Metronomic sentence rhythm'));
+  const finding = detectSlop(flat).findings.find((f) => f.rule === 'Metronomic sentence rhythm');
+  assert.ok(finding);
+  // The run-length half of rhythm is a metric in its own right, so it owes the
+  // editor the sentence the run starts on, not just a count.
+  assert.equal(finding.count, 1);
+  assert.deepEqual(finding.lines, [1]);
+  assert.ok(finding.matches[0].startsWith('The Sony headphones sound clean'));
 
   const varied =
     'The Sony wins. Battery life runs to thirty hours with noise cancelling switched on, ' +

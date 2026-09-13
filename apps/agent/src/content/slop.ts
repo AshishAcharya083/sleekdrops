@@ -498,6 +498,14 @@ export const SCAN_THRESHOLDS = {
   minSentences: 12,
   /** Sentence-length variation below this reads as a metronome. */
   sentenceVariationMin: 0.35,
+  /**
+   * The other half of rhythm, and the one a whole-article variance misses: a
+   * run of this many consecutive sentences all within `rhythmRunSpread` words
+   * of each other. A draft can be varied across its length and still beat like
+   * a metronome for a paragraph at a time.
+   */
+  rhythmRunLength: 4,
+  rhythmRunSpread: 3,
   /** Paragraphs (of `minParagraphWords`+) needed before uniformity is measurable. */
   minParagraphs: 6,
   minParagraphWords: 20,
@@ -1132,26 +1140,29 @@ export function detectSlop(markdown: string, options?: SlopScanOptions): SlopRep
   }
 
   // Metronomic rhythm: runs of similar-length sentences. Human prose varies.
+  // Anchored on the sentence each run starts on, because "somewhere in this
+  // draft there are four sentences the same length" is not an instruction.
   const spans = sentenceSpans(lines);
   const lengths = spans.map((s) => s.words);
+  const flatRuns: SentenceSpan[] = [];
   let run = 1;
-  let flatRuns = 0;
   for (let i = 1; i < lengths.length; i++) {
-    if (Math.abs(lengths[i] - lengths[i - 1]) <= 3) {
+    if (Math.abs(lengths[i] - lengths[i - 1]) <= SCAN_THRESHOLDS.rhythmRunSpread) {
       run += 1;
-      if (run === 4) flatRuns += 1;
+      if (run === SCAN_THRESHOLDS.rhythmRunLength) flatRuns.push(spans[i - run + 1]);
     } else {
       run = 1;
     }
   }
-  if (flatRuns > 0) {
+  if (flatRuns.length > 0) {
+    const shown = flatRuns.slice(0, EXAMPLES_PER_RULE);
     findings.push({
       category: 'rhythm',
       rule: 'Metronomic sentence rhythm',
-      matches: [],
-      lines: [],
-      count: flatRuns,
-      fix: `${flatRuns} run(s) of 4+ consecutive sentences within 3 words of each other. Break them up — mix a 5-word sentence into the 25-word ones.`,
+      matches: shown.map((s) => excerpt(s.text)),
+      lines: shown.map((s) => s.line),
+      count: flatRuns.length,
+      fix: `${flatRuns.length} run(s) of ${SCAN_THRESHOLDS.rhythmRunLength}+ consecutive sentences within ${SCAN_THRESHOLDS.rhythmRunSpread} words of each other, starting at the line(s) above. Break them up — mix a 5-word sentence into the 25-word ones.`,
     });
   }
 
