@@ -2,6 +2,11 @@
  * SEO helpers — meta payload construction, absolute URL resolution, and
  * JSON-LD schema builders for each page type. Imported by SEOHead and
  * the page front-matter.
+ *
+ * Post pages ship one linked `@graph` rather than a stack of loose objects:
+ * the publisher, the site, the page, the byline and the article are separate
+ * nodes with stable `@id`s that reference each other, which is the shape a
+ * generative engine can actually resolve into a knowledge graph.
  */
 
 import type {
@@ -9,19 +14,23 @@ import type {
   BreadcrumbList,
   CollectionPage,
   FAQPage,
+  ItemList,
   Offer,
   Organization,
   Product as ProductSchema,
   ProfilePage,
   Review,
   Thing,
+  WebPage,
   WebSite,
   WithContext,
 } from 'schema-dts';
 import type { Author } from '@data/authors';
 import type { Deal } from '@data/deals';
 import type { Promo } from '@data/promos';
+import type { PickData, SourceData } from '../content/frontmatter';
 import type { BlogPost } from './posts';
+import { categories } from '../data/categories.ts';
 
 // Same defensive read as ads-env / analytics-env / flags-env: Vite inlines
 // `import.meta.env` at build time and the bare `node --test` runner has no such
@@ -37,18 +46,153 @@ const defaultImage = `${siteUrl}/og-default.png`;
 /** Every page is written for Australian readers; the schema says so. */
 const LANGUAGE = 'en-AU';
 
+/** The audience, and every price on the site, is Australian. */
+const DEFAULT_CURRENCY = 'AUD';
+
+// Stable node identities. They are fragments of the site's own URLs so the
+// same organisation, site and byline mean the same node on every page that
+// declares them.
+const ORGANIZATION_ID = `${siteUrl}/#organization`;
+const WEBSITE_ID = `${siteUrl}/#website`;
+
+/**
+ * External profiles the publisher actually controls. `sameAs` is an identity
+ * claim, so it stays empty until there is a real profile to point at rather
+ * than naming something we do not own.
+ */
+const PUBLISHER_PROFILES: string[] = [];
+
 const PUBLISHER: Organization = {
   '@type': 'Organization',
+  '@id': ORGANIZATION_ID,
   name: 'SleekDrops',
   url: siteUrl,
   // The square mark, not the 1200x630 social card: Google's Article guidance
   // wants `publisher.logo` to be a logo, and reads it as an ImageObject.
   logo: { '@type': 'ImageObject', url: `${siteUrl}/mark.svg` },
+  publishingPrinciples: `${siteUrl}/about`,
+  ...(PUBLISHER_PROFILES.length > 0 ? { sameAs: PUBLISHER_PROFILES } : {}),
 };
 
-/** The editorial desk byline, pointing at its profile page on this site. */
-function authorSchema(author: Author): Organization {
-  return { '@type': 'Organization', name: author.name, url: absoluteUrl(`/author/${author.id}`) };
+const WEBSITE: WebSite = {
+  '@type': 'WebSite',
+  '@id': WEBSITE_ID,
+  name: 'SleekDrops',
+  url: siteUrl,
+  inLanguage: LANGUAGE,
+  publisher: { '@id': ORGANIZATION_ID },
+};
+
+function authorPageUrl(author: Author): string {
+  return absoluteUrl(`/author/${author.id}`);
+}
+
+function authorId(author: Author): string {
+  return `${authorPageUrl(author)}#byline`;
+}
+
+/**
+ * The subjects the desk covers: the site's own category registry, which is
+ * exactly the ground the archive spans. Site-wide rather than per-post, because
+ * this node has one `@id` on every page and so has to say the same thing on
+ * each of them.
+ */
+const BYLINE_TOPICS = categories.map((category) => category.name);
+
+/**
+ * The byline as a graph node: same `@id` here, on the author page and in a
+ * Review.
+ *
+ * An Organization, not a Person. The site publishes under one labelled
+ * editorial-desk byline rather than named reviewer personas, so a Person node
+ * here would assert a human author the page never shows. `parentOrganization`
+ * ties the desk to the publisher so the two same-named nodes resolve as one
+ * operation.
+ */
+function authorNode(author: Author): Organization {
+  return {
+    '@type': 'Organization',
+    '@id': authorId(author),
+    name: author.name,
+    url: authorPageUrl(author),
+    description: author.bio,
+    knowsAbout: BYLINE_TOPICS,
+    parentOrganization: { '@id': ORGANIZATION_ID },
+    ...(author.url ? { sameAs: [author.url] } : {}),
+  };
+}
+
+/** Site-wide identity for a named entity, so the same thing is one node everywhere. */
+function entityNode(name: string): Thing {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return {
+    '@type': 'Thing',
+    ...(slug ? { '@id': `${siteUrl}/#/entity/${slug}` } : {}),
+    name,
+  };
+}
+
+/** How many of the keyword plan's entities the piece is `about`; the rest it `mentions`. */
+const ABOUT_ENTITY_COUNT = 3;
+
+function citationNode(source: SourceData): WebPage {
+  return {
+    '@type': 'WebPage',
+    '@id': source.url,
+    url: source.url,
+    ...(source.publisher
+      ? { publisher: { '@type': 'Organization', name: source.publisher } }
+      : {}),
+    ...(source.date ? { datePublished: source.date } : {}),
+  };
+}
+
+/**
+ * The number out of a price as it was stated ("A$2,699", "around $180"). Null
+ * when there is no number in it — an offer with an invented price is worse
+ * than no offer at all, so a pick or product with no parseable figure simply
+ * ships no `offers`.
+ *
+ * A currency symbol wins over any other number in the string, so "2026 model,
+ * $199" prices the model at 199 rather than at the year.
+ */
+function parsePrice(stated: string | undefined): string | null {
+  const cleaned = stated?.replace(/,/g, '');
+  if (!cleaned) return null;
+  const tagged = cleaned.match(/(?:AUD|A?\$)\s*(\d+(?:\.\d{1,2})?)/i);
+  if (tagged) return tagged[1];
+  const bare = cleaned.match(/\d+(?:\.\d{1,2})?/);
+  return bare ? bare[0] : null;
+}
+
+/** Body words, markdown stripped — Article.wordCount. */
+function countWords(body: string): number {
+  const text = plainText((body ?? '').replace(/^#{1,6}\s+/gm, ''));
+  return text ? text.split(/\s+/).filter(Boolean).length : 0;
+}
+
+function graph(nodes: Thing[]): WithContext<Thing> {
+  return { '@context': 'https://schema.org', '@graph': nodes } as unknown as WithContext<Thing>;
+}
+
+/**
+ * A schema serialised for `<script type="application/ld+json">`.
+ *
+ * Much of what goes into the graph (source URLs, entity and pick names) comes
+ * from research the pipeline gathered off the open web, so it is untrusted
+ * text. `JSON.stringify` escapes neither `<` nor `>`, and the script body is
+ * written with `set:html`, which does not escape anything either: a `</script>`
+ * inside any string value would otherwise close the block and let whatever
+ * followed it execute. The `\uXXXX` forms parse back to the same characters,
+ * so the JSON-LD a consumer reads is unchanged. U+2028/U+2029 are escaped for
+ * the same reason they always are in inline scripts: they are newlines to a
+ * JavaScript parser.
+ */
+export function jsonLdScript(schema: WithContext<Thing>): string {
+  return JSON.stringify(schema).replace(
+    /[<>\u2028\u2029]/g,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
 }
 
 export interface BreadcrumbItem {
@@ -115,52 +259,247 @@ export function buildBreadcrumbSchema(
   };
 }
 
-export function buildHomeSchema(): WithContext<WebSite> {
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'WebSite',
-    name: 'SleekDrops',
-    url: siteUrl,
-    publisher: PUBLISHER,
-  };
+/** The home page is where the site and its publisher are declared in full. */
+export function buildHomeSchema(): WithContext<Thing> {
+  return graph([PUBLISHER, WEBSITE]);
 }
 
-export function buildArticleSchema(
-  post: BlogPost,
-  author: Author,
-): WithContext<Article> {
-  const url = absoluteUrl(`/blog/${post.slug}`);
-  return {
-    '@context': 'https://schema.org',
+function postUrl(post: BlogPost): string {
+  return absoluteUrl(`/blog/${post.slug}`);
+}
+
+/**
+ * Publisher, site, page, byline and article as one linked graph.
+ *
+ * `mainEntityId` is the node the piece is really about when there is one — the
+ * ItemList of picks on a roundup, the Product on a review.
+ */
+function postNodes(post: BlogPost, author: Author, mainEntityId?: string): Thing[] {
+  const url = postUrl(post);
+  const webPageId = `${url}#webpage`;
+  const entities = post.data.entities ?? [];
+  const sources = post.data.sources ?? [];
+  const words = countWords(post.body);
+  const datePublished = post.data.pubDate.toISOString();
+  // Distinct from datePublished whenever the post has been revised; a post
+  // that never has says so honestly rather than claiming freshness.
+  const dateModified = (post.data.updatedDate ?? post.data.pubDate).toISOString();
+  const image = post.data.heroImage ?? defaultImage;
+  const about = entities.slice(0, ABOUT_ENTITY_COUNT);
+  const mentions = entities.slice(ABOUT_ENTITY_COUNT);
+
+  const webPage: WebPage = {
+    '@type': 'WebPage',
+    '@id': webPageId,
+    url,
+    name: post.data.title,
+    description: post.data.dek,
+    inLanguage: LANGUAGE,
+    isPartOf: { '@id': WEBSITE_ID },
+    datePublished,
+    dateModified,
+    primaryImageOfPage: { '@type': 'ImageObject', url: image },
+  };
+
+  const article: Article = {
     '@type': 'Article',
+    '@id': `${url}#article`,
     headline: post.data.title,
     description: post.data.dek,
     url,
     inLanguage: LANGUAGE,
-    datePublished: post.data.pubDate.toISOString(),
-    dateModified: (post.data.updatedDate ?? post.data.pubDate).toISOString(),
-    author: authorSchema(author),
+    datePublished,
+    dateModified,
+    author: { '@id': authorId(author) },
+    publisher: { '@id': ORGANIZATION_ID },
+    isPartOf: { '@id': webPageId },
+    mainEntityOfPage: { '@id': webPageId },
     articleSection: post.data.category,
     keywords: post.data.tags.join(', '),
-    image: [post.data.heroImage ?? defaultImage],
-    mainEntityOfPage: { '@type': 'WebPage', '@id': url },
-    publisher: PUBLISHER,
+    image: [image],
+    ...(words > 0 ? { wordCount: words } : {}),
+    ...(about.length > 0 ? { about: about.map(entityNode) } : {}),
+    ...(mentions.length > 0 ? { mentions: mentions.map(entityNode) } : {}),
+    ...(sources.length > 0 ? { citation: sources.map(citationNode) } : {}),
+    ...(mainEntityId ? { mainEntity: { '@id': mainEntityId } } : {}),
   };
+
+  return [PUBLISHER, WEBSITE, webPage, authorNode(author), article];
+}
+
+/** Post types whose whole point is a ranked set of products. */
+const LIST_POST_TYPES = new Set(['guide', 'roundup']);
+
+/**
+ * One rendered heading, as `post.render()` hands them back: `slug` is the id
+ * Astro actually emitted on the `<h*>`, so an anchor built from it resolves.
+ */
+export interface PostHeading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+
+const GO_LINK = /\/go\/([a-z0-9]+(?:-[a-z0-9]+)*)/g;
+
+/**
+ * The id of the section each pick is recommended in, keyed by its /go/ slug —
+ * the ItemList entries point at those anchors, which is the shape Google
+ * documents for a list whose items all live on one page.
+ *
+ * Headings are matched by position rather than by text: `headings` is in
+ * document order, one entry per heading Astro rendered, so the nth `#` line in
+ * the body is `headings[n]` whatever markdown that heading contains. If the
+ * two ever disagree on how many headings there are (a setext heading, say),
+ * no anchors are returned at all rather than a set that has drifted by one.
+ */
+function pickAnchors(body: string, headings: PostHeading[]): Map<string, string> {
+  const anchors = new Map<string, string>();
+  let seen = 0;
+  let inFence = false;
+  let section: string | null = null;
+
+  for (const line of (body ?? '').split('\n')) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (/^#{1,6}\s+/.test(line)) {
+      section = headings[seen]?.slug ?? null;
+      seen += 1;
+      continue;
+    }
+    if (!section) continue;
+    for (const [, slug] of line.matchAll(GO_LINK)) {
+      if (!anchors.has(slug)) anchors.set(slug, section);
+    }
+  }
+
+  return seen === headings.length ? anchors : new Map();
+}
+
+/**
+ * The Offer behind a pick: the researched figure in the post's own currency,
+ * pointing at the `/go/` hop that is the only destination the site has. Null
+ * when the research stated no parseable number: an Offer with no price is not
+ * a product entity, and an invented one is worse.
+ *
+ * The figure is the dossier's approximate/RRP price, which the body itself no
+ * longer prints (see `docs/seo-ai-discoverability-review-2026-09.md` §3.3), so
+ * it is a stated-at-publication price rather than a live one.
+ */
+function offerNode(pick: PickData, currency: string): Offer | null {
+  const price = parsePrice(pick.price);
+  if (price === null) return null;
+  return {
+    '@type': 'Offer',
+    priceCurrency: currency,
+    price,
+    availability: 'https://schema.org/InStock',
+    url: absoluteUrl(`/go/${pick.goSlug}`),
+  };
+}
+
+/**
+ * A recommended pick as a Product node, with the Offer that makes it a
+ * resolvable product entity rather than a bare name.
+ *
+ * No `aggregateRating`: we earn commission on this product, so a rating we
+ * award ourselves is the self-serving markup Google's guidelines exclude.
+ */
+function productNode(pick: PickData, pageUrl: string, currency: string): ProductSchema {
+  const offers = offerNode(pick, currency);
+  return {
+    '@type': 'Product',
+    '@id': `${pageUrl}#pick-${pick.goSlug}`,
+    name: pick.name,
+    ...(pick.brand ? { brand: { '@type': 'Brand', name: pick.brand } } : {}),
+    ...(offers ? { offers } : {}),
+  };
+}
+
+/**
+ * The ranked picks of a guide or roundup as an ItemList of Product nodes.
+ * Null when the post is not one of those, or carries no picks — every post
+ * published before the pipeline wrote them is in that case.
+ */
+function buildPickList(
+  post: BlogPost,
+  headings: PostHeading[],
+): { id: string; node: ItemList } | null {
+  const picks = post.data.picks ?? [];
+  if (picks.length === 0 || !LIST_POST_TYPES.has(post.data.postType)) return null;
+
+  const url = postUrl(post);
+  const anchors = pickAnchors(post.body, headings);
+  // The post says what it is priced in; AUD only as the fallback for a post
+  // written before the field existed.
+  const currency = post.data.currency ?? DEFAULT_CURRENCY;
+  return {
+    id: `${url}#picks`,
+    node: {
+      '@type': 'ItemList',
+      '@id': `${url}#picks`,
+      name: post.data.title,
+      numberOfItems: picks.length,
+      // The body ranks them; position 1 is the top pick.
+      itemListOrder: 'https://schema.org/ItemListOrderAscending',
+      itemListElement: picks.map((pick, index) => {
+        const anchor = anchors.get(pick.goSlug);
+        return {
+          '@type': 'ListItem',
+          position: index + 1,
+          ...(anchor ? { url: `${url}#${anchor}` } : {}),
+          item: productNode(pick, url, currency),
+        };
+      }),
+    },
+  };
+}
+
+/**
+ * Article JSON-LD as a linked graph. Guides and roundups additionally carry
+ * the ItemList of everything they recommend; a post with no picks, sources or
+ * entities simply emits fewer nodes.
+ *
+ * `headings` are the ones `post.render()` returned, used to anchor each pick
+ * to the section that recommends it. Omit them and the list still ships, just
+ * without per-item URLs.
+ */
+export function buildArticleSchema(
+  post: BlogPost,
+  author: Author,
+  headings: PostHeading[] = [],
+): WithContext<Thing> {
+  const picks = buildPickList(post, headings);
+  return graph([...postNodes(post, author, picks?.id), ...(picks ? [picks.node] : [])]);
+}
+
+/**
+ * The JSON-LD a blog post ships: the Product graph for a post with embedded
+ * product data, the Article graph for everything else.
+ */
+export function buildPostSchema(
+  post: BlogPost,
+  author: Author,
+  headings: PostHeading[] = [],
+): WithContext<Thing> {
+  return post.data.product
+    ? buildReviewSchema(post, author)
+    : buildArticleSchema(post, author, headings);
 }
 
 /**
  * Build Product + Review JSON-LD from a review post's embedded product data.
  *
  * Pre-condition: post.data.postType === 'review' AND post.data.product is set.
- * Enforced by the content-collection refine() in src/content/config.ts.
+ * Enforced by the content-collection refine() in src/content/frontmatter.ts.
  *
- * The Offer URL points to /go/<post.slug>; the redirect target lives in
- * the sleekdrops-cms repo's data/affiliate-links.json keyed by the same slug.
+ * The Offer URL points to /go/<post.slug>; the redirect target is the
+ * affiliate_links row carrying the same slug.
  */
-export function buildReviewSchema(
-  post: BlogPost,
-  author: Author,
-): WithContext<Thing> {
+export function buildReviewSchema(post: BlogPost, author: Author): WithContext<Thing> {
   const product = post.data.product;
   if (!product) {
     // Should never happen — the content schema enforces this. Throw loudly so
@@ -171,43 +510,60 @@ export function buildReviewSchema(
     );
   }
 
+  const url = postUrl(post);
+  const productId = `${url}#product`;
+  const reviewId = `${url}#review`;
+  // The post says what it is priced in; AUD only as the fallback for a post
+  // written before the field existed. Nothing here assumes a currency.
+  const currency = post.data.currency ?? DEFAULT_CURRENCY;
+  const price = parsePrice(product.price);
+
   const reviewedProduct: ProductSchema = {
     '@type': 'Product',
+    '@id': productId,
     name: product.name,
     brand: { '@type': 'Brand', name: product.brand },
     description: product.tagline,
-    offers: {
-      '@type': 'Offer',
-      // The audience and the frontmatter price are Australian.
-      priceCurrency: 'AUD',
-      price: product.price.replace(/[^0-9.]/g, ''),
-      availability: 'https://schema.org/InStock',
-      url: absoluteUrl(`/go/${post.slug}`),
-    },
+    review: { '@id': reviewId },
+    // Unlike a guide's picks, this price is on the page — Verdict and
+    // ProductCallout both print `product.price` — so mirroring it into an
+    // Offer describes content the reader can see, which is what Google's
+    // structured-data policies ask for.
+    ...(price !== null
+      ? {
+          offers: {
+            '@type': 'Offer',
+            priceCurrency: currency,
+            price,
+            availability: 'https://schema.org/InStock',
+            url: absoluteUrl(`/go/${post.slug}`),
+          } satisfies Offer,
+        }
+      : {}),
     // No AggregateRating: schema.org defines it as "the average rating based on
-    // multiple ratings or reviews", and one editorial review is not that. The
-    // single Review below is the honest shape and is enough for a product snippet.
+    // multiple ratings or reviews", and one editorial review is not that — on a
+    // product we earn commission on, awarding ourselves one is the self-serving
+    // markup Google's guidelines exclude. The single Review below is the honest
+    // shape and is enough for a product snippet.
   };
 
   const review: Review = {
     '@type': 'Review',
+    '@id': reviewId,
     name: post.data.title,
     reviewBody: post.data.dek,
-    author: authorSchema(author),
-    itemReviewed: reviewedProduct,
+    author: { '@id': authorId(author) },
+    itemReviewed: { '@id': productId },
     reviewRating: {
       '@type': 'Rating',
       ratingValue: product.rating,
       bestRating: 5,
       worstRating: 1,
     },
-    publisher: PUBLISHER,
+    publisher: { '@id': ORGANIZATION_ID },
   };
 
-  return {
-    '@context': 'https://schema.org',
-    '@graph': [reviewedProduct, review],
-  } as unknown as WithContext<Thing>;
+  return graph([...postNodes(post, author, productId), reviewedProduct, review]);
 }
 
 export function buildOfferSchema(
@@ -248,13 +604,9 @@ export function buildAuthorSchema(author: Author): WithContext<ProfilePage> {
     '@context': 'https://schema.org',
     '@type': 'ProfilePage',
     name: author.name,
-    url: absoluteUrl(`/author/${author.id}`),
-    mainEntity: {
-      '@type': 'Organization',
-      name: author.name,
-      description: author.bio,
-      sameAs: author.url ? [author.url] : [],
-    } as Organization,
+    url: authorPageUrl(author),
+    // The same byline node every article on the site points at.
+    mainEntity: authorNode(author),
   };
 }
 

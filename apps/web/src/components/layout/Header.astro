@@ -50,6 +50,16 @@ const navItems: NavItem[] = [
       ))}
     </nav>
     <div class="header-actions">
+      <button
+        type="button"
+        class="menu-toggle"
+        aria-label="Open navigation"
+        aria-expanded="false"
+        aria-controls="mobile-navigation"
+        data-menu-toggle
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+      </button>
       <IconButton title="Toggle theme" data={{ 'theme-toggle': 'true' }}>
         <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
         <svg class="sun" viewBox="0 0 24 24" aria-hidden="true">
@@ -66,6 +76,15 @@ const navItems: NavItem[] = [
       </IconButton>
     </div>
   </div>
+  <nav id="mobile-navigation" class="mobile-nav" aria-label="Mobile primary" data-mobile-nav hidden>
+    {navItems.map((item) => (
+      <a
+        href={item.href}
+        class:list={[{ active: active === item.id }]}
+        aria-current={active === item.id ? 'page' : undefined}
+      >{item.label}</a>
+    ))}
+  </nav>
 </header>
 
 <style>
@@ -119,16 +138,75 @@ const navItems: NavItem[] = [
     align-items: center;
     gap: 8px;
   }
+  .menu-toggle,
+  .mobile-nav { display: none; }
+  .menu-toggle {
+    width: 40px;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-full);
+    background: var(--surface);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .menu-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; }
   :global(.icon-btn) .sun { display: none; }
   :global(:root[data-theme="dark"] .icon-btn) .moon { display: none; }
   :global(:root[data-theme="dark"] .icon-btn) .sun { display: block; }
 
-  /* There is no drawer behind this: below the breakpoint the primary nav is
-     simply not on screen, so a nav experiment cannot reach these visitors.
-     NAV_HIDDEN_QUERY in src/lib/nav-experiment.ts mirrors the bound to keep
-     them out of the bucketing; nav-experiment.test.ts fails if the two drift. */
+  /* The desktop experiment remains gated at this breakpoint. Mobile gets a
+     separate, stable menu so an experiment cannot make navigation disappear. */
   @media (max-width: 900px) {
     .site-nav { display: none; }
     .header-inner { padding: 14px 20px; }
+    .menu-toggle { display: inline-flex; }
+    .mobile-nav {
+      padding: 8px 20px 20px;
+      border-top: 1px solid var(--hairline);
+      background: var(--paper);
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+    }
+    .mobile-nav:not([hidden]) { display: grid; }
+    .mobile-nav a {
+      padding: 12px 14px;
+      border-radius: var(--r-md);
+      color: var(--ink-2);
+      text-decoration: none;
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .mobile-nav a:hover,
+    .mobile-nav a.active { color: var(--ink); background: var(--surface-2); }
   }
 </style>
+
+<script>
+  const toggle = document.querySelector<HTMLButtonElement>('[data-menu-toggle]');
+  const mobileNav = document.querySelector<HTMLElement>('[data-mobile-nav]');
+
+  function setMenu(open: boolean): void {
+    if (!toggle || !mobileNav) return;
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+    mobileNav.hidden = !open;
+  }
+
+  toggle?.addEventListener('click', () => {
+    setMenu(toggle.getAttribute('aria-expanded') !== 'true');
+  });
+  mobileNav?.addEventListener('click', (event) => {
+    if ((event.target as Element).closest('a')) setMenu(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && toggle?.getAttribute('aria-expanded') === 'true') {
+      setMenu(false);
+      toggle.focus();
+    }
+  });
+  window.matchMedia('(min-width: 901px)').addEventListener('change', (event) => {
+    if (event.matches) setMenu(false);
+  });
+</script>

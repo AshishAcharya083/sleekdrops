@@ -3,6 +3,7 @@
 // article to its next stage. Verdict-driven, bounded revision loop —
 // a light version of devteam-platform's card lane pattern.
 import { MONETISED_INTENTS } from '../content/contract.js';
+import { describeShapeSelection } from '../content/shapes.js';
 import { getSetting, q } from '../db/pool.js';
 import {
   claudeConfigured,
@@ -13,6 +14,7 @@ import {
   llmSettings,
   UsageTracker,
 } from '../llm/index.js';
+import { runAngleEditor } from '../agents/angleEditor.js';
 import { runAssembler } from '../agents/assembler.js';
 import { runEditor } from '../agents/editor.js';
 import { runImageAgent } from '../agents/imageAgent.js';
@@ -24,9 +26,11 @@ import { runSeoReviewer } from '../agents/seoReviewer.js';
 import { runWriter } from '../agents/writer.js';
 import type { ArticleRow, Stage, TopicRow } from './types.js';
 
-const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
+/** The agent that runs each stage. A stage missing here has no named session. */
+export const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
   research: 'researcher',
   keyword: 'keyword_strategist',
+  angle: 'angle_editor',
   outline: 'outliner',
   write: 'writer',
   seo_review: 'seo_reviewer',
@@ -37,7 +41,7 @@ const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
 };
 
 /** Stages that run deterministic code — no LLM chat, no model to pick. */
-const NO_LLM_AGENTS = new Set(['assembler', 'publisher']);
+export const NO_LLM_AGENTS = new Set(['assembler', 'publisher']);
 
 /**
  * Every agent that runs a prompt. All of them follow the admin engine toggle,
@@ -49,10 +53,11 @@ const NO_LLM_AGENTS = new Set(['assembler', 'publisher']);
  * everything downstream then spends its budget on, so leaving it on the cheap
  * model saved the least valuable tokens in the pipeline.
  */
-const ENGINE_AGENTS = new Set([
+export const ENGINE_AGENTS = new Set([
   'topic_scout',
   'researcher',
   'keyword_strategist',
+  'angle_editor',
   'outliner',
   'writer',
   'seo_reviewer',
@@ -201,18 +206,36 @@ export async function runStage(article: ArticleRow): Promise<void> {
           );
         }
         summary = `"${plan.primaryKeyword}" — ${plan.intent}, ${plan.difficulty} difficulty, ${plan.zeroClickRisk} zero-click risk, ${plan.wordCountTarget} words, ${plan.contentGaps.length} gap(s) to exploit`;
+        next = { stage: 'angle', status: 'queued' };
+        break;
+      }
+      case 'angle': {
+        const topic = article.topic_id
+          ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
+          : null;
+        const angle = await runAngleEditor(article, topic, model!, tracker);
+        await updateArticle(article.id, { editorial_angle: JSON.stringify(angle) });
+        summary = angle.defensible
+          ? `"${angle.thesis}" - ${angle.shape} shape, ${angle.informationGain.length} claim(s) the top results miss, ${angle.byline} beat`
+          : `no defensible take recorded (${angle.weakness}) - ${angle.shape} shape, ${angle.byline} beat`;
         next = { stage: 'outline', status: 'queued' };
         break;
       }
       case 'outline': {
         const brief = await runOutliner(article, model!, tracker);
         brief.slug = await uniqueSlug(article.id, brief.slug);
+        // The shape goes in its own column as well as inside the brief: the
+        // brief is what carries it into the writer and reviewer prompts, the
+        // column is the record of the decision an operator can see and query.
+        // Both are written here so they can never disagree.
+        const shape = brief.structureShape ?? null;
         await updateArticle(article.id, {
           outline: JSON.stringify(brief),
+          structure_shape: shape ? JSON.stringify(shape) : null,
           slug: brief.slug,
           title: brief.seoTitle,
         });
-        summary = `"${brief.seoTitle}" — ${brief.sections?.length ?? 0} sections, target ${brief.wordCountTarget} words`;
+        summary = `"${brief.seoTitle}" — ${shape ? `${describeShapeSelection(shape)}, ` : ''}${brief.sections?.length ?? 0} sections, target ${brief.wordCountTarget} words`;
         next = { stage: 'write', status: 'queued' };
         break;
       }

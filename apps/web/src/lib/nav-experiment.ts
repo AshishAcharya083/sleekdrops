@@ -11,8 +11,8 @@
  *     the slot it rendered in, and a callback that fires again with an unchanged
  *     value must do nothing at all.
  *  2. **Only bucket who can see it.** Below the nav's breakpoint `.site-nav` is
- *     `display: none` and there is no mobile drawer, so a visitor there cannot
- *     receive the treatment. Reading the flag is what buckets them and fires
+ *     `display: none`; the separate mobile menu is intentionally stable, so a
+ *     visitor there cannot receive the treatment. Reading the flag is what buckets them and fires
  *     `$experiment_viewed`, so the read itself is gated on the nav being on
  *     screen rather than the removal being gated on it.
  *
@@ -26,7 +26,8 @@ export const NAV_ITEM_ATTRIBUTE = 'data-experiment-nav-item';
 
 /**
  * Complement of the `@media (max-width: 900px) { .site-nav { display: none } }`
- * rule in `Header.astro`: when this matches, the primary nav is hidden. Kept as
+ * rule in `Header.astro`: when this matches, the experimental desktop nav is hidden
+ * and the stable mobile menu is available instead. Kept as
  * the same literal breakpoint so the two cannot drift into a range where the nav
  * is hidden but the visitor is bucketed anyway.
  */

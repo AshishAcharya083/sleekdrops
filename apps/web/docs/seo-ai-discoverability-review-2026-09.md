@@ -8,8 +8,9 @@ Implemented on `feat/seo-structured-data-research` (6 September 2026):
 - §3.1 `build.format: 'file'` and `trailingSlash: false` in the RSS feed, so the
   canonical URL is the one Cloudflare Pages serves. Verify after deploy with
   `curl -I https://sleekdrops.com/blog/<slug>` (expect 200) and
-  `curl -I https://sleekdrops.com/blog/<slug>/` (expect 308 back), then request
-  re-indexing in Search Console.
+  `curl -I https://sleekdrops.com/blog/<slug>/` (expect 200 as well since
+  12 September 2026 - see the follow-up in §3.1), then request re-indexing in
+  Search Console.
 - §3.2 `rel="sponsored noopener"` on every body `/go/` link (rehype plugin); CTA
   components drop `noreferrer`; the agent's link rules now require a CTA to name
   Amazon.
@@ -144,6 +145,15 @@ set `trailingSlash: false` in the `rss()` call in `src/pages/rss.xml.ts`; the
 feed currently emits `/blog/<slug>/` links because `@astrojs/rss` adds a slash
 regardless of config. Verify after deploy with the curl above, then request
 re-indexing in Search Console.
+
+> **Follow-up, 2026-09-12.** The reversed 308 above is no longer served. A
+> permanent redirect survives in the browser and at the edge, so every client
+> still holding the *old* `/blog/<slug>` → `/blog/<slug>/` met the reverse of it
+> and looped (`ERR_TOO_MANY_REDIRECTS`) on roughly half of page loads.
+> `functions/_middleware.js` now serves the trailing-slash form the canonical
+> asset with a **200** instead, which is the only leg that can break a loop whose
+> other half lives in the client. The canonical, sitemap, RSS and JSON-LD form is
+> unchanged. See `docs/deployment.md`.
 
 ### 3.2 Body affiliate links have no `rel`; CTA labels hide the destination (P0)
 
@@ -413,6 +423,37 @@ Two "Ignore" items shipped anyway, for reasons this audit did not weigh.
   inferred from a wildcard - which is what an audit, or an operator honouring a
   per-agent opt-out, has to read. §3.8 still holds: Cloudflare's bot toggles,
   not this file, decide whether those agents reach the origin at all.
+
+### Decided since: the entity graph (2026-09-10)
+
+Two of the three `buildReviewSchema` defects §2 row 1 lists are fixed, §3.9's
+thrown-away rich data now reaches the page, and that row's "never on roundups"
+line needs a caveat.
+
+- **The graph, and the two defects.** Every post now ships one `@graph` -
+  publisher, site, page, byline and article as `@id`-referencing nodes - with
+  `wordCount`, `about`/`mentions` from the keyword plan's entities and
+  `citation` from the dossier's source URLs, all carried through frontmatter.
+  `buildReviewSchema` no longer hard-codes USD (the currency rides through
+  frontmatter as AUD) and no longer awards itself an `AggregateRating` of one
+  review. Its `Offer.url` still points at the robots-blocked `/go/` hop - that
+  one stands, and is the only destination the site has.
+- **Guides and roundups emit `ItemList` + `Product`.** §2 row 1 is still right
+  that this earns no product snippet and no carousel: the classic ItemList
+  carousel covers Recipe, Course, Movie and Restaurant only, and the beta that
+  accepts Product is EEA/Turkey/South Africa. It ships as the machine-readable
+  statement of what the page recommends and in what order, which is the
+  passage-level claim a retrieval agent resolves, not as a rich-result play.
+- **Each pick carries an `offers` node**, priced in AUD off the dossier's
+  stated figure and pointing at its `/go/` hop, so a pick is a resolvable
+  product entity rather than a bare name.
+  Worth a reviewer's eye: that figure is an approximate/RRP price the body no
+  longer prints (§3.3), so unlike a single-product review - where `offers`
+  mirrors the `product.price` on the page - the number exists only in the
+  markup. A displayed, dated price beside each pick is what would settle it.
+- **The byline is an Organization, not a Person.** The six reviewer personas
+  are gone; one labelled editorial desk is what the page shows, so it is what
+  the markup claims.
 
 ---
 

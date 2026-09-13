@@ -11,10 +11,11 @@ const { author } = Astro.props;
 <aside class="author-card">
   <div class="avatar" aria-hidden="true">{authorInitials(author)}</div>
   <div>
-    <div class="role">{author.role}</div>
+    <div class="role">{author.beat ? `${author.role} · ${author.beat}` : author.role}</div>
     <h4>{author.name}</h4>
     <p>{author.bio}</p>
-    <a href={`/author/${author.id}`}>All posts by the Editorial Desk →</a>
+    {author.focus && <p class="focus">{author.beat} beat: {author.focus}</p>}
+    <a href={`/author/${author.id}`}>All posts by the editorial team →</a>
   </div>
 </aside>
 
@@ -62,6 +63,7 @@ const { author } = Astro.props;
     color: var(--muted);
     margin: 0 0 12px;
   }
+  .focus { font-size: 13px; }
   a {
     font-size: 13px;
     font-weight: 600;

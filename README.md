@@ -37,7 +37,7 @@ The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archive
 ```
 
 - **Two LLM engines.** Every stage that runs a prompt — scout, researcher,
-  keyword strategist, outliner, writer, SEO reviewer, editor — runs on your
+  keyword strategist, angle editor, outliner, writer, SEO reviewer, editor — runs on your
   Claude plan through the Claude Agent SDK at $0 marginal cost, Opus 5 by
   default, with an admin toggle to put them on Gemini instead. Only the image
   agent is pinned to Gemini, for its vision and image generation. Without a

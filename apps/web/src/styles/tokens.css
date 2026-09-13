@@ -5,6 +5,7 @@
 
 /* ---------- Webfonts ---------- */
 /* Display: Lora (self-hosted, variable). Body: Manrope. Mono: JetBrains Mono. */
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 @font-face {
   font-family: 'Lora';
   src: url('/fonts/Lora-VariableFont_wght.ttf') format('truetype-variations'),
@@ -21,8 +22,6 @@
   font-style: italic;
   font-display: swap;
 }
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-
 /* ============================================================
    LIGHT MODE (default)
    ============================================================ */

@@ -1,6 +1,6 @@
 import type { Session } from '../api';
 import { duration, fmtCost, fmtTime, fmtTokens } from '../api';
-import { Badge } from '../components';
+import { ApiErrorBanner, Badge } from '../components';
 import { usePoll } from '../hooks';
 
 export function Sessions() {
@@ -9,7 +9,7 @@ export function Sessions() {
 
   return (
     <>
-      {error && <div className="error-banner">API unreachable: {error}</div>}
+      <ApiErrorBanner error={error} />
       <div className="card table-scroll" tabIndex={0} role="region" aria-label="Agent sessions">
         <table>
           <thead>

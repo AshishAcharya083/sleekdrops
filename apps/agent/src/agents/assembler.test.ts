@@ -178,3 +178,131 @@ test('an article with no keyword plan is not gated', async () => {
   const { affiliateLinks } = await runAssembler(article({ research: oneProduct, keyword_plan: null }));
   assert.deepEqual(affiliateLinks, []);
 });
+
+// ── Structured-data inputs ───────────────────────────────────────────────────
+// The frontmatter the site's JSON-LD graph is built from. Everything here is
+// deterministic: the dossier's sources become `citation`, the keyword plan's
+// entities become `about`/`mentions`, and `picks` become the ItemList — but
+// only for the /go/ slugs that resolved to a live affiliate row.
+
+const twoProducts = {
+  summary: 's',
+  facts: [
+    { fact: 'Sticks lose suction as the filter clogs.', sourceUrl: 'https://www.choice.com.au/vacuums' },
+    { fact: 'Owners report brush-bar tangles.', sourceUrl: 'https://www.productreview.com.au/shark' },
+    { fact: 'Same page, second fact.', sourceUrl: 'https://www.choice.com.au/vacuums' },
+    { fact: 'Unparseable source.', sourceUrl: 'not a url' },
+  ],
+  products: [
+    { name: 'Shark Detect Pro', brand: 'Shark', approxPrice: 'A$1,199',
+      amazonUrl: null, goSlug: 'shark-detect-pro', notes: '' },
+    { name: 'Dyson V15 Detect', brand: 'Dyson', approxPrice: '',
+      amazonUrl: null, goSlug: 'dyson-v15-detect', notes: '' },
+  ],
+  keywords: { primary: 'cordless stick vacuum', secondary: [] },
+  competitorNotes: '',
+  faqIdeas: [],
+} as never;
+
+const vacuumPlan = {
+  intent: 'Commercial Investigation',
+  primaryKeyword: 'best cordless stick vacuum',
+  wordCountTarget: 1500,
+  entities: ['Dyson', 'Shark', 'HEPA filtration', 'Dyson', ' '],
+} as never;
+
+const linkedBody =
+  '## Our picks\n\n[Shark Detect Pro](/go/shark-detect-pro) is the one to buy, ' +
+  'and the [Dyson V15 Detect](/go/dyson-v15-detect) is the upgrade.';
+
+test('sources, entities, picks and the currency ride through frontmatter', async () => {
+  const { frontmatter } = await runAssembler(
+    article({ research: twoProducts, keyword_plan: vacuumPlan, draft_md: linkedBody }),
+  );
+
+  // Deduped by URL, http(s) only, in the order the research stated them.
+  assert.deepEqual(frontmatter.sources, [
+    { url: 'https://www.choice.com.au/vacuums', publisher: 'choice.com.au' },
+    { url: 'https://www.productreview.com.au/shark', publisher: 'productreview.com.au' },
+  ]);
+  assert.deepEqual(frontmatter.entities, ['Dyson', 'Shark', 'HEPA filtration']);
+  assert.deepEqual(frontmatter.picks, [
+    { name: 'Shark Detect Pro', brand: 'Shark', price: 'A$1,199', goSlug: 'shark-detect-pro' },
+    { name: 'Dyson V15 Detect', brand: 'Dyson', goSlug: 'dyson-v15-detect' },
+  ]);
+  assert.equal(frontmatter.currency, 'AUD');
+});
+
+test('a source URL is stored as the parser normalised it, not as it was stated', async () => {
+  // A source URL comes from search results, so it is untrusted text that ends
+  // up inside the page's <script type="application/ld+json"> block. `new URL()`
+  // percent-encodes the characters that could close that block early, and
+  // canonicalising also collapses two spellings of one page into one citation.
+  const hostile = {
+    ...(twoProducts as unknown as { facts: Array<Record<string, unknown>> }),
+    facts: [
+      { fact: 'Breakout attempt.', sourceUrl: 'https://evil.example/a</script><script>alert(1)</script>' },
+      { fact: 'Same page, other spelling.', sourceUrl: 'https://WWW.Choice.com.au/vacuums' },
+      { fact: 'Same page again.', sourceUrl: 'https://www.choice.com.au/vacuums' },
+      { fact: 'Not a web scheme.', sourceUrl: 'javascript:alert(1)' },
+    ],
+  } as never;
+
+  const { frontmatter } = await runAssembler(
+    article({ research: hostile, keyword_plan: vacuumPlan, draft_md: linkedBody }),
+  );
+
+  assert.deepEqual(frontmatter.sources, [
+    {
+      url: 'https://evil.example/a%3C/script%3E%3Cscript%3Ealert(1)%3C/script%3E',
+      publisher: 'evil.example',
+    },
+    { url: 'https://www.choice.com.au/vacuums', publisher: 'choice.com.au' },
+  ]);
+});
+
+test('picks only cover the /go/ slugs that resolved to a live destination', async () => {
+  // The draft linked a product the dossier never carried: the link is stripped
+  // from the body, so it must not become a pick with a dead Offer URL either.
+  const { frontmatter, droppedSlugs } = await runAssembler(
+    article({
+      research: twoProducts,
+      keyword_plan: vacuumPlan,
+      draft_md: '## Our pick\n\n[Shark Detect Pro](/go/shark-detect-pro), not the [Miele](/go/miele-triflex).',
+    }),
+  );
+
+  assert.deepEqual(droppedSlugs, ['miele-triflex']);
+  assert.deepEqual((frontmatter.picks as Array<{ goSlug: string }>).map((p) => p.goSlug), [
+    'shark-detect-pro',
+  ]);
+});
+
+test('a nameless dossier product is skipped rather than failing the assembly', async () => {
+  // frontmatter.picks[].name is required by the site schema, so a broken
+  // dossier row would otherwise take the whole article down with it.
+  const nameless = {
+    ...(twoProducts as unknown as { products: Array<Record<string, unknown>> }),
+    products: [{ name: '  ', brand: 'Shark', approxPrice: '', amazonUrl: null, goSlug: 'shark-detect-pro', notes: '' }],
+  } as never;
+
+  const { frontmatter, affiliateLinks } = await runAssembler(
+    article({
+      research: nameless,
+      keyword_plan: vacuumPlan,
+      draft_md: '## Our pick\n\n[Shark Detect Pro](/go/shark-detect-pro) is the one to buy.',
+    }),
+  );
+
+  assert.equal('picks' in frontmatter, false);
+  assert.equal(affiliateLinks.length, 1, 'the affiliate row behind the link still ships');
+});
+
+test('an article with no research or keyword plan carries no structured-data fields', async () => {
+  const { frontmatter } = await runAssembler(article());
+
+  assert.equal('sources' in frontmatter, false);
+  assert.equal('entities' in frontmatter, false);
+  assert.equal('picks' in frontmatter, false);
+  assert.equal(frontmatter.currency, 'AUD');
+});

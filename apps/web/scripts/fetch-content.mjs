@@ -24,6 +24,7 @@ import {
 } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { normalizeArticleBody } from '../src/lib/content-normalize.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -123,17 +124,18 @@ if (existsSync(BLOG_TARGET)) rmSync(BLOG_TARGET, { recursive: true, force: true 
 mkdirSync(BLOG_TARGET, { recursive: true });
 
 for (const post of posts) {
-  if (RAW_MERCHANT.test(post.body_md)) {
+  const body = normalizeArticleBody(post.body_md);
+  if (RAW_MERCHANT.test(body)) {
     errors.push(`${post.slug}: body contains a raw merchant URL — use /go/<slug> instead.`);
   }
-  for (const m of post.body_md.matchAll(GO_LINK)) {
+  for (const m of body.matchAll(GO_LINK)) {
     if (!linkSlugs.has(m[1])) {
       errors.push(`${post.slug}: /go/${m[1]} has no matching row in affiliate_links.`);
     }
   }
   writeFileSync(
     resolve(BLOG_TARGET, `${post.slug}.md`),
-    `${toFrontmatterYaml(post.frontmatter_json)}\n\n${post.body_md.trim()}\n`,
+    `${toFrontmatterYaml(post.frontmatter_json)}\n\n${body.trim()}\n`,
     'utf8',
   );
 }

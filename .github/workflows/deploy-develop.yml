@@ -64,7 +64,7 @@ jobs:
           # second copy of the site competing with the real one in the index.
           # Aimed at the production host instead, every develop page tells a
           # crawler that the canonical version of it lives there.
-          SITE_URL: https://sleekdrops.pages.dev
+          SITE_URL: https://sleekdrops.com
           # Marks this build a preview, which noindexes every page it renders and
           # publishes a robots.txt that advertises no sitemap.
           #
@@ -80,16 +80,10 @@ jobs:
           # (apps/web/src/lib/site-env.test.ts) rather than by hoping.
           PUBLIC_SITE_ENV: preview
           NODE_ENV: production
-          # DevTeam Analytics - public ingest key (dtp_) + ingest host. The key is
-          # ingest-only and safe to expose; PUBLIC_ hands it to the Astro build so
-          # the analytics + logging sink is active.
-          #
-          # Held in repo settings rather than inline: re-provisioning a project on
-          # DevTeam mints a NEW analytics project and key, and the old key keeps
-          # returning 202 from an orphaned project. A hardcoded key therefore goes
-          # stale silently - the site looks healthy while the Analytics tab reads a
-          # different project and shows nothing. The admin panel reads the same two
-          # settings, so both apps always report into one project.
+          # DevTeam Analytics is enabled only for this non-production build.
+          # PUBLIC_SITE_ENV is also checked in the browser bundle, so a key
+          # supplied to a production build is discarded before the SDK can be
+          # created. Production keeps literal empty values in its own workflow.
           PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY: ${{ secrets.DEVTEAM_ANALYTICS_INGEST_KEY }}
           PUBLIC_DEVTEAM_ANALYTICS_HOST: ${{ vars.DEVTEAM_ANALYTICS_HOST }}
           # In-app feedback widget - develop only. It is a visible control on the
@@ -109,8 +103,8 @@ jobs:
           #
           # An empty value (or anything that is not a `G-` measurement id)
           # disables GA4 silently after one console warning: gtag.js is never
-          # requested and no `_ga` cookie is written. The DevTeam sink is
-          # unaffected, and so is the rest of the site.
+          # requested and no `_ga` cookie is written. The rest of the site is
+          # unaffected.
           PUBLIC_GA4_ID: ${{ vars.GA4_MEASUREMENT_ID }}
           # DevTeam A/B Testing - flag-delivery host + per-environment client key.
           # Held in repo settings for the same reason as the ingest key above: the
@@ -161,40 +155,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm --filter @sleekdrops/web build
 
-      # The build-time PUBLIC_ values above are inlined into the browser bundle
-      # by Vite and never reach a Pages Function. functions/go/[slug].js counts
-      # the outbound affiliate click - the site's primary conversion - and reads
-      # its ingest key and host from context.env, which is the Pages *runtime*
-      # environment. That environment is set here, from the same repo secret and
-      # variable, so a re-provisioned analytics project rotates both halves at
-      # once and neither is ever committed.
-      #
-      # `pages secret put` for both: wrangler has no command for a plain-text
-      # Pages variable, and a secret reads back through context.env identically.
-      # An empty value is skipped rather than uploaded - the Function disables
-      # its sink silently on an empty key and still serves the 302.
-      - name: Publish the analytics runtime config to Pages Functions (develop)
-        working-directory: apps/web
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          PROJECT_NAME: ${{ secrets.CLOUDFLARE_PROJECT_NAME }}
-          PAGES_ENV: preview
-          DEVTEAM_ANALYTICS_INGEST_KEY: ${{ secrets.DEVTEAM_ANALYTICS_INGEST_KEY }}
-          DEVTEAM_ANALYTICS_HOST: ${{ vars.DEVTEAM_ANALYTICS_HOST }}
-        run: |
-          set -euo pipefail
-          put() {
-            if [ -z "${2:-}" ]; then
-              echo "::notice::$1 is empty - the /go Function's analytics sink stays off"
-              return 0
-            fi
-            printf '%s' "$2" | pnpm exec wrangler pages secret put "$1" \
-              --project-name "$PROJECT_NAME" --env "$PAGES_ENV"
-          }
-          put DEVTEAM_ANALYTICS_INGEST_KEY "$DEVTEAM_ANALYTICS_INGEST_KEY"
-          put DEVTEAM_ANALYTICS_HOST "$DEVTEAM_ANALYTICS_HOST"
-
       - name: Deploy to Cloudflare Pages (develop)
         uses: cloudflare/wrangler-action@v3
         with:
@@ -203,3 +163,39 @@ jobs:
           # Run from apps/web so wrangler picks up the functions/ directory.
           workingDirectory: apps/web
           command: pages deploy dist --project-name=${{ secrets.CLOUDFLARE_PROJECT_NAME }} --branch=develop
+
+      # Clear the edge copy of whatever this deploy changed. Pages invalidates
+      # its own asset cache on deploy, but a *redirect* the zone cached is a
+      # different object: when the site flipped its canonical URL form, edge
+      # nodes went on serving the previous permanent 308 to the old form, which
+      # is half of the loop that produced ERR_TOO_MANY_REDIRECTS
+      # (functions/_lib/canonical.mjs). Purging here is what stops a URL-form
+      # change leaving a stale redirect behind again; the middleware is what
+      # protects a visitor whose own browser cached one.
+      #
+      # Deliberately not continue-on-error: a purge that silently failed leaves
+      # exactly the state this step exists to prevent, so the deploy goes red
+      # and someone purges by hand.
+      - name: Purge the Cloudflare edge cache
+        env:
+          # Zone → Overview → Zone ID, for the zone serving the develop host.
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          # Needs "Zone → Cache Purge → Purge" on top of the Pages scopes.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_ZONE_ID" ]; then
+            echo "::warning::CLOUDFLARE_ZONE_ID is unset - skipping the edge cache purge. Expected while develop is served from the bare *.pages.dev host, which is not a zone this account can purge; set it once develop.sleekdrops.com is bound."
+            exit 0
+          fi
+          status=$(curl -sS -o /tmp/purge.json -w '%{http_code}' -X POST \
+            "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/purge_cache" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data '{"purge_everything":true}')
+          cat /tmp/purge.json 2>/dev/null
+          echo
+          if [ "$status" != "200" ]; then
+            echo "::error::Cache purge failed (HTTP $status). Purge the zone by hand before trusting this deploy."
+            exit 1
+          fi
+          echo "Edge cache purged."

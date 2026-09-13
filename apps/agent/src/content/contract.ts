@@ -21,13 +21,179 @@ export const POST_TYPES = ['article', 'guide', 'roundup'] as const;
  */
 export const MONETISED_INTENTS = new Set(['Commercial Investigation', 'Transactional']);
 
-export const AUTHORS = [
+/**
+ * Currency every price the site quotes is in — the home market is HOME_REGION
+ * ('au') and always has been. It rides through frontmatter so a schema builder
+ * never has to assume one.
+ */
+export const HOME_CURRENCY = 'AUD';
+
+/**
+ * How one beat writes, as instructions a writer can actually follow.
+ *
+ * "Write in Mira's voice" produces the same prose as no instruction at all,
+ * because a one-line persona carries no information about sentences. These
+ * four fields do: a rhythm to imitate, words to reach for and words to avoid,
+ * the question this beat always asks of a product, and a paragraph whose
+ * texture the draft is matched against.
+ */
+export interface AuthorVoice {
+  /** Sentence-rhythm habits - lengths, openings, where this beat breaks. */
+  rhythm: string;
+  /** The vocabulary this beat reaches for, and what it will not write. */
+  vocabulary: string;
+  /** What it cares about - the thing it checks on every product, always. */
+  cares: string;
+  /** A paragraph in this voice. The writer matches its texture, not its subject. */
+  specimen: string;
+}
+
+/**
+ * The one byline the pipeline publishes under.
+ *
+ * A named desk or a "staff" byline is a promise that a staffed team stands
+ * behind it, and a masthead whose team does not exist is what the publisher
+ * policies call misrepresentation - the Sports Illustrated and CNET failures
+ * both sit here. So there is one accountable entity on every piece, and the
+ * beat is a label on that byline rather than a second masthead. Nothing in
+ * this registry claims a person, a credential or hands-on testing.
+ */
+export const BYLINE_NAME = 'SleekDrops Editorial Team';
+
+/** One beat of the editorial team: a voice to write in and a tag on the byline. */
+export interface AuthorProfile {
+  id: string;
+  /** The beat tag shown beside the byline. Empty on the house voice. */
+  label: string;
+  /** What this beat covers, for the prompts. */
+  beat: string;
+  /** Categories this beat owns. Empty means it covers everything (the fallback). */
+  covers: readonly string[];
+  voice: AuthorVoice;
+}
+
+/** How a piece is attributed: the team, tagged with the beat that wrote it. */
+export function bylineFor(author: AuthorProfile): string {
+  return author.label ? `${BYLINE_NAME} - ${author.label}` : BYLINE_NAME;
+}
+
+/**
+ * The beat voices a piece may be commissioned in.
+ *
+ * What separates them is what a masthead actually separates - a beat and a
+ * house voice - which is enough for the choice to change the prose while the
+ * byline stays one accountable team. The `desk` id is the house voice and
+ * keeps its name because published posts and /author/desk already carry it.
+ */
+export const AUTHORS: readonly AuthorProfile[] = [
   {
     id: 'desk',
-    name: 'SleekDrops Editorial Desk',
+    label: '',
     beat: 'Research-led product coverage across Tech, Home, Fashion, Health, Finance and Travel',
+    covers: [],
+    voice: {
+      rhythm:
+        'Medium sentences, 12-22 words, broken by a short one when a verdict lands. Paragraphs of two or three sentences. Never opens two consecutive paragraphs the same way.',
+      vocabulary:
+        'Plain nouns and concrete verbs. Says "costs", "breaks", "fits" rather than "delivers", "offers", "provides". Writes "we could not confirm" instead of hedging with adverbs.',
+      cares:
+        'Whether the evidence actually supports the recommendation, and saying plainly where it runs out.',
+      specimen:
+        'The V15 is the one to buy if your floors are mostly hard. Choice measured 210AW on the high setting in 2026, and the run time holds up for a two-bedroom flat. Past that it stops being sensible: owners on ProductReview report the battery down to nine minutes by the second year, on 37 of 412 reviews. Carpet-heavy houses should look at the mains-powered options instead.',
+    },
   },
-] as const;
+  {
+    id: 'tech',
+    label: 'Tech',
+    beat: 'Audio, computing, mobile, wearables and smart-home hardware',
+    covers: ['Tech'],
+    voice: {
+      rhythm:
+        'Short and declarative. Most sentences under 15 words, with an occasional long one that carries a full spec. Opens sections with the number, not the wind-up.',
+      vocabulary:
+        'Names chipsets, codecs, standards and model numbers on first mention. Uses the measured unit every time (AW, dB, nits, mAh). Never writes "powerful", "fast" or "premium" without the figure beside it.',
+      cares:
+        'Whether a spec claim survives contact with a measurement, and which of two near-identical models is the one actually on sale here.',
+      specimen:
+        'The XM6 runs the QN3 processor and LDAC. Sony rates it at 30 hours with ANC on; RTINGS measured 28.5 in 2026, which is close enough to trust. The XM5 is the same headphone minus the new processor, and it is regularly A$120 less. If you are not listening on a hi-res source, the older one is the better buy and nothing about the spec sheet argues otherwise.',
+    },
+  },
+  {
+    id: 'home',
+    label: 'Home',
+    beat: 'Kitchen, cleaning, furniture and everything that has to survive daily use',
+    covers: ['Home', 'Fashion'],
+    voice: {
+      rhythm:
+        'Longer, plainer sentences that run 18-28 words, cut by a blunt five-word judgement. Reads like someone talking across a kitchen bench.',
+      vocabulary:
+        'Domestic and physical: what it weighs, what it sounds like at 7am, what the filter costs to replace. Avoids trade jargon; explains a spec in what it does rather than what it is.',
+      cares:
+        'What the thing is like to live with after six months - the seals, the filters, the bit that always goes first.',
+      specimen:
+        'Air fryers are mostly the same box with a different fan, and the part that decides whether you keep using one is the basket coating. Owners report it flaking on the cheaper Kmart units inside a year, on 61 of 890 ProductReview entries. The Ninja costs more and its basket is heavier to lift out one-handed, which matters if you are draining hot oil over a sink. That trade is the whole decision.',
+    },
+  },
+  {
+    id: 'value',
+    label: 'Value',
+    beat: 'Price, warranty, running costs and the money side of Health, Finance and Travel buys',
+    covers: ['Finance', 'Travel', 'Health'],
+    voice: {
+      rhythm:
+        'Arithmetic in the prose. Sentences build to a figure and stop there. Frequent two-sentence paragraphs, the second one the sum.',
+      vocabulary:
+        'Money words used precisely: RRP, street price, cost per year, excess, warranty term. Never "affordable", "budget-friendly" or "great value" - a dollar figure instead.',
+      cares:
+        'What the thing costs over its life rather than at the till, and what the warranty actually covers when it fails.',
+      specimen:
+        'The RRP is A$399 and Philips warrants it for two years. Replacement heads are A$45 for a pack of four and the manual says to change them quarterly, so budget A$45 a year on top. Over the warranty term that is A$489 all in. The A$199 model takes the same heads, which makes the gap A$200 for a pressure sensor and a travel case.',
+    },
+  },
+];
+
+/** The beat voice with this id, or null. Ids come out of a model, so nothing is assumed. */
+export function authorById(id: unknown): AuthorProfile | null {
+  return AUTHORS.find((a) => a.id === id) ?? null;
+}
+
+/**
+ * The beat that owns a category, deterministically. This is the fallback when
+ * the angle stage names a voice that does not exist - a beat match beats
+ * defaulting everything to the house voice, which is how every piece ended up
+ * sounding the same in the first place.
+ */
+export function defaultAuthorFor(category: string): AuthorProfile {
+  const match = AUTHORS.find((a) => a.covers.includes(category));
+  return match ?? AUTHORS.find((a) => a.covers.length === 0) ?? AUTHORS[0];
+}
+
+/**
+ * A source behind the article, carried into the page's JSON-LD `citation`.
+ * `date` is reserved for the researcher's per-fact publication date and is
+ * left unset today.
+ */
+export const sourceSchema = z.object({
+  url: z.string().url(),
+  publisher: z.string().min(1).optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+/**
+ * A product the article recommends, one per /go/ slug the body actually links.
+ * Becomes an ItemList -> Product node on guides and roundups.
+ */
+export const pickSchema = z.object({
+  name: z.string().min(1),
+  brand: z.string().min(1).optional(),
+  /**
+   * As the dossier stated it, e.g. "A$229". The site parses the digits out of
+   * it into the pick's `offers.price`, quoted in `currency` - see `offerNode`
+   * in apps/web/src/lib/seo.ts.
+   */
+  price: z.string().min(1).optional(),
+  goSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+});
 
 export const frontmatterSchema = z.object({
   title: z.string().min(1),
@@ -43,6 +209,12 @@ export const frontmatterSchema = z.object({
   cover: z.enum(['fill-1', 'fill-2', 'fill-3', 'fill-4', 'fill-5', 'fill-6', 'fill-7', 'fill-8']),
   heroImage: z.string().url().optional(),
   heroAlt: z.string().optional(),
+  // Structured-data inputs. All optional: every post published before this
+  // existed carries none of them and must keep validating.
+  sources: z.array(sourceSchema).optional(),
+  entities: z.array(z.string().min(1)).optional(),
+  picks: z.array(pickSchema).optional(),
+  currency: z.string().min(1).default(HOME_CURRENCY),
   featured: z.boolean().default(false),
   draft: z.boolean().default(false),
 });

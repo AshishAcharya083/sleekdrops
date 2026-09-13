@@ -11,10 +11,13 @@
 // unverified", the fix is to cut or hedge it — not to go and find a number
 // nobody reviewed and slide it into a draft on its way out.
 import { chat, UsageTracker } from '../llm/index.js';
+import { authorById, defaultAuthorFor } from '../content/contract.js';
 import { detectSlop, formatSlopReport } from '../content/slop.js';
 import { loadPublishedCorpus } from '../content/corpus.js';
 import {
   ANTI_SLOP_RULES,
+  authorVoiceBrief,
+  editorialAngleBrief,
   EDITORIAL_RULES,
   GEO_RULES,
   keywordPlanBrief,
@@ -33,6 +36,12 @@ export async function runEditor(
   const draft = article.draft_md ?? '';
   const feedback = article.feedback?.trim();
   const planBrief = keywordPlanBrief(article.keyword_plan);
+  const angleBrief = editorialAngleBrief(article.editorial_angle);
+  // The edit pass gets the same single voice the writer had. Without it a
+  // revision rounds the byline's rhythm off and every draft converges on the
+  // house voice by the second pass, which undoes the point of having bylines.
+  const author =
+    authorById(article.outline?.author) ?? defaultAuthorFor(article.category);
 
   // The reviewer already filed the scan's hits as issues; drop those from the
   // list so the editor is not told the same thing twice in two formats.
@@ -55,6 +64,7 @@ export async function runEditor(
       LINK_PLACEMENT_RULES,
       SEO_RULES,
       GEO_RULES,
+      authorVoiceBrief(author),
     ].join('\n\n'),
     temperature: 0.4,
     prompt: `Revise this draft to resolve every issue below. Keep everything that already
@@ -66,7 +76,7 @@ ${feedback ? `
 ADMIN FEEDBACK — highest priority, apply it even where it goes beyond the SEO
 issues (but never break the editorial rules or invent facts):
 ${feedback}
-` : ''}${planBrief ? `\n${planBrief}\n` : ''}
+` : ''}${angleBrief ? `\n${angleBrief}\n` : ''}${planBrief ? `\n${planBrief}\n` : ''}
 Issues to resolve (from the SEO review, most severe first):
 ${issues
   .map((i) => `- [${i.severity}] ${i.issue}\n  Fix: ${i.fix}`)
