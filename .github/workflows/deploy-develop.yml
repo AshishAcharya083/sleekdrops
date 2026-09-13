@@ -80,11 +80,12 @@ jobs:
           # (apps/web/src/lib/site-env.test.ts) rather than by hoping.
           PUBLIC_SITE_ENV: preview
           NODE_ENV: production
-          # Disabled on every public deployment until the processor publishes
-          # verifiable privacy, jurisdiction and retention terms. GA4 remains
-          # available behind the site's explicit analytics opt-in.
-          PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY: ''
-          PUBLIC_DEVTEAM_ANALYTICS_HOST: ''
+          # DevTeam Analytics is enabled only for this non-production build.
+          # PUBLIC_SITE_ENV is also checked in the browser bundle, so a key
+          # supplied to a production build is discarded before the SDK can be
+          # created. Production keeps literal empty values in its own workflow.
+          PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY: ${{ secrets.DEVTEAM_ANALYTICS_INGEST_KEY }}
+          PUBLIC_DEVTEAM_ANALYTICS_HOST: ${{ vars.DEVTEAM_ANALYTICS_HOST }}
           # In-app feedback widget - develop only. It is a visible control on the
           # page, so production stays without it until we have looked at it here.
           PUBLIC_DEVTEAM_ANALYTICS_FEEDBACK: 'true'
@@ -162,3 +163,39 @@ jobs:
           # Run from apps/web so wrangler picks up the functions/ directory.
           workingDirectory: apps/web
           command: pages deploy dist --project-name=${{ secrets.CLOUDFLARE_PROJECT_NAME }} --branch=develop
+
+      # Clear the edge copy of whatever this deploy changed. Pages invalidates
+      # its own asset cache on deploy, but a *redirect* the zone cached is a
+      # different object: when the site flipped its canonical URL form, edge
+      # nodes went on serving the previous permanent 308 to the old form, which
+      # is half of the loop that produced ERR_TOO_MANY_REDIRECTS
+      # (functions/_lib/canonical.mjs). Purging here is what stops a URL-form
+      # change leaving a stale redirect behind again; the middleware is what
+      # protects a visitor whose own browser cached one.
+      #
+      # Deliberately not continue-on-error: a purge that silently failed leaves
+      # exactly the state this step exists to prevent, so the deploy goes red
+      # and someone purges by hand.
+      - name: Purge the Cloudflare edge cache
+        env:
+          # Zone → Overview → Zone ID, for the zone serving the develop host.
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          # Needs "Zone → Cache Purge → Purge" on top of the Pages scopes.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_ZONE_ID" ]; then
+            echo "::warning::CLOUDFLARE_ZONE_ID is unset - skipping the edge cache purge. Expected while develop is served from the bare *.pages.dev host, which is not a zone this account can purge; set it once develop.sleekdrops.com is bound."
+            exit 0
+          fi
+          status=$(curl -sS -o /tmp/purge.json -w '%{http_code}' -X POST \
+            "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/purge_cache" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data '{"purge_everything":true}')
+          cat /tmp/purge.json 2>/dev/null
+          echo
+          if [ "$status" != "200" ]; then
+            echo "::error::Cache purge failed (HTTP $status). Purge the zone by hand before trusting this deploy."
+            exit 1
+          fi
+          echo "Edge cache purged."

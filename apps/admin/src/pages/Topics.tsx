@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
 import type { Topic } from '../api';
 import { api, fmtTime } from '../api';
-import { Badge } from '../components';
+import { ApiErrorBanner, Badge } from '../components';
 import { usePoll } from '../hooks';
 import { ManualTopicDrawer } from './ManualTopicDrawer';
 
@@ -62,7 +62,7 @@ export function Topics() {
 
   return (
     <>
-      {error && <div className="error-banner">API unreachable: {error}</div>}
+      <ApiErrorBanner error={error} />
       {notice && <div className="error-banner">{notice}</div>}
       {flash && <div className="notice-banner">{flash}</div>}
 

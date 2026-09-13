@@ -5,11 +5,15 @@
  *
  * Nothing here opens by itself: the
  * island's script boots the consent state machine in `@lib/analytics` (which
- * applies the stored decision, or the privacy-preserving default of analytics
- * off - silently), and the dialog appears only when the footer's
+ * applies the stored decision, or the deployment default, silently), and the
+ * dialog appears only when the footer's
  * Privacy preferences control asks for it through `@lib/consent-preferences`.
  * Everything is hidden until then, so the static HTML never flashes a prompt.
  */
+
+import { analyticsEnv } from '@lib/analytics-env';
+
+const analyticsStartsOn = analyticsEnv().defaultConsent === 'granted';
 ---
 
 <div class="sd-consent-root" data-consent-root hidden>
@@ -27,7 +31,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
       </button>
     </div>
-    <p class="sd-prefs__sub">Choose whether SleekDrops may measure anonymous usage. Analytics stays off until you enable it. Advertising choices are handled separately by Google's certified consent message where required. Changes apply straight away, and you can return here from <strong>Privacy preferences</strong> in the footer.</p>
+    <p class="sd-prefs__sub">Choose whether SleekDrops may measure anonymous usage. {analyticsStartsOn ? 'Anonymous analytics starts automatically on this non-production preview.' : 'Analytics stays off until you enable it.'} Advertising choices are handled separately by Google's certified consent message where required. Changes apply straight away, and you can return here from <strong>Privacy preferences</strong> in the footer.</p>
 
     <div class="pref-row">
       <div class="pref-row__text">
@@ -42,7 +46,7 @@
 
     <div class="pref-row">
       <div class="pref-row__text">
-        <span class="pref-row__title">Anonymous analytics <span class="tag">Off by default</span></span>
+        <span class="pref-row__title">Anonymous analytics <span class="tag">{analyticsStartsOn ? 'On for preview' : 'Off by default'}</span></span>
         <p class="pref-row__help">Aggregate, anonymised page views — which guides get read, nothing more. If enabled, a random session identifier groups page views from one visit. There is no advertising or cross-site tracking in this category, and personal data is stripped in your browser before anything is sent.</p>
       </div>
       <label class="sd-switch">
@@ -61,7 +65,7 @@
     </div>
 
     <div class="sd-prefs__actions">
-      <button type="button" class="btn btn-outline" data-action="decline-all">Keep analytics off</button>
+      <button type="button" class="btn btn-outline" data-action="decline-all">Turn analytics off</button>
       <button type="button" class="btn btn-primary" data-action="save">Save preferences</button>
     </div>
   </section>
@@ -336,8 +340,8 @@
       }
     });
 
-    // Apply the decision in force - stored, or the site default - and start (or
-    // not) the analytics sinks. Nothing is shown.
+    // Apply the decision in force - stored, or the deployment default - and
+    // start (or not) the analytics sinks. Nothing is shown.
     boot();
   }
 </script>

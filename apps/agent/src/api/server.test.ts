@@ -102,6 +102,53 @@ test('an uncaught route error returns the { error } shape plus the trace id', as
   );
 });
 
+test('an unauthorized overview call names the auth failure the panel reacts to', async () => {
+  const { res } = await call('/api/overview', { headers: { [TRACE_HEADER]: CLIENT_TRACE_ID } });
+
+  // The panel turns this exact 401 into "check the admin token" rather than
+  // "API unreachable" (apps/admin/src/api-error.ts).
+  assert.equal(res.status, 401);
+  assert.deepEqual(await res.json(), { error: 'unauthorized' });
+});
+
+test('a database outage degrades the overview instead of blanking the dashboard', async () => {
+  const { res, logs } = await call('/api/overview', {
+    headers: { ...AUTH, [TRACE_HEADER]: CLIENT_TRACE_ID },
+  });
+
+  assert.equal(res.status, 200, 'the landing screen must not collapse to a 500');
+  const body = (await res.json()) as Record<string, unknown> & { failedSections: string[] };
+  assert.deepEqual(body.failedSections, [
+    'articles',
+    'recentSessions',
+    'runningSessions',
+    'settings',
+    'topics',
+    'usage30d',
+  ]);
+  // Every field the panel reads is still there, at its fallback.
+  assert.deepEqual(body.topics, []);
+  assert.deepEqual(body.articles, []);
+  assert.deepEqual(body.recentSessions, []);
+  assert.equal(body.runningSessions, 0);
+  assert.deepEqual(body.usage30d, { costUsd: 0, tokensInput: 0, tokensOutput: 0, runs: 0 });
+  assert.equal(body.publishMode, 'approval');
+  assert.equal(body.workerEnabled, true);
+
+  const failures = logs.filter((l) => l.message === 'overview section failed');
+  assert.equal(failures.length, 6, 'each failing section is attributable on its own');
+  for (const line of failures) {
+    assert.equal(line.trace_id, CLIENT_TRACE_ID);
+    assert.equal(typeof line.section, 'string');
+    assert.equal(typeof line.error, 'string');
+  }
+  assert.equal(
+    JSON.stringify(body).includes('127.0.0.1'),
+    false,
+    'the response stays generic; the detail lives in the log line',
+  );
+});
+
 test('a POST that enqueues work is traced the same way', async () => {
   const { res, logs } = await call('/api/topics/approve', {
     method: 'POST',
