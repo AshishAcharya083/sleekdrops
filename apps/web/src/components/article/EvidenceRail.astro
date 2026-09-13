@@ -1,0 +1,120 @@
+---
+import { reviewStatus, sourceCountLabel, TIER_LABELS, TIER_ORDER } from '@lib/sources';
+import { formatMedium, formatMonth } from '@lib/format';
+import type { SourceData } from '../../content/config';
+
+/**
+ * EvidenceRail — the sidebar summary of what an article rests on: how many
+ * sources, what kind they are, and when a human last reviewed it.
+ *
+ * It is a jump-off, not a second sources list: the counts link down to the
+ * block at the foot of the page, which is where the rows themselves live.
+ */
+export interface Props {
+  sources?: SourceData[];
+  pubDate: Date;
+  updatedDate?: Date;
+  lastReviewed?: Date;
+  /** The category this piece is filed under - it sets the re-check cadence. */
+  category?: string;
+}
+
+const { sources = [], pubDate, updatedDate, lastReviewed, category } = Astro.props;
+const review = reviewStatus({ pubDate, updatedDate, lastReviewed, category });
+// Only the tiers this piece actually cites, strongest evidence first.
+const tierCounts = TIER_ORDER.map((tier) => ({
+  tier,
+  label: TIER_LABELS[tier],
+  count: sources.filter((source) => source.tier === tier).length,
+})).filter((row) => row.count > 0);
+const undated = sources.filter((source) => !source.date).length;
+---
+
+<section class="evidence-rail" aria-label="Evidence summary">
+  <h6>Evidence</h6>
+  <dl>
+    <div class="row">
+      <dt>Sources</dt>
+      <dd>
+        {sources.length > 0 ? <a href="#sources-title">{sourceCountLabel(sources.length)}</a> : 'Inline in the text'}
+      </dd>
+    </div>
+    {tierCounts.map((row) => (
+      <div class="row row--sub">
+        <dt>{row.label}</dt>
+        <dd>{row.count}</dd>
+      </div>
+    ))}
+    {undated > 0 && (
+      <div class="row row--sub">
+        <dt>Undated</dt>
+        <dd class="caution">{undated}</dd>
+      </div>
+    )}
+    <div class="row">
+      <dt>{review.inferred ? 'Last updated' : 'Last reviewed'}</dt>
+      {/* Never amber: a re-check we owe is our problem, not a defect in the
+          evidence. The amber in this rail counts sources a reader can weigh. */}
+      <dd>{formatMedium(review.date)}</dd>
+    </div>
+    {/* Only while it is still ahead of us. Once the date has passed, the review
+        stamp under the byline says how long ago the last check was - repeating
+        it here as a second date row would read as a third, different date. */}
+    {!review.due && (
+      <div class="row">
+        <dt>Next check</dt>
+        <dd>{formatMonth(review.nextDue)}</dd>
+      </div>
+    )}
+  </dl>
+  <p class="rail-links">
+    <a href="/how-we-research">How we research</a>
+    <a href="/ai-disclosure">AI disclosure</a>
+  </p>
+</section>
+
+<style>
+  .evidence-rail {
+    padding: 24px 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  h6 {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+    margin: 0 0 16px;
+  }
+  dl { margin: 0; display: grid; gap: 6px; }
+  .row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 13px;
+  }
+  .row--sub { padding-left: 14px; border-left: 1px solid var(--hairline); }
+  .row--sub dt { font-size: 12px; }
+  dt { color: var(--muted); margin: 0; }
+  dd {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  dd.caution { color: var(--warning); }
+  dd a { color: var(--ink); text-decoration-color: var(--accent); }
+  .rail-links {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin: 16px 0 0;
+    font-size: 13px;
+  }
+  .rail-links a { color: var(--muted); text-decoration: none; }
+  .rail-links a:hover { color: var(--accent); text-decoration: underline; }
+</style>

@@ -70,7 +70,11 @@ const PUBLISHER: Organization = {
   // The square mark, not the 1200x630 social card: Google's Article guidance
   // wants `publisher.logo` to be a logo, and reads it as an ImageObject.
   logo: { '@type': 'ImageObject', url: `${siteUrl}/mark.svg` },
-  publishingPrinciples: `${siteUrl}/about`,
+  // The method page, not the about page: `publishingPrinciples` is defined as
+  // the document describing the editorial principles behind the content, and
+  // /how-we-research is where the evidence standard and the review cadence
+  // actually live.
+  publishingPrinciples: `${siteUrl}/how-we-research`,
   ...(PUBLISHER_PROFILES.length > 0 ? { sameAs: PUBLISHER_PROFILES } : {}),
 };
 

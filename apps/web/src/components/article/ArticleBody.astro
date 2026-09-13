@@ -31,13 +31,16 @@ import AdUnit from '@components/ads/AdUnit.astro';
 
 <style>
   .article-body {
-    max-width: 68ch;
     font-family: var(--font-body);
     font-size: 18px;
     line-height: 1.75;
     color: var(--ink-2);
     min-width: 0;
   }
+  /* The reading measure belongs to the prose, not to the column. Carried on
+     the whole body it also bound the comparison tables, which are the widest
+     thing an article renders and the one block that needs the column it has. */
+  .article-body :global(> *) { max-width: var(--max-reading); }
   .article-body :global(> * + *) { margin-top: 1.3em; }
   /* Zero-height and unspaced: the sentinel marks the end of the body, it does
      not add one. More specific than the sibling rule above, so it wins. */
@@ -107,18 +110,72 @@ import AdUnit from '@components/ads/AdUnit.astro';
     letter-spacing: -0.005em;
   }
 
-  /* GFM tables — pipe-table syntax in markdown. */
-  .article-body :global(.table-wrap) {
-    margin: 2em 0;
-    overflow-x: auto;
-    border: 1px solid var(--hairline);
-    border-radius: 12px;
+  /* A citation marker the pipeline's writer left in the body, turned into a
+     link to the sources block by lib/rehype-citations.mjs. No underline of its
+     own: the marker rides above the baseline, so a border under it detaches
+     from the line it belongs to. Superscript citations are inline text links,
+     exempt from the 44px target under WCAG 2.5.5. */
+  .article-body :global(sup.citation) {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 0;
+    vertical-align: super;
+    white-space: nowrap;
   }
+  .article-body :global(sup.citation a) {
+    color: var(--muted);
+    text-decoration: none;
+    padding: 1px 2px;
+    border-radius: 3px;
+  }
+  .article-body :global(sup.citation a:hover) {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  /* GFM tables — pipe-table syntax in markdown. */
   .article-body :global(table) {
     width: 100%;
     border-collapse: collapse;
     font-size: 15px;
     line-height: 1.5;
+  }
+  /* A comparison table is the one block allowed the article column's full
+     width rather than the prose measure: seven columns squeezed into 68ch is
+     what clipped the scorecard. Wider than the column it scrolls inside
+     itself, so a wide table never pushes the page sideways. */
+  .article-body :global(> table) {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+  }
+  /* Raised by the script below only on a table that is genuinely clipped, so a
+     table that fits its column never carries a hint. Sits above the table: the
+     point of it is to be read before the reader decides the table is cut off. */
+  .article-body :global(> .table-scroll-hint) {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  /* `display` here beats the `hidden` attribute's UA `display: none`, so the
+     hidden state has to be restated. */
+  .article-body :global(> .table-scroll-hint[hidden]) { display: none; }
+  .article-body :global(> .table-scroll-hint::after) {
+    content: '→';
+    font-size: 14px;
+  }
+  /* The hint belongs to the table under it, not to the prose above it. Only
+     while it is shown: a hidden hint must leave the block rhythm untouched. */
+  .article-body :global(> .table-scroll-hint:not([hidden]) + table) { margin-top: 8px; }
+  .article-body :global(> table[tabindex]:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
   .article-body :global(thead) {
     background: var(--paper-2, #f6f5f1);
@@ -138,7 +195,10 @@ import AdUnit from '@components/ads/AdUnit.astro';
     letter-spacing: 0.02em;
     text-transform: uppercase;
   }
-  .article-body :global(tbody tr:last-child td) { border-bottom: 0; }
+  /* `th` as well as `td`: a table with a row header in the first column keeps
+     a hairline under its last row otherwise, which reads as a missing row. */
+  .article-body :global(tbody tr:last-child td),
+  .article-body :global(tbody tr:last-child th) { border-bottom: 0; }
   .article-body :global(tbody tr:hover) {
     background: color-mix(in srgb, var(--accent) 4%, transparent);
   }
@@ -195,6 +255,7 @@ import AdUnit from '@components/ads/AdUnit.astro';
 
 <script>
   import { midArticleIndex } from '@lib/ad-placement';
+  import { TABLE_SCROLL_HINT, overflowsSideways } from '@lib/table-scroll';
 
   /**
    * Move the mid-article unit to the break it belongs on, or drop it if this
@@ -212,12 +273,70 @@ import AdUnit from '@components/ads/AdUnit.astro';
   const unit = body?.querySelector<HTMLElement>('[data-ad-placement="articleMid"]');
 
   if (body && unit) {
-    // The editorial blocks only: not the two ad slots, not the read sentinel.
+    // The editorial blocks only: not the two ad slots, not the read sentinel,
+    // not a table's scroll hint (chrome the body did not write).
     const blocks = Array.from(body.children).filter(
-      (el) => !el.hasAttribute('data-ad-unit') && !el.hasAttribute('data-read-sentinel'),
+      (el) =>
+        !el.hasAttribute('data-ad-unit') &&
+        !el.hasAttribute('data-read-sentinel') &&
+        !el.hasAttribute('data-table-hint'),
     );
     const index = midArticleIndex(blocks.map((el) => el.tagName.toLowerCase()));
     if (index === null) unit.remove();
     else body.insertBefore(unit, blocks[index]);
+  }
+
+  /**
+   * Tell the reader a wide table can be swiped, on the tables where that is
+   * true.
+   *
+   * A table wider than the article column scrolls inside itself, which is right
+   * and invisible: on a phone a seven-column scorecard is simply clipped
+   * mid-column. The hint is raised against the table's measured overflow rather
+   * than a breakpoint - the width at which a table overflows is a property of
+   * that table - so it appears exactly where there is something to scroll to
+   * and disappears when the window grows past it. The same condition makes the
+   * box focusable, since a scroll container a mouse can drag is otherwise
+   * unreachable by keyboard.
+   */
+  if (body) {
+    const tables = Array.from(body.querySelectorAll<HTMLTableElement>(':scope > table'));
+
+    const hintFor = (table: HTMLElement): HTMLElement => {
+      const previous = table.previousElementSibling;
+      if (previous instanceof HTMLElement && previous.dataset.tableHint !== undefined) {
+        return previous;
+      }
+      // A div, not a p: the body's drop-cap rule keys off `> p:first-of-type`,
+      // and an article that opens on a table would hand it to this hint.
+      const hint = document.createElement('div');
+      hint.className = 'table-scroll-hint';
+      hint.dataset.tableHint = '';
+      hint.textContent = TABLE_SCROLL_HINT;
+      table.before(hint);
+      return hint;
+    };
+
+    const sync = () => {
+      for (const table of tables) {
+        const scrolls = overflowsSideways(table.scrollWidth, table.clientWidth);
+        hintFor(table).hidden = !scrolls;
+        if (scrolls) table.setAttribute('tabindex', '0');
+        else table.removeAttribute('tabindex');
+      }
+    };
+
+    if (tables.length > 0) {
+      sync();
+      // The column width the table is measured against changes with the window,
+      // and the table's own width changes when the editorial webfonts land.
+      if (typeof ResizeObserver === 'function') {
+        const observer = new ResizeObserver(sync);
+        for (const table of tables) observer.observe(table);
+      } else {
+        window.addEventListener('resize', sync);
+      }
+      document.fonts?.ready.then(sync);
+    }
   }
 </script>

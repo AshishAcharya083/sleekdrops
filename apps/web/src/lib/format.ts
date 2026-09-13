@@ -20,6 +20,12 @@ const mediumDate = new Intl.DateTimeFormat('en-US', {
   year: 'numeric',
 });
 
+/** Month and year only - a forward-looking date we should not imply is a deadline. */
+const monthYear = new Intl.DateTimeFormat('en-US', {
+  month: 'long',
+  year: 'numeric',
+});
+
 export function formatLong(date: Date): string {
   return longDate.format(date);
 }
@@ -30,6 +36,10 @@ export function formatShort(date: Date): string {
 
 export function formatMedium(date: Date): string {
   return mediumDate.format(date);
+}
+
+export function formatMonth(date: Date): string {
+  return monthYear.format(date);
 }
 
 export function isoDate(date: Date): string {

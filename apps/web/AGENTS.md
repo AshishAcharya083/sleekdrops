@@ -57,7 +57,8 @@ sleekdrops/
 │   │   ├── ui/                     # Atoms: Badge, Button, Eyebrow, BrandMark, IconButton
 │   │   ├── layout/                 # Header, Footer, CategoryStrip, Newsletter
 │   │   ├── blog/                   # PostCard, PostGrid, FeaturedPost, ListingHero, ...
-│   │   ├── article/                # ArticleBody, Verdict, TableOfContents, LegalLayout
+│   │   ├── article/                # ArticleBody, Verdict, TableOfContents, LegalLayout,
+│   │   │                           #   TrustStack, Sources, EvidenceRail
 │   │   ├── affiliate/              # DealCard, PromoCard, ProductCallout, ProsConsList, ...
 │   │   ├── ads/                    # AdUnit — the only component that emits ad markup
 │   │   └── seo/                    # SEOHead, JsonLd, Breadcrumbs
@@ -75,6 +76,8 @@ sleekdrops/
 │   ├── lib/
 │   │   ├── posts.ts                # Content-collection helpers
 │   │   ├── format.ts
+│   │   ├── sources.ts              # The reader's view of an article's evidence
+│   │   ├── rehype-citations.mjs    # `[n]` in a body → a link into its sources block
 │   │   ├── llms-txt.mjs            # What /llms.txt says, and what "strongest" means
 │   │   ├── robots-policy.mjs       # The crawl policy, incl. the named AI agents
 │   │   ├── sitemap-policy.mjs      # Sitemap filter + lastmod
@@ -108,6 +111,8 @@ sleekdrops/
 | Adding a new page | `src/pages/<route>.astro` |
 | Adding a new component | `src/components/<namespace>/<Name>.astro` |
 | Adding a new SEO schema | `src/lib/seo.ts` |
+| Changing the evidence standard or the review cadence | `src/pages/how-we-research.astro` (and `REVIEW_INTERVAL_DAYS` in `src/lib/sources.ts`) |
+| Changing what the site says about its use of AI | `src/pages/ai-disclosure.astro` |
 | Changing the crawl policy or naming another AI agent | `src/lib/robots-policy.mjs` |
 | Changing what `/llms.txt` says or how articles are ranked | `src/lib/llms-txt.mjs` |
 
@@ -123,6 +128,11 @@ Ship the honest placeholder (no input, no submit, copy that says what is and isn
 The homepage hero used to render `href="#today"` whether or not `DropPanel` emitted that id, so with no live drop the button did nothing at all.
 In-page anchor CTAs are therefore derived from the state that renders their target - see [`src/lib/hero-cta.ts`](src/lib/hero-cta.ts) - and `scripts/check-anchors.mjs` fails the build on any `href="#..."` in `dist/` with no matching element.
 The rule that script enforces lives in [`src/lib/anchor-integrity.ts`](src/lib/anchor-integrity.ts), unit-tested by its sibling `.test.ts`.
+
+**Nothing on this site claims testing, experience or a person that does not exist.**
+There is no lab, no tester and no named author: the byline is one accountable editorial team, the articles are AI-assisted and human-reviewed, and both facts are stated on the page rather than implied away.
+The two standing documents behind that are [`/how-we-research`](src/pages/how-we-research.astro) (the evidence standard, the review cadence, what we do not do) and [`/ai-disclosure`](src/pages/ai-disclosure.astro), and every article links to both from its byline block and its sources block.
+A source with no date or no identifiable publisher is shown as such - a sources list that hides its weak rows is not evidence.
 
 **Every surface degrades to a designed empty state.**
 A heading over an empty row, or a blank hero column, is a broken page rather than a neutral one.

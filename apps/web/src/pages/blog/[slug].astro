@@ -5,7 +5,9 @@ import Breadcrumbs from '@components/seo/Breadcrumbs.astro';
 import Badge from '@components/ui/Badge.astro';
 import IconButton from '@components/ui/IconButton.astro';
 import ArticleBody from '@components/article/ArticleBody.astro';
-import EvidencePanel from '@components/article/EvidencePanel.astro';
+import EvidenceRail from '@components/article/EvidenceRail.astro';
+import Sources from '@components/article/Sources.astro';
+import TrustStack from '@components/article/TrustStack.astro';
 import Verdict from '@components/article/Verdict.astro';
 import TableOfContents from '@components/article/TableOfContents.astro';
 import AdUnit from '@components/ads/AdUnit.astro';
@@ -18,7 +20,8 @@ import { getAllPosts, getRelatedPosts, type BlogPost } from '@lib/posts';
 import { authorInitials, getAuthor } from '@data/authors';
 import { getCategory } from '@data/categories';
 import { buildFaqSchema, buildMeta, buildPostSchema, extractFaq } from '@lib/seo';
-import { emphasiseLastWord, formatLong } from '@lib/format';
+import { emphasiseLastWord, formatLong, formatMedium, formatMonth } from '@lib/format';
+import { reviewStatus, sourceCountLabel } from '@lib/sources';
 
 export const getStaticPaths = (async () => {
   const posts = await getAllPosts();
@@ -61,6 +64,18 @@ const meta = buildMeta({
 // (removed May 2026), so it ships as-is rather than being relied on. Posts
 // without an FAQ section (most of the older hand-written pieces) emit no block.
 const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractFaq(post.body))];
+// What the collapsed rail says on a phone, so the reader knows what is behind
+// it before opening it.
+const review = reviewStatus(post.data);
+// The cadence is a per-category commitment, so the piece states when its own
+// next check falls due rather than leaving it to the methodology page. Only
+// while that date is still ahead: once it has passed, the review stamp says how
+// long ago the last check was, which is the fact a reader can act on.
+const nextCheck = review.due ? undefined : formatMonth(review.nextDue);
+const asideSummary = [
+  post.data.sources?.length ? sourceCountLabel(post.data.sources.length) : 'sources inline',
+  `${review.inferred ? 'updated' : 'reviewed'} ${formatMedium(review.date)}`,
+].join(' · ');
 ---
 <BaseLayout
   {...meta}
@@ -116,6 +131,14 @@ const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractF
         </div>
       </div>
 
+      <TrustStack
+        pubDate={post.data.pubDate}
+        updatedDate={post.data.updatedDate}
+        lastReviewed={post.data.lastReviewed}
+        category={post.data.category}
+        reviewedBy={author.name}
+      />
+
       {hasAffiliateLinks && <AffiliateDisclosure variant="inline" />}
 
       <div
@@ -137,11 +160,37 @@ const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractF
           {product && <ProsConsList pros={product.pros} cons={product.cons} />}
           {hasAffiliateLinks && <AffiliateDisclosure />}
         </ArticleBody>
-        <EvidencePanel sources={post.data.sources} highStakes={highStakes} />
+        <Sources
+          sources={post.data.sources}
+          highStakes={highStakes}
+          reviewedLabel={review.inferred ? 'Last updated' : 'Last reviewed'}
+          reviewedOn={formatLong(review.date)}
+          nextCheck={nextCheck}
+        />
       </div>
 
       <aside class="article-aside">
-        <TableOfContents headings={headings} />
+        {/* On phones and tablets the rail reflows above the prose, where a
+            screenful of metadata otherwise sits between the headline and the
+            first paragraph. It collapses into one row there, and the stylesheet
+            below holds it open on the desktop layout. */}
+        <details class="aside-details">
+          <summary>
+            <span class="summary-label">On this page &amp; evidence</span>
+            <span class="summary-meta">{asideSummary}</span>
+            <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </summary>
+          <div class="aside-inner">
+            <TableOfContents headings={headings} />
+            <EvidenceRail
+              sources={post.data.sources}
+              pubDate={post.data.pubDate}
+              updatedDate={post.data.updatedDate}
+              lastReviewed={post.data.lastReviewed}
+              category={post.data.category}
+            />
+          </div>
+        </details>
         <AdUnit placement="sidebar" />
       </aside>
     </div>
@@ -267,8 +316,74 @@ const schema = [buildPostSchema(post, author, headings), buildFaqSchema(extractF
     padding: 64px 0 0;
     align-items: start;
   }
+  /* A grid item's automatic minimum size is its min-content width, and a
+     comparison table's min-content is every column at its narrowest - wider
+     than the track. Without this the 1fr track grew to fit the table, pushed
+     the rail off the page and took the whole document sideways with it. The
+     table scrolls inside itself instead. */
+  .article-main { min-width: 0; }
   @media (max-width: 1000px) {
-    .article-grid { grid-template-columns: 1fr; gap: 48px; }
+    .article-grid { grid-template-columns: 1fr; gap: 40px; }
+    /* The rail stops being a column here. Its contents become rows of the
+       article grid so the collapsed evidence row can sit under the trust
+       stack, where a reader is still deciding whether to trust the piece -
+       rather than a screenful of metadata before the first paragraph, or a
+       jump list stranded under the article. */
+    .article-aside { display: contents; }
+    .aside-details { order: -1; }
+  }
+
+  /* The jump list and the evidence summary, behind one row on a phone, and a
+     permanently open sidebar from 1001px up. The element ships closed in the
+     HTML and the wide layout opens it in CSS, so the desktop rail is complete
+     at first paint - no script, and nothing appears late enough to push the
+     ad slot beneath it down the page. */
+  .aside-details { border-bottom: 1px solid var(--hairline); }
+  .aside-details > summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    padding: 10px 0;
+    cursor: pointer;
+    list-style: none;
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+  .aside-details > summary::-webkit-details-marker { display: none; }
+  .aside-details .summary-label { font-weight: 700; }
+  .aside-details .summary-meta {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .aside-details .chevron {
+    width: 16px;
+    height: 16px;
+    margin-left: auto;
+    stroke: var(--muted);
+    stroke-width: 1.8;
+    fill: none;
+    transition: transform var(--dur-base) var(--ease-out);
+  }
+  .aside-details[open] .chevron { transform: rotate(180deg); }
+  @media (prefers-reduced-motion: reduce) {
+    .aside-details .chevron { transition: none; }
+  }
+  @media (min-width: 1001px) {
+    /* `::details-content` is the only handle CSS has on a closed disclosure:
+       the content is hidden in layout, not by a rule on the child, so setting
+       `display` on `.aside-inner` does nothing in any engine. Behind an
+       `@supports` gate, because an engine without the pseudo-element would
+       otherwise be left with the summary hidden and the content unreachable -
+       there it keeps the toggle and the reader opens the rail themselves. */
+    @supports selector(::details-content) {
+      .aside-details::details-content { content-visibility: visible; }
+      .aside-details > summary { display: none; }
+      .aside-details { border-bottom: 0; }
+    }
+    .aside-details[open] > summary { display: none; }
+    .aside-details[open] { border-bottom: 0; }
   }
 
   .article-aside {
