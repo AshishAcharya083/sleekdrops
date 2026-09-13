@@ -501,12 +501,25 @@ export const SCAN_THRESHOLDS = {
   /** Paragraphs (of `minParagraphWords`+) needed before uniformity is measurable. */
   minParagraphs: 6,
   minParagraphWords: 20,
-  /** Paragraph-length variation below this means every block is the same size. */
-  paragraphVariationMin: 0.22,
+  /**
+   * Paragraph-length variation below this means every block is the same size.
+   *
+   * Set from the two ends rather than the middle. A draft in the old skeleton
+   * measures 0.03 and one written to a structure-library shape measures 0.26
+   * (SHAPED_DRAFT in the tests), so anywhere in between separates them; the
+   * threshold sits near the template end because a false positive here costs a
+   * revision round on prose that is doing what it was commissioned to do.
+   * Paragraphs held inside a 40-60 word band still measure 0.14 and still fire.
+   */
+  paragraphVariationMin: 0.18,
   /** H2 sections needed before section shape is a pattern rather than a habit. */
   minSections: 4,
-  /** Variation in the length of each section's opening block. */
-  sectionOpeningVariationMin: 0.18,
+  /**
+   * Variation in the length of each section's opening block. Same calibration:
+   * 0.04 in the old skeleton, 0.21 in a shaped draft, and 0.14 for the
+   * "40-60 word block under every H2" rule this scanner exists to catch.
+   */
+  sectionOpeningVariationMin: 0.15,
   /** Sections that must share an opening frame before it counts, and their share. */
   sectionFrameRepeats: 3,
   sectionFrameShare: 0.6,
@@ -1347,6 +1360,30 @@ function rawSections(raw: string[]): RawSection[] {
   return out.filter((section) => section.to >= section.from);
 }
 
+/**
+ * The numbered designation a product's own `/go/` slug records, as prose
+ * spells it: "roam 2" for `/go/sonos-roam-2`, "wh 1000xm6" for
+ * `/go/sony-wh-1000xm6`.
+ *
+ * Half this category glues the number to a letter - AF160, V15, XM5 - and
+ * `MODEL_MARKER` recognises that form on its own. The other half writes it as
+ * a separate word, and "Roam 2" is no less exact for it. Without this, a draft
+ * that names the Sonos Roam 2 in full is told to add the model designation it
+ * already carries, and the only way to satisfy the finding is to invent a code
+ * the maker does not print.
+ *
+ * The slug is the site's own record of the product name, so it is what the
+ * designation is read off. Null when the slug carries no digit, or carries one
+ * with no word in front of it to anchor it: there is then nothing specific to
+ * match on, and the section is judged on `MODEL_MARKER` alone.
+ */
+function slugDesignation(slug: string): RegExp | null {
+  const parts = slug.split('-');
+  const at = parts.findIndex((part) => /\d/.test(part));
+  if (at < 1) return null;
+  return new RegExp(`\\b${parts[at - 1]}[\\s-]*${parts[at]}\\b`, 'i');
+}
+
 interface ProductPick {
   slug: string;
   /** 1-based line of the first link to this product. */
@@ -1389,9 +1426,11 @@ function productPicks(raw: string[], lines: string[]): ProductPick[] {
     price.lastIndex = 0;
     model.lastIndex = 0;
     const hasPrice = price.test(text);
-    const hasModel = model.test(text);
+    const hasGluedModel = model.test(text);
 
     for (const [slug, line] of linked) {
+      const designation = slugDesignation(slug);
+      const hasModel = hasGluedModel || (designation !== null && designation.test(text));
       const seen = picks.get(slug);
       if (seen) {
         seen.hasPrice = seen.hasPrice || hasPrice;

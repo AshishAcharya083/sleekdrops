@@ -974,3 +974,165 @@ test('a draft with Windows line endings scans the same as one without', () => {
   const separated = detectSlop(VARIED.replace('## How we picked', '## How\u2028we picked'));
   assert.equal(separated.score, detectSlop(VARIED).score);
 });
+
+test('a model designation written as a separate word counts as one', () => {
+  // Half this category glues the number to a letter (AF160, V15) and half
+  // writes it as its own word (Roam 2, Flip 6). Only the first form is a token
+  // a regex sees on its own, so a draft that named the Sonos Roam 2 in full
+  // used to be told to add the designation it already carried - a finding the
+  // editor can only clear by inventing a code the maker does not print.
+  const spaced = `${COMPLETE_PICKS}
+
+## The cheap one: Sonos Roam 2
+
+Sonos rates the Roam 2 at 10 hours and sells it for $299 RRP. It is the only
+one here that hands back to Wi-Fi indoors. [See it on Amazon](/go/sonos-roam-2)`;
+  assert.equal(
+    detectSlop(spaced).findings.some(
+      (f) => f.rule === 'Product without a price or a model designation',
+    ),
+    false,
+  );
+
+  // The number still has to be there. Same section, same price, the product
+  // named as "the Sonos" everywhere including the heading - which is exactly
+  // what the rule exists to catch.
+  const vague = spaced
+    .replace('## The cheap one: Sonos Roam 2', '## The cheap one')
+    .replace('Sonos rates the Roam 2 at 10 hours', 'Sonos rates this one at ten hours');
+  const finding = detectSlop(vague).findings.find(
+    (f) => f.rule === 'Product without a price or a model designation',
+  );
+  assert.ok(finding);
+  assert.deepEqual(finding.matches, ['/go/sonos-roam-2 (missing model designation)']);
+});
+
+// ---------------------------------------------------------------------------
+// Calibration against what the pipeline now ships
+// ---------------------------------------------------------------------------
+
+/**
+ * A draft in the "segmented-buyers" shape from the structure library, written
+ * the way the writer is now instructed to: four extractable answers spent on
+ * the sections that carry one, ordinary prose everywhere else, a comparison
+ * table, a methodology paragraph under this shape's own naming, the FAQ this
+ * shape requires, and the registered disclosure.
+ *
+ * It is the calibration this card's thresholds are set against. Every gate
+ * here is a judgement about prose the pipeline produces on purpose, so a
+ * threshold that fires on this draft is not strict, it is broken: the editor
+ * would be sent to rewrite a piece that is doing exactly what it was
+ * commissioned to do.
+ */
+const SHAPED_DRAFT = `Three people buy a portable Bluetooth speaker for three different reasons, and
+the pick changes with each one. There is no overall winner here. Find the line
+below that sounds like your weekend and skip the rest.
+
+## Which of these you are
+
+If the speaker lives on a kitchen bench and travels twice a year, buy the
+[Sonos Roam 2](/go/sonos-roam-2) at $299 RRP. If it goes in an esky every
+second Saturday, buy the [JBL Flip 6](/go/jbl-flip-6) at $149. If you are
+carrying it up a mountain, the [Tribit StormBox Micro 2](/go/tribit-stormbox-micro-2)
+weighs 318 g and costs $89, and that is the whole argument.
+
+## The pick for the kitchen bench: Sonos Roam 2
+
+Sonos rates the Roam 2 at 10 hours, and its 2026 spec sheet still prints that
+figure with the volume unstated, which is how every maker prints it. At about
+two-thirds volume it lands closer to seven. Wi-Fi handover is the reason to pay
+the extra $150 over the JBL: the speaker joins the house system on the bench
+and drops back to Bluetooth in the car park.
+
+It is not a beach speaker. IP67 covers a splash, but the 1-star reviews on
+ProductReview.com.au are dominated by sand in the grille, and Sonos will not
+service that.
+
+## The pick for the esky: JBL Flip 6
+
+JBL rates the Flip 6 at 12 hours. Owners on ProductReview.com.au put it nearer
+nine with the bass boost on, which is the setting anybody uses outdoors. The
+racetrack driver throws more midrange than the Tribit and enough bass to
+survive wind off the water.
+
+Buy it if the speaker will get wet. Do not buy it if you want it to sound good
+indoors, where it is boomy against a hard wall and stays that way.
+
+Its weakness is the battery. JBL does not sell a replacement pack, and a
+four-year-old Flip is landfill.
+
+## The pick for a pack: Tribit StormBox Micro 2
+
+318 g, $89, and a strap that clips to a bike frame rather than a wrist. Tribit
+claims 12 hours and owners report about eight. The ceiling is volume: past
+about 70% it compresses hard, which on a hillside with wind is the only thing
+that matters.
+
+## The picks side by side
+
+| Speaker | Price (RRP) | Claimed battery | Weight | Rating |
+| --- | --- | --- | --- | --- |
+| Sonos Roam 2 | $299 | 10 h | 430 g | IP67 |
+| JBL Flip 6 | $149 | 12 h | 550 g | IP67 |
+| Tribit StormBox Micro 2 | $89 | 12 h | 318 g | IP67 |
+
+## Where these numbers come from
+
+Battery and weight figures are the makers' own 2026 published specifications.
+The owner figures are counted from ProductReview.com.au and Amazon Australia
+listings read in February 2026. Nobody here has had these three speakers on a
+bench.
+
+## FAQ
+
+### Does IP67 mean a speaker survives salt water?
+
+No. IP67 is tested in fresh water at one metre for thirty minutes. Salt
+corrodes the grille and the charging port, and every maker in this group voids
+the warranty for it. Rinse the speaker under a tap the same day and it will
+last; leave the salt on it and the port fails inside a season.
+
+### Can any of these be used as a pair?
+
+The Sonos Roam 2 pairs with another Roam over Wi-Fi for true stereo. JBL's
+PartyBoost links two Flip 6 units but keeps both in mono unless you set stereo
+in the app. The Tribit does stereo over Bluetooth with a second Micro 2.
+
+## Who should skip all three
+
+Anybody who wants a speaker for a room rather than a trip. At $299 the Roam 2
+is beaten indoors by a $199 bookshelf pair, and the other two are not close.
+This is editorial synthesis from published specifications, retailer listings
+and owner reviews. We have not run these products through a lab.`;
+
+test('a draft written to a structure-library shape passes every v2 gate', () => {
+  const report = detectSlop(SHAPED_DRAFT);
+  assert.deepEqual(
+    report.findings.map((f) => f.rule),
+    [],
+  );
+  assert.equal(report.score, 100);
+});
+
+test('the "40-60 word block under every H2" skeleton still trips both length gates', () => {
+  // The rule this scanner exists to catch, at its most favourable: every
+  // extractable block a different length, spread across the whole 40-60 word
+  // band the old writer prompt allowed. That is still one shape repeated, and
+  // it is what the thresholds above are set to reach.
+  const sentence = (n: number): string =>
+    Array.from({ length: n }, (_, i) => `word${i % 7}`).join(' ') + '.';
+  const section = (heading: string, words: number): string =>
+    `## ${heading}\n\n${sentence(Math.floor(words / 2))} ${sentence(Math.ceil(words / 2))}`;
+  const skeleton = [
+    section('What to look for', 40),
+    section('How the heads compare', 44),
+    section('Why filtration matters', 48),
+    section('What we think about price', 52),
+    section('How long they last', 56),
+    section('Where to buy one', 60),
+  ].join('\n\n');
+
+  const rules = detectSlop(skeleton).findings.map((f) => f.rule);
+  assert.ok(rules.includes('Uniform paragraph length'), rules.join(', '));
+  assert.ok(rules.includes('Section-shape uniformity'), rules.join(', '));
+});
