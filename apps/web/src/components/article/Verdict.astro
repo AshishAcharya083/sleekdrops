@@ -35,8 +35,13 @@ const href = `/go/${postSlug}`;
     </Button>
   </div>
   <div class="score">
+    {/* Named for what it is built from. A bare number beside a product we earn
+        commission on reads as a test result nobody here ran; "research score",
+        linked to the page that says what goes into it, is the claim we can
+        actually stand behind. */}
     <div class="score-num">{product.rating.toFixed(1)}<sup>&nbsp;/5</sup></div>
     <StarRating rating={product.rating} />
+    <a class="score-label" href="/how-we-research#scores">Research score</a>
   </div>
 </aside>
 
@@ -89,6 +94,17 @@ const href = `/go/${postSlug}`;
     color: var(--muted);
     font-style: italic;
   }
+  .score-label {
+    display: inline-block;
+    margin-top: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-decoration-color: var(--hairline-strong);
+  }
+  .score-label:hover { color: var(--accent); }
 
   @media (max-width: 700px) {
     .verdict { grid-template-columns: 1fr; }

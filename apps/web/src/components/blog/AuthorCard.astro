@@ -15,7 +15,15 @@ const { author } = Astro.props;
     <h4>{author.name}</h4>
     <p>{author.bio}</p>
     {author.focus && <p class="focus">{author.beat} beat: {author.focus}</p>}
-    <a href={`/author/${author.id}`}>All posts by the editorial team →</a>
+    <p class="honesty">
+      Written with AI assistance and reviewed by a human editor before
+      publication. No SleekDrops article is written from hands-on testing.
+    </p>
+    <div class="links">
+      <a href={`/author/${author.id}`}>All posts by the editorial team →</a>
+      <a href="/how-we-research">How we research</a>
+      <a href="/ai-disclosure">AI disclosure</a>
+    </div>
   </div>
 </aside>
 
@@ -64,7 +72,14 @@ const { author } = Astro.props;
     margin: 0 0 12px;
   }
   .focus { font-size: 13px; }
-  a {
+  .honesty { font-size: 13px; color: var(--muted); }
+  .links {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    align-items: baseline;
+  }
+  .links a {
     font-size: 13px;
     font-weight: 600;
     text-decoration: none;
@@ -72,5 +87,10 @@ const { author } = Astro.props;
     border-bottom: 1.5px solid var(--accent);
     padding-bottom: 2px;
   }
-  a:hover { color: var(--accent); }
+  .links a:not(:first-child) {
+    font-weight: 500;
+    color: var(--muted);
+    border-bottom-color: var(--hairline-strong);
+  }
+  .links a:hover { color: var(--accent); border-bottom-color: var(--accent); }
 </style>

@@ -32,6 +32,16 @@ const year = new Date().getFullYear();
       </div>
 
       <div class="footer-col">
+        <h6>How we work</h6>
+        <ul>
+          <li><a href="/how-we-research">How we research</a></li>
+          <li><a href="/ai-disclosure">AI disclosure</a></li>
+          <li><a href="/disclaimer">Affiliate disclaimer</a></li>
+          <li><a href="/about">About SleekDrops</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
         <h6>Categories</h6>
         <ul>
           {categories.map((c) => (
@@ -69,7 +79,7 @@ const year = new Date().getFullYear();
   }
   .footer-grid {
     display: grid;
-    grid-template-columns: 1.5fr 1fr 1fr;
+    grid-template-columns: 1.4fr 1fr 1fr 1fr;
     gap: 48px;
     margin-bottom: 48px;
   }
@@ -127,7 +137,12 @@ const year = new Date().getFullYear();
   .footer-links button:hover { color: var(--accent); }
   .footer-links button[hidden] { display: none; }
 
-  @media (max-width: 900px) {
+  /* Four columns need more room than three did: two rows of two before the
+     single-column stack, rather than four squeezed columns at tablet width. */
+  @media (max-width: 1040px) {
+    .footer-grid { grid-template-columns: 1fr 1fr; gap: 40px 32px; }
+  }
+  @media (max-width: 620px) {
     .footer-grid { grid-template-columns: 1fr; gap: 32px; }
   }
 

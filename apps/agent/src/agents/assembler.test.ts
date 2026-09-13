@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runAssembler } from './assembler.js';
+import { citedSourceIndexes } from '../content/sources.js';
 import type { ArticleRow, ContentBrief } from '../pipeline/types.js';
 
 const brief: ContentBrief = {
@@ -296,6 +297,80 @@ test('a nameless dossier product is skipped rather than failing the assembly', a
 
   assert.equal('picks' in frontmatter, false);
   assert.equal(affiliateLinks.length, 1, 'the affiliate row behind the link still ships');
+});
+
+test('the tier, date and publisher the researcher filed a source under ride through', async () => {
+  const tiered = {
+    ...(twoProducts as unknown as { facts: Array<Record<string, unknown>> }),
+    facts: [
+      {
+        fact: 'Rated 210AW on high.',
+        sourceUrl: 'https://www.choice.com.au/vacuums',
+        tier: 'expert',
+        date: '2026-03',
+        publisher: 'Choice',
+      },
+      {
+        fact: 'Owners report brush-bar tangles.',
+        sourceUrl: 'https://www.productreview.com.au/shark',
+        tier: 'unknown',
+        date: null,
+        publisher: null,
+      },
+    ],
+  } as never;
+
+  const { frontmatter } = await runAssembler(
+    article({ research: tiered, keyword_plan: vacuumPlan, draft_md: linkedBody }),
+  );
+
+  assert.deepEqual(frontmatter.sources, [
+    {
+      url: 'https://www.choice.com.au/vacuums',
+      publisher: 'Choice',
+      date: '2026-03',
+      tier: 'expert',
+    },
+    {
+      url: 'https://www.productreview.com.au/shark',
+      publisher: 'productreview.com.au',
+      tier: 'unknown',
+    },
+  ]);
+});
+
+test('the sources shown are the ones the body cites, and a marker past the end goes', async () => {
+  // The visible list and the markers in the prose are two views of one
+  // derivation: a marker that survives assembly always has an entry behind it.
+  const cited =
+    '## Our picks\n\n[Shark Detect Pro](/go/shark-detect-pro) lost suction as the filter clogged.[1] ' +
+    'Owners report tangles.[2] Nobody published a teardown.[5] ' +
+    'The [Dyson V15 Detect](/go/dyson-v15-detect) is the upgrade.';
+
+  const { frontmatter, body } = await runAssembler(
+    article({ research: twoProducts, keyword_plan: vacuumPlan, draft_md: cited }),
+  );
+
+  const sources = frontmatter.sources as Array<{ url: string }>;
+  assert.equal(sources.length, 2);
+  assert.deepEqual(citedSourceIndexes(body), [1, 2]);
+  assert.doesNotMatch(body, /\[5\]/);
+  assert.match(body, /teardown\. Th/, 'the sentence survives, only the broken marker goes');
+});
+
+test('every assembly stamps the date a human last reviewed the piece', async () => {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const fresh = await runAssembler(article());
+  assert.equal(fresh.frontmatter.lastReviewed, today);
+  assert.equal(fresh.frontmatter.pubDate, today);
+
+  // A re-assembly keeps the original publication date and still re-stamps the
+  // review: "reviewed today" and "published in June" are different promises.
+  const revisited = await runAssembler(article({ frontmatter: { pubDate: '2026-06-01' } }));
+  assert.equal(revisited.frontmatter.pubDate, '2026-06-01');
+  assert.equal(revisited.frontmatter.updatedDate, today);
+  assert.equal(revisited.frontmatter.lastReviewed, today);
 });
 
 test('an article with no research or keyword plan carries no structured-data fields', async () => {

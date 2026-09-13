@@ -13,8 +13,9 @@ import {
   pickCover,
   validateArticle,
 } from '../content/contract.js';
+import { articleSources, stripUnresolvedCitations } from '../content/sources.js';
 import { productSearchTerm, verifyAmazonProductUrl } from '../tools/amazon.js';
-import type { AffiliateLinkRow, ArticleRow, ResearchDossier } from '../pipeline/types.js';
+import type { AffiliateLinkRow, ArticleRow } from '../pipeline/types.js';
 
 export interface AssembledArticle {
   frontmatter: Record<string, unknown>;
@@ -22,41 +23,6 @@ export interface AssembledArticle {
   /** Body after stripping /go/ links that had no resolvable destination. */
   body: string;
   droppedSlugs: string[];
-}
-
-/**
- * The dossier's sources, in the order the research stated them, deduped and
- * limited to web URLs — they become the page's JSON-LD `citation`.
- *
- * What is stored is the parser's normalised serialisation, never the raw
- * string: a source URL is attacker-influenceable (the researcher collects them
- * from search results), and `new URL()` percent-encodes the characters that
- * would otherwise let one break out of the `<script type="application/ld+json">`
- * block it is rendered into. Normalising also makes the dedupe set compare
- * canonical forms rather than incidental spelling.
- */
-function citableSources(
-  facts: ResearchDossier['facts'],
-): Array<{ url: string; publisher?: string }> {
-  const seen = new Set<string>();
-  const sources: Array<{ url: string; publisher?: string }> = [];
-  for (const fact of facts) {
-    const stated = fact.sourceUrl?.trim();
-    if (!stated) continue;
-    let parsed: URL;
-    try {
-      parsed = new URL(stated);
-    } catch {
-      continue;
-    }
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
-    const url = parsed.toString();
-    if (seen.has(url)) continue;
-    seen.add(url);
-    const publisher = parsed.hostname.replace(/^www\./, '');
-    sources.push({ url, ...(publisher ? { publisher } : {}) });
-  }
-  return sources;
 }
 
 function uniqueEntities(entities: string[]): string[] {
@@ -90,6 +56,12 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
     tags: brief.tags,
     pubDate,
     ...(pubDate !== today ? { updatedDate: today } : {}),
+    // Stamped on every pass, including a re-assembly that leaves pubDate
+    // alone. It is the date the piece was last rebuilt from its research and
+    // checked against its sources - before the editor's sign-off at the
+    // approval gate - which is a different promise from when it first went up,
+    // and the one the article's review stamp makes.
+    lastReviewed: today,
     readTime: estimateReadTime(body),
     cover: pickCover(brief.slug),
     featured: false,
@@ -144,12 +116,18 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
       .replace(new RegExp(`\\[([^\\]]*)\\]\\(/go/${slug}\\)`, 'g'), '$1')
       .replace(new RegExp(`/go/${slug}`, 'g'), '');
   }
+
+  // The sources the page shows, and the markers in the body that point at
+  // them. A marker numbered past the end of the list has nothing to link to,
+  // so it goes the same way an unresolvable /go/ link does — the sentence
+  // survives, the broken reference does not.
+  const sources = articleSources(article.research?.facts ?? []);
+  body = stripUnresolvedCitations(body, sources.length);
   frontmatter.readTime = estimateReadTime(body);
 
   // Structured-data inputs for the site's JSON-LD graph. `picks` is keyed off
   // the resolved affiliate rows, not the raw body, so every Offer URL the site
   // emits has a live /go/ destination behind it.
-  const sources = citableSources(article.research?.facts ?? []);
   const entities = uniqueEntities(article.keyword_plan?.entities ?? []);
   const picks = [...bySlug.keys()].flatMap((slug) => {
     const product = products.find((p) => p.goSlug === slug);

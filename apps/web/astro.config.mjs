@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import rehypeAffiliateLinks from './src/lib/rehype-affiliate-links.mjs';
+import rehypeCitations from './src/lib/rehype-citations.mjs';
 import { createSitemapPolicy, readContentIndex } from './src/lib/sitemap-policy.mjs';
 
 const site = process.env.SITE_URL ?? 'https://sleekdrops.com';
@@ -47,8 +48,9 @@ export default defineConfig({
     remarkPlugins: [remarkGfm],
     // Every /go/<slug> link in an article body is a paid placement, and Google
     // asks for rel="sponsored" on those; the markdown pipeline is the only place
-    // body links can be given it.
-    rehypePlugins: [rehypeAffiliateLinks],
+    // body links can be given it. The second plugin turns the body's `[n]`
+    // citation markers into links into the article's own sources block.
+    rehypePlugins: [rehypeAffiliateLinks, rehypeCitations],
     shikiConfig: {
       theme: 'github-light',
       wrap: true,
