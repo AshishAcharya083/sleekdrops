@@ -329,6 +329,68 @@ export function goSlugsIn(body: string): string[] {
   return [...new Set([...body.matchAll(GO_LINK)].map((m) => m[1]))];
 }
 
+/** A markdown link whose destination is a /go/ slug, with its anchor text. */
+const GO_MARKDOWN_LINK = /\[([^\]]+)\]\(\/go\/([a-z0-9]+(?:-[a-z0-9]+)*)\)/g;
+
+/**
+ * Words that shop rather than name. An anchor built only from these ("check
+ * the price", "here") points at a product without ever saying which one, so
+ * there is nothing to rebuild a destination from.
+ */
+const SHOPPING_WORDS = new Set([
+  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'it', 'one', 'here', 'now', 'today',
+  'see', 'check', 'view', 'buy', 'shop', 'get', 'grab', 'find', 'compare', 'click', 'order',
+  'browse', 'price', 'prices', 'pricing', 'cost', 'deal', 'deals', 'offer', 'offers', 'link',
+  'links', 'more', 'details', 'latest', 'current', 'best', 'cheapest', 'lowest', 'full',
+  'out', 'on', 'at', 'in', 'for', 'from', 'to', 'and', 'or', 'amazon', 'store', 'online',
+  'available', 'availability', 'stock',
+]);
+
+/**
+ * What each /go/ link in the body calls the thing it points at, keyed by slug.
+ *
+ * This is what lets a link with no dossier product behind it be rebuilt rather
+ * than deleted: the anchor text a writer put on an affiliate link IS the
+ * product name, which is the only input an Amazon search destination needs.
+ *
+ * The anchor is kept whole (minus markdown emphasis) rather than reduced to
+ * the words that look like a name — the writer's own phrasing searches better
+ * than anything a word filter would leave behind. Slugs whose anchor names no
+ * product at all are simply absent, and a slug linked more than once is taken
+ * from the first anchor that names something.
+ */
+export function goLinkAnchors(body: string): Map<string, string> {
+  const anchors = new Map<string, string>();
+  for (const [, anchor, slug] of body.matchAll(GO_MARKDOWN_LINK)) {
+    if (anchors.has(slug)) continue;
+    const named = anchorProductName(anchor);
+    if (named) anchors.set(slug, named);
+  }
+  return anchors;
+}
+
+/**
+ * The anchor text as a search term, or '' when it names no product.
+ *
+ * Naming takes a word of two or more letters that is not one of the shopping
+ * words: a price ("A$1,199"), a bare model number or an arrow is a link a
+ * reader follows for a product it never says the name of, and searching Amazon
+ * for those characters is a worse destination than no link at all.
+ */
+function anchorProductName(anchor: string): string {
+  const plain = anchor
+    .replace(/[*_`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N})]+$/gu, '');
+  const namesSomething = plain.split(' ').some((word) => {
+    const letters = word.replace(/[^\p{L}]/gu, '');
+    const bare = word.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
+    return letters.length >= 2 && !SHOPPING_WORDS.has(bare);
+  });
+  return namesSomething ? plain : '';
+}
+
 export function estimateReadTime(body: string): number {
   const words = body.split(/\s+/).filter(Boolean).length;
   return Math.max(1, Math.round(words / 220));

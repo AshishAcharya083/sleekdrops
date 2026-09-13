@@ -4,9 +4,14 @@
 // no LLM touches a URL. Each row is region-aware: a liveness-verified ASIN for
 // the marketplace it was captured on, plus a search term the /go/ resolver
 // uses for every other region (search-results pages never 404).
+//
+// A slug the dossier cannot account for is healed from its own anchor text
+// rather than deleted: the words the writer put on the link are the product's
+// name, and a name is the whole input a search destination needs.
 import {
   amazonSearchUrl,
   estimateReadTime,
+  goLinkAnchors,
   goSlugsIn,
   HOME_CURRENCY,
   MONETISED_INTENTS,
@@ -20,8 +25,10 @@ import type { AffiliateLinkRow, ArticleRow } from '../pipeline/types.js';
 export interface AssembledArticle {
   frontmatter: Record<string, unknown>;
   affiliateLinks: AffiliateLinkRow[];
-  /** Body after stripping /go/ links that had no resolvable destination. */
+  /** Body after stripping the /go/ links that could not be healed either. */
   body: string;
+  /** Slugs linked to an Amazon search built from their own anchor text. */
+  healedSlugs: string[];
   droppedSlugs: string[];
 }
 
@@ -106,10 +113,35 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
       note: `${product.name} — ${verified ? `ASIN ${verified.asin} (${verified.region}, verified ${today})` : 'search link (no verified ASIN)'}, used by ${brief.slug}`,
     });
   }
+
+  // A /go/ slug with no dossier product behind it still names a real product:
+  // the writer's anchor text is that name, and `amazonSearchUrl` asks for
+  // nothing else. So the link is rebuilt from the body rather than deleted -
+  // stripping it destroys the evidence of what the reader was promised, and
+  // the monetisation gate below then fails the piece on its absence.
+  //
+  // The destination class is the same one every resolved row already carries
+  // as its `default_url` safety net, so a healed link needs no disclosure the
+  // page does not already make.
+  const anchors = goLinkAnchors(body);
+  const healedSlugs: string[] = [];
+  for (const slug of slugsInBody) {
+    if (bySlug.has(slug)) continue;
+    const search = productSearchTerm({ name: anchors.get(slug) ?? '' });
+    if (!search) continue; // the anchor names no product → stripped below
+    bySlug.set(slug, {
+      slug,
+      default_url: amazonSearchUrl(search),
+      regions_json: { network: 'amazon', search },
+      note: `${search} - healed from anchor text, no dossier product behind it, used by ${brief.slug}`,
+    });
+    healedSlugs.push(slug);
+  }
   const finalLinks = [...bySlug.values()];
 
-  // A /go/ slug with no dossier product would fail the site build. Rather than
-  // failing the article, strip those links and keep the product as plain text.
+  // What is left names nothing to search for, and a /go/ slug with no row
+  // would fail the site build. Rather than failing the article, strip those
+  // links and keep the sentence as plain text.
   const droppedSlugs = slugsInBody.filter((slug) => !bySlug.has(slug));
   for (const slug of droppedSlugs) {
     body = body
@@ -158,18 +190,22 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
   if (problems.length > 0) {
     throw new Error(`assembly validation failed:\n- ${problems.join('\n- ')}`);
   }
-  // The dossier had products and the intent is commercial, yet nothing in the
-  // body resolved to one — the draft ignored the link contract. The reviewer's
-  // `links` dimension is supposed to catch this; being sure is deterministic.
+  // Last line, and only after healing has had its turn: a commercial piece
+  // with nothing clickable on it either linked nothing at all or named nothing
+  // a reader could be sent to. This is not a judgement about revenue - a
+  // launch-window piece settles its commission 6-12+ weeks after the traffic,
+  // so nobody can tell at publish time what a page earns. It is the page
+  // failing to do what a "which should I buy" piece exists to do.
   const intent = article.keyword_plan?.intent;
   if (finalLinks.length === 0 && intent && MONETISED_INTENTS.has(intent)) {
     throw new Error(
-      `no affiliate links for a ${intent} piece: the dossier carried ${products.length} product(s) ` +
-        `and the draft linked ${slugsInBody.length} /go/ slug(s)` +
-        `${droppedSlugs.length > 0 ? `, all unresolvable (${droppedSlugs.join(', ')})` : ''}. ` +
-        `Publishing this would earn nothing.`,
+      `no affiliate links for a ${intent} piece: the dossier carried ${products.length} product(s), ` +
+        `the draft linked ${slugsInBody.length} /go/ slug(s), and anchor-text healing recovered ` +
+        `${healedSlugs.length} of ${slugsInBody.length}` +
+        `${droppedSlugs.length > 0 ? ` (nothing nameable in: ${droppedSlugs.join(', ')})` : ''}. ` +
+        `There is nothing on the page for a reader to click.`,
     );
   }
 
-  return { frontmatter, affiliateLinks: finalLinks, body, droppedSlugs };
+  return { frontmatter, affiliateLinks: finalLinks, body, healedSlugs, droppedSlugs };
 }

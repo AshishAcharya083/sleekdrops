@@ -386,6 +386,23 @@ export function normaliseDossier(raw: unknown): ResearchDossier {
 }
 
 /**
+ * A dossier with a rediscovered product list folded into it.
+ *
+ * The keyword stage runs this when research filed evidence but no contenders.
+ * Everything else the research pass produced - the facts, the owner strata and
+ * the gate verdict the panel renders beside them - is carried through as it
+ * was stored: the piece is missing a product list, not its evidence, and a
+ * remediation that overwrote the rest would be a worse fault than the one it
+ * set out to fix.
+ */
+export function withDiscoveredProducts(
+  dossier: ResearchDossier | null,
+  products: ResearchDossier['products'],
+): ResearchDossier {
+  return { ...normaliseDossier(dossier ?? {}), ...(dossier ?? {}), products };
+}
+
+/**
  * Shortest competitorNotes that could describe what the top pages cover and
  * where they are thin. Below it the stratum was skipped, whatever it says.
  */

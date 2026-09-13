@@ -108,12 +108,12 @@ test('no hero image at all still assembles — the site renders its cover fill',
 });
 
 // ── The monetisation gate ────────────────────────────────────────────────────
-// A "which should I buy" piece that ships with nothing to click earns nothing,
-// and post_type does not catch it: a plain `article` is allowed to carry no
-// products (a trend piece has nothing to link), so the only signal is the
-// intent the keyword strategist read off the SERP. Production produced exactly
-// this shape — post_type "article", intent "Commercial Investigation", a
-// dossier with no products at all.
+// A "which should I buy" piece that ships with nothing to click fails at the
+// one job it was commissioned to do, and post_type does not catch it: a plain
+// `article` is allowed to carry no products (a trend piece has nothing to
+// link), so the only signal is the intent the keyword strategist read off the
+// SERP. Production produced exactly this shape — post_type "article", intent
+// "Commercial Investigation", a dossier with no products at all.
 
 const plan = (intent: string) => ({ intent, primaryKeyword: 'k', wordCountTarget: 1500 }) as never;
 
@@ -262,21 +262,157 @@ test('a source URL is stored as the parser normalised it, not as it was stated',
   ]);
 });
 
-test('picks only cover the /go/ slugs that resolved to a live destination', async () => {
-  // The draft linked a product the dossier never carried: the link is stripped
-  // from the body, so it must not become a pick with a dead Offer URL either.
-  const { frontmatter, droppedSlugs } = await runAssembler(
+test('picks only cover the /go/ slugs a dossier product stands behind', async () => {
+  // The draft linked a product the dossier never carried. The link itself is
+  // healed from its anchor text, but there is no dossier row behind it, so it
+  // must not become a pick: `picks` is what the site's ItemList is built from,
+  // and it carries a brand and a price this product has neither of.
+  const { frontmatter, droppedSlugs, healedSlugs } = await runAssembler(
     article({
       research: twoProducts,
       keyword_plan: vacuumPlan,
-      draft_md: '## Our pick\n\n[Shark Detect Pro](/go/shark-detect-pro), not the [Miele](/go/miele-triflex).',
+      draft_md: '## Our pick\n\n[Shark Detect Pro](/go/shark-detect-pro), not the [Miele Triflex](/go/miele-triflex).',
     }),
   );
 
-  assert.deepEqual(droppedSlugs, ['miele-triflex']);
+  assert.deepEqual(droppedSlugs, []);
+  assert.deepEqual(healedSlugs, ['miele-triflex']);
   assert.deepEqual((frontmatter.picks as Array<{ goSlug: string }>).map((p) => p.goSlug), [
     'shark-detect-pro',
   ]);
+});
+
+// ── Healing an unresolvable /go/ slug ────────────────────────────────────────
+// A slug with no dossier product behind it used to be stripped out of the body
+// and then counted as a reason to fail the piece. The anchor text names the
+// product, and a search destination needs nothing else, so the link is rebuilt
+// instead - and the gate below only fires once that has been tried.
+
+test('a slug the dossier never carried is linked from its own anchor text', async () => {
+  const { affiliateLinks, body, healedSlugs, droppedSlugs } = await runAssembler(
+    article({
+      research: twoProducts,
+      keyword_plan: vacuumPlan,
+      draft_md: '## Our pick\n\nThe [Miele Triflex HX2](/go/miele-triflex-hx2) is the quiet one.',
+    }),
+  );
+
+  assert.deepEqual(healedSlugs, ['miele-triflex-hx2']);
+  assert.deepEqual(droppedSlugs, []);
+  assert.match(body, /\[Miele Triflex HX2\]\(\/go\/miele-triflex-hx2\)/, 'the link survives');
+
+  const healed = affiliateLinks.find((link) => link.slug === 'miele-triflex-hx2')!;
+  assert.equal(healed.default_url, 'https://www.amazon.com.au/s?k=Miele%20Triflex%20HX2');
+  assert.deepEqual(healed.regions_json, { network: 'amazon', search: 'Miele Triflex HX2' });
+  assert.match(healed.note, /healed from anchor text, no dossier product behind it/);
+});
+
+test('markdown emphasis around the name is not part of the search term', async () => {
+  const { affiliateLinks } = await runAssembler(
+    article({
+      research: twoProducts,
+      keyword_plan: vacuumPlan,
+      draft_md: '## Our pick\n\nThe [**Miele Triflex HX2**](/go/miele-triflex-hx2) is the quiet one.',
+    }),
+  );
+
+  assert.equal(affiliateLinks[0].regions_json?.search, 'Miele Triflex HX2');
+});
+
+test('a resolved product is never overwritten by its anchor text', async () => {
+  // The dossier is the better source: it carries the brand, and (where one
+  // survived the liveness probe) the ASIN. Healing only fills holes.
+  const { affiliateLinks, healedSlugs } = await runAssembler(
+    article({
+      research: twoProducts,
+      keyword_plan: vacuumPlan,
+      draft_md: '## Our pick\n\n[the one we like](/go/shark-detect-pro) is the buy.',
+    }),
+  );
+
+  assert.deepEqual(healedSlugs, []);
+  assert.equal(affiliateLinks[0].regions_json?.search, 'Shark Detect Pro');
+  assert.match(affiliateLinks[0].note, /^Shark Detect Pro/);
+});
+
+test('anchor text that names no product is still stripped', async () => {
+  // "Check the price" points at a product without saying which one. A search
+  // for those words is worse than no link: it sends a reader nowhere useful
+  // and still spends the click.
+  const { affiliateLinks, body, droppedSlugs, healedSlugs } = await runAssembler(
+    article({
+      research: twoProducts,
+      keyword_plan: vacuumPlan,
+      draft_md: linkedBody + '\n\n[Check the price](/go/todays-best-deal) before you commit.',
+    }),
+  );
+
+  assert.deepEqual(healedSlugs, []);
+  assert.deepEqual(droppedSlugs, ['todays-best-deal']);
+  assert.equal(affiliateLinks.length, 2, 'only the two dossier products ship');
+  assert.match(body, /Check the price before you commit\./);
+  assert.doesNotMatch(body, /\/go\/todays-best-deal/);
+});
+
+test('a bare /go/ reference with no anchor text at all is stripped', async () => {
+  const { droppedSlugs, healedSlugs } = await runAssembler(
+    article({
+      research: twoProducts,
+      keyword_plan: vacuumPlan,
+      draft_md: linkedBody + '\n\nSee /go/miele-triflex for the quiet one.',
+    }),
+  );
+
+  assert.deepEqual(healedSlugs, []);
+  assert.deepEqual(droppedSlugs, ['miele-triflex']);
+});
+
+test('a commercial piece whose only links are healed publishes', async () => {
+  // The Z Fold 8 shape: three real products named in the body, a dossier that
+  // carries none of them, and a gate that used to fail the piece for it.
+  const noProducts = { ...(twoProducts as unknown as Record<string, unknown>), products: [] } as never;
+
+  const { affiliateLinks, healedSlugs } = await runAssembler(
+    article({
+      research: noProducts,
+      keyword_plan: vacuumPlan,
+      draft_md:
+        '## The one to buy\n\nThe [Samsung Galaxy Z Fold 8](/go/samsung-galaxy-z-fold-8) folds flat, ' +
+        'the [Samsung Galaxy Z Fold 8 Ultra](/go/samsung-galaxy-z-fold-8-ultra) costs more, and the ' +
+        '[Samsung Galaxy Z Flip 8](/go/samsung-galaxy-z-flip-8) fits a pocket.',
+    }),
+  );
+
+  assert.equal(healedSlugs.length, 3);
+  assert.deepEqual(
+    affiliateLinks.map((link) => link.default_url),
+    [
+      'https://www.amazon.com.au/s?k=Samsung%20Galaxy%20Z%20Fold%208',
+      'https://www.amazon.com.au/s?k=Samsung%20Galaxy%20Z%20Fold%208%20Ultra',
+      'https://www.amazon.com.au/s?k=Samsung%20Galaxy%20Z%20Flip%208',
+    ],
+  );
+});
+
+test('the gate fires only after healing, and reports what healing recovered', async () => {
+  await assert.rejects(
+    runAssembler(
+      article({
+        research: oneProduct,
+        keyword_plan: plan('Commercial Investigation'),
+        draft_md: '## Our pick\n\n[Check the price](/go/todays-best-deal) before you commit.',
+      }),
+    ),
+    (err: Error) => {
+      assert.match(err.message, /anchor-text healing recovered 0 of 1/);
+      assert.match(err.message, /nothing nameable in: todays-best-deal/);
+      assert.match(err.message, /nothing on the page for a reader to click/);
+      // Commission on a launch-window piece settles 6-12+ weeks after the
+      // traffic, so the gate does not get to claim what a page would earn.
+      assert.doesNotMatch(err.message, /earn/i);
+      return true;
+    },
+  );
 });
 
 test('a nameless dossier product is skipped rather than failing the assembly', async () => {

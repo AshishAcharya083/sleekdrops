@@ -13,7 +13,7 @@
 // The Tavily sweep still runs first and unconditionally. It is the evidence
 // floor — breadth the model does not have to think to ask for — and the search
 // tool is what the model uses on top of it to check the specifics that matter.
-import { chatJson, type ShapeCheck, UsageTracker } from '../llm/index.js';
+import { chatJson, requireKeys, type ShapeCheck, UsageTracker } from '../llm/index.js';
 import { formatSearches, type SearchHit, tavilySearchMany } from '../tools/tavily.js';
 import { assertEvidenceSufficient, describeBar, normaliseDossier } from '../content/evidence.js';
 import { operatorBrief, siteContext, SOURCE_DISCIPLINE, VERIFICATION_RULES } from './context.js';
@@ -313,6 +313,78 @@ Return JSON:
   // route to `failed` — runStage's catch writes the status, the message and
   // releases the claim already, so there is no second failure path to keep.
   return assertEvidenceSufficient(normaliseDossier(dossier), article.post_type, article.category);
+}
+
+/**
+ * Product discovery, as a remediation pass rather than a whole second dossier.
+ *
+ * The keyword stage is the first point at which "this piece has nothing to
+ * link" is knowable: the dossier is built and the SERP read has just named the
+ * intent. A dossier with no products at that point used to be terminal, which
+ * is the wrong shape for a recoverable fault - a "best foldable" piece whose
+ * research pass filed its evidence but never filed a product list is missing
+ * one narrow thing, and one narrow search is what it takes to get it.
+ *
+ * So this asks for products and nothing else, against the keyword the piece is
+ * actually being built to win. It returns what it found, including nothing:
+ * inventing contenders to clear a gate is the failure this exists to avoid,
+ * and an empty result is the caller's signal to fail the card.
+ */
+export async function runProductDiscovery(
+  article: ArticleRow,
+  topic: TopicRow | null,
+  keyword: string,
+  model: string,
+  tracker: UsageTracker,
+): Promise<ResearchDossier['products']> {
+  const brief = operatorBrief(topic);
+  const queries = [...new Set([`best ${keyword} australia`, `${keyword} price australia`])];
+  const searches = await tavilySearchMany(queries, 5);
+
+  const { products } = await chatJson<{ products: ResearchDossier['products'] }>(
+    {
+      model,
+      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}\n\n${VERIFICATION_RULES}`,
+      temperature: 0.2,
+      search: true,
+      prompt: `Name the products a buyer searching "${keyword}" is actually choosing between.
+
+Working title: ${article.title}
+Post type: ${article.post_type} | Category: ${article.category}
+${brief ? `\n${brief}\n` : ''}
+The research dossier for this piece was filed without a product list, and the
+piece cannot recommend anything it cannot name. This pass fills that hole and
+nothing else - no facts, no prices beyond an approximate RRP, no review copy.
+
+RULES:
+- Real models, on sale in Australia now, named the way the retailer names them
+  ("Samsung Galaxy Z Fold 8", not "Samsung's latest foldable"). Check the
+  evidence below or search before you file one.
+- amazonUrl: an Amazon PRODUCT page URL (amazon.com.au or amazon.com, containing
+  /dp/ or /gp/product/) you have actually seen - else null. Never assemble one
+  from an ASIN you remember. Products without one are fine: the pipeline links
+  them via an Amazon search fallback.
+- goSlug is the kebab-case affiliate slug for the product ("samsung-galaxy-z-fold-8").
+- approxPrice is AUD and approximate ("about A$2,899"), or "" when you could not
+  check one. An invented price is worse than no price.
+- 3-6 contenders. Return an empty array rather than padding with products that
+  do not exist or are not sold here - the pipeline fails the piece honestly on
+  an empty list, and a fabricated contender fails a reader instead.
+
+Search evidence:
+${formatSearches(searches)}
+
+Return JSON:
+{"products": [{"name": string, "brand": string, "approxPrice": string,
+               "amazonUrl": string|null, "goSlug": string, "notes": string}]}`,
+    },
+    tracker,
+    requireKeys<{ products: ResearchDossier['products'] }>('products'),
+  );
+
+  // Through the same normalisation the dossier gets: slugified goSlugs and
+  // non-Amazon URLs dropped are what the assembler's link contract assumes.
+  return normaliseDossier({ products }).products;
 }
 
 /**
