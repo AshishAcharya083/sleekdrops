@@ -723,6 +723,26 @@ test('no single new metric drags a draft below the pass mark on its own', () => 
     verdict.findings.map((f) => f.rule).join(', '),
   );
   assert.ok(verdict.score >= SLOP_PASS_SCORE, `thin verdict scored ${verdict.score}`);
+
+  // The shaped draft with its two Australian anchors taken out, and nothing
+  // else changed: the gate fires and the draft still ships.
+  const unanchored = detectSlop(
+    SHAPED_DRAFT.replace('at $299 RRP', 'at $299').replace(
+      'That is $150 less\nthan the Sonos.',
+      'That is cheaper\nthan the Sonos.',
+    ),
+  );
+  assert.deepEqual(unanchored.findings.map((f) => f.rule), [
+    'Recommendation without an Australian anchor',
+  ]);
+  assert.ok(unanchored.score >= SLOP_PASS_SCORE, `unanchored draft scored ${unanchored.score}`);
+
+  // Same for page furniture typed into an otherwise clean body.
+  const furniture = detectSlop(
+    `${SHAPED_DRAFT}\n\n${HOUSE_BLOCKS.find((b) => b.templateOwned)?.text ?? ''}`,
+  );
+  assert.deepEqual(furniture.findings.map((f) => f.rule), ['Page furniture written into the body']);
+  assert.ok(furniture.score >= SLOP_PASS_SCORE, `retyped furniture scored ${furniture.score}`);
 });
 
 /** A verdict long enough to measure and carrying not one verifiable fact. */
@@ -743,6 +763,12 @@ test('every new finding carries line numbers and a fix, like every old one', () 
     ...detectSlop(WITH_LINKS).findings,
     ...detectSlop(COMPLETE_PICKS.replace(WRAPPED_DISCLOSURE, 'We picked six.')).findings,
     ...detectSlop(NEAR_DUPLICATE, { corpus: CORPUS }).findings,
+    ...detectSlop(
+      `${SHAPED_DRAFT.replace('at $299 RRP', 'at $299').replace(
+        'That is $150 less\nthan the Sonos.',
+        'That is cheaper\nthan the Sonos.',
+      )}\n\n${HOUSE_BLOCKS.find((b) => b.templateOwned)?.text ?? ''}`,
+    ).findings,
   ];
   const v2 = findings.filter((f) =>
     ['uniformity', 'specificity', 'repetition', 'disclosure'].includes(f.category),
@@ -819,7 +845,10 @@ const WITH_LINKS = VARIED.replace(
 const COMPLETE_PICKS = WITH_LINKS.replace(
   'Dyson rates the V15 at 60 minutes',
   'Dyson lists the V15 Detect Absolute at $1,449 RRP and rates it at 60 minutes',
-).replace('Shark sells the Detect Pro for $599 RRP.', 'Shark sells the Detect Pro IW3611 for $599 RRP.');
+).replace(
+  'Shark sells the Detect Pro for $599 RRP.',
+  "Shark sells the Detect Pro IW3611 for $599 RRP, the same figure its 2026 listing shows.",
+);
 
 test('every product we earn on owes a price and a model designation', () => {
   // The /go/ slug is the site's own record that a passage sells something, so
@@ -978,7 +1007,7 @@ test('a passage that names a pick is held to a density an explainer is not', () 
   const verdict = verdictRule(`${padding}\n\n## The verdict\n\n${body}`);
   assert.ok(verdict, 'the same prose under a verdict heading is not');
   assert.equal(verdict.count, 1);
-  assert.match(verdict.matches[0], /^The verdict \(0\.0 per 100\)$/);
+  assert.match(verdict.matches[0], /^The verdict \(0 specific\(s\), 0\.0 per 100\)$/);
   assert.ok(verdict.lines[0] > 1, 'anchored on the heading, not the top of the draft');
   assert.match(verdict.fix, /Explainer sections are exempt/);
 
@@ -995,6 +1024,137 @@ test('a passage that names a pick is held to a density an explainer is not', () 
     verdictRule(`${padding}\n\n## The verdict\n\n${dense}`),
     undefined,
     'leader density in the verdict passage clears it',
+  );
+});
+
+test('a short recommendation cannot pass by being too short to measure', () => {
+  // The technicality this closes: below the density floor a verdict used to be
+  // waved through entirely, so the thinnest passages on the site were the ones
+  // nothing measured. A 72-word verdict is a passage, and it owes the reader
+  // three verifiable specifics whatever its rate works out at.
+  const padding = `## What to look for in a bin seal\n\n${FILLER_SENTENCE} ${FILLER_SENTENCE}\n\n${FILLER_SENTENCE} ${FILLER_SENTENCE}\n\n${FILLER_SENTENCE} ${FILLER_SENTENCE} ${FILLER_SENTENCE}`;
+  const verdict = (specifics: number): string => {
+    const sentences = Array.from({ length: 6 }, (_, i) =>
+      i < specifics ? ONE_SPECIFIC_SENTENCE : FILLER_SENTENCE,
+    );
+    return `${padding}\n\n${padding}\n\n${padding}\n\n## The verdict\n\n${sentences.slice(0, 3).join(' ')}\n\n${sentences.slice(3).join(' ')}`;
+  };
+  const verdictRule = (md: string) =>
+    detectSlop(md).findings.find((f) => f.rule === 'Recommendation passage without evidence');
+
+  const thin = verdictRule(verdict(2));
+  assert.ok(thin, 'two specifics in a 72-word verdict is not a measured passage');
+  assert.match(thin.fix, /fewer than 3 verifiable specifics/);
+  assert.match(thin.matches[0], /2 specific\(s\)/, 'the label says which floor was missed');
+  assert.ok(thin.lines[0] > 1, 'anchored on the heading');
+
+  // Three clears it at 4.2 per 100, which is below `verdictPer100`: the rate
+  // is not a rate at this length, and applying it here would fail passages the
+  // AU leaders publish.
+  assert.equal(verdictRule(verdict(3)), undefined, 'the absolute floor is the floor below 80 words');
+
+  // A signpost is still not a passage.
+  assert.equal(
+    verdictRule(`${padding}\n\n${padding}\n\n${padding}\n\n## The verdict\n\nBuy the [Ninja](/go/ninja-af160).`),
+    undefined,
+    'a one-line verdict is not judged on its own',
+  );
+});
+
+/** 12 words, five specifics, and not one of them about buying it here. */
+const SPEC_SHEET_SENTENCE = 'Ninja lists the AF160 at 1400 W and 5.7 litres in 2026.';
+
+test('a recommendation has to be anchored to the market it claims to be best in', () => {
+  // The claim a verdict passage makes is "best in Australia", and the ACCC can
+  // ask us to substantiate it. A restated global spec sheet reads identically
+  // in every market and substantiates none of it, however dense it is.
+  const padding = `## What to look for in a bin seal\n\n${FILLER_SENTENCE} ${FILLER_SENTENCE}\n\n${FILLER_SENTENCE} ${FILLER_SENTENCE}\n\n${FILLER_SENTENCE} ${FILLER_SENTENCE} ${FILLER_SENTENCE}`;
+  const dense = `${SPEC_SHEET_SENTENCE} ${SPEC_SHEET_SENTENCE}\n\n${SPEC_SHEET_SENTENCE} ${SPEC_SHEET_SENTENCE}\n\n${SPEC_SHEET_SENTENCE} ${SPEC_SHEET_SENTENCE}`;
+  const anchorRule = (md: string) =>
+    detectSlop(md).findings.find((f) => f.rule === 'Recommendation without an Australian anchor');
+
+  const global = anchorRule(`${padding}\n\n${padding}\n\n${padding}\n\n## The verdict\n\n${dense}`);
+  assert.ok(global, 'spec-sheet density alone is not an Australian recommendation');
+  assert.equal(global.count, 2);
+  assert.match(global.matches[0], /^The verdict \(0 local anchor\(s\)\)$/);
+  assert.ok(global.lines[0] > 1);
+  assert.match(global.fix, /local RRP/);
+
+  // A local price and a stated gap against the other pick clear it.
+  const anchored = dense.replace(
+    SPEC_SHEET_SENTENCE,
+    'Ninja lists the AF160 at $229 RRP, $40 more than the Sunbeam it beats.',
+  );
+  assert.equal(
+    anchorRule(`${padding}\n\n${padding}\n\n${padding}\n\n## The verdict\n\n${anchored}`),
+    undefined,
+    'a local RRP and a stated gap are what substantiate the claim',
+  );
+
+  // An explainer makes no claim to substantiate, so nothing to anchor.
+  assert.equal(
+    anchorRule(`${padding}\n\n${padding}\n\n${padding}\n\n## How a cyclone separates dust\n\n${dense}`),
+    undefined,
+    'only the passages that pick are asked for anchors',
+  );
+
+  // ...and the anchors are counted across the recommending passages together:
+  // a guide with six picks owes one anchored comparison, not twelve.
+  assert.equal(
+    anchorRule(
+      `${padding}\n\n${padding}\n\n${padding}\n\n## The verdict\n\n${anchored}\n\n## Our pick for a small kitchen\n\n${dense}`,
+    ),
+    undefined,
+  );
+});
+
+test('page furniture the layout renders is a deletion, not a rewrite', () => {
+  // The AU comparison market carries the scope and price notes on every page,
+  // but renders them from the template beside the table and the prices - with
+  // a last-checked date out of real price data, because under the ACL a stale
+  // disclaimer cures nothing. A body copy of them is a second wording that
+  // drifts, so the instruction is delete, not rewrite.
+  const scope = HOUSE_BLOCKS.find((b) => b.id === 'comparison-scope');
+  assert.ok(scope?.templateOwned);
+  assert.ok(
+    HOUSE_BLOCKS.every((b) => !(b.mandated && b.templateOwned)),
+    'a block the layout renders cannot also be text the body owes the reader',
+  );
+
+  const retyped = detectSlop(`${VARIED}\n\n${scope.text}`).findings.find(
+    (f) => f.rule === 'Page furniture written into the body',
+  );
+  assert.ok(retyped);
+  assert.equal(retyped.count, 1);
+  assert.match(retyped.matches[0], /^comparison-scope \(v\d\)/);
+  assert.match(retyped.fix, /Delete them/);
+  assert.ok(retyped.lines[0] > 1, 'anchored where the furniture was typed');
+  assert.notEqual(slopSeverity(retyped), 'high');
+
+  // The hand-rolled variant is the case that matters: it is the one the
+  // registry cannot keep in step with the page.
+  assert.ok(
+    detectSlop(
+      `${VARIED}\n\nWe compare a selected range of products, but not everything on sale here.`,
+    ).findings.some((f) => f.rule === 'Page furniture written into the body'),
+  );
+
+  // One defect, one finding: the same words must not also come back as
+  // site-wide repetition, which would ask the editor to rewrite what they have
+  // just been told to delete.
+  const corpus = CORPUS.map((doc) => ({ ...doc, body: `${doc.body}\n\n${scope.text}` }));
+  const repetition = detectSlop(`${VARIED}\n\n${scope.text}`, { corpus }).findings.filter(
+    (f) => f.category === 'repetition',
+  );
+  const scopeWords = scope.text.toLowerCase();
+  for (const match of repetition.flatMap((f) => f.matches)) {
+    assert.ok(!scopeWords.includes(match), `furniture flagged as repetition: "${match}"`);
+  }
+
+  // And a body that simply leaves it to the layout is clean.
+  assert.equal(
+    detectSlop(VARIED).findings.some((f) => f.rule === 'Page furniture written into the body'),
+    false,
   );
 });
 
@@ -1203,9 +1363,10 @@ below that sounds like your weekend and skip the rest.
 
 If the speaker lives on a kitchen bench and travels twice a year, buy the
 [Sonos Roam 2](/go/sonos-roam-2) at $299 RRP. If it goes in an esky every
-second Saturday, buy the [JBL Flip 6](/go/jbl-flip-6) at $149. If you are
-carrying it up a mountain, the [Tribit StormBox Micro 2](/go/tribit-stormbox-micro-2)
-weighs 318 g and costs $89, and that is the whole argument.
+second Saturday, buy the [JBL Flip 6](/go/jbl-flip-6) at $149. That is $150 less
+than the Sonos. If you are carrying it up a mountain, the
+[Tribit StormBox Micro 2](/go/tribit-stormbox-micro-2) weighs 318 g and costs
+$89, and that is the whole argument.
 
 ## The pick for the kitchen bench: Sonos Roam 2
 

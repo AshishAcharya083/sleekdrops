@@ -559,10 +559,40 @@ export const SCAN_THRESHOLDS = {
    * unsourced affiliate page is sparse in exactly that passage. Explainer
    * sections are exempt from this one and judged only by the article-wide
    * floor and the rolling window.
+   *
+   * What anchors the number is substantiation risk, not a search or ads
+   * threshold - no published Google criterion measures fact density, so
+   * nothing here is set to pass a review. The verdict is where the page makes
+   * a "best in Australia" claim, and the ACCC's comparator guidance is that an
+   * absolute claim must be substantiated and current, on demand. Thin prose is
+   * cheap everywhere else in an article and expensive here. Measured verdict
+   * passages at Wirecutter and Canstar Blue run 9-14 per 100, so 5 is a third
+   * to a half of leader practice: a floor with headroom. Moving it wants 10-15
+   * AU verdict passages measured first, not an argument.
    */
   verdictPer100: 5,
-  /** Body words a recommendation section needs before its own density reads. */
-  minVerdictSectionWords: 80,
+  /** Body words a recommendation section needs before it is measured at all. */
+  minVerdictSectionWords: 60,
+  /**
+   * ...and the words a per-100 rate needs before it is a rate rather than an
+   * artefact of a short passage. Between the two floors a verdict is held to
+   * `verdictMinSpecifics` instead, so a short one cannot pass on the
+   * technicality of being too short to measure.
+   */
+  verdictDensityWords: 80,
+  /** Verifiable specifics every measured verdict passage owes, whatever its length. */
+  verdictMinSpecifics: 3,
+  /**
+   * Specifics across the recommending passages that must be Australian and
+   * comparative - a local RRP, an AU retailer, an AU warranty term, an energy
+   * or water rating, or a stated gap against another pick. A restated spec
+   * sheet substantiates nothing about the Australian buying decision the page
+   * claims to have made, and it is the same sentence for every market.
+   *
+   * Counted across those passages together rather than per passage: a guide
+   * with six picks owes the reader an anchored comparison, not twelve of them.
+   */
+  verdictLocalAnchors: 2,
   /**
    * ...and no window of this many consecutive words may fall below
    * `specificityWindowPer100`, so an article cannot pass on one dense
@@ -849,6 +879,39 @@ const SPECIFICITY_MARKERS = new RegExp(
   'g',
 );
 
+/**
+ * A specific that is anchored to Australia and to this comparison, rather than
+ * copied off a global spec sheet: a local recommended price, a retailer a
+ * reader here can walk into, cover under Australian law, a label that only
+ * exists on an appliance sold here, or a stated gap against another pick.
+ *
+ * These are the specifics that do any work substantiating a "best in
+ * Australia" claim, which is the claim the ACCC can ask us to stand up.
+ */
+const AU_ANCHOR_MARKERS = new RegExp(
+  [
+    // A local recommended price rather than whatever a US listing shows.
+    String.raw`\bRRP\b|\brecommended\s+retail\s+price\b|\bAUD?\b|\bAU?\$\s?\d`,
+    // Where a reader here actually buys it, and the sources that only cover
+    // what is sold here.
+    String.raw`\b(?:Amazon\s+Australia|JB\s+Hi-?Fi|Harvey\s+Norman|The\s+Good\s+Guys|Bing\s+Lee|Bunnings|Officeworks|Appliances\s+Online|Kogan|Big\s+W|Kmart|Myer|David\s+Jones|Chemist\s+Warehouse|Woolworths|Coles)\b`,
+    String.raw`\b[a-z][\w-]*\.(?:com\.au|net\.au|org\.au|gov\.au)\b`,
+    // Cover a buyer here can claim.
+    String.raw`\b\d+[\s-](?:year|month)s?\s+(?:Australian\s+)?warranty\b|\bAustralian\s+(?:Consumer\s+Law|warranty)\b|\bACCC\b`,
+    // Labels that only appear on a product sold into this market.
+    String.raw`\b(?:WELS|water\s+rating|energy\s+rating|star\s+(?:energy\s+)?rating)\b`,
+    // A stated gap against another pick - the comparison the claim rests on.
+    // Split by what is being compared: "over" and "under" read as a gap after
+    // a price and as a preposition after anything else ("5.7 litres under the
+    // bench"), so only the price alternative takes them.
+    String.raw`\$\d[\d,]*(?:\.\d+)?\s+(?:more|less|cheaper|dearer|over|under)\b`,
+    String.raw`\b\d+(?:\.\d+)?\s*[a-z]+\s+(?:more|less|cheaper|dearer|longer|shorter|heavier|lighter|faster|slower|quieter|louder|bigger|smaller)\b`,
+    String.raw`\b(?:than|over)\s+the\s+(?:runners?-?up|second|next|cheaper|dearer)\b`,
+    String.raw`\bcompared\s+(?:with|to)\s+the\b`,
+  ].join('|'),
+  'gi',
+);
+
 // ---------------------------------------------------------------------------
 // The house-block registry
 // ---------------------------------------------------------------------------
@@ -902,6 +965,22 @@ export interface HouseBlock {
    * post is asking for a defect it filed itself.
    */
   mandated?: true;
+  /**
+   * Rendered by the article layout on every page, never typed by an author.
+   *
+   * This is how the AU comparison market actually ships the scope and price
+   * caveats: Finder, Canstar Blue and Mozo all carry them on every article,
+   * but as a templated header, listing note or end-of-article block that links
+   * a standing page - not as body copy. Registering them as text an author may
+   * insert is the failure mode, because a hand-rolled variant drifts, goes
+   * stale, and multiplies the wordings a reader has to reconcile.
+   *
+   * So the entry stays in the registry, as the single source of truth for the
+   * wording and so a retype is still exempt from the repetition metrics rather
+   * than reading as site-wide sameness, and `templateFurnitureFindings` asks
+   * the editor to delete it from the body instead.
+   */
+  templateOwned?: true;
 }
 
 /**
@@ -918,6 +997,10 @@ export interface HouseBlock {
  * an existing page on the site; the registry is where the wording is frozen so
  * it can be exempted, asserted and versioned in one place. Depth belongs on a
  * standing page - the methodology entry is a pointer, not the method.
+ *
+ * Entries carry one of two flags at most: `mandated` for text a body owes the
+ * reader on every endorsement, and `templateOwned` for text the layout renders
+ * and an author must therefore never retype.
  */
 export const HOUSE_BLOCKS: HouseBlock[] = [
   {
@@ -961,16 +1044,26 @@ export const HOUSE_BLOCKS: HouseBlock[] = [
   {
     id: 'price-currency-note',
     tag: 'price-currency',
-    version: 1,
-    text: 'Prices are in AUD and correct at the time of publication.',
+    version: 2,
+    // v2: template-owned, and the volatile half deliberately left out of the
+    // registered string. The layout renders a last-checked date beside it from
+    // the article's own price data, because under the Australian Consumer Law
+    // a disclaimer does not cure a misleading price representation - a static
+    // "correct at the time of publication" typed into a body is worth nothing
+    // once the price moves, and cannot be refreshed by the price job either.
+    templateOwned: true,
+    text: 'Prices in AUD. Prices and availability change often - confirm with the retailer before buying.',
   },
   {
     id: 'comparison-scope',
     tag: 'comparison-scope',
-    version: 1,
-    // The ACCC's position under the Australian Consumer Law is that a page
-    // must not read as an exhaustive independent comparison when it is not.
-    text: 'We do not compare every product on the market, only the ones sold in Australia.',
+    version: 2,
+    // The ACCC's comparator-website guidance asks for the nature and extent of
+    // the comparison to be clear and prominent rather than buried, which is
+    // why this is rendered next to the comparison table on every guide and not
+    // left to a link. v2 takes the market's own wording.
+    templateOwned: true,
+    text: 'We compare a selected range of products, not every product on sale in Australia. Other options may be available that we do not cover.',
   },
 ];
 
@@ -1086,15 +1179,24 @@ function registeredWordsByLine(lines: string[]): Map<number, number> {
   return byLine;
 }
 
-/** Every 5-word sequence of a set of house blocks. Computed once per set. */
-let houseKeys: { all: Set<string>; mandated: Set<string> } | null = null;
-function houseShingles(): { all: Set<string>; mandated: Set<string> } {
+/**
+ * Every 5-word sequence of a set of house blocks. Computed once per set.
+ *
+ * `unrationed` is the text the discretionary word budget must not touch:
+ * mandated blocks, which a body owes the reader however short it is, and
+ * template-owned ones, which the layout renders and `templateFurnitureFindings`
+ * already asks the editor to delete. Rationing either would spend a short
+ * post's whole allowance on words the author had no choice about, and push the
+ * house text they did choose over the ceiling.
+ */
+let houseKeys: { all: Set<string>; unrationed: Set<string> } | null = null;
+function houseShingles(): { all: Set<string>; unrationed: Set<string> } {
   if (!houseKeys) {
-    houseKeys = { all: new Set<string>(), mandated: new Set<string>() };
+    houseKeys = { all: new Set<string>(), unrationed: new Set<string>() };
     for (const block of HOUSE_BLOCKS) {
       for (const key of shingleSet(proseLines(block.text), SCAN_THRESHOLDS.ngramSize)) {
         houseKeys.all.add(key);
-        if (block.mandated) houseKeys.mandated.add(key);
+        if (block.mandated || block.templateOwned) houseKeys.unrationed.add(key);
       }
     }
   }
@@ -1109,11 +1211,11 @@ function registeredShingles(): Set<string> {
  * Word positions in the draft that registered house text excuses from the
  * cross-corpus metrics.
  *
- * Mandated blocks are excused outright. Discretionary ones share a ceiling of
- * `min(houseBlockWords, houseBlockDraftShare x body words)`, taken in the
- * order they appear so the result is deterministic: the absolute half is the
- * leaders' constant budget, and the proportional half is what stops a short
- * post from being mostly exempt boilerplate. Anything past the ceiling is
+ * Mandated and template-owned blocks are excused outright. Discretionary ones
+ * share a ceiling of `min(houseBlockWords, houseBlockDraftShare x body
+ * words)`, taken in the order they appear so the result is deterministic: the
+ * absolute half is the leaders' constant budget, and the proportional half is
+ * what stops a short post from being mostly exempt boilerplate. Anything past the ceiling is
  * ordinary body content and is measured like any other sentence.
  *
  * The ceiling is on the repetition metrics only. The specificity reads blank
@@ -1122,17 +1224,17 @@ function registeredShingles(): Set<string> {
  * thin body copy and charge the draft twice for the same words.
  */
 function exemptTokens(draft: Shingle[], totalWords: number): Set<number> {
-  const { all, mandated } = houseShingles();
+  const { all, unrationed } = houseShingles();
   const exempt = new Set<number>();
   const discretionary: number[] = [];
   const seen = new Set<number>();
 
   for (const shingle of draft) {
     if (!all.has(shingle.key)) continue;
-    const isMandated = mandated.has(shingle.key);
+    const excused = unrationed.has(shingle.key);
     for (let i = 0; i < SCAN_THRESHOLDS.ngramSize; i++) {
       const index = shingle.index + i;
-      if (isMandated) {
+      if (excused) {
         exempt.add(index);
       } else if (!seen.has(index)) {
         seen.add(index);
@@ -1308,6 +1410,7 @@ export function detectSlop(markdown: string, options?: SlopScanOptions): SlopRep
   findings.push(...structureFindings(lines, spans));
   findings.push(...specificityFindings(raw, lines));
   findings.push(...disclosureFindings(raw, lines));
+  findings.push(...templateFurnitureFindings(lines));
   findings.push(...corpusFindings(markdown ?? '', options?.corpus ?? []));
 
   let penalty = 0;
@@ -1614,11 +1717,15 @@ function productPicks(raw: string[], lines: string[]): ProductPick[] {
 const VERDICT_HEADING =
   /\b(?:best|top pick|our pick|the winner|runners?-?up|verdict|we recommend|how we tested|test results)\b/i;
 
-/** A section that recommends, and the density it carries. */
+/** A section that recommends, and the evidence it carries. */
 interface VerdictSection {
   heading: string;
   /** 1-based line of the heading. */
   line: number;
+  words: number;
+  specifics: number;
+  /** How many of those specifics are Australian and comparative. */
+  anchors: number;
   per100: number;
 }
 
@@ -1635,8 +1742,11 @@ interface VerdictSection {
  *
  * A section recommends when it links a product - a `/go/` slug is the site's
  * own record that the passage sells something - or when its heading says so.
+ *
+ * Measured across the whole passage, never sentence by sentence: a verdict is
+ * allowed a plain sentence, as long as the passage around it is evidenced.
  */
-function thinVerdictSections(raw: string[], lines: string[]): VerdictSection[] {
+function verdictSections(raw: string[], lines: string[]): VerdictSection[] {
   const T = SCAN_THRESHOLDS;
   const dense = bodyCopyLines(lines, 'count');
   const out: VerdictSection[] = [];
@@ -1653,10 +1763,34 @@ function thinVerdictSections(raw: string[], lines: string[]): VerdictSection[] {
     // passage, and judging it on its own would flag every signpost.
     if (words < T.minVerdictSectionWords) continue;
 
-    const per100 = (scan(body, SPECIFICITY_MARKERS).count / words) * 100;
-    if (per100 < T.verdictPer100) out.push({ heading: section.heading, line: section.line, per100 });
+    const specifics = scan(body, SPECIFICITY_MARKERS).count;
+    out.push({
+      heading: section.heading,
+      line: section.line,
+      words,
+      specifics,
+      anchors: scan(body, AU_ANCHOR_MARKERS).count,
+      per100: (specifics / words) * 100,
+    });
   }
   return out;
+}
+
+/**
+ * Verdict passages carrying less evidence than they owe.
+ *
+ * Two floors, because a short passage clears a density it never really met:
+ * the per-100 rate above `verdictDensityWords`, and below it an absolute count,
+ * so a 60-word verdict still owes three verifiable specifics instead of being
+ * waved through as too short to measure.
+ */
+function thinVerdictSections(sections: VerdictSection[]): VerdictSection[] {
+  const T = SCAN_THRESHOLDS;
+  return sections.filter(
+    (section) =>
+      section.specifics < T.verdictMinSpecifics ||
+      (section.words >= T.verdictDensityWords && section.per100 < T.verdictPer100),
+  );
 }
 
 /**
@@ -1722,16 +1856,36 @@ function specificityFindings(raw: string[], lines: string[]): SlopFinding[] {
     });
   }
 
-  const thinVerdicts = thinVerdictSections(raw, lines);
+  const verdicts = verdictSections(raw, lines);
+  const thinVerdicts = thinVerdictSections(verdicts);
   if (thinVerdicts.length > 0) {
     const shown = thinVerdicts.slice(0, EXAMPLES_PER_RULE);
     out.push({
       category: 'specificity',
       rule: 'Recommendation passage without evidence',
-      matches: shown.map((s) => `${s.heading} (${s.per100.toFixed(1)} per 100)`),
+      matches: shown.map(
+        (s) => `${s.heading} (${s.specifics} specific(s), ${s.per100.toFixed(1)} per 100)`,
+      ),
       lines: shown.map((s) => s.line),
       count: thinVerdicts.length,
-      fix: `${thinVerdicts.length} passage(s) that rank, pick or declare a verdict carry fewer than ${T.verdictPer100} specifics per 100 words. This is where a category leader is densest and thin affiliate copy is not: give each the price, the model designation and the measured figure that decided the pick, with whoever published it. Explainer sections are exempt from this - passages that name a pick are not.`,
+      fix: `${thinVerdicts.length} passage(s) that rank, pick or declare a verdict carry fewer than ${T.verdictMinSpecifics} verifiable specifics, or fewer than ${T.verdictPer100} per 100 words. This is where a category leader is densest and thin affiliate copy is not: give each the price, the model designation and the measured figure that decided the pick, with whoever published it. Explainer sections are exempt from this - passages that name a pick are not.`,
+    });
+  }
+
+  // ...and of those specifics, some have to be about buying it here. A page
+  // that recommends "the best in Australia" off a global spec sheet has
+  // substantiated nothing a reader here can act on, and it is the claim the
+  // ACCC can ask us to stand up.
+  const anchors = verdicts.reduce((total, section) => total + section.anchors, 0);
+  if (verdicts.length > 0 && anchors < T.verdictLocalAnchors) {
+    const shown = verdicts.slice(0, EXAMPLES_PER_RULE);
+    out.push({
+      category: 'specificity',
+      rule: 'Recommendation without an Australian anchor',
+      matches: shown.map((s) => `${s.heading} (${s.anchors} local anchor(s))`),
+      lines: shown.map((s) => s.line),
+      count: T.verdictLocalAnchors - anchors,
+      fix: `The passages that pick and rank carry ${anchors} Australian, comparative specific(s); ${T.verdictLocalAnchors} are wanted. A restated spec sheet reads the same in every market and substantiates nothing about buying here: name the local RRP, the Australian retailer, the warranty term a buyer here can claim, the energy or water rating, or the stated gap against the runner-up ("$60 dearer than the runner-up for two more minutes of runtime").`,
     });
   }
 
@@ -1808,6 +1962,52 @@ function disclosureFindings(raw: string[], lines: string[]): SlopFinding[] {
       // Absence is the defect; a reworded one is a smaller defect than none.
       count: reworded ? 1 : 3,
       fix: `This piece links products we earn on${reworded ? ' and discloses that it was not hands-on tested, but not in the registered wording' : ' but never says we have not tested them'}. Add the registered ${block.tag} block (v${block.version}) verbatim: "${block.text}" - registered house text is exempt from the repetition metrics, a paraphrase is not.`,
+    },
+  ];
+}
+
+/**
+ * Page furniture typed into the body.
+ *
+ * The scope note and the price-currency note belong on every article - the AU
+ * comparison market puts them on 100% of pages, and the ACCC's guidance wants
+ * the scope one prominent rather than linked - but they belong to the layout.
+ * It renders one wording beside the comparison table and one under the prices,
+ * and it dates the price note from the article's own price data. A writer
+ * restating either in prose gives the reader a second copy that drifts, and
+ * hides a caveat that goes stale inside body text, so the fix is deletion
+ * rather than a rewrite.
+ *
+ * Matched on shared 5-word runs rather than on the exact string, because a
+ * hand-rolled variant is the case that matters; the registered wording itself
+ * is what the layout already ships.
+ */
+function templateFurnitureFindings(lines: string[]): SlopFinding[] {
+  const owned = HOUSE_BLOCKS.filter((block) => block.templateOwned);
+  if (owned.length === 0) return [];
+
+  const draft = shingles(proseTokens(lines), SCAN_THRESHOLDS.ngramSize);
+  if (draft.length === 0) return [];
+
+  const matches: string[] = [];
+  const hitLines: number[] = [];
+  for (const block of owned) {
+    const keys = shingleSet(proseLines(block.text), SCAN_THRESHOLDS.ngramSize);
+    const hit = draft.find((shingle) => keys.has(shingle.key));
+    if (!hit) continue;
+    matches.push(`${block.id} (v${block.version}): ${excerpt(block.text, 60)}`);
+    hitLines.push(hit.line);
+  }
+  if (matches.length === 0) return [];
+
+  return [
+    {
+      category: 'disclosure',
+      rule: 'Page furniture written into the body',
+      matches,
+      lines: hitLines,
+      count: matches.length,
+      fix: `${matches.length} registered block(s) the article layout already renders on every page have been retyped as body prose, at the line(s) above. Delete them: the scope note sits beside the comparison table and the price note under the prices, both with a last-checked date taken from the price data, and a second hand-written copy in the body only drifts and goes stale.`,
     },
   ];
 }
