@@ -24,15 +24,27 @@ export async function runPublisher(article: ArticleRow): Promise<PublishResult> 
 
   // Affiliate links first — fetch-content.mjs fails the site build if a
   // /go/ slug in a published body has no matching row.
+  //
+  // `affiliate_links` is one site-wide slug → destination map, and a product
+  // slug is deterministic, so two articles covering the same product write the
+  // same row. A dossier-backed row wins that collision: it may carry an ASIN
+  // verified against the live marketplace, and a healed row is a search term
+  // rebuilt from one draft's own words. So a healed row only ever fills a slug
+  // nothing has claimed yet - it must not send the readers of an
+  // already-published article to a search page instead of the product page
+  // they had.
   for (const link of links) {
+    const onSlugTaken = link.healed
+      ? 'DO NOTHING'
+      : `DO UPDATE SET
+           default_url = excluded.default_url,
+           regions_json = excluded.regions_json,
+           note = excluded.note,
+           updated_at = datetime('now')`;
     await d1Query(
       `INSERT INTO affiliate_links (slug, default_url, regions_json, note, created_at, updated_at)
        VALUES (?1, ?2, ?3, ?4, datetime('now'), datetime('now'))
-       ON CONFLICT (slug) DO UPDATE SET
-         default_url = excluded.default_url,
-         regions_json = excluded.regions_json,
-         note = excluded.note,
-         updated_at = datetime('now')`,
+       ON CONFLICT (slug) ${onSlugTaken}`,
       [link.slug, link.default_url, link.regions_json ? JSON.stringify(link.regions_json) : null, link.note ?? null],
     );
   }

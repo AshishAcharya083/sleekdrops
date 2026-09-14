@@ -3,6 +3,7 @@
 // article to its next stage. Verdict-driven, bounded revision loop —
 // a light version of devteam-platform's card lane pattern.
 import { MONETISED_INTENTS } from '../content/contract.js';
+import { withDiscoveredProducts } from '../content/evidence.js';
 import { describeShapeSelection } from '../content/shapes.js';
 import { getSetting, q } from '../db/pool.js';
 import {
@@ -21,7 +22,7 @@ import { runImageAgent } from '../agents/imageAgent.js';
 import { runKeywordStrategist } from '../agents/keywordStrategist.js';
 import { runOutliner } from '../agents/outliner.js';
 import { runPublisher } from '../agents/publisher.js';
-import { runResearcher } from '../agents/researcher.js';
+import { runProductDiscovery, runResearcher } from '../agents/researcher.js';
 import { runSeoReviewer } from '../agents/seoReviewer.js';
 import { runWriter } from '../agents/writer.js';
 import type { ArticleRow, Stage, TopicRow } from './types.js';
@@ -193,19 +194,38 @@ export async function runStage(article: ArticleRow): Promise<void> {
           : null;
         const plan = await runKeywordStrategist(article, topic, model!, tracker);
         await updateArticle(article.id, { keyword_plan: JSON.stringify(plan) });
-        // Earliest point at which "this piece earns nothing" is knowable: the
-        // dossier is built, and the SERP read has just named the intent. Fail
-        // here rather than at assemble — outline, write, review and up to two
-        // edit rounds all run on Opus 5 before the missing links would show up.
-        const products = article.research?.products?.length ?? 0;
-        if (products === 0 && MONETISED_INTENTS.has(plan.intent)) {
-          throw new Error(
-            `the dossier has no products but the SERP read says this is a ${plan.intent} query — ` +
-              `the piece would publish with nothing to click. Re-run research (a "${article.post_type}" ` +
-              `is not required to find products, so it did not) or add them to the topic brief by hand.`,
+        // Earliest point at which "this piece has nothing to link" is knowable:
+        // the dossier is built, and the SERP read has just named the intent.
+        // Deal with it here rather than at assemble - outline, write, review
+        // and up to two edit rounds all run on Opus 5 in between.
+        //
+        // A missing product list is a narrow, recoverable fault, so it gets a
+        // discovery pass before the card is failed: the research stage filed
+        // its evidence and skipped the contenders, and one focused search is
+        // what it takes to fill that in. Only an empty result is terminal.
+        let discoveryNote = '';
+        if ((article.research?.products?.length ?? 0) === 0 && MONETISED_INTENTS.has(plan.intent)) {
+          const products = await runProductDiscovery(
+            article,
+            topic,
+            plan.primaryKeyword,
+            model!,
+            tracker,
           );
+          if (products.length === 0) {
+            throw new Error(
+              `the dossier has no products and a discovery pass for "${plan.primaryKeyword}" found ` +
+                `none either, but the SERP read says this is a ${plan.intent} query - there would be ` +
+                `nothing on the page for a reader to click. Re-run research (a "${article.post_type}" ` +
+                `is not required to find products, so it did not) or add them to the topic brief by hand.`,
+            );
+          }
+          await updateArticle(article.id, {
+            research: JSON.stringify(withDiscoveredProducts(article.research, products)),
+          });
+          discoveryNote = `, ${products.length} product(s) recovered by a discovery pass`;
         }
-        summary = `"${plan.primaryKeyword}" — ${plan.intent}, ${plan.difficulty} difficulty, ${plan.zeroClickRisk} zero-click risk, ${plan.wordCountTarget} words, ${plan.contentGaps.length} gap(s) to exploit`;
+        summary = `"${plan.primaryKeyword}" — ${plan.intent}, ${plan.difficulty} difficulty, ${plan.zeroClickRisk} zero-click risk, ${plan.wordCountTarget} words, ${plan.contentGaps.length} gap(s) to exploit${discoveryNote}`;
         next = { stage: 'angle', status: 'queued' };
         break;
       }
@@ -287,6 +307,10 @@ export async function runStage(article: ArticleRow): Promise<void> {
           affiliate_links: JSON.stringify(assembled.affiliateLinks),
         });
         summary = `frontmatter + ${assembled.affiliateLinks.length} affiliate link(s) validated${
+          assembled.healedSlugs.length > 0
+            ? ` (${assembled.healedSlugs.length} healed from the draft: ${assembled.healedSlugs.join(', ')})`
+            : ''
+        }${
           assembled.droppedSlugs.length > 0
             ? `; stripped unlinkable: ${assembled.droppedSlugs.join(', ')}`
             : ''
