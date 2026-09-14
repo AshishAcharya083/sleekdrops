@@ -19,9 +19,8 @@ delete process.env.ANTHROPIC_API_KEY;
 
 const { getSetting, pool, q, setSetting } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
-const { formatAge, heldScoutLock, isScoutRunning, recoverStaleScoutRuns } = await import(
-  './scout.js'
-);
+const { formatAge, heldScoutLock, isScoutRunning, recoverStaleScoutRuns, renewScoutLease } =
+  await import('./scout.js');
 const { recoverStranded } = await import('./worker.js');
 const { createApp } = await import('../api/server.js');
 
@@ -108,6 +107,14 @@ const statusOf = async (id: string): Promise<{ status: string; error: string | n
   return row;
 };
 
+const heartbeatOf = async (id: string): Promise<string> => {
+  const [row] = await q<{ heartbeat_at: Date }>(
+    'SELECT heartbeat_at FROM scout_runs WHERE id = $1',
+    [id],
+  );
+  return row.heartbeat_at.toISOString();
+};
+
 // Not a database test: the refusal above is only readable if the age in it is.
 test('an age reads as an operator would say it', () => {
   assert.equal(formatAge(0), '0s');
@@ -145,6 +152,47 @@ test('a run whose lease expired holds nothing', { skip }, async () => {
   // Still 'running' until something sweeps it - the lease decides the lock, the
   // sweep decides the row.
   assert.equal((await statusOf(stale)).status, 'running');
+});
+
+// The heartbeat is what separates a sweep that is merely slow from one that
+// died with its instance. Nothing else in this file can observe it: the
+// interval is 60s and every run here reaches a terminal state in milliseconds,
+// so these drive the renewal the interval calls directly.
+test('a heartbeat pulls a run back inside its lease', { skip }, async () => {
+  const id = await seedRunningRun(31);
+  assert.equal((await getLock()).lock, null, 'the run starts outside the lease');
+  const expired = await heartbeatOf(id);
+
+  assert.equal(await renewScoutLease(id), true, 'a live run renews its own lease');
+
+  assert.notEqual(await heartbeatOf(id), expired, 'the heartbeat actually advanced');
+  const { lock } = await getLock();
+  assert.equal(lock?.id, id, 'and the run holds the lock again');
+  assert.ok(lock.heartbeat_age_seconds < 60, 'on a fresh lease');
+  assert.equal(await isScoutRunning(), true, 'so a concurrent sweep is still kept out');
+
+  await deleteLock();
+});
+
+test('a run that lost the lock cannot heartbeat its way back', { skip }, async () => {
+  const cleared = await seedRunningRun(0);
+  await deleteLock();
+  const atRelease = await heartbeatOf(cleared);
+
+  // The still-live task behind the cleared run keeps ticking for up to a
+  // heartbeat before it notices; the status guard is what stops that tick from
+  // overruling the operator.
+  assert.equal(await renewScoutLease(cleared), false, 'there is no live row left to renew');
+
+  assert.equal(await heartbeatOf(cleared), atRelease, 'a released run does not touch its lease');
+  assert.equal((await statusOf(cleared)).status, 'failed', 'and stays terminal');
+  assert.equal((await getLock()).lock, null, 'so the lock stays free for the next sweep');
+
+  const swept = await seedRunningRun(31);
+  await recoverStaleScoutRuns();
+  const atSweep = await heartbeatOf(swept);
+  assert.equal(await renewScoutLease(swept), false, 'the same holds for a swept run');
+  assert.equal(await heartbeatOf(swept), atSweep, 'a swept run does not resurrect its lease');
 });
 
 test('the stale sweep moves an expired run to a terminal state', { skip }, async () => {

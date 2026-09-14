@@ -100,10 +100,23 @@ export async function recoverStaleScoutRuns(): Promise<void> {
 }
 
 /**
+ * Renew a live run's lease. The `status = 'running'` guard is the whole point:
+ * a run whose lock was swept or cleared finds no row to touch, so it reports
+ * false and cannot put itself back inside the lease it already lost.
+ */
+export async function renewScoutLease(id: string): Promise<boolean> {
+  const renewed = await q(
+    "UPDATE scout_runs SET heartbeat_at = now() WHERE id = $1 AND status = 'running' RETURNING id",
+    [id],
+  );
+  return renewed.length > 0;
+}
+
+/**
  * Operator escape hatch: release the lock now, without waiting out the lease.
  * Returns the runs it released. A run whose process is genuinely still alive
- * stops renewing (the heartbeat only touches rows still marked 'running'), so
- * clearing cannot leave a row flapping between states.
+ * stops renewing - renewScoutLease() only touches rows still marked 'running' -
+ * so clearing cannot leave a row flapping between states.
  */
 export async function clearScoutLock(): Promise<ScoutLock[]> {
   const released = await q<ScoutLock>(
@@ -120,12 +133,10 @@ export async function startScoutRun(): Promise<string> {
   const [run] = await q<{ id: string }>('INSERT INTO scout_runs DEFAULT VALUES RETURNING id');
   void (async () => {
     const tracker = new UsageTracker();
-    // The lease is renewed only while the row still says 'running', so an
-    // operator who cleared the lock is not overruled by the task that lost it.
     const heartbeat = setInterval(() => {
-      void q("UPDATE scout_runs SET heartbeat_at = now() WHERE id = $1 AND status = 'running'", [
-        run.id,
-      ]).catch((err) => console.error(`[scout] heartbeat failed for run ${run.id}:`, err));
+      void renewScoutLease(run.id).catch((err) =>
+        console.error(`[scout] heartbeat failed for run ${run.id}:`, err),
+      );
     }, HEARTBEAT_MS);
     heartbeat.unref();
     // Model resolution is inside the try on purpose: it fails when the engine
