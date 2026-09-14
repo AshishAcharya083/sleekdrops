@@ -82,12 +82,16 @@ Score these dimensions 0-100 each:
    conclusion. Heading hierarchy matches the search intent. Length vs the
    ${article.outline?.wordCountTarget ?? 'n/a'}-word target (substance, not padding).
    Format matches what the SERP rewards${plan ? ` (${plan.winningFormat})` : ''}.
-2. geo — generative-engine citability. Does every major H2 open with a
-   self-contained 40-60 word answer? Are claims paired with named sources and
-   years, or left as adjectives? Are entities named specifically? Is there an
-   "## FAQ" section with "### Question?" headings and 40-60 word answers (the
-   site builds FAQPage schema from it — a missing or malformed FAQ is a
-   high-severity issue)? Are recency signals present?
+2. geo - generative-engine citability. If the brief carries a
+   "structureShape", judge the extractable answers and the FAQ against that
+   shape's passage budget and FAQ rule, not against a fixed per-H2 rule. If it
+   does not, expect every major H2 to open with a self-contained 40-60 word
+   answer. Either way: are claims paired with named sources and years, or left
+   as adjectives? Are entities named specifically? Where the shape requires an
+   FAQ (or the brief carries faq entries), it must be an "## FAQ" section with
+   "### Question?" headings and 40-60 word answers - the site builds FAQPage
+   schema from it, so a missing or malformed FAQ there is a high-severity
+   issue. Are recency signals present?
 3. voice — reads as a person. Judge against the scan above plus: positions
    taken, rhythm varied, no section-summary padding.${
      angle
