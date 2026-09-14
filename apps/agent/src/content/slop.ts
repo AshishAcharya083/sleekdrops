@@ -957,30 +957,16 @@ export interface HouseBlock {
   /** The exact string. Registered text is removed before any similarity is computed. */
   text: string;
   /**
-   * Owed to the reader on every endorsement, not by our choice: the Amazon
-   * Associates Operating Agreement mandates its sentence verbatim, and the
-   * hands-on disclosure is the one `disclosureFindings` below demands by
-   * presence. Mandated text sits underneath `houseBlockDraftShare` rather than
-   * inside it - a scanner that requires a block and then rations it on a short
-   * post is asking for a defect it filed itself.
+   * Owed to the reader, not by our choice: the Amazon Associates Operating
+   * Agreement mandates its sentence verbatim, the hands-on disclosure is the
+   * one `disclosureFindings` below demands by presence, and the ACCC and the
+   * Australian Consumer Law want the comparison's scope and the volatility of
+   * a printed price in front of the reader on the page that carries them.
+   * Mandated text sits underneath `houseBlockDraftShare` rather than inside it
+   * - a scanner that requires a block and then rations it on a short post is
+   * asking for a defect it filed itself.
    */
   mandated?: true;
-  /**
-   * Rendered by the article layout on every page, never typed by an author.
-   *
-   * This is how the AU comparison market actually ships the scope and price
-   * caveats: Finder, Canstar Blue and Mozo all carry them on every article,
-   * but as a templated header, listing note or end-of-article block that links
-   * a standing page - not as body copy. Registering them as text an author may
-   * insert is the failure mode, because a hand-rolled variant drifts, goes
-   * stale, and multiplies the wordings a reader has to reconcile.
-   *
-   * So the entry stays in the registry, as the single source of truth for the
-   * wording and so a retype is still exempt from the repetition metrics rather
-   * than reading as site-wide sameness, and `templateFurnitureFindings` asks
-   * the editor to delete it from the body instead.
-   */
-  templateOwned?: true;
 }
 
 /**
@@ -998,9 +984,10 @@ export interface HouseBlock {
  * it can be exempted, asserted and versioned in one place. Depth belongs on a
  * standing page - the methodology entry is a pointer, not the method.
  *
- * Entries carry one of two flags at most: `mandated` for text a body owes the
- * reader on every endorsement, and `templateOwned` for text the layout renders
- * and an author must therefore never retype.
+ * Entries carry at most one flag, `mandated`, for text a body owes the reader
+ * whatever its length. Registration is not an instruction to insert a block:
+ * it fixes the wording, and exempts it from the repetition metrics so text the
+ * site genuinely repeats is never read as site-wide sameness.
  */
 export const HOUSE_BLOCKS: HouseBlock[] = [
   {
@@ -1045,13 +1032,13 @@ export const HOUSE_BLOCKS: HouseBlock[] = [
     id: 'price-currency-note',
     tag: 'price-currency',
     version: 2,
-    // v2: template-owned, and the volatile half deliberately left out of the
-    // registered string. The layout renders a last-checked date beside it from
-    // the article's own price data, because under the Australian Consumer Law
-    // a disclaimer does not cure a misleading price representation - a static
-    // "correct at the time of publication" typed into a body is worth nothing
-    // once the price moves, and cannot be refreshed by the price job either.
-    templateOwned: true,
+    // v2 leaves the volatile half out of the registered string: under the
+    // Australian Consumer Law a disclaimer does not cure a misleading price
+    // representation, so a static "correct at the time of publication" typed
+    // into a body is worth nothing once the price moves. Nothing in the
+    // article layout renders a price caveat today, so the body is the only
+    // place the reader gets one.
+    mandated: true,
     text: 'Prices in AUD. Prices and availability change often - confirm with the retailer before buying.',
   },
   {
@@ -1060,9 +1047,11 @@ export const HOUSE_BLOCKS: HouseBlock[] = [
     version: 2,
     // The ACCC's comparator-website guidance asks for the nature and extent of
     // the comparison to be clear and prominent rather than buried, which is
-    // why this is rendered next to the comparison table on every guide and not
-    // left to a link. v2 takes the market's own wording.
-    templateOwned: true,
+    // why every guide carries it near its table rather than behind a link. v2
+    // takes the market's own wording. No component renders it today, so the
+    // body is where the reader meets it, and registering it keeps the site to
+    // one wording rather than a dozen hand-rolled variants.
+    mandated: true,
     text: 'We compare a selected range of products, not every product on sale in Australia. Other options may be available that we do not cover.',
   },
 ];
@@ -1183,11 +1172,9 @@ function registeredWordsByLine(lines: string[]): Map<number, number> {
  * Every 5-word sequence of a set of house blocks. Computed once per set.
  *
  * `unrationed` is the text the discretionary word budget must not touch:
- * mandated blocks, which a body owes the reader however short it is, and
- * template-owned ones, which the layout renders and `templateFurnitureFindings`
- * already asks the editor to delete. Rationing either would spend a short
- * post's whole allowance on words the author had no choice about, and push the
- * house text they did choose over the ceiling.
+ * mandated blocks, which a body owes the reader however short it is. Rationing
+ * those would spend a short post's whole allowance on words the author had no
+ * choice about, and push the house text they did choose over the ceiling.
  */
 let houseKeys: { all: Set<string>; unrationed: Set<string> } | null = null;
 function houseShingles(): { all: Set<string>; unrationed: Set<string> } {
@@ -1196,7 +1183,7 @@ function houseShingles(): { all: Set<string>; unrationed: Set<string> } {
     for (const block of HOUSE_BLOCKS) {
       for (const key of shingleSet(proseLines(block.text), SCAN_THRESHOLDS.ngramSize)) {
         houseKeys.all.add(key);
-        if (block.mandated || block.templateOwned) houseKeys.unrationed.add(key);
+        if (block.mandated) houseKeys.unrationed.add(key);
       }
     }
   }
@@ -1211,12 +1198,12 @@ function registeredShingles(): Set<string> {
  * Word positions in the draft that registered house text excuses from the
  * cross-corpus metrics.
  *
- * Mandated and template-owned blocks are excused outright. Discretionary ones
- * share a ceiling of `min(houseBlockWords, houseBlockDraftShare x body
- * words)`, taken in the order they appear so the result is deterministic: the
- * absolute half is the leaders' constant budget, and the proportional half is
- * what stops a short post from being mostly exempt boilerplate. Anything past the ceiling is
- * ordinary body content and is measured like any other sentence.
+ * Mandated blocks are excused outright. Discretionary ones share a ceiling of
+ * `min(houseBlockWords, houseBlockDraftShare x body words)`, taken in the order
+ * they appear so the result is deterministic: the absolute half is the leaders'
+ * constant budget, and the proportional half is what stops a short post from
+ * being mostly exempt boilerplate. Anything past the ceiling is ordinary body
+ * content and is measured like any other sentence.
  *
  * The ceiling is on the repetition metrics only. The specificity reads blank
  * registered text outright (see `bodyCopyLines`), because there it neither
@@ -1410,7 +1397,6 @@ export function detectSlop(markdown: string, options?: SlopScanOptions): SlopRep
   findings.push(...structureFindings(lines, spans));
   findings.push(...specificityFindings(raw, lines));
   findings.push(...disclosureFindings(raw, lines));
-  findings.push(...templateFurnitureFindings(lines));
   findings.push(...corpusFindings(markdown ?? '', options?.corpus ?? []));
 
   let penalty = 0;
@@ -1962,52 +1948,6 @@ function disclosureFindings(raw: string[], lines: string[]): SlopFinding[] {
       // Absence is the defect; a reworded one is a smaller defect than none.
       count: reworded ? 1 : 3,
       fix: `This piece links products we earn on${reworded ? ' and discloses that it was not hands-on tested, but not in the registered wording' : ' but never says we have not tested them'}. Add the registered ${block.tag} block (v${block.version}) verbatim: "${block.text}" - registered house text is exempt from the repetition metrics, a paraphrase is not.`,
-    },
-  ];
-}
-
-/**
- * Page furniture typed into the body.
- *
- * The scope note and the price-currency note belong on every article - the AU
- * comparison market puts them on 100% of pages, and the ACCC's guidance wants
- * the scope one prominent rather than linked - but they belong to the layout.
- * It renders one wording beside the comparison table and one under the prices,
- * and it dates the price note from the article's own price data. A writer
- * restating either in prose gives the reader a second copy that drifts, and
- * hides a caveat that goes stale inside body text, so the fix is deletion
- * rather than a rewrite.
- *
- * Matched on shared 5-word runs rather than on the exact string, because a
- * hand-rolled variant is the case that matters; the registered wording itself
- * is what the layout already ships.
- */
-function templateFurnitureFindings(lines: string[]): SlopFinding[] {
-  const owned = HOUSE_BLOCKS.filter((block) => block.templateOwned);
-  if (owned.length === 0) return [];
-
-  const draft = shingles(proseTokens(lines), SCAN_THRESHOLDS.ngramSize);
-  if (draft.length === 0) return [];
-
-  const matches: string[] = [];
-  const hitLines: number[] = [];
-  for (const block of owned) {
-    const keys = shingleSet(proseLines(block.text), SCAN_THRESHOLDS.ngramSize);
-    const hit = draft.find((shingle) => keys.has(shingle.key));
-    if (!hit) continue;
-    matches.push(`${block.id} (v${block.version}): ${excerpt(block.text, 60)}`);
-    hitLines.push(hit.line);
-  }
-  if (matches.length === 0) return [];
-
-  return [
-    {
-      category: 'disclosure',
-      rule: 'Page furniture written into the body',
-      matches,
-      lines: hitLines,
-      count: matches.length,
-      fix: `${matches.length} registered block(s) the article layout already renders on every page have been retyped as body prose, at the line(s) above. Delete them: the scope note sits beside the comparison table and the price note under the prices, both with a last-checked date taken from the price data, and a second hand-written copy in the body only drifts and goes stale.`,
     },
   ];
 }

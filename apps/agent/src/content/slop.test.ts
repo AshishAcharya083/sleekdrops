@@ -737,12 +737,14 @@ test('no single new metric drags a draft below the pass mark on its own', () => 
   ]);
   assert.ok(unanchored.score >= SLOP_PASS_SCORE, `unanchored draft scored ${unanchored.score}`);
 
-  // Same for page furniture typed into an otherwise clean body.
-  const furniture = detectSlop(
-    `${SHAPED_DRAFT}\n\n${HOUSE_BLOCKS.find((b) => b.templateOwned)?.text ?? ''}`,
+  // A registered house caveat on an otherwise clean body is not a defect at
+  // all: nothing in the layout renders one, so the body is the reader's only
+  // copy. It stays exempt, and files nothing.
+  const caveat = detectSlop(
+    `${SHAPED_DRAFT}\n\n${HOUSE_BLOCKS.find((b) => b.id === 'comparison-scope')?.text ?? ''}`,
   );
-  assert.deepEqual(furniture.findings.map((f) => f.rule), ['Page furniture written into the body']);
-  assert.ok(furniture.score >= SLOP_PASS_SCORE, `retyped furniture scored ${furniture.score}`);
+  assert.deepEqual(caveat.findings.map((f) => f.rule), []);
+  assert.ok(caveat.score >= SLOP_PASS_SCORE, `registered caveat scored ${caveat.score}`);
 });
 
 /** A verdict long enough to measure and carrying not one verifiable fact. */
@@ -763,12 +765,6 @@ test('every new finding carries line numbers and a fix, like every old one', () 
     ...detectSlop(WITH_LINKS).findings,
     ...detectSlop(COMPLETE_PICKS.replace(WRAPPED_DISCLOSURE, 'We picked six.')).findings,
     ...detectSlop(NEAR_DUPLICATE, { corpus: CORPUS }).findings,
-    ...detectSlop(
-      `${SHAPED_DRAFT.replace('at $299 RRP', 'at $299').replace(
-        'That is $150 less\nthan the Sonos.',
-        'That is cheaper\nthan the Sonos.',
-      )}\n\n${HOUSE_BLOCKS.find((b) => b.templateOwned)?.text ?? ''}`,
-    ).findings,
   ];
   const v2 = findings.filter((f) =>
     ['uniformity', 'specificity', 'repetition', 'disclosure'].includes(f.category),
@@ -1108,54 +1104,39 @@ test('a recommendation has to be anchored to the market it claims to be best in'
   );
 });
 
-test('page furniture the layout renders is a deletion, not a rewrite', () => {
-  // The AU comparison market carries the scope and price notes on every page,
-  // but renders them from the template beside the table and the prices - with
-  // a last-checked date out of real price data, because under the ACL a stale
-  // disclaimer cures nothing. A body copy of them is a second wording that
-  // drifts, so the instruction is delete, not rewrite.
+test('the registered scope and price caveats are body copy, not a deletion', () => {
+  // The AU comparison market carries a scope note and a price-volatility note
+  // on every page, and the ACCC's guidance wants the scope one prominent
+  // rather than linked. Nothing in the article layout renders either today, so
+  // a body that carries them is the reader's only copy of them: registration
+  // fixes the wording and exempts it from the repetition metrics, and files no
+  // finding at all.
   const scope = HOUSE_BLOCKS.find((b) => b.id === 'comparison-scope');
-  assert.ok(scope?.templateOwned);
-  assert.ok(
-    HOUSE_BLOCKS.every((b) => !(b.mandated && b.templateOwned)),
-    'a block the layout renders cannot also be text the body owes the reader',
-  );
+  const price = HOUSE_BLOCKS.find((b) => b.id === 'price-currency-note');
+  assert.ok(scope && price);
 
-  const retyped = detectSlop(`${VARIED}\n\n${scope.text}`).findings.find(
-    (f) => f.rule === 'Page furniture written into the body',
-  );
-  assert.ok(retyped);
-  assert.equal(retyped.count, 1);
-  assert.match(retyped.matches[0], /^comparison-scope \(v\d\)/);
-  assert.match(retyped.fix, /Delete them/);
-  assert.ok(retyped.lines[0] > 1, 'anchored where the furniture was typed');
-  assert.notEqual(slopSeverity(retyped), 'high');
+  const carried = detectSlop(`${VARIED}\n\n${scope.text}\n\n${price.text}`);
+  assert.deepEqual(carried.findings.filter((f) => f.category === 'disclosure'), []);
+  assert.ok(carried.score >= SLOP_PASS_SCORE, `registered caveats scored ${carried.score}`);
 
-  // The hand-rolled variant is the case that matters: it is the one the
-  // registry cannot keep in step with the page.
-  assert.ok(
-    detectSlop(
-      `${VARIED}\n\nWe compare a selected range of products, but not everything on sale here.`,
-    ).findings.some((f) => f.rule === 'Page furniture written into the body'),
-  );
-
-  // One defect, one finding: the same words must not also come back as
-  // site-wide repetition, which would ask the editor to rewrite what they have
-  // just been told to delete.
+  // The same words back from every published article stay exempt: text the
+  // site genuinely repeats is not the sameness these metrics are looking for.
   const corpus = CORPUS.map((doc) => ({ ...doc, body: `${doc.body}\n\n${scope.text}` }));
   const repetition = detectSlop(`${VARIED}\n\n${scope.text}`, { corpus }).findings.filter(
     (f) => f.category === 'repetition',
   );
   const scopeWords = scope.text.toLowerCase();
   for (const match of repetition.flatMap((f) => f.matches)) {
-    assert.ok(!scopeWords.includes(match), `furniture flagged as repetition: "${match}"`);
+    assert.ok(!scopeWords.includes(match), `registered caveat flagged as repetition: "${match}"`);
   }
 
-  // And a body that simply leaves it to the layout is clean.
-  assert.equal(
-    detectSlop(VARIED).findings.some((f) => f.rule === 'Page furniture written into the body'),
-    false,
+  // And ordinary prose that happens to share a five-word run with one of them
+  // is untouched - a shared run is not a retyped block.
+  const ordinary = detectSlop(
+    `${VARIED}\n\nStock moves fast on this one. Confirm with the retailer before buying, because
+listings lag the price changes by a day or two.`,
   );
+  assert.deepEqual(ordinary.findings.filter((f) => f.category === 'disclosure'), []);
 });
 
 test('an article with no dated, named source is told to add one', () => {
