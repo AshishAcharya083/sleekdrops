@@ -599,8 +599,71 @@ ${HOUSE_METHOD}`;
   );
 });
 
+/** Everything a publisher may repeat but is not obliged to. */
+const DISCRETIONARY_HOUSE = HOUSE_BLOCKS.filter((b) => !b.mandated)
+  .map((b) => b.text)
+  .join('\n\n');
+
+/** The blocks the FTC, the ACCC and the Associates agreement do not let us drop. */
+const MANDATED_HOUSE = HOUSE_BLOCKS.filter((b) => b.mandated)
+  .map((b) => b.text)
+  .join('\n\n');
+
+test('mandated house text is exempt at any length, discretionary text is rationed', () => {
+  // Leader practice is a constant absolute budget of one-liners - Wirecutter's
+  // 17-word commission line, the Associates' mandated 9 words - so the budget
+  // is absolute. But 101 words of furniture on a 60-word deal post is a page
+  // that is mostly boilerplate, which is the exact profile an AdSense reviewer
+  // calls low-value, so a proportional ceiling sits on top of it.
+  const houseCorpus = CORPUS.map((doc) => ({
+    ...doc,
+    body: `${doc.body}\n\n${DISCRETIONARY_HOUSE}\n\n${MANDATED_HOUSE}`,
+  }));
+
+  // A full-length guide: the whole registry fits under the ceiling.
+  const guide = `${VARIED}\n\n${DISCRETIONARY_HOUSE}\n\n${MANDATED_HOUSE}`;
+  assert.deepEqual(
+    detectSlop(guide, { corpus: houseCorpus }).findings.filter((f) => f.category === 'repetition'),
+    [],
+  );
+
+  // The same furniture on a deal post is most of the page, and the excess is
+  // measured like any other prose.
+  const dealPost = `The Ninja AF160 dropped to $179 at Amazon Australia this morning, down from
+the $229 RRP Ninja lists. It holds 5.7 litres.
+
+${DISCRETIONARY_HOUSE}
+
+${MANDATED_HOUSE}`;
+  const finding = detectSlop(dealPost, { corpus: houseCorpus }).findings.find(
+    (f) => f.rule === 'House phrasing repeated site-wide',
+  );
+  assert.ok(finding, 'house text past the ceiling is not excused on a short post');
+
+  // ...but never the mandated blocks. The scanner demands the disclosure by
+  // presence and the Associates agreement forbids touching its sentence, so
+  // neither may ever surface as something to rewrite.
+  const mandatedWords = MANDATED_HOUSE.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ');
+  for (const match of finding.matches) {
+    assert.ok(!mandatedWords.includes(match), `mandated text was flagged: "${match}"`);
+  }
+});
+
+test('the mandated Associates sentence is never a finding of any kind', () => {
+  // The Operating Agreement requires it verbatim and forbids a paraphrase.
+  // Any rule that asked an editor to change it would be asking for a breach.
+  const associates = block('affiliate-program');
+  assert.deepEqual(detectSlop(associates).findings, []);
+
+  const everywhere = CORPUS.map((doc) => ({ ...doc, body: `${doc.body}\n\n${associates}` }));
+  const withIt = detectSlop(`${VARIED}\n\n${associates}`, { corpus: everywhere });
+  for (const f of withIt.findings) {
+    assert.ok(!f.matches.some((m) => associates.toLowerCase().includes(m.toLowerCase())), f.rule);
+  }
+});
+
 test('the house-block registry stays inside its own budget', () => {
-  // The cap belongs on the registry, not on the draft: a fifth block, or a
+  // The cap belongs on the registry, not on the draft: a ninth block, or a
   // longer one, is the signal to move that text to a standing page and link
   // it. This assertion is the only thing enforcing that.
   assert.ok(
@@ -652,7 +715,27 @@ test('no single new metric drags a draft below the pass mark on its own', () => 
   const duplicate = detectSlop(NEAR_DUPLICATE, { corpus: CORPUS });
   assert.deepEqual(duplicate.findings.map((f) => f.category), ['repetition', 'repetition']);
   assert.ok(duplicate.score >= SLOP_PASS_SCORE, `near-duplicate scored ${duplicate.score}`);
+
+  // A draft that is otherwise clean, with one evidence-free verdict section.
+  const verdict = detectSlop(`${VARIED}\n\n## The verdict\n\n${EVIDENCE_FREE_VERDICT}`);
+  assert.ok(
+    verdict.findings.some((f) => f.rule === 'Recommendation passage without evidence'),
+    verdict.findings.map((f) => f.rule).join(', '),
+  );
+  assert.ok(verdict.score >= SLOP_PASS_SCORE, `thin verdict scored ${verdict.score}`);
 });
+
+/** A verdict long enough to measure and carrying not one verifiable fact. */
+const EVIDENCE_FREE_VERDICT = `Most people will be happy with the pick above, and the rest of the group is
+close enough that the choice comes down to what you already own. If you have a
+big house, weight matters more than you think it will.
+
+The rest is preference. Buy the one that feels right in the hand, because the
+difference between them is smaller than the marketing suggests, and you will
+not regret either of the two we named.
+
+Nobody in this group is a bad machine, and the gap between the top and the
+bottom is narrower than it has been for a while now.`;
 
 test('every new finding carries line numbers and a fix, like every old one', () => {
   const findings = [
@@ -830,24 +913,89 @@ function calibrationDraft(sentences: number, every: number): string {
   return out.join('\n');
 }
 
-test('the specificity gate is calibrated to the category leaders, not to our own prose', () => {
-  // CHOICE and Canstar Blue run 5-14 specifics per 100 words in verdict and
-  // test-result prose and about 2 in their thinnest methodology boilerplate,
-  // which blends to 3-5 over a whole article. A draft at 2.1 per 100 cleared
-  // the old 1.5 gate; it is exactly the copy the AdSense reviewer called
-  // templated, so it does not clear this one.
-  assert.equal(SCAN_THRESHOLDS.specificityPer100, 3);
+/** 12 words, one specific: a measured quantity and nothing else. */
+const ONE_SPECIFIC_SENTENCE = 'The 5.7 litre bin is the part owners notice first of all.';
+
+/** The same draft, every `every`-th sentence carrying a single specific. */
+function sparseDraft(sentences: number, every: number): string {
+  const out: string[] = ['## What we found', ''];
+  for (let i = 0; i < sentences; i++) {
+    out.push(i % every === 0 ? ONE_SPECIFIC_SENTENCE : FILLER_SENTENCE);
+    if (i % 3 === 2) out.push('');
+  }
+  return out.join('\n');
+}
+
+test('the article-wide floor clears a leader writing an explainer, not filler', () => {
+  // Measured passage densities put Canstar Blue at 5-9 per 100 and Wirecutter
+  // at 4-8, but CHOICE is bimodal: its free explainer guides run 0-2 per 100
+  // across whole stretches and blend to about 2-4. A flat 3.0 floor failed
+  // that article, which is a floor calibrated against the wrong thing - so it
+  // sits below every leader blend and `verdictPer100` does the discriminating.
+  assert.equal(SCAN_THRESHOLDS.specificityPer100, 2.5);
+
+  const explainer = detectSlop(sparseDraft(30, 3)).findings.find(
+    (f) => f.rule === 'Thin specificity density',
+  );
+  assert.equal(explainer, undefined, 'a CHOICE-style explainer at 2.8 per 100 passes');
+
+  const filler = detectSlop(sparseDraft(30, 4)).findings.find(
+    (f) => f.rule === 'Thin specificity density',
+  );
+  assert.ok(filler, 'a draft at 2.2 per 100 is below every leader blend and fails');
+  assert.match(filler.fix, /2\.\d per 100, want 2\.5/);
 
   const thin = detectSlop(calibrationDraft(30, 16)).findings.find(
     (f) => f.rule === 'Thin specificity density',
   );
-  assert.ok(thin, 'a draft at roughly 2 specifics per 100 words must not pass');
-  assert.match(thin.fix, /2\.\d per 100, want 3/);
+  assert.ok(thin, 'the copy the AdSense reviewer called templated still fails');
 
   const leaderDensity = detectSlop(calibrationDraft(30, 5)).findings.some(
     (f) => f.rule === 'Thin specificity density',
   );
   assert.equal(leaderDensity, false, 'leader density must pass');
+});
+
+test('a passage that names a pick is held to a density an explainer is not', () => {
+  // The discriminating test the blended floor cannot make. Same prose, same
+  // density, judged differently by what the passage is doing: explanatory
+  // copy is legitimately sparse at the leaders, the paragraph where they name
+  // a pick never is, and unsourced affiliate copy is sparse in exactly that
+  // paragraph.
+  const body = `${FILLER_SENTENCE} ${FILLER_SENTENCE}\n\n${FILLER_SENTENCE} ${FILLER_SENTENCE}\n\n${FILLER_SENTENCE} ${FILLER_SENTENCE} ${FILLER_SENTENCE}`;
+  // Padding so the article clears `minWordsForSpecificity`; explainer
+  // headings, so nothing but the section under test is ever a recommendation.
+  const padding = `## What to look for in a bin seal\n\n${body}\n\n## Care and maintenance\n\n${body}\n\n## How the filters clog\n\n${body}`;
+  const verdictRule = (md: string) =>
+    detectSlop(md).findings.find((f) => f.rule === 'Recommendation passage without evidence');
+
+  assert.equal(
+    verdictRule(`${padding}\n\n## How a cyclone separates dust\n\n${body}`),
+    undefined,
+    'an explainer section is exempt from this gate',
+  );
+
+  const verdict = verdictRule(`${padding}\n\n## The verdict\n\n${body}`);
+  assert.ok(verdict, 'the same prose under a verdict heading is not');
+  assert.equal(verdict.count, 1);
+  assert.match(verdict.matches[0], /^The verdict \(0\.0 per 100\)$/);
+  assert.ok(verdict.lines[0] > 1, 'anchored on the heading, not the top of the draft');
+  assert.match(verdict.fix, /Explainer sections are exempt/);
+
+  // A section that links a product is a recommendation whatever its heading
+  // says: a /go/ slug is the site's own record that the passage sells.
+  assert.ok(
+    verdictRule(`${padding}\n\n## How a cyclone separates dust\n\n${body}\n\nRead the [full listing](/go/dyson-v15).`),
+    'an affiliate link makes the passage a recommendation',
+  );
+
+  // And evidence clears it.
+  const dense = `${SPECIFIC_SENTENCE} ${SPECIFIC_SENTENCE}\n\n${SPECIFIC_SENTENCE} ${FILLER_SENTENCE}\n\n${SPECIFIC_SENTENCE} ${FILLER_SENTENCE} ${FILLER_SENTENCE}`;
+  assert.equal(
+    verdictRule(`${padding}\n\n## The verdict\n\n${dense}`),
+    undefined,
+    'leader density in the verdict passage clears it',
+  );
 });
 
 test('an article with no dated, named source is told to add one', () => {
@@ -943,10 +1091,16 @@ owner reviews back that up.`;
   );
 });
 
-test('a spec table cannot carry a vague article', () => {
-  // The table is where the leaders put their figures, and it is also where a
-  // thin article hides: 40 numbers in a grid above 500 words that say
-  // nothing. Both sides of the density are measured on body copy only.
+test('spec-table figures count, and still cannot carry vague prose', () => {
+  // The decision, asserted once so it cannot drift: comparison-table figures
+  // DO count towards the article-wide density. A reader gets the same
+  // verifiable fact from a row as from a sentence, and a large share of what
+  // CHOICE and Canstar Blue publish lives in exactly those rows - scoring our
+  // prose against a leader blend that included them, having stripped ours,
+  // would be comparing two different measurements.
+  //
+  // What stops 40 numbers in a grid from carrying 500 words that say nothing
+  // is the rolling window, which is prose-only and asks a different question.
   const rows = Array.from(
     { length: 12 },
     (_, i) => `| Model ${i}00 | $${200 + i * 10} | ${4 + i} hours | 2026 |`,
@@ -954,10 +1108,21 @@ test('a spec table cannot carry a vague article', () => {
   const table = `## How they compare\n\n| Model | RRP | Runtime | Released |\n| --- | --- | --- | --- |\n${rows}`;
   const vague = TEMPLATED.replace('## FAQ', `${table}\n\n## FAQ`);
 
-  const finding = detectSlop(vague).findings.find((f) => f.rule === 'Thin specificity density');
-  assert.ok(finding, 'the table must not lift the density');
-  assert.match(finding.fix, /Spec tables do not count towards this/);
-  assert.ok(finding.lines.every((line) => line > 0));
+  const bare = detectSlop(TEMPLATED).findings.find((f) => f.rule === 'Thin specificity density');
+  assert.ok(bare, 'the same draft without the table is thin');
+  assert.match(bare.fix, /Comparison-table figures already count towards this/);
+
+  const withTable = detectSlop(vague);
+  assert.equal(
+    withTable.findings.some((f) => f.rule === 'Thin specificity density'),
+    false,
+    'the table is real evidence and lifts the article-wide read',
+  );
+
+  const thin = withTable.findings.find((f) => f.rule === 'Thin passage');
+  assert.ok(thin, 'the filler prose around the table is still caught');
+  assert.ok(thin.count >= 3);
+  assert.ok(thin.lines.every((line) => line > 0));
 });
 
 test('a draft with Windows line endings scans the same as one without', () => {
