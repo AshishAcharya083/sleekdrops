@@ -256,6 +256,8 @@ export const affiliateLinkSchema = z.object({
   default_url: z.string().url(),
   regions_json: affiliateRegionsSchema.nullable().optional(),
   note: z.string().optional(),
+  /** Rebuilt from the draft, with no dossier product behind it (see AffiliateLinkRow). */
+  healed: z.boolean().optional(),
 });
 
 export type AffiliateLink = z.infer<typeof affiliateLinkSchema>;
@@ -333,62 +335,113 @@ export function goSlugsIn(body: string): string[] {
 const GO_MARKDOWN_LINK = /\[([^\]]+)\]\(\/go\/([a-z0-9]+(?:-[a-z0-9]+)*)\)/g;
 
 /**
- * Words that shop rather than name. An anchor built only from these ("check
- * the price", "here") points at a product without ever saying which one, so
- * there is nothing to rebuild a destination from.
+ * Words that shop rather than name. A phrase built only from these ("check the
+ * price on Amazon AU", "our top pick") points at a product without ever saying
+ * which one, so there is nothing in it to rebuild a destination from.
+ *
+ * This is the second filter, not the first: what a phrase is *about* is
+ * decided by the slug it links (see `namingAnchor`). The list only has to
+ * settle phrases with no slug to measure against.
  */
 const SHOPPING_WORDS = new Set([
   'a', 'an', 'the', 'this', 'that', 'these', 'those', 'it', 'one', 'here', 'now', 'today',
+  'todays', 'we', 'our', 'ours', 'us', 'you', 'your', 'yours', 'where', 'which', 'what',
   'see', 'check', 'view', 'buy', 'shop', 'get', 'grab', 'find', 'compare', 'click', 'order',
-  'browse', 'price', 'prices', 'pricing', 'cost', 'deal', 'deals', 'offer', 'offers', 'link',
-  'links', 'more', 'details', 'latest', 'current', 'best', 'cheapest', 'lowest', 'full',
+  'browse', 'read', 'pick', 'picks', 'top', 'option', 'options', 'model', 'review', 'reviews',
+  'price', 'prices', 'pricing', 'cost', 'deal', 'deals', 'offer', 'offers', 'link', 'sale',
+  'links', 'more', 'details', 'latest', 'current', 'new', 'best', 'cheapest', 'lowest', 'full',
   'out', 'on', 'at', 'in', 'for', 'from', 'to', 'and', 'or', 'amazon', 'store', 'online',
   'available', 'availability', 'stock',
+  // Marketplace qualifiers. The link contract tells the writer to say where a
+  // CTA goes ("view at Amazon AU"), so these ride along on shopping phrases.
+  'com', 'au', 'uk', 'nz', 'ca', 'de',
 ]);
 
-/**
- * What each /go/ link in the body calls the thing it points at, keyed by slug.
- *
- * This is what lets a link with no dossier product behind it be rebuilt rather
- * than deleted: the anchor text a writer put on an affiliate link IS the
- * product name, which is the only input an Amazon search destination needs.
- *
- * The anchor is kept whole (minus markdown emphasis) rather than reduced to
- * the words that look like a name — the writer's own phrasing searches better
- * than anything a word filter would leave behind. Slugs whose anchor names no
- * product at all are simply absent, and a slug linked more than once is taken
- * from the first anchor that names something.
- */
-export function goLinkAnchors(body: string): Map<string, string> {
-  const anchors = new Map<string, string>();
-  for (const [, anchor, slug] of body.matchAll(GO_MARKDOWN_LINK)) {
-    if (anchors.has(slug)) continue;
-    const named = anchorProductName(anchor);
-    if (named) anchors.set(slug, named);
-  }
-  return anchors;
+/** The words of a phrase that could be naming a product rather than a click. */
+function namingWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.replace(/[^\p{L}]/gu, '').length >= 2 && !SHOPPING_WORDS.has(word));
+}
+
+export interface GoLinkSearchTerm {
+  /** What to search Amazon for. */
+  term: string;
+  /** Where it was read from - the provenance an affiliate row's note records. */
+  source: 'anchor text' | 'its /go/ slug';
 }
 
 /**
- * The anchor text as a search term, or '' when it names no product.
+ * The Amazon search term each /go/ *link* in the body is worth, keyed by slug.
  *
- * Naming takes a word of two or more letters that is not one of the shopping
- * words: a price ("A$1,199"), a bare model number or an arrow is a link a
- * reader follows for a product it never says the name of, and searching Amazon
- * for those characters is a worse destination than no link at all.
+ * This is what lets a link with no dossier product behind it be rebuilt rather
+ * than deleted: a name is the only input a search destination needs, and the
+ * body carries the name twice - in the words the writer put on the link, and
+ * in the slug itself, which is that name kebab-cased.
+ *
+ * A bare `/go/` mention with no anchor around it is absent: there is no link
+ * for a reader to follow there, so there is nothing to heal.
  */
-function anchorProductName(anchor: string): string {
-  const plain = anchor
+export function goLinkSearchTerms(body: string): Map<string, GoLinkSearchTerm> {
+  const anchorsBySlug = new Map<string, string[]>();
+  for (const [, anchor, slug] of body.matchAll(GO_MARKDOWN_LINK)) {
+    anchorsBySlug.set(slug, [...(anchorsBySlug.get(slug) ?? []), anchor]);
+  }
+
+  const terms = new Map<string, GoLinkSearchTerm>();
+  for (const [slug, anchors] of anchorsBySlug) {
+    const anchor = namingAnchor(anchors, slug);
+    if (anchor) terms.set(slug, { term: anchor, source: 'anchor text' });
+    else if (namingWords(slug).length > 0) {
+      terms.set(slug, { term: slug.split('-').join(' '), source: 'its /go/ slug' });
+    }
+  }
+  return terms;
+}
+
+/**
+ * The anchor that names the slug's product best, or '' when none of them does.
+ *
+ * A word the anchor and the slug share is the anchor talking about the product
+ * rather than about the click, and that - not a list of call-to-action
+ * phrasings to exclude - is the test. The link contract prescribes the
+ * phrasings (LINK_PLACEMENT_RULES: "Check price on Amazon" table cells, "See
+ * today's price on Amazon" CTAs, "view at Amazon AU"), so an anchor filter
+ * would be excluding exactly what the writer was told to produce, and an
+ * Amazon search for those words lands the reader on a page about nothing.
+ *
+ * Where several links share a slug - a comparison-table cell, a section CTA,
+ * the name in the prose - the anchor sharing the most of the slug's words
+ * wins, whichever came first in the body.
+ *
+ * The winner is kept whole (minus markdown emphasis) rather than reduced to
+ * the words it shares: the writer's own phrasing searches better than anything
+ * a word filter would leave behind.
+ */
+function namingAnchor(anchors: string[], slug: string): string {
+  const named = new Set(namingWords(slug));
+  let best = '';
+  let bestShared = 0;
+  for (const anchor of anchors) {
+    const text = plainAnchor(anchor);
+    const shared = new Set(namingWords(text).filter((word) => named.has(word))).size;
+    if (shared > bestShared) {
+      best = text;
+      bestShared = shared;
+    }
+  }
+  return best;
+}
+
+/** Anchor text as a reader sees it: no markdown emphasis, no edge punctuation. */
+function plainAnchor(anchor: string): string {
+  return anchor
     .replace(/[*_`]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N})]+$/gu, '');
-  const namesSomething = plain.split(' ').some((word) => {
-    const letters = word.replace(/[^\p{L}]/gu, '');
-    const bare = word.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
-    return letters.length >= 2 && !SHOPPING_WORDS.has(bare);
-  });
-  return namesSomething ? plain : '';
 }
 
 export function estimateReadTime(body: string): number {

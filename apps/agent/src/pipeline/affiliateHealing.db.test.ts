@@ -142,7 +142,7 @@ test('a draft naming three real products publishes on healed search links', { sk
     [article.id],
   );
   assert.equal(session.status, 'done');
-  assert.match(session.summary, /3 healed from anchor text/);
+  assert.match(session.summary, /3 healed from the draft/);
 });
 
 test('the panel reads the healed rows back off the card', { skip }, async () => {
@@ -160,6 +160,9 @@ test('the panel reads the healed rows back off the card', { skip }, async () => 
   assert.equal(links[0].regions_json.network, 'amazon');
   assert.equal(links[0].regions_json.search, 'Samsung Galaxy Z Fold 8');
   assert.equal('asins' in links[0].regions_json, false, 'a healed row ships no ASIN');
+  // The publisher reads this flag back off the card to decide that the row may
+  // not overwrite another article's resolved one, so it has to survive JSONB.
+  assert.equal(links[0].healed, true);
 });
 
 test('a card with nothing nameable behind its links still fails, and says so', { skip }, async () => {
@@ -182,7 +185,7 @@ test('a card with nothing nameable behind its links still fails, and says so', {
   const failed = await reload(article.id);
   assert.equal(failed.status, 'failed');
   assert.equal(failed.stage, 'assemble');
-  assert.match(failed.error ?? '', /anchor-text healing recovered 0 of 1/);
+  assert.match(failed.error ?? '', /healing recovered 0 of 1/);
   assert.doesNotMatch(failed.error ?? '', /earn nothing/);
 });
 

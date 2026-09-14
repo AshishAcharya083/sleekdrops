@@ -5,13 +5,14 @@
 // the marketplace it was captured on, plus a search term the /go/ resolver
 // uses for every other region (search-results pages never 404).
 //
-// A slug the dossier cannot account for is healed from its own anchor text
-// rather than deleted: the words the writer put on the link are the product's
-// name, and a name is the whole input a search destination needs.
+// A slug the dossier cannot account for is healed out of the draft rather than
+// deleted: the words the writer put on the link - or the slug itself, which is
+// a product name kebab-cased - are that product's name, and a name is the
+// whole input a search destination needs.
 import {
   amazonSearchUrl,
   estimateReadTime,
-  goLinkAnchors,
+  goLinkSearchTerms,
   goSlugsIn,
   HOME_CURRENCY,
   MONETISED_INTENTS,
@@ -27,7 +28,7 @@ export interface AssembledArticle {
   affiliateLinks: AffiliateLinkRow[];
   /** Body after stripping the /go/ links that could not be healed either. */
   body: string;
-  /** Slugs linked to an Amazon search built from their own anchor text. */
+  /** Slugs linked to an Amazon search built from the draft's own words. */
   healedSlugs: string[];
   droppedSlugs: string[];
 }
@@ -115,7 +116,8 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
   }
 
   // A /go/ slug with no dossier product behind it still names a real product:
-  // the writer's anchor text is that name, and `amazonSearchUrl` asks for
+  // the words on the link - or failing those, the slug itself, which is a
+  // product name kebab-cased - are that name, and `amazonSearchUrl` asks for
   // nothing else. So the link is rebuilt from the body rather than deleted -
   // stripping it destroys the evidence of what the reader was promised, and
   // the monetisation gate below then fails the piece on its absence.
@@ -123,17 +125,21 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
   // The destination class is the same one every resolved row already carries
   // as its `default_url` safety net, so a healed link needs no disclosure the
   // page does not already make.
-  const anchors = goLinkAnchors(body);
+  const healable = goLinkSearchTerms(body);
   const healedSlugs: string[] = [];
   for (const slug of slugsInBody) {
     if (bySlug.has(slug)) continue;
-    const search = productSearchTerm({ name: anchors.get(slug) ?? '' });
-    if (!search) continue; // the anchor names no product → stripped below
+    const named = healable.get(slug);
+    if (!named) continue; // the link names no product → stripped below
+    const search = productSearchTerm({ name: named.term });
     bySlug.set(slug, {
       slug,
       default_url: amazonSearchUrl(search),
       regions_json: { network: 'amazon', search },
-      note: `${search} - healed from anchor text, no dossier product behind it, used by ${brief.slug}`,
+      // Never allowed to displace another article's row for the same slug:
+      // this is a guess rebuilt from one draft, and the slug map is site-wide.
+      healed: true,
+      note: `${search} - healed from ${named.source}, no dossier product behind it, used by ${brief.slug}`,
     });
     healedSlugs.push(slug);
   }
@@ -200,7 +206,7 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
   if (finalLinks.length === 0 && intent && MONETISED_INTENTS.has(intent)) {
     throw new Error(
       `no affiliate links for a ${intent} piece: the dossier carried ${products.length} product(s), ` +
-        `the draft linked ${slugsInBody.length} /go/ slug(s), and anchor-text healing recovered ` +
+        `the draft linked ${slugsInBody.length} /go/ slug(s), and healing recovered ` +
         `${healedSlugs.length} of ${slugsInBody.length}` +
         `${droppedSlugs.length > 0 ? ` (nothing nameable in: ${droppedSlugs.join(', ')})` : ''}. ` +
         `There is nothing on the page for a reader to click.`,

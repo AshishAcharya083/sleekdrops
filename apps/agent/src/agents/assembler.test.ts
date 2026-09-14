@@ -284,9 +284,10 @@ test('picks only cover the /go/ slugs a dossier product stands behind', async ()
 
 // ── Healing an unresolvable /go/ slug ────────────────────────────────────────
 // A slug with no dossier product behind it used to be stripped out of the body
-// and then counted as a reason to fail the piece. The anchor text names the
-// product, and a search destination needs nothing else, so the link is rebuilt
-// instead - and the gate below only fires once that has been tried.
+// and then counted as a reason to fail the piece. The draft names the product
+// twice - in the words on the link and in the slug itself - and a search
+// destination needs nothing else, so the link is rebuilt instead. The gate
+// below only fires once that has been tried.
 
 test('a slug the dossier never carried is linked from its own anchor text', async () => {
   const { affiliateLinks, body, healedSlugs, droppedSlugs } = await runAssembler(
@@ -305,6 +306,10 @@ test('a slug the dossier never carried is linked from its own anchor text', asyn
   assert.equal(healed.default_url, 'https://www.amazon.com.au/s?k=Miele%20Triflex%20HX2');
   assert.deepEqual(healed.regions_json, { network: 'amazon', search: 'Miele Triflex HX2' });
   assert.match(healed.note, /healed from anchor text, no dossier product behind it/);
+  // What keeps the publisher from letting this guess overwrite another
+  // article's dossier-backed row for the same product slug.
+  assert.equal(healed.healed, true);
+  assert.equal(affiliateLinks.find((link) => link.slug === 'shark-detect-pro')?.healed, undefined);
 });
 
 test('markdown emphasis around the name is not part of the search term', async () => {
@@ -394,6 +399,51 @@ test('a commercial piece whose only links are healed publishes', async () => {
   );
 });
 
+test('a link labelled the way the contract prescribes is healed from its slug', async () => {
+  // LINK_PLACEMENT_RULES tells the writer to put a "Where to buy" column in
+  // the comparison table (which sits above the per-product sections) and to
+  // end each section with a CTA that says where it goes. Both are anchors
+  // that name no product, so the slug - a product name kebab-cased - is what
+  // the destination gets built from. Searching Amazon for "view at Amazon AU"
+  // would ship a sponsored link to a results page for nothing.
+  const noProducts = { ...(twoProducts as unknown as Record<string, unknown>), products: [] } as never;
+
+  const { affiliateLinks, healedSlugs, droppedSlugs } = await runAssembler(
+    article({
+      research: noProducts,
+      keyword_plan: vacuumPlan,
+      draft_md:
+        '| Phone | Where to buy |\n| --- | --- |\n' +
+        '| Z Fold 8 | [Check price on Amazon](/go/samsung-galaxy-z-fold-8) |\n\n' +
+        '## The one to buy\n\nIt folds flat.\n\n[view at Amazon AU](/go/samsung-galaxy-z-fold-8)',
+    }),
+  );
+
+  assert.deepEqual(droppedSlugs, []);
+  assert.deepEqual(healedSlugs, ['samsung-galaxy-z-fold-8']);
+  assert.equal(
+    affiliateLinks[0].default_url,
+    'https://www.amazon.com.au/s?k=samsung%20galaxy%20z%20fold%208',
+  );
+  assert.match(affiliateLinks[0].note, /healed from its \/go\/ slug/);
+});
+
+test('the name in the prose outranks the call to action above it', async () => {
+  const noProducts = { ...(twoProducts as unknown as Record<string, unknown>), products: [] } as never;
+
+  const { affiliateLinks } = await runAssembler(
+    article({
+      research: noProducts,
+      keyword_plan: vacuumPlan,
+      draft_md:
+        '| Z Fold 8 | [Check price on Amazon](/go/samsung-galaxy-z-fold-8) |\n\n' +
+        '## The one to buy\n\nThe [Samsung Galaxy Z Fold 8 Ultra](/go/samsung-galaxy-z-fold-8) is it.',
+    }),
+  );
+
+  assert.equal(affiliateLinks[0].regions_json?.search, 'Samsung Galaxy Z Fold 8 Ultra');
+});
+
 test('the gate fires only after healing, and reports what healing recovered', async () => {
   await assert.rejects(
     runAssembler(
@@ -404,7 +454,7 @@ test('the gate fires only after healing, and reports what healing recovered', as
       }),
     ),
     (err: Error) => {
-      assert.match(err.message, /anchor-text healing recovered 0 of 1/);
+      assert.match(err.message, /healing recovered 0 of 1/);
       assert.match(err.message, /nothing nameable in: todays-best-deal/);
       assert.match(err.message, /nothing on the page for a reader to click/);
       // Commission on a launch-window piece settles 6-12+ weeks after the

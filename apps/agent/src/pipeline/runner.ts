@@ -308,7 +308,7 @@ export async function runStage(article: ArticleRow): Promise<void> {
         });
         summary = `frontmatter + ${assembled.affiliateLinks.length} affiliate link(s) validated${
           assembled.healedSlugs.length > 0
-            ? ` (${assembled.healedSlugs.length} healed from anchor text: ${assembled.healedSlugs.join(', ')})`
+            ? ` (${assembled.healedSlugs.length} healed from the draft: ${assembled.healedSlugs.join(', ')})`
             : ''
         }${
           assembled.droppedSlugs.length > 0
