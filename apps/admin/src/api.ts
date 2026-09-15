@@ -48,6 +48,23 @@ export interface ManualTopicPayload {
   references: ReferenceMaterial[];
 }
 
+/**
+ * The scout run holding the sweep lock, as GET /api/scout/lock reports it.
+ * A sweep is a background task, so its 'running' row is the only thing keeping
+ * two of them apart - and a run whose instance died used to hold that row
+ * forever. The agent now leases it, and this is what the Topics tab reads to
+ * show the operator who holds the lock and to offer to release it.
+ */
+export interface ScoutLock {
+  id: string;
+  started_at: string;
+  heartbeat_at: string;
+  /** Seconds since the run started - how long the lock has been held. */
+  age_seconds: number;
+  /** Seconds since the run last reported it was alive. */
+  heartbeat_age_seconds: number;
+}
+
 export const TOPIC_CATEGORIES = ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel'] as const;
 export const TOPIC_POST_TYPES = ['article', 'guide', 'roundup'] as const;
 
@@ -359,6 +376,13 @@ export const fmtTokens = (v: number | string): string => {
 };
 export const fmtTime = (iso: string | null): string =>
   iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+/** An age in seconds, the way the agent words it in the scout-lock message. */
+export const fmtAge = (seconds: number): string => {
+  const total = Math.max(0, Math.round(seconds));
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+};
 export const duration = (start: string, end: string | null): string => {
   const ms = (end ? new Date(end).getTime() : Date.now()) - new Date(start).getTime();
   const s = Math.max(0, Math.round(ms / 1000));

@@ -116,6 +116,23 @@ test('no stored record applies the site default: analytics and ads off', () => {
   });
 });
 
+test('a deployment can silently default analytics on without enabling ads', () => {
+  const previewDefaults = { analytics: 'granted', ads: 'denied' } as const;
+  assert.deepEqual(resolveConsent(null, false, previewDefaults), {
+    effects: { analytics: 'grant', ads: 'deny' },
+  });
+  assert.deepEqual(
+    resolveConsent(record({ analytics: 'denied', ads: 'denied' }), false, previewDefaults),
+    { effects: { analytics: 'deny', ads: 'deny' } },
+    'an explicit stored opt-out must override the deployment default',
+  );
+  assert.deepEqual(
+    resolveConsent(null, true, previewDefaults),
+    { effects: { analytics: 'deny', ads: 'deny' } },
+    'a browser privacy signal must override the deployment default',
+  );
+});
+
 test('every category the site declares is resolved, none left undefined', () => {
   // Guards the next category added to CONSENT_CATEGORIES: a resolution missing an
   // effect reads as `undefined` at the call site, which is neither grant nor deny.

@@ -31,7 +31,12 @@ import { createAnalytics } from '@getdevteam/analytics-web';
 /** Feedback on, as a build that sets PUBLIC_DEVTEAM_ANALYTICS_FEEDBACK=true has it. */
 mock.module(new URL('./analytics-env.ts', import.meta.url).href, {
   namedExports: {
-    analyticsEnv: () => ({ key: 'dtp_test', host: 'http://analytics.test', feedback: true }),
+    analyticsEnv: () => ({
+      key: 'dtp_test',
+      host: 'http://analytics.test',
+      feedback: true,
+      defaultConsent: 'granted',
+    }),
   },
 });
 

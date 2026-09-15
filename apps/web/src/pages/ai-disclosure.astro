@@ -1,0 +1,78 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import LegalLayout from '@components/article/LegalLayout.astro';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
+
+/**
+ * The AI-assistance disclosure: what part of a SleekDrops article is produced
+ * with AI tools, what a human does before it publishes, and who is accountable
+ * for the result. Linked from the byline block of every article, from every
+ * article's sources block, from the author page and from the footer.
+ *
+ * Written plainly and without hedging on purpose. A disclosure a reader has to
+ * decode is not one, and the failure this page exists to prevent - a site
+ * presenting generated text as the work of reviewers who do not exist - is
+ * caused by vagueness far more often than by outright lying.
+ */
+const meta = buildMeta({
+  title: 'AI-assistance disclosure',
+  description:
+    'SleekDrops articles are AI-assisted and human-reviewed. This page says exactly which parts are produced with AI tools, what an editor checks before publication, and who is accountable.',
+  pathname: '/ai-disclosure',
+});
+---
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema('AI-assistance disclosure', '/ai-disclosure', meta.description)}
+  screen="ai-disclosure"
+>
+  <LegalLayout
+    eyebrow="Disclosure"
+    titleHtml="How AI is used <em>here</em>."
+    updated="September 12, 2026"
+    toc={[
+      { href: '#summary', label: 'Plain summary' },
+      { href: '#where', label: 'Where AI is used' },
+      { href: '#human', label: 'What a human does' },
+      { href: '#byline', label: 'Why the byline reads as it does' },
+      { href: '#limits', label: 'What this means for you' },
+      { href: '#questions', label: 'Questions and corrections' },
+    ]}
+  >
+    <div class="summary" id="summary">
+      <strong>Plain summary</strong>
+      SleekDrops articles are AI-assisted and human-reviewed. AI tools gather the research and write the first draft; a human editor checks every claim against the sources listed on the article, rewrites what does not hold, and signs it off for publication. Nothing publishes without that pass, and the date the piece was last built and checked against its sources is stamped under its byline as "last reviewed".
+    </div>
+
+    <h2 id="where">Where AI <em>is</em> used</h2>
+    <p>Four stages of our process use AI tools, and it is worth being specific about which:</p>
+    <ul>
+      <li><strong>Research.</strong> Gathering published test results, specifications, owner reports and prices, and recording the URL, publisher and date of each one. Those records become the sources list at the foot of the article.</li>
+      <li><strong>Planning.</strong> Reading what the existing coverage of a topic already says, and deciding what this article has to add to be worth publishing.</li>
+      <li><strong>Drafting.</strong> Writing the first draft from that research, in the voice of the beat it was commissioned on.</li>
+      <li><strong>Checking.</strong> A second automated pass that re-reads the draft against the research and flags anything the evidence does not support.</li>
+    </ul>
+    <p>Affiliate destinations are not written by a model at any point: every <code>/go/</code> link is built deterministically from the researched product, which is why a link never points somewhere the research did not name.</p>
+
+    <h2 id="human">What a <em>human</em> does</h2>
+    <p>Before anything appears on the site, an editor at SleekDrops reads the draft and:</p>
+    <ul>
+      <li>checks each figure against the source it is attributed to, and cuts the claim when the source does not carry it;</li>
+      <li>removes anything that implies testing, hands-on use or first-hand experience;</li>
+      <li>confirms the products are actually sold in Australia at the time of writing;</li>
+      <li>signs the piece off for publication — nothing goes live without that step.</li>
+    </ul>
+    <p>That is a review of a draft, not a rewrite of it, and we would rather describe it accurately than inflate it. What it guarantees is that a person is accountable for every published claim — not that every sentence was typed by one.</p>
+
+    <h2 id="byline">Why the byline reads as it <em>does</em></h2>
+    <p>Every article on this site is published by the <a href="/author/desk">SleekDrops Editorial Team</a>, with a beat label — Tech, Home, Value — describing the subject area it was written on. There are no named author personas here, no photographs of writers and no claimed credentials, because inventing any of those is the specific thing we are not willing to do. The team byline is the accountable publisher: one entity, reachable, responsible for every piece.</p>
+    <p>If you are reading a page elsewhere that carries a SleekDrops article under a person's name, it is not ours.</p>
+
+    <h2 id="limits">What this means <em>for you</em></h2>
+    <p>Treat a SleekDrops article as a well-sourced reading of the published evidence, and nothing more than that. The sources are listed on every article with their publisher and date, so the strongest thing you can do is follow the ones your decision rests on. Where evidence is thin, our article says so; where it is missing, we would rather leave the question open than fill it in.</p>
+    <p>Our full method — the evidence standard, how a pick is chosen, and how often each article is re-checked — is on the <a href="/how-we-research">how we research</a> page. How we make money is on the <a href="/disclaimer">affiliate disclaimer</a>.</p>
+
+    <h2 id="questions">Questions and <em>corrections</em></h2>
+    <p>If something here reads as a claim we have not earned, tell us: <a href="mailto:desk@sleekdrops.com">desk@sleekdrops.com</a> for editorial questions, <a href="mailto:corrections@sleekdrops.com">corrections@sleekdrops.com</a> for a factual error. Corrections are made as soon as we can confirm them, and the article's review date is re-stamped when they are.</p>
+  </LegalLayout>
+</BaseLayout>

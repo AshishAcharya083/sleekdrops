@@ -2,12 +2,13 @@
  * Analytics - the single entry point for product tracking, and the wiring that
  * gates it behind the visitor's consent choice.
  *
- * Analytics is off by default and starts only after a visitor enables it under
- * Privacy preferences. `boot()` reads the decision in force - the stored record, or the
- * privacy-preserving default when there is none - and applies it. Every event is queued in an
- * in-memory buffer until that has happened; on grant the buffer flushes and
- * subsequent events send live, on deny (the default, a stored opt-out, or a GPC/DNT signal)
- * the buffer is dropped and nothing is ever sent. Every outgoing payload -
+ * A configured non-production build starts anonymous analytics automatically;
+ * production keeps the DevTeam sink disabled and analytics off by default.
+ * `boot()` reads the decision in force - the stored record, or the deployment
+ * default when there is none - and applies it without opening a prompt. Every
+ * event is queued in an in-memory buffer until that has happened; on grant the
+ * buffer flushes and subsequent events send live, while a stored opt-out or a
+ * GPC/DNT signal drops the buffer and sends nothing. Every outgoing payload -
  * buffered or live - runs through the central PII scrub() first. A withdrawal
  * arriving after a grant - the footer's preferences control makes that reachable on
  * any page - stops both sinks and the A/B testing SDK where they stand and clears
@@ -66,6 +67,7 @@ import {
 } from './analytics-scope.ts';
 import {
   CONSENT_KEY,
+  DEFAULT_GRANTS,
   POLICY_VERSION,
   parseConsent,
   resolveConsent,
@@ -238,8 +240,8 @@ function ensureDevteam(): void {
       autoCaptureErrors: false,
       // In-app feedback: a floating button that screenshots the page, lets the
       // visitor circle what is wrong and sends it to the analytics project. It
-      // appears only after consent, because this is the only place a client is
-      // created and the grant path is the only caller.
+      // appears only while analytics is enabled, because this is the only place
+      // a client is created and the grant path is the only caller.
       allowUserFeedback,
       feedback: { title: FEEDBACK_TITLE },
       onError: (error) => console.error('[analytics] DevTeam SDK error:', error),
@@ -323,9 +325,9 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 /**
  * Log to the browser console (prefixed [analytics]) and, once the DevTeam client
  * exists, forward the same line to the analytics platform as a server-side log so
- * it lands in the platform's Logs view. Consent-gated: the client is only created
- * after the visitor opts in, so nothing reaches the server before consent. Exported
- * so any script can emit a server-visible log.
+ * it lands in the platform's Logs view. Decision-gated: the client is only
+ * created while analytics is enabled. Exported so any script can emit a
+ * server-visible log.
  *
  * Carries the sticky experiment stamps and the theme state stamp, so a log line
  * written after a variant is assigned is attributable to it just like an event
@@ -348,7 +350,7 @@ export function serverLog(level: LogLevel, message: string, attributes?: EventPr
  * bucket a returning visitor on a throwaway id.
  *
  * Called only from the grant path, so nothing is fetched, bucketed or tracked
- * before the visitor opts in.
+ * while analytics is disabled.
  */
 function startExperimentsForVisitor(): void {
   const client = scope().client;
@@ -393,7 +395,7 @@ function applyGrant(): void {
   ensureDevteam();
   setGaOptOut(false);
   ensureGa();
-  serverLog('info', 'consent granted - analytics active');
+  serverLog('info', 'analytics enabled - events will be sent');
   drainBuffer(s).forEach(send);
   startExperimentsForVisitor();
 }
@@ -467,7 +469,7 @@ function applyDeny(): void {
   stopExperiments();
   stopGa();
   stopAnalytics(s);
-  serverLog('info', 'consent denied - no events will be sent');
+  serverLog('info', 'analytics disabled - no events will be sent');
 }
 
 /**
@@ -552,19 +554,22 @@ export function denyConsent(): void {
 }
 
 /**
- * Resolve the decision in force on page load - the stored record, the site
+ * Resolve the decision in force on page load - the stored record, the deployment
  * default when there is none, or a blanket denial for a GPC/DNT signal - and
- * apply it. The page-view event and any funnel events are dispatched by
- * chrome.ts through the same buffered, consent-gated track() pipeline, so they
- * flush on a grant and are dropped on any denial regardless of which script ran
- * first. Nothing is shown to the visitor.
+ * apply it. A configured preview defaults to granted; production and an
+ * unconfigured preview default to denied. The page-view event and any funnel
+ * events are dispatched by chrome.ts through the same buffered, consent-gated
+ * track() pipeline, so they flush on a grant and are dropped on any denial
+ * regardless of which script ran first. Nothing is shown to the visitor.
  *
  * Safe to call more than once per document: the effect it applies is idempotent,
  * so a second entry point calling boot() re-reads the decision without opening a
  * second session or re-flushing the buffer.
  */
 export function boot(): void {
-  const { effects } = resolveConsent(readConsent(), hasPrivacySignal());
+  const { defaultConsent } = analyticsEnv();
+  const defaults = { ...DEFAULT_GRANTS, analytics: defaultConsent };
+  const { effects } = resolveConsent(readConsent(), hasPrivacySignal(), defaults);
   if (effects.analytics === 'grant') applyGrant();
   else applyDeny();
 }
@@ -581,8 +586,8 @@ function reportError(props: ErrorProps): void {
     if (!deduper.shouldReport(errorSignature(props), Date.now())) return;
     track(CLIENT_ERROR_EVENT, props);
     // Also forward to the platform's log pipeline so errors land in the Logs view,
-    // not only as $client_error events. The client only exists after consent, so
-    // this stays consent-gated like track().
+    // not only as $client_error events. The client only exists while analytics
+    // is enabled, so this stays decision-gated like track().
     scope().client?.log.error(String(props.message ?? 'client error'), scrub(props, CLIENT_ERROR_EVENT));
   } catch {
     /* error reporting is best-effort - never let it surface to the user */
@@ -594,7 +599,7 @@ function reportError(props: ErrorProps): void {
  * handler or an error boundary - with its message and a truncated stack trace.
  *
  * Routes through exactly the same pipeline an uncaught error does: the consent
- * gate (nothing is sent, stored or logged before the visitor opts in), the
+ * gate (nothing is sent, stored or logged while analytics is disabled), the
  * dedupe window (a fault firing in a loop reports once), and the scrub()
  * chokepoint (URLs in the message and the stack are reduced to path, emails
  * redacted, and any attribute not on the allowlist dropped). It emits both the
@@ -613,8 +618,8 @@ export function captureError(error: unknown, attributes?: EventProps): void {
 }
 
 /**
- * This session's analytics trace id, or an empty string before consent (there
- * is no client, and so no session, until then).
+ * This session's analytics trace id, or an empty string while analytics is
+ * disabled (there is no client, and so no session, until then).
  *
  * Every log line the SDK sends already carries it. Sending it on to the site's
  * own backend - here, on the `/go` redirect URL - is what puts a client-side

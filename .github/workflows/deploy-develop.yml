@@ -80,11 +80,12 @@ jobs:
           # (apps/web/src/lib/site-env.test.ts) rather than by hoping.
           PUBLIC_SITE_ENV: preview
           NODE_ENV: production
-          # Disabled on every public deployment until the processor publishes
-          # verifiable privacy, jurisdiction and retention terms. GA4 remains
-          # available behind the site's explicit analytics opt-in.
-          PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY: ''
-          PUBLIC_DEVTEAM_ANALYTICS_HOST: ''
+          # DevTeam Analytics is enabled only for this non-production build.
+          # PUBLIC_SITE_ENV is also checked in the browser bundle, so a key
+          # supplied to a production build is discarded before the SDK can be
+          # created. Production keeps literal empty values in its own workflow.
+          PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY: ${{ secrets.DEVTEAM_ANALYTICS_INGEST_KEY }}
+          PUBLIC_DEVTEAM_ANALYTICS_HOST: ${{ vars.DEVTEAM_ANALYTICS_HOST }}
           # In-app feedback widget - develop only. It is a visible control on the
           # page, so production stays without it until we have looked at it here.
           PUBLIC_DEVTEAM_ANALYTICS_FEEDBACK: 'true'

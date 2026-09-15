@@ -2,12 +2,17 @@
 // on a settings-driven interval; humans still pick which ones get written
 // (and approve publishes, unless publish_mode is switched to auto).
 import { getSetting, q } from '../db/pool.js';
-import { isScoutRunning, startScoutRun } from './scout.js';
+import { isScoutRunning, recoverStaleScoutRuns, startScoutRun } from './scout.js';
 
 // Don't pile up suggestions nobody has triaged yet.
 const MAX_PENDING_SUGGESTIONS = 30;
 
 async function tick(): Promise<void> {
+  // recoverStranded() releases expired locks at boot, which covers the recycled
+  // instance; this covers the other half - a sweep whose task died under an
+  // instance that kept running - so the lock heals without a restart.
+  await recoverStaleScoutRuns();
+
   const hours = await getSetting<number>('scout_interval_hours', 24);
   if (!hours || hours <= 0) return;
   if (await isScoutRunning()) return;

@@ -107,6 +107,27 @@ false agency), and two density rules that scale with length: hedge adverbs and
 em-dashes per thousand words. It also flags metronomic rhythm — four
 consecutive sentences within three words of each other.
 
+On top of that vocabulary layer it measures the qualities a blocklist cannot
+see, still deterministic and offline, each with its own threshold in
+`SCAN_THRESHOLDS` and its own line-anchored finding:
+
+- **shape** - sentence-length variance, paragraph-length uniformity and the
+  opening move repeated across every H2. This is what "every article on the
+  site reads the same" actually measures as;
+- **specificity** - prices, model designations, dates and named sources per 100
+  words of body copy, with a stricter floor on the passages that pick or rank,
+  and a requirement that some of those specifics be Australian and comparative
+  (a local RRP, an AU retailer, a warranty term, a stated gap against the
+  runner-up) rather than a restated global spec sheet;
+- **house text** - `HOUSE_BLOCKS` registers the exact blocks a publisher may
+  repeat verbatim, split three ways: what the body owes the reader on every
+  endorsement, what it may repeat inside a word budget, and what the article
+  layout renders and an author must therefore never retype;
+- **cross-corpus repetition** - n-gram and opening-line overlap against the
+  last published bodies, loaded by `src/content/corpus.ts`. `detectSlop` never
+  fetches anything itself: the corpus is passed in, and with no corpus those
+  metrics are skipped entirely and the score is unchanged.
+
 The scan runs **before** the SEO reviewer prompts anything, and its hits are
 handed to the model as established fact rather than left to its judgement. Then:
 
@@ -114,6 +135,9 @@ handed to the model as established fact rather than left to its judgement. Then:
 - a banned word or phrase is **high severity whatever the score**, and a
   high-severity issue blocks the pass — one "delve" in an otherwise strong
   draft still forces a revision round;
+- the shape, specificity, house-text and repetition metrics are **never** high
+  severity and each is capped, so no single measurement can force a revision
+  round or drag an otherwise clean draft below the pass mark on its own;
 - the scan's score caps the review's `voice` dimension and the overall score,
   so a model that liked the draft cannot out-vote the scanner;
 - the editor re-runs the scan on the draft in front of it, so it never works
@@ -199,7 +223,10 @@ stopped.
 
 - **Topic scout**: runs on a schedule (Settings → *Autonomous topic scout*,
   default daily; in-process scheduler, no external cron needed). It skips a
-  sweep while 30+ suggestions sit untriaged.
+  sweep while 30+ suggestions sit untriaged, and while another sweep holds the
+  scout lock - a live sweep renews `scout_runs.heartbeat_at`, and a run that
+  has not renewed for 30 minutes has lost the lock and gets swept to `failed`.
+  The Topics tab shows who holds the lock and can release it by hand.
 - **Article pipeline**: fully autonomous once you approve topics — the worker
   polls Postgres (the light pub/sub) and drives every stage to completion.
 - **Publishing**: gated on your approval by default (`publish_mode=approval`);
@@ -214,11 +241,14 @@ stopped.
 - `agent_sessions` — one row per agent run: model, tokens in/out, cost USD,
   duration, summary/error
 - `settings` — publish_mode, per-agent models, revision cap, worker toggle
-- `scout_runs` — one row per topic sweep
+- `scout_runs` — one row per topic sweep; a `running` row is the scout lock,
+  leased by `heartbeat_at` so a sweep that died with its instance cannot hold
+  it forever
 
 The worker claims queued articles with `FOR UPDATE SKIP LOCKED` (atomic,
 multi-process safe), runs the stage's agent, records the session, and routes
-the article onward. Stranded `running` rows are re-queued on startup.
+the article onward. Stranded `running` rows are re-queued on startup, on the
+same pass that releases expired scout locks.
 
 ## Run it
 

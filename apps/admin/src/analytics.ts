@@ -38,6 +38,7 @@ export const EVENTS = {
   topicApproved: 'Topic Approved',
   topicRejected: 'Topic Rejected',
   scoutRunStarted: 'Scout Run Started',
+  scoutLockCleared: 'Scout Lock Cleared',
   manualTopicSaved: 'Manual Topic Saved',
   articleActioned: 'Article Actioned',
   articleFeedbackSubmitted: 'Article Feedback Submitted',

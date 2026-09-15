@@ -2,6 +2,9 @@
 import BaseLayout from '@layouts/BaseLayout.astro';
 import LegalLayout from '@components/article/LegalLayout.astro';
 import { buildCategorySchema, buildMeta } from '@lib/seo';
+import { analyticsEnv } from '@lib/analytics-env';
+
+const analyticsStartsOn = analyticsEnv().defaultConsent === 'granted';
 
 const meta = buildMeta({
   title: 'Privacy policy',
@@ -19,7 +22,7 @@ const meta = buildMeta({
   <LegalLayout
     eyebrow="Legal"
     titleHtml="Privacy <em>policy</em>."
-    updated="September 11, 2026"
+    updated="September 12, 2026"
     toc={[
       { href: '#summary',      label: 'Plain summary' },
       { href: '#scope',        label: 'Scope of this policy' },
@@ -41,7 +44,7 @@ const meta = buildMeta({
   >
     <div class="summary" id="summary">
       <strong>Plain summary</strong>
-      We host on Cloudflare, optional analytics is off until you enable it under <strong>Privacy preferences</strong> in the footer, and we keep browser storage to a minimum. Google manages advertising consent through its certified consent platform where required. Most outbound product links are affiliate links, which may earn us a small commission at no extra cost to you.
+      We host on Cloudflare and keep browser storage to a minimum. {analyticsStartsOn ? 'Anonymous analytics starts automatically on this non-production preview.' : 'Optional analytics is off until you enable it.'} You can change it under <strong>Privacy preferences</strong> in the footer. Google manages advertising consent through its certified consent platform where required. Most outbound product links are affiliate links, which may earn us a small commission at no extra cost to you.
     </div>
 
     <h2 id="scope">Scope of this <em>policy</em></h2>
@@ -52,7 +55,7 @@ const meta = buildMeta({
     <p>SleekDrops is a static publication. The site itself stores no personal data about you directly. The following limited information is collected by services we rely on:</p>
     <ul>
       <li><strong>Server logs.</strong> Our host (Cloudflare) automatically logs IP addresses, user-agent strings, and request paths for security, abuse prevention, and performance — standard for any website. We do not access or analyse these logs.</li>
-      <li><strong>Analytics.</strong> If you enable it under <strong>Privacy preferences</strong>, we use Google Analytics 4 to understand which pages and deals are useful. We record aggregate events such as page views, outbound clicks, reading completion and use of page controls, together with limited context such as the page path, category, content slug and placement. We strip personal data in your browser before an event is sent, so names, email addresses, full query strings and typed text are not included. Google may derive approximate location from your IP address. Analytics remains off until you enable it, and a Global Privacy Control or Do-Not-Track signal keeps it off.</li>
+      <li><strong>Analytics.</strong> {analyticsStartsOn ? 'On this non-production preview, anonymous analytics starts automatically through DevTeam Analytics.' : 'On sleekdrops.com, analytics stays off until you enable it under Privacy preferences.'} We record aggregate events such as page views, outbound clicks, reading completion and use of page controls, together with limited context such as the page path, category, content slug and placement. We strip personal data in your browser before an event is sent, so names, email addresses, full query strings and typed text are not included. A Global Privacy Control or Do-Not-Track signal keeps analytics off, and you can switch it off at any time under <strong>Privacy preferences</strong>.</li>
       <li><strong>Outbound affiliate clicks.</strong> When you follow one of our <code>/go/</code> product links, our server chooses the appropriate retailer destination for your country. It does not store your IP address, browser or a cookie. The redirect carries a freshly generated random reference to the retailer's affiliate network so a later commission can be matched to that click; it is new for every click and is not used to recognise you on this site or another visit.</li>
       <li><strong>Email.</strong> If you write to one of the addresses shown on the site, we receive your email address and whatever information you include in the message.</li>
     </ul>
@@ -102,6 +105,7 @@ const meta = buildMeta({
     <p>The following services may process limited data on our behalf:</p>
     <ul>
       <li><strong>Cloudflare</strong> (USA / global) — hosting, CDN, security. Privacy policy: <a href="https://www.cloudflare.com/privacypolicy/" rel="noopener nofollow" target="_blank">cloudflare.com/privacypolicy</a>.</li>
+      {analyticsStartsOn && <li><strong>DevTeam Analytics</strong> - anonymous product analytics for the non-production preview. The live sleekdrops.com build blocks this sink.</li>}
       <li><strong>Google Analytics 4</strong> (USA / global) — optional aggregate traffic measurement, loaded only after you enable analytics. We send page paths rather than full URLs so query strings never reach Google. Privacy policy: <a href="https://policies.google.com/privacy" rel="noopener nofollow" target="_blank">policies.google.com/privacy</a>.</li>
       <li><strong>Amazon Associates</strong> — an affiliate network and independent controller that may receive limited information, such as a referring URL and cookie ID, after you follow an affiliate link to Amazon.</li>
     </ul>

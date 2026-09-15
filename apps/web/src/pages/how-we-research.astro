@@ -1,0 +1,199 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import LegalLayout from '@components/article/LegalLayout.astro';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
+import {
+  FAST_MOVING_CATEGORIES,
+  FAST_REVIEW_INTERVAL_DAYS,
+  REVIEW_INTERVAL_DAYS,
+  TIER_LABELS,
+  TIER_ORDER,
+} from '@lib/sources';
+import type { SourceTier } from '../content/config';
+
+/**
+ * The site's standing methodology page: the evidence standard every article is
+ * held to, what SleekDrops does and does not do, and how a recommendation gets
+ * chosen. Every article links here from its byline and from its sources block,
+ * and the publisher's `publishingPrinciples` in JSON-LD points at it.
+ *
+ * One hub rather than a page per category: our protocol does not change
+ * between air fryers and headphones, because it is a reading protocol rather
+ * than a testing one. A per-category page would be this page with the nouns
+ * swapped, which is the duplicate-content shape answer engines cluster and
+ * then ignore.
+ */
+const reviewMonths = Math.round(REVIEW_INTERVAL_DAYS / 30);
+const fastMonths = Math.round(FAST_REVIEW_INTERVAL_DAYS / 30);
+
+/**
+ * What each source tier is, and what it may be used for. Typed against the
+ * tier vocabulary itself, so a tier added to the researcher cannot reach the
+ * sources block without this page saying what it means.
+ */
+const tiers: Record<SourceTier, { what: string; use: string }> = {
+  expert: {
+    what: 'A published test by an independent lab or review outfit — Choice, RTINGS, consumer bodies.',
+    use: 'The strongest evidence we can cite for performance. Quoted with the tester and the year.',
+  },
+  primary: {
+    what: "The maker's own spec sheet or an Australian retailer's listing.",
+    use: 'Specifications, warranty terms and availability. Never treated as evidence of performance.',
+  },
+  owner: {
+    what: 'Reports from people who bought and lived with the product, at ProductReview.com.au and elsewhere.',
+    use: 'Failure modes and what goes wrong after months of use, always with the sample size we saw.',
+  },
+  aggregator: {
+    what: 'Price trackers, retailer aggregations and databases that collate other people’s numbers.',
+    use: 'Context only — a price history or a spec cross-check, never the sole support for a claim.',
+  },
+  unknown: {
+    what: 'A page whose publisher we could not confirm, or which states no method behind its figure.',
+    use: 'Listed and marked in the sources block, because we read it - but no recommendation rests on one of these alone.',
+  },
+};
+
+const meta = buildMeta({
+  title: 'How we research',
+  description:
+    'SleekDrops does not test products. This is the evidence standard behind every recommendation: which sources count, how picks are chosen, and when each article is reviewed again.',
+  pathname: '/how-we-research',
+});
+---
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema('How we research', '/how-we-research', meta.description)}
+  screen="how-we-research"
+>
+  <LegalLayout
+    eyebrow="Editorial method"
+    titleHtml="How we <em>research</em>."
+    updated="September 12, 2026"
+    toc={[
+      { href: '#summary', label: 'Plain summary' },
+      { href: '#not-tested', label: 'What we do not do' },
+      { href: '#standard', label: 'The evidence standard' },
+      { href: '#picks', label: 'How a pick is chosen' },
+      { href: '#scores', label: 'What a score means' },
+      { href: '#dates', label: 'Dates and re-checks' },
+      { href: '#ai', label: 'AI assistance' },
+      { href: '#corrections', label: 'Corrections' },
+    ]}
+  >
+    <div class="summary" id="summary">
+      <strong>Plain summary</strong>
+      We do not test products. Every SleekDrops article is built by reading published evidence — independent test results, manufacturer specifications, and what owners report after living with a product — and each article lists the sources it used, with the publisher and the date. Research and the first draft are AI-assisted; a human editor checks every claim against those sources and signs the piece off before it publishes.
+    </div>
+
+    <h2 id="not-tested">What we do <em>not</em> do</h2>
+    <p>Stating this first, because the rest of the page is worth nothing if this part is vague:</p>
+    <ul>
+      <li><strong>We do not test products.</strong> There is no lab, no test bench and no tester. No SleekDrops article is written from hands-on use, and none of them will say it was.</li>
+      <li><strong>We are not sent products.</strong> No brand has supplied us with a unit. If one ever does, the article will say so at the top.</li>
+      <li><strong>We do not take sponsorships or paid placement.</strong> No brand pays for a position, and no brand sees an article before it runs.</li>
+      <li><strong>We do not photograph products we have not held.</strong> Article imagery is illustrative and labelled as such; you will not find a staged "testing" photo on this site.</li>
+    </ul>
+    <p>What we do is read the evidence carefully, say where each claim came from, and be explicit about the point at which the evidence stops.</p>
+
+    <h2 id="standard">The evidence <em>standard</em></h2>
+    <p>A claim is publishable when we can name who published it and when. Every source behind an article is filed under one of five tiers, and the tier travels with the source into the list at the foot of the article — so a figure from an independent lab and a number lifted from a price aggregator are never presented as the same thing.</p>
+    <table>
+      <thead>
+        <tr><th>Tier</th><th>What it is</th><th>What we use it for</th></tr>
+      </thead>
+      <tbody>
+        {TIER_ORDER.map((tier) => (
+          <tr>
+            <td><strong>{TIER_LABELS[tier]}</strong></td>
+            <td>{tiers[tier].what}</td>
+            <td>{tiers[tier].use}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+    <p>Two rules sit over that table. Competing articles are not sources: if a number exists only in someone else's roundup, we chase it to the publisher or leave it out. And an undated source is shown as undated — we would rather tell you we cannot date a figure than quietly imply it is current.</p>
+
+    <h2 id="picks">How a pick is <em>chosen</em></h2>
+    <p>A recommendation is an argument from the evidence above, made in this order:</p>
+    <ul>
+      <li><strong>Availability first.</strong> A product that is not currently sold in Australia does not get recommended, whatever the international coverage says.</li>
+      <li><strong>Then the measured evidence.</strong> Where an independent test exists, it decides. Where none exists, the article says so rather than substituting a spec sheet for a measurement.</li>
+      <li><strong>Then what goes wrong.</strong> Owner reports are read for failure modes — what fails, and how long it takes — and reported with the sample size behind them.</li>
+      <li><strong>Then the money.</strong> RRP with its year, replacement-part and running costs where they matter, and the warranty term.</li>
+      <li><strong>Then who it is wrong for.</strong> Every recommendation names a buyer who should pick something else. A pick with no such buyer has not been thought about hard enough.</li>
+    </ul>
+    <p>Affiliate revenue is not part of that order. We earn a commission when you buy through our links, and a product's commission rate has never been an input into whether or where it appears. See the <a href="/disclaimer">affiliate disclaimer</a> for how the links themselves work.</p>
+
+    <h2 id="scores">What a <em>score</em> means</h2>
+    <p>Where an article shows a decimal score, it is a research score: our reading of the evidence in the criteria above, expressed on a 1&ndash;5 scale. It is not a test result, and we do not dress it up as one with a formula we do not run. What it summarises is the strength and recency of the evidence, the measured performance where somebody measured it, the reported failure rate, and what the product costs to own.</p>
+    <p>Two things follow. A product with thin evidence behind it cannot score highly here, however good it may be; and no score on this site should be read as our having used the product. If you want the underlying evidence rather than the summary, it is listed at the foot of every article.</p>
+
+    <h2 id="dates">Dates and <em>re-checks</em></h2>
+    <p>Four dates appear on an article and they mean different things:</p>
+    <ul>
+      <li><strong>Published</strong> — when the article first went live.</li>
+      <li><strong>Updated</strong> — when its text last changed.</li>
+      <li><strong>Last reviewed</strong> — when the article was last rebuilt from its research and checked against those sources, before an editor signed it off. This is the date under the byline, and it is the one worth checking.</li>
+      <li><strong>Next check due</strong> - when we have committed to look at it again, derived from the last review and the category's cadence below.</li>
+    </ul>
+    <p>The re-check interval is a commitment we make per category rather than per article, because what makes evidence go stale is the category rather than the piece. Every article states its own next check date under the byline and again at the foot of its sources.</p>
+    <table>
+      <thead>
+        <tr><th>Category</th><th>How often</th><th>Why</th></tr>
+      </thead>
+      <tbody>
+        {Object.entries(FAST_MOVING_CATEGORIES).map(([category, why]) => (
+          <tr>
+            <td><strong>{category}</strong></td>
+            <td>Every {fastMonths} months</td>
+            <td>{why}</td>
+          </tr>
+        ))}
+        <tr>
+          <td><strong>Everything else</strong></td>
+          <td>Every {reviewMonths} months</td>
+          <td>Home, Fashion and Health products change slowly, and the evidence behind them is republished on roughly an annual cycle.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>We also re-check sooner, outside the cadence, when a product is discontinued, superseded or recalled. When an article does slip past its interval, its stamp says how long ago the last check was and that prices and models may have moved since - a fact you can act on. We do not put a warning colour over it: an overdue re-check is our failure to keep a schedule, not a defect we have found in the article, and dressing it as one would tell you something is wrong without telling you what. Amber on this site is reserved for evidence you can weigh - a source we could not attribute, a figure we could not date. Articles published before we logged reviews show their last editorial pass instead, and say that is what it is.</p>
+
+    <h2 id="ai">AI <em>assistance</em></h2>
+    <p>Research and drafting on this site are AI-assisted and human-reviewed. Because that is a material fact about how the words in front of you were produced, it has its own page rather than a line in this one: read the <a href="/ai-disclosure">AI-assistance disclosure</a>.</p>
+
+    <h2 id="corrections">Corrections</h2>
+    <p>If a figure here is wrong, we want to fix it rather than defend it. Email <a href="mailto:corrections@sleekdrops.com">corrections@sleekdrops.com</a> with the article and the claim. We correct factual errors as soon as we can confirm them, note the change on the article, and re-stamp its review date.</p>
+  </LegalLayout>
+</BaseLayout>
+
+<style>
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 24px 0;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  th,
+  td {
+    text-align: left;
+    vertical-align: top;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  th {
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+  }
+  td { color: var(--ink-2); }
+  tbody tr:last-child td { border-bottom: 0; }
+  @media (max-width: 700px) {
+    table { display: block; overflow-x: auto; white-space: normal; }
+    td, th { min-width: 180px; }
+  }
+</style>

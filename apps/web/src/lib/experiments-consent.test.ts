@@ -94,7 +94,14 @@ const FLAG_PAYLOAD = {
 let clientKey = '';
 
 mock.module(new URL('./analytics-env.ts', import.meta.url).href, {
-  namedExports: { analyticsEnv: () => ({ key: 'dtp_test', host: INGEST_HOST }) },
+  namedExports: {
+    analyticsEnv: () => ({
+      key: 'dtp_test',
+      host: INGEST_HOST,
+      feedback: false,
+      defaultConsent: 'denied',
+    }),
+  },
 });
 mock.module(new URL('./flags-env.ts', import.meta.url).href, {
   namedExports: { flagsEnv: () => ({ apiHost: FLAG_HOST, clientKey }) },

@@ -1,6 +1,7 @@
 /**
  * The build-time configuration of the DevTeam analytics sink: the ingest key and
- * the host to send to.
+ * the host to send to, plus the deployment policy that keeps the sink out of
+ * production.
  *
  * It is a module of its own because it is the one part of `./analytics` that
  * cannot exist outside a Vite build - `import.meta.env` is inlined at build time
@@ -13,15 +14,18 @@
  * applies however the module was loaded.
  */
 
+import { deploymentOf, type SiteDeployment } from './site-env.ts';
+import type { ConsentStatus } from './consent.ts';
+
 export interface AnalyticsEnv {
   /**
-   * DevTeam Analytics ingest key (dtp_...). Empty disables the DevTeam sink
-   * silently, exactly as an empty flags client key disables experiments.
+   * DevTeam Analytics ingest key (dtp_...). Empty disables the DevTeam sink;
+   * production always resolves this to empty even if one is supplied.
    */
   key: string;
   /**
-   * Ingest host. Defaults to the local analytics platform; set
-   * PUBLIC_DEVTEAM_ANALYTICS_HOST to https://ingest.getdevteam.ai in production.
+   * Ingest host. Defaults to the local analytics platform for a configured
+   * non-production build.
    */
   host: string;
   /**
@@ -35,15 +39,46 @@ export interface AnalyticsEnv {
    * `true`, which is also the SDK's own default.
    */
   feedback: boolean;
+  /** The no-record analytics decision for this build. */
+  defaultConsent: ConsentStatus;
+}
+
+export interface AnalyticsEnvInput {
+  key?: string;
+  host?: string;
+  feedback?: string;
+}
+
+const LOCAL_HOST = 'http://localhost:6080';
+
+/**
+ * Resolve the DevTeam sink configuration for one deployment.
+ *
+ * Production refuses the sink even if a key is supplied accidentally. A
+ * configured preview starts anonymous analytics without prompting; an explicit
+ * stored opt-out and browser privacy signals are still enforced by analytics.ts.
+ */
+export function resolveAnalyticsEnv(
+  deployment: SiteDeployment,
+  input: AnalyticsEnvInput,
+): AnalyticsEnv {
+  const configuredKey = input.key?.trim() ?? '';
+  const enabled = deployment === 'preview' && configuredKey !== '';
+  return {
+    key: enabled ? configuredKey : '',
+    host: enabled ? input.host?.trim() || LOCAL_HOST : '',
+    feedback: enabled && input.feedback === 'true',
+    defaultConsent: enabled ? 'granted' : 'denied',
+  };
 }
 
 const env = import.meta.env as ImportMetaEnv | undefined;
 
 /** This build's analytics configuration. */
 export function analyticsEnv(): AnalyticsEnv {
-  return {
-    key: env?.PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY ?? '',
-    host: env?.PUBLIC_DEVTEAM_ANALYTICS_HOST ?? 'http://localhost:6080',
-    feedback: env?.PUBLIC_DEVTEAM_ANALYTICS_FEEDBACK === 'true',
-  };
+  return resolveAnalyticsEnv(deploymentOf(env?.PUBLIC_SITE_ENV), {
+    key: env?.PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY,
+    host: env?.PUBLIC_DEVTEAM_ANALYTICS_HOST,
+    feedback: env?.PUBLIC_DEVTEAM_ANALYTICS_FEEDBACK,
+  });
 }
