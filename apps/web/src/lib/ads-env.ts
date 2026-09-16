@@ -35,6 +35,16 @@ export interface AdsEnv {
   slots: Record<AdPlacement, string>;
 }
 
+/** The raw build settings needed to decide whether ads exist in this build. */
+export interface RawAdsEnv {
+  PUBLIC_SITE_ENV?: string;
+  PUBLIC_ADSENSE_CLIENT?: string;
+  PUBLIC_ADSENSE_SLOT_ARTICLE_MID?: string;
+  PUBLIC_ADSENSE_SLOT_ARTICLE_END?: string;
+  PUBLIC_ADSENSE_SLOT_SIDEBAR?: string;
+  PUBLIC_ADSENSE_SLOT_FEED?: string;
+}
+
 const env = import.meta.env as ImportMetaEnv | undefined;
 
 /**
@@ -69,15 +79,34 @@ export function publisherId(raw: string | undefined): string {
   return PUBLISHER_ID_PATTERN.test(value) ? value : '';
 }
 
-/** This build's ad configuration. */
-export function adsEnv(): AdsEnv {
+/**
+ * Resolve ad settings from a build environment.
+ *
+ * Only the exact production deployment may retain an AdSense id. This is a
+ * second boundary behind the develop workflow's deliberately empty publisher
+ * id: a future preview workflow, a local .env file, or an inherited repository
+ * variable cannot make an unapproved hostname request ads by accident.
+ */
+export function adsEnvFrom(raw: RawAdsEnv | undefined): AdsEnv {
+  if (trimmed(raw?.PUBLIC_SITE_ENV) !== 'production') {
+    return {
+      client: '',
+      slots: { articleMid: '', articleEnd: '', sidebar: '', feed: '' },
+    };
+  }
+
   return {
-    client: publisherId(env?.PUBLIC_ADSENSE_CLIENT),
+    client: publisherId(raw?.PUBLIC_ADSENSE_CLIENT),
     slots: {
-      articleMid: trimmed(env?.PUBLIC_ADSENSE_SLOT_ARTICLE_MID),
-      articleEnd: trimmed(env?.PUBLIC_ADSENSE_SLOT_ARTICLE_END),
-      sidebar: trimmed(env?.PUBLIC_ADSENSE_SLOT_SIDEBAR),
-      feed: trimmed(env?.PUBLIC_ADSENSE_SLOT_FEED),
+      articleMid: trimmed(raw?.PUBLIC_ADSENSE_SLOT_ARTICLE_MID),
+      articleEnd: trimmed(raw?.PUBLIC_ADSENSE_SLOT_ARTICLE_END),
+      sidebar: trimmed(raw?.PUBLIC_ADSENSE_SLOT_SIDEBAR),
+      feed: trimmed(raw?.PUBLIC_ADSENSE_SLOT_FEED),
     },
   };
+}
+
+/** This build's ad configuration. */
+export function adsEnv(): AdsEnv {
+  return adsEnvFrom(env);
 }

@@ -214,13 +214,13 @@ All five are **variables**, not secrets: they are `PUBLIC_`-prefixed Astro value
 
 Set them under **Settings → Environments → `production` → Environment variables**.
 
-**Develop carries no publisher id, and cannot be given one by a variable.** `deploy-develop.yml` pins `PUBLIC_ADSENSE_CLIENT: ''` outright rather than reading `vars.ADSENSE_CLIENT`, which is the one place this differs from every other setting in this document.
+**Develop carries no publisher id, and cannot be given one by a variable.** `deploy-develop.yml` pins `PUBLIC_ADSENSE_CLIENT: ''` outright rather than reading `vars.ADSENSE_CLIENT`, which is the one place this differs from every other setting in this document. The runtime configuration and `ads.txt` generator independently require `PUBLIC_SITE_ENV=production`, so a local `.env`, inherited variable or future preview workflow still cannot enable ads on a non-production hostname.
 
 The reason is inheritance. GitHub resolves `vars.X` as environment → repository → organization, so a repo-level `ADSENSE_CLIENT` would silently apply to develop as well — and adding one is the natural mistake, because the publisher id genuinely *is* the same for the whole account, so scoping it per environment looks redundant until you know why it is not.
 
 Why it is not: `sleekdrops.pages.dev` is a different domain from `sleekdrops.com` and is not in the AdSense account's Sites list. A publisher id there publishes an `/ads.txt` and a `google-adsense-account` tag on an unlisted domain claiming the account, which is the shape of a review failure — and since develop tracks `main` closely, that one line is the entire difference between the two environments. An empty value disables the units, `ads.txt` and the verification tag together, which is what a preview deploy should publish: nothing.
 
-Two tests in [`src/lib/ads-env.test.ts`](../src/lib/ads-env.test.ts) hold both halves — develop pinned empty, production still reading its variable — so this cannot be undone silently, in either direction. Turning ads on for develop means editing that line and knowing why.
+The tests in [`src/lib/ads-env.test.ts`](../src/lib/ads-env.test.ts) hold both workflow halves and the code-level production gate, including removal of a stale generated `ads.txt`, so this cannot be undone silently in either direction.
 
 #### What each slot renders
 
