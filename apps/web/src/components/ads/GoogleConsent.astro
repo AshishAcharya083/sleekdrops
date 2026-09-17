@@ -1,5 +1,6 @@
 ---
 import { adsEnv } from '@lib/ads-env';
+import { GOOGLE_EU_CONSENT_REGIONS } from '@lib/google-consent';
 
 /**
  * Production AdSense bootstrap.
@@ -10,6 +11,7 @@ import { adsEnv } from '@lib/ads-env';
  * to be free of the ad tag / Funding Choices message.
  */
 const { client } = adsEnv();
+const consentRegions = [...GOOGLE_EU_CONSENT_REGIONS];
 const src = client
   ? `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(client)}`
   : '';
@@ -17,14 +19,30 @@ const src = client
 
 {client && (
   <>
-    <script is:inline>
+    <script is:inline define:vars={{ consentRegions }}>
       window.dataLayer = window.dataLayer || [];
       window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+
+      // Google's CMP is only shown in the EEA, UK and Switzerland. Keep
+      // analytics opt-in everywhere, while allowing the ad defaults Google
+      // applies outside those regions to remain unrestricted by a banner the
+      // visitor will never be shown.
       window.gtag('consent', 'default', {
         analytics_storage: 'denied',
+        ad_storage: 'granted',
+        ad_user_data: 'granted',
+        ad_personalization: 'granted'
+      });
+
+      // A region-specific default is more specific than the worldwide command
+      // above and therefore wins for these visitors. Google's CMP updates these
+      // three signals after the visitor chooses Consent, Do not consent, or
+      // Manage options.
+      window.gtag('consent', 'default', {
         ad_storage: 'denied',
         ad_user_data: 'denied',
         ad_personalization: 'denied',
+        region: consentRegions,
         wait_for_update: 500
       });
     </script>

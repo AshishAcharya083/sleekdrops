@@ -12,6 +12,8 @@
  * applies however the module was loaded.
  */
 
+import { deploymentOf, type SiteDeployment } from './site-env.ts';
+
 /**
  * Where a unit may appear. Naming the placements here rather than passing raw
  * slot ids around is what keeps the pages partner-agnostic: swapping AdSense for
@@ -69,10 +71,26 @@ export function publisherId(raw: string | undefined): string {
   return PUBLISHER_ID_PATTERN.test(value) ? value : '';
 }
 
+/**
+ * The publisher id this deployment is allowed to expose.
+ *
+ * AdSense and Google's CMP belong to the canonical production domain only.
+ * Requiring an explicit production deployment here is a second safety boundary
+ * behind the deploy workflow's empty preview value: a repo- or organisation-
+ * level variable added later cannot make a preview claim this publisher account.
+ */
+export function publisherIdForDeployment(
+  deployment: SiteDeployment,
+  raw: string | undefined,
+): string {
+  return deployment === 'production' ? publisherId(raw) : '';
+}
+
 /** This build's ad configuration. */
 export function adsEnv(): AdsEnv {
+  const deployment = deploymentOf(env?.PUBLIC_SITE_ENV);
   return {
-    client: publisherId(env?.PUBLIC_ADSENSE_CLIENT),
+    client: publisherIdForDeployment(deployment, env?.PUBLIC_ADSENSE_CLIENT),
     slots: {
       articleMid: trimmed(env?.PUBLIC_ADSENSE_SLOT_ARTICLE_MID),
       articleEnd: trimmed(env?.PUBLIC_ADSENSE_SLOT_ARTICLE_END),

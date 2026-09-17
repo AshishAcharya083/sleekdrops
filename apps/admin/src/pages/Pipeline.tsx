@@ -62,13 +62,35 @@ export function Pipeline() {
   );
 }
 
+/**
+ * The axes a review can carry. The first five are what the reviewer grades
+ * today; the rest are the pre-rebuild axes, kept so an article reviewed before
+ * the change still explains its own badges.
+ */
 const DIMENSION_HELP: Record<string, string> = {
-  seo: 'Classic search: keyword placement, headings, intent match, depth.',
-  geo: 'Generative-engine citability: extractable answers, named sources, entities, FAQ schema.',
-  voice: 'Reads as a person. Capped by the deterministic anti-slop scan.',
-  eeat: 'Experience, expertise, authority, trust — methodology, evidence, honest trade-offs.',
+  evidence: 'Specifics traceable to the dossier, sourced by name and dated where recency matters.',
+  position: 'Does the piece argue something and pay for it - a named loser, cons that cost the buyer.',
+  structure: 'Fit to the structure shape it was commissioned in, rather than the house skeleton.',
+  citability: 'What a generative engine can lift: extractable answers, named entities, FAQ, recency.',
   links: 'The /go/ affiliate contract and the placement rules.',
+  seo: 'Retired axis: keyword placement, headings, intent match, depth.',
+  geo: 'Retired axis: extractable answers, named sources, entities, FAQ schema.',
+  voice: 'Retired axis: reads as a person. Now measured by the anti-slop scan alone.',
+  eeat: 'Retired axis: methodology, evidence, honest trade-offs.',
 };
+
+/**
+ * The axes in DIMENSION_HELP order, current set first. JSONB does not preserve
+ * key order, so a review read back out of the column arrives sorted by key
+ * length; the reading order is restored here.
+ */
+function orderedDimensions(dimensions: Record<string, number>): Array<[string, number]> {
+  const rank = (name: string): number => {
+    const at = Object.keys(DIMENSION_HELP).indexOf(name);
+    return at === -1 ? Object.keys(DIMENSION_HELP).length : at;
+  };
+  return Object.entries(dimensions).sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b));
+}
 
 /** The counts worth showing, in the order an operator reads them. */
 const EVIDENCE_COUNTS: Array<[string, string]> = [
@@ -528,7 +550,7 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                 <div className="card">
                   {detail.article.seo_review.dimensions && (
                     <div className="row" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
-                      {Object.entries(detail.article.seo_review.dimensions).map(([name, value]) => (
+                      {orderedDimensions(detail.article.seo_review.dimensions).map(([name, value]) => (
                         <span
                           key={name}
                           className={`badge${value >= 80 ? ' green' : value >= 60 ? ' amber' : ' red'}`}
@@ -538,6 +560,28 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                         </span>
                       ))}
                     </div>
+                  )}
+                  {detail.article.seo_review.competitorDelta && (
+                    <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+                      Versus the top{' '}
+                      {detail.article.seo_review.competitorDelta.comparedWith.length} captured
+                      result(s): <strong>{detail.article.seo_review.competitorDelta.verdict}</strong>.{' '}
+                      {detail.article.seo_review.competitorDelta.additions.length === 0
+                        ? 'Nothing this piece carries that they do not.'
+                        : detail.article.seo_review.competitorDelta.additions
+                            .map((a) => a.claim)
+                            .join(' · ')}
+                    </p>
+                  )}
+                  {detail.article.seo_review.claimAudit && (
+                    <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+                      Claim audit: {detail.article.seo_review.claimAudit.unsupported} of{' '}
+                      {detail.article.seo_review.claimAudit.checked} specific(s) are not carried by
+                      the dossier.{' '}
+                      {detail.article.seo_review.claimAudit.unsupported > 0
+                        ? 'Each one blocks a pass on its own.'
+                        : 'Every figure in the draft traces back to the research.'}
+                    </p>
                   )}
                   {detail.article.seo_review.slop && (
                     <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
