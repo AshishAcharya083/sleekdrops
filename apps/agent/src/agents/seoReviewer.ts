@@ -27,6 +27,7 @@
 // for "delve" gets you an answer.
 import { chatJson, requireKeys, UsageTracker } from '../llm/index.js';
 import { detectSlop, formatSlopReport, slopSeverity, SLOP_PASS_SCORE } from '../content/slop.js';
+import { loadPublishedCorpus } from '../content/corpus.js';
 import { structureBrief } from '../content/shapes.js';
 import {
   ANTI_SLOP_RULES,
@@ -395,7 +396,13 @@ export async function runSeoReviewer(
   const shapeBrief = structureBrief(shape);
 
   // Deterministic first, so the model reviews prose we have already measured.
-  const slop = detectSlop(draft);
+  // The scan reads the published corpus too, so repetition is measured against
+  // the rest of the site and not just inside this draft. The article's own slug
+  // is excluded: a republish or a feedback round would otherwise score as a
+  // near-duplicate of itself. loadPublishedCorpus never throws - without D1 it
+  // returns [] and the cross-corpus metrics are simply skipped.
+  const corpus = await loadPublishedCorpus({ excludeSlug: article.slug });
+  const slop = detectSlop(draft, { corpus });
   const slopReport = formatSlopReport(slop);
 
   // The two graded passes are independent of each other and of the rubric, so

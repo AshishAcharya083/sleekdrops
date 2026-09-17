@@ -130,6 +130,36 @@ test('the scan caps the overall score', () => {
   assert.equal(review.dimensions!.evidence, 90);
 });
 
+test('cross-corpus scan findings fold through like any other finding', () => {
+  // The reviewer hands detectSlop the published corpus, so a draft recycling a
+  // live article has to reach the verdict by the same route a banned word
+  // does. finalizeReview must not need to know the corpus exists.
+  const scan = detectSlop(LONG_CLEAN, { corpus: [{ slug: 'already-published', body: LONG_CLEAN }] });
+  assert.ok(
+    scan.score < detectSlop(LONG_CLEAN).score,
+    'the corpus has to move the score for this test to mean anything',
+  );
+
+  const review = finalizeReview(verdict(), scan, passingAudits());
+  assert.equal(review.pass, false, 'recycled phrasing must block the pass');
+  assert.ok(review.score <= scan.score);
+  assert.equal(review.slop.findings, scan.findings.length);
+  const recycled = review.issues.filter((i) =>
+    i.issue.startsWith(`${ISSUE_PREFIX.scan}Verbatim passage recycled from a published article`),
+  );
+  assert.equal(recycled.length, 1);
+  assert.match(recycled[0].fix, /already-published/);
+});
+
+test('an unavailable corpus leaves the review exactly where an in-isolation scan does', () => {
+  // loadPublishedCorpus returns [] when D1 is unreachable, so a review round
+  // has to survive that as an ordinary scan rather than a degraded one.
+  assert.deepEqual(
+    finalizeReview(verdict(), detectSlop(CLEAN, { corpus: [] }), passingAudits()),
+    finalizeReview(verdict(), detectSlop(CLEAN), passingAudits()),
+  );
+});
+
 test('a weak link dimension caps the score - the affiliate contract is load-bearing', () => {
   const review = finalizeReview(
     verdict({ dimensions: { evidence: 90, position: 86, structure: 90, citability: 88, links: 40 } }),

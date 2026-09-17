@@ -69,7 +69,6 @@ export function issuesForEditor(
 ): NonNullable<ArticleRow['seo_review']>['issues'] {
   return (review?.issues ?? [])
     .filter((i) => !SCAN_ISSUE_PATTERN.test(i.issue))
-    .slice()
     .sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
 }
 
