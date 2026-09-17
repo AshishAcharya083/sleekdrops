@@ -220,7 +220,7 @@ The reason is inheritance. GitHub resolves `vars.X` as environment → repositor
 
 Why it is not: `sleekdrops.pages.dev` is a different domain from `sleekdrops.com` and is not in the AdSense account's Sites list. A publisher id there publishes an `/ads.txt` and a `google-adsense-account` tag on an unlisted domain claiming the account, which is the shape of a review failure — and since develop tracks `main` closely, that one line is the entire difference between the two environments. An empty value disables the units, `ads.txt` and the verification tag together, which is what a preview deploy should publish: nothing.
 
-Two tests in [`src/lib/ads-env.test.ts`](../src/lib/ads-env.test.ts) hold both halves — develop pinned empty, production still reading its variable — so this cannot be undone silently, in either direction. Turning ads on for develop means editing that line and knowing why.
+Two tests in [`src/lib/ads-env.test.ts`](../src/lib/ads-env.test.ts) hold both halves — develop pinned empty, production still reading its variable — and `src/lib/ads-env.ts` independently discards the publisher id unless `PUBLIC_SITE_ENV=production`. `generate-ads-txt.mjs` applies the same production gate. A leaked or inherited variable therefore cannot publish the tag, account meta, ad units or seller record on a preview.
 
 #### What each slot renders
 
@@ -237,7 +237,9 @@ An empty slot id disables that one placement and leaves the others running, so t
 
 Two rules decide whether a slot is used at all, and both live in the pure [`src/lib/ad-placement.ts`](../src/lib/ad-placement.ts): a post shorter than 8 top-level blocks gets no mid-article unit, and a grid of fewer than 4 cards gives no cell away. Thin content beside ads is the shape of an AdSense policy action, and a unit in a three-card grid reads as an ad-first listing.
 
-Nothing is requested until the visitor switches **Advertising** on under **Privacy preferences** in the footer — a decline, the default (no decision on file) and a GPC/DNT signal all load no partner script at all (see [`src/lib/ads.ts`](../src/lib/ads.ts)). Units ship `hidden` and are removed outright for anyone who has not opted in, so no reserved "Advertisement" box is ever shown to a visitor who will not see an ad. Each unit is requested only once it comes within 300px of the viewport, because viewable CPM is what an impression is priced on, and a slot that has no box on the current viewport is dropped rather than filled. A slot the auction cannot fill reports `data-ad-status="unfilled"` and the wrapper collapses, so an unsold slot leaves no hole in the page.
+Production loads the publisher tag in the document head so Google's certified CMP can run before any ad slot is requested (see [`GoogleConsent.astro`](../src/components/ads/GoogleConsent.astro)). The message itself is eligible only in the EEA, UK and Switzerland. Ad Consent Mode defaults are granted for visitors elsewhere and denied in those regions until the CMP supplies the visitor's choice; analytics remains denied everywhere until the separate SleekDrops analytics opt-in. Units ship `hidden`, are requested only once they come within 300px of the viewport, and collapse on `data-ad-status="unfilled"`, so an unsold slot leaves no hole in the page.
+
+Use the Google CMP's **three-choice** first layer: **Consent**, **Do not consent**, and **Manage options**. In AdSense, enable Consent Mode for advertising purposes so those CMP choices update `ad_storage`, `ad_user_data`, and `ad_personalization`; leave its analytics-purpose option off because SleekDrops collects analytics consent separately. Google controls the message's geolocation. Do not add client-side IP or country detection.
 
 The `Content-Security-Policy` in [`public/_headers`](../public/_headers) already allowlists the partner's script and frame hosts. A **new** ad host would be blocked by it — add it to `script-src` / `frame-src` there, or the units silently stay empty.
 
@@ -245,7 +247,7 @@ The `Content-Security-Policy` in [`public/_headers`](../public/_headers) already
 
 Setting `ADSENSE_CLIENT` also emits `<meta name="google-adsense-account">` on every page (from [`SEOHead.astro`](../src/components/seo/SEOHead.astro)), alongside the `/ads.txt` the same value generates. Those two are what AdSense verifies the site with.
 
-They exist because **the ad script alone cannot verify a consent-gated site**. `src/lib/ads.ts` requests `adsbygoogle.js` only for a visitor who switched Advertising on, and neither AdSense's verification crawler nor its policy reviewer accepts a consent banner — so the snippet AdSense hands you on onboarding is never what they find here, and the review stalls on "ad code not found". Google publishes the meta tag for exactly this case.
+The meta tag is also a stable ownership signal if the partner script is blocked by a browser extension or network policy. Google publishes it specifically as a supported site-verification method.
 
 That tag is the one part of the ad integration deliberately outside the consent gate, and it is allowed to be because it costs the visitor nothing: an inert `<meta>` carrying an account id that already ships publicly in `/ads.txt`. No script, no cookie, no device storage, no request — so ePrivacy Art. 5(3), the rule the gate exists to satisfy, does not reach it. Everything that *does* set storage stays behind the opt-in.
 
@@ -259,9 +261,7 @@ Note that `ads.txt` publishes the publisher id **without** the `ca-` prefix the 
 It also validates the value first - anything that is not `ca-pub-<digits>` fails the build, because every line of that file authorises somebody to sell this domain's inventory and a stray character would publish a record naming the wrong seller.
 The site build applies the same check to the same value (`publisherId()` in `src/lib/ads-env.ts`): a publisher id the generator refuses is one the page will not ask the partner to serve against either, so the two halves of the setting cannot disagree.
 
-Ads are additionally gated on consent at runtime, so a configured publisher id on its own serves nothing.
-The partner script is requested only for a visitor who switched **Advertising** on under **Privacy preferences**; a decline, the default and a GPC/DNT signal all leave it unrequested.
-That is stricter than serving non-personalised ads to a decline, and deliberately so: the ad tag writes cookies and device storage of its own (frequency capping, reporting, fraud) as soon as it runs, which ePrivacy Art. 5(3) conditions on consent whether or not the ads are personalised.
+In the EEA, UK and Switzerland, the Google CMP owns the advertising decision and transmits it through IAB TCF plus Consent Mode. Outside those regions, no European message is shown and the production tag uses the granted advertising defaults. The site's own privacy preferences continue to own analytics only, avoiding two overlapping controls for the same advertising purpose.
 
 ### Response headers
 
