@@ -1,18 +1,19 @@
 // Materializes public/ads.txt - the IAB authorized-sellers file the ad partner
 // reads from the site root to confirm this domain may sell its inventory.
 //
-// Generated rather than committed because the publisher id is per-environment
-// build configuration (PUBLIC_ADSENSE_CLIENT, the same value src/lib/ads.ts
-// loads the partner script with), so develop and production publish different
-// lines from one source. It is written into public/ - Astro copies that
+// Generated rather than committed because the publisher id is production build
+// configuration (PUBLIC_ADSENSE_CLIENT, the same value src/lib/ads.ts loads the
+// partner script with). Preview builds publish no seller record at all. It is
+// written into public/ - Astro copies that
 // directory to the site root verbatim, which is the only place a crawler looks
 // for /ads.txt - alongside the generated _redirects, and is gitignored for the
 // same reason that one is.
 //
-// With no publisher id configured the file is not written at all, and any file a
-// previously configured build left behind is removed: no ads are served in that
-// build either, and an ads.txt authorizing nobody is worse than none, because
-// that is the file a crawler reads as "this domain has revoked every seller".
+// Outside production, or with no publisher id configured, the file is not
+// written at all, and any file a previously configured build left behind is
+// removed: no ads are served in that build either, and an ads.txt authorizing
+// nobody is worse than none, because that is the file a crawler reads as "this
+// domain has revoked every seller".
 //
 // Run before the build (see package.json -> scripts.prebuild). Safe to re-run;
 // the output is overwritten in place.
@@ -53,8 +54,12 @@ function removeGenerated() {
 }
 
 const client = (process.env.PUBLIC_ADSENSE_CLIENT ?? '').trim();
+const production = (process.env.PUBLIC_SITE_ENV ?? '').trim() === 'production';
 
-if (!client) {
+if (!production) {
+  removeGenerated();
+  console.log('[generate-ads-txt] non-production build - ads.txt is disabled.');
+} else if (!client) {
   removeGenerated();
 } else if (!CLIENT_PATTERN.test(client)) {
   console.error(

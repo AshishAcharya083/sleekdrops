@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { publisherId } from './ads-env.ts';
+import { publisherId, publisherIdForDeployment } from './ads-env.ts';
 
 /** A deploy workflow, read as text from the repo root. */
 const workflow = (name: string): string =>
@@ -50,6 +50,12 @@ test('anything that is not a publisher id reads as unconfigured', () => {
   ].forEach((raw) => {
     assert.equal(publisherId(raw), '', `${JSON.stringify(raw)} is not a publisher id`);
   });
+});
+
+test('only production may expose a valid AdSense publisher id', () => {
+  const publisher = 'ca-pub-1234567890123456';
+  assert.equal(publisherIdForDeployment('production', publisher), publisher);
+  assert.equal(publisherIdForDeployment('preview', publisher), '');
 });
 
 /**
