@@ -7,12 +7,20 @@
 // number wastes the pass. The list it gets is what the scan says about the
 // draft in front of it, right now.
 //
+// That re-derived scan reads the published corpus, exactly as the reviewer's
+// does. It has to: issuesForEditor drops the review's scan issues on the
+// grounds that they are re-derived here, so anything this scan cannot see is
+// something the editor is never told about. Without the corpus that is every
+// cross-corpus repetition finding: the piece would be failed for recycling a
+// published article and handed an issue list that never mentions it.
+//
 // No web access here either. When the reviewer's issue is "this figure is
 // unverified", the fix is to cut or hedge it — not to go and find a number
 // nobody reviewed and slide it into a draft on its way out.
 import { chat, UsageTracker } from '../llm/index.js';
 import { authorById, defaultAuthorFor } from '../content/contract.js';
 import { detectSlop, formatSlopReport } from '../content/slop.js';
+import { loadPublishedCorpus } from '../content/corpus.js';
 import { ISSUE_PREFIX, SCAN_ISSUE_PATTERN } from './seoReviewer.js';
 import {
   ANTI_SLOP_RULES,
@@ -26,6 +34,7 @@ import {
   siteContext,
   SOURCE_DISCIPLINE,
 } from './context.js';
+import type { CorpusDocument } from '../content/corpus.js';
 import type { ArticleRow } from '../pipeline/types.js';
 
 /** Most severe first - the order the prompt claims the issue list is in. */
@@ -72,6 +81,16 @@ export function issuesForEditor(
     .sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
 }
 
+/**
+ * The voice scan as the edit pass is shown it: the same scan the reviewer runs,
+ * over the same corpus, so every finding the review could have failed on is one
+ * the editor can act on. `corpus` is empty when D1 is unreachable, which drops
+ * the cross-corpus metrics and nothing else.
+ */
+export function voiceScanBrief(draft: string, corpus: CorpusDocument[]): string {
+  return formatSlopReport(detectSlop(draft, { corpus }));
+}
+
 export async function runEditor(
   article: ArticleRow,
   model: string,
@@ -88,7 +107,11 @@ export async function runEditor(
     authorById(article.outline?.author) ?? defaultAuthorFor(article.category);
 
   const issues = issuesForEditor(article.seo_review);
-  const slopReport = formatSlopReport(detectSlop(draft));
+  // Same corpus the reviewer scanned against, and the article's own published
+  // body excluded for the same reason: a feedback round on a live piece is not
+  // a near-duplicate of itself.
+  const corpus = await loadPublishedCorpus({ excludeSlug: article.slug });
+  const slopReport = voiceScanBrief(draft, corpus);
   const delta = article.seo_review?.competitorDelta ?? null;
   // Only explain the classes this round actually has to fix. A guide to issues
   // that are not in the list is prompt the model has to read past.
