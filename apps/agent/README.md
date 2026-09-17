@@ -20,6 +20,7 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 | 9 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
 | 10 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter. Stands down entirely when the operator attached their own image, and skips itself when `GCS_IMAGES_BUCKET` is unset |
 | 11 | `publisher` | publish | Upserts D1 `posts` + `affiliate_links`, fires the `content-updated` dispatch → site rebuilds |
+| 12 | `corpus_auditor` | (out of band) | Scores a page that is **already live** - the deterministic scan against the rest of the corpus, plus a reviewer pass over what the page itself shows - and ranks the whole site worst first |
 
 Flow: `research → keyword → angle → outline → write → seo_review ⇄ edit → assemble → image → publish`.
 
@@ -35,9 +36,10 @@ With `publish_mode = approval` (default) the article parks at
 Every agent prompt is grounded with today's date (Australia/Sydney) so years
 in titles/copy come from the calendar, not stale training data.
 
-Admin extras: the **Published** tab lists everything in D1 and can delete a
+Admin extras: the **Published** tab lists everything in D1, can delete a
 post (plus its orphaned pipeline-authored affiliate links) with an automatic
-site rebuild; the article panel has a **feedback box** that requeues the piece
+site rebuild, ranks the whole corpus worst-first and can **requalify** any live
+page back through the pipeline (see below); the article panel has a **feedback box** that requeues the piece
 through `edit → seo_review → assemble → image → publish` with your notes
 applied (original pubDate is kept, `updatedDate` is stamped).
 
@@ -64,6 +66,83 @@ surface edits the published D1 row directly — and when a pipeline article does
 exist for the slug, its copy is updated too, so a later re-publish can't push
 the old image back over the new one. `updatedDate` is deliberately not stamped:
 swapping a photo is not an editorial revision.
+
+## Requalification and the corpus audit
+
+Improving the pipeline does nothing for what is already published.
+The pages an AdSense reviewer read were written under the old prompts, they are still live, and asking for a second review while they are up invites the same answer.
+Two jobs close that gap, and neither of them is autonomous - both are triggered by an operator in the admin panel.
+
+**Requalify** (`POST /api/published/<slug>/requalify`, or `POST /api/articles/<id>/requalify`) sends a live page back to the `research` stage and runs the whole pipeline again.
+It is exposed on the **Published** tab, per row, and on the pipeline board's article view.
+What makes it a rebuild of *that page* rather than a new article on the same subject is captured once, into `articles.requalification`, and read back by the three stages that would otherwise lose it:
+
+| What is kept | Where it is read back | Why |
+| --- | --- | --- |
+| the slug | the `outline` stage overrules the outliner's proposal | the slug is the page's address: its inbound links, its D1 row and the affiliate rows noted against it all key off it |
+| the published body and angle | the `research` stage, as a specimen of the problem | the failure is an evidence deficiency, so the instruction is to research the subject again - never to edit what is there |
+| the original `pubDate` and hero image | the `assemble` stage | the page was published when it was published; `updatedDate` is stamped beside it when the rebuild earns it (see below) |
+| the live `/go/` destinations | the `assemble` and `publish` stages | a row this pass could not re-verify is left exactly as the live site has it (`preserved`), and one that *was* re-verified overwrites |
+
+**The fresh date is earned, not automatic.**
+Republishing at the same address means the date is the only thing telling a reader they are looking at a revision, which is exactly why stamping one on a rebuild that moved nothing is the "artificially freshening" pattern Google's helpful-content guidance names as a negative signal - and the requalify button can be pressed on every page of the site.
+So `assemble` compares the rebuild with the page it replaces (`content/revision.ts`): prose that differs, or a recommendation added or dropped, is a substantial revision and takes today's `updatedDate` plus an `updateNote` naming what moved, in this page's own product names ("Swapped the Shark Stratos for the Dyson V15 Detect.").
+A rebuild that reproduces the live page keeps whatever date and note the page already showed.
+The note is rendered beside the date on the article, so the fresh date is a claim the reader can check.
+
+A page whose article is mid-pipeline is refused rather than reset underneath the stage that is running.
+A page with no pipeline article behind it - most of the site predates this platform - gets one created for it.
+The rebuild rejoins the normal pipeline, so `publish_mode = approval` still parks it at `waiting_approval`: requalifying can never put an unreviewed rewrite on the site.
+The one mode it cannot rejoin is `publish_mode = draft`, and a requalification is refused with a 409 while that is set.
+Draft mode parks whatever finishes in D1 as `status = 'draft'`, and the site build only selects published rows - so on a page that is already live it is not a parking space but a deletion: the rebuild overwrites the row the page is served from, the next build drops the page, and a URL people have linked to starts 404ing with no approval checkpoint anywhere in the run.
+The publisher refuses the same thing for the same reason, in case the mode is switched while a rebuild is in flight: the stage fails, and the live page is left exactly as it is.
+
+**Corpus audit** (`POST /api/corpus-audit`, read back with `GET /api/corpus-audit`) answers the other question: of everything already live, which page is worst.
+It pulls every published body out of D1, runs scanner v2 over each one *against the rest of the corpus* (the only way site-wide sameness is visible at all), adds a reviewer pass over what the page itself shows, and writes one ranked report the **Published** tab renders.
+The composite is 40% scan / 60% reviewer, and a page below the scanner's own pass mark is banded `requalify` whatever the reviewer thought of it - it is below the bar the pipeline applies to a draft it would refuse to ship.
+A page the reviewer could not grade is still ranked, on its scan alone: "the model timed out" is not evidence that the page is fine.
+The audit ranks and recommends; it never rewrites anything.
+
+Like the topic scout, the audit is a detached background sweep, so its `running` row is also its lock, leased by `heartbeat_at` on the same 30-minute threshold.
+
+### Clearing the AdSense-flagged articles
+
+The three pages named in the review are `beef tallow skincare`, `best cordless stick vacuums` and `best portable waterproof Bluetooth speakers`.
+Against the live site, in order:
+
+1. **Settings** → publish mode is *approval* (or *auto*). In *draft* mode the requalify button answers 409 rather than taking the live pages down.
+2. **Published** tab → **Audit the corpus**, and read the ranking. The three should be in the `requalify` band; anything else down there is worth the same treatment.
+3. **Requalify** each of the three. Each is a full article run (research → publish) and parks at *waiting approval*.
+4. Spot-check each draft by hand before approving. What to look for, because it is what the reviewer objected to:
+   - the piece argues something - a named loser, a buyer who should not buy, a con that costs the reader something;
+   - specifics carry a named source and a date, and at least some of them come from owners rather than spec sheets;
+   - it does **not** share a silhouette with the other two (structure shape, opening, whether it carries an FAQ);
+   - the slug is unchanged, `updatedDate` is today, `pubDate` is the original, and `updateNote` describes what actually changed;
+   - every `/go/` link still resolves to a product or a search page, not a 404.
+5. **Approve & publish**, wait for the rebuild (~90s), then load the live page and confirm the above on the rendered article.
+6. Re-run the corpus audit and record the before/after scores for the three, in the run record below.
+
+#### Run record
+
+**Status: not yet run. Deferred to the operator who owns the AdSense re-review** - the person holding the live Cloudflare D1 credentials (`CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `CLOUDFLARE_D1_TOKEN`) and a Claude credential for the pipeline.
+Nothing in this branch can stand in for that: the three pages exist only in the production D1, each requalification is a full article run against a paid model, and the approval step is a human reading a draft.
+The code, the audit and the runbook above are what ships here; the runs themselves are the merge gate, and the acceptance criterion is met when this table is filled in on the card and in this file, not before.
+
+Fill in, per article, from the audits either side of the rebuild:
+
+| Article | Audit score / band before | Audit score / band after | Spot-check (all five checks in step 4) | Approved & live |
+| --- | --- | --- | --- | --- |
+| `beef-tallow-skincare` | | | | |
+| `best-cordless-stick-vacuums` | | | | |
+| `best-portable-waterproof-bluetooth-speakers` | | | | |
+
+The slugs above are the ones the review named; take the exact slugs off the **Published** tab before starting, and requalify by slug so there is no chance of rebuilding a different page.
+
+**One deviation to sign off with that record.**
+The card asks for a rebuild that "republishes with `updatedDate` set".
+The implementation stamps `updatedDate` only when `describeRevision()` finds the page substantially changed, for the reason under *The fresh date is earned, not automatic* above - a date that moves without the content moving is the freshening signal Google names, and this button can be pressed on every page of the site.
+In practice a real requalification rewrites the page and earns the date; a rebuild that reproduces it keeps the date it had.
+If the operator wants the literal reading - a fresh `updatedDate` on every requalification, earned or not - that is a one-line change in `content/revision.ts` and should be agreed before these three are published, not after.
 
 ## What the pipeline optimises for
 
@@ -244,6 +323,10 @@ stopped.
 - `scout_runs` — one row per topic sweep; a `running` row is the scout lock,
   leased by `heartbeat_at` so a sweep that died with its instance cannot hold
   it forever
+- `corpus_audits` — one row per audit sweep; same lock-and-lease treatment as
+  `scout_runs`, with the ranked report in `report` JSONB
+- `articles.requalification` — the live slug, angle, body, publication date and
+  `/go/` slugs a rebuild started from; null on a normal article
 
 The worker claims queued articles with `FOR UPDATE SKIP LOCKED` (atomic,
 multi-process safe), runs the stage's agent, records the session, and routes

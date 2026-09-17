@@ -7,9 +7,10 @@ import {
   editorialAngleBrief,
   GEO_RULES,
   operatorBrief,
+  requalificationBrief,
 } from './context.js';
 import { AUTHORS, authorById } from '../content/contract.js';
-import type { EditorialAngle, TopicRow } from '../pipeline/types.js';
+import type { EditorialAngle, RequalificationSource, TopicRow } from '../pipeline/types.js';
 
 const baseTopic: TopicRow = {
   id: '00000000-0000-0000-0000-000000000000',
@@ -150,4 +151,48 @@ test('the voice rules name the house skeleton as a thing not to build', () => {
   assert.match(ANTI_SLOP_RULES, /NEVER BUILD THE HOUSE SKELETON/);
   assert.match(ANTI_SLOP_RULES, /No identical block under every heading/);
   assert.match(ANTI_SLOP_RULES, /No section that fires by reflex/);
+});
+
+const requalifying: RequalificationSource = {
+  slug: 'best-cordless-stick-vacuums',
+  title: 'Best cordless stick vacuums',
+  angle: 'Suction numbers are the wrong thing to shop on.',
+  body: 'The published body, which reads like every other page on the site.',
+  pubDate: '2025-06-02',
+  goSlugs: ['shark-detect-pro'],
+  requestedAt: '2026-09-17T00:00:00.000Z',
+};
+
+test('requalificationBrief is empty for an article that is not a rebuild', () => {
+  assert.equal(requalificationBrief(null), '');
+  assert.equal(requalificationBrief(undefined), '');
+});
+
+test('the rebuild brief frames the published page as the problem, not the draft', () => {
+  const brief = requalificationBrief(requalifying);
+  assert.match(brief, /ALREADY PUBLISHED at \/blog\/best-cordless-stick-vacuums\//);
+  assert.match(brief, /SPECIMEN OF THE PROBLEM, not a draft to\nimprove/);
+  // The whole failure mode this stage exists to stop: a stage handed "improve
+  // this" edits a generic article into a generic article.
+  assert.match(brief, /Research the subject from scratch/);
+  assert.match(brief, /Never carry a figure, a price, a\nspec, a product or a source over from it/);
+  assert.match(brief, /Suction numbers are the wrong thing to shop on\./);
+  assert.match(brief, /The published body, which reads like every other page on the site\./);
+});
+
+test('the search planner gets the framing without the old body', () => {
+  const brief = requalificationBrief(requalifying, { includeBody: false });
+  assert.match(brief, /ALREADY PUBLISHED/);
+  assert.match(brief, /Suction numbers are the wrong thing to shop on\./);
+  assert.doesNotMatch(
+    brief,
+    /The published body, which reads like every other page on the site\./,
+    'queries steered by the old article would find the ground it already covers',
+  );
+});
+
+test('a body far past the cap is truncated rather than left to crowd out the evidence', () => {
+  const brief = requalificationBrief({ ...requalifying, body: 'x'.repeat(20_000) });
+  assert.match(brief, /\[\.\.\.truncated\]/);
+  assert.ok(brief.length < 15_000, 'the prompt stays dominated by the evidence it gathers');
 });

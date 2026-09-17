@@ -19,9 +19,10 @@ import {
   pickCover,
   validateArticle,
 } from '../content/contract.js';
+import { describeRevision } from '../content/revision.js';
 import { articleSources, stripUnresolvedCitations } from '../content/sources.js';
 import { productSearchTerm, verifyAmazonProductUrl } from '../tools/amazon.js';
-import type { AffiliateLinkRow, ArticleRow } from '../pipeline/types.js';
+import type { AffiliateLinkRow, ArticleRow, RequalificationSource } from '../pipeline/types.js';
 
 export interface AssembledArticle {
   frontmatter: Record<string, unknown>;
@@ -31,6 +32,23 @@ export interface AssembledArticle {
   /** Slugs linked to an Amazon search built from the draft's own words. */
   healedSlugs: string[];
   droppedSlugs: string[];
+}
+
+/**
+ * The live page this pass is rebuilding, or null when it is not rebuilding one.
+ *
+ * The requalification marker stays on the row after the rebuild lands - it is
+ * what holds the slug on every later run - so "is this a rebuild of the page
+ * that is live" is a different question from "is this row a requalification".
+ * Once the rebuild has published, the live page IS the rebuild: a later
+ * editorial pass measured against the body the rebuild already replaced would
+ * date itself against, and describe, a change the reader was shown weeks ago.
+ */
+function livePageBeingRebuilt(article: ArticleRow): RequalificationSource | null {
+  const source = article.requalification;
+  if (!source) return null;
+  const published = article.published_at ? new Date(article.published_at).getTime() : null;
+  return published !== null && published > Date.parse(source.requestedAt) ? null : source;
 }
 
 function uniqueEntities(entities: string[]): string[] {
@@ -54,6 +72,12 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
   // found, and stamps updatedDate instead.
   const prior = article.frontmatter ?? {};
   const pubDate = typeof prior.pubDate === 'string' ? prior.pubDate : today;
+  // Set when this pass is rebuilding a page that is already live. It changes
+  // two things below: the page's date is judged against the version it
+  // replaces rather than assumed, and the /go/ rows it already has are
+  // protected from being downgraded.
+  const requalification = article.requalification ?? null;
+  const livePage = livePageBeingRebuilt(article);
   const frontmatter: Record<string, unknown> = {
     title: brief.seoTitle,
     dek: brief.dek,
@@ -63,8 +87,10 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
     author: brief.author,
     tags: brief.tags,
     pubDate,
-    ...(pubDate !== today ? { updatedDate: today } : {}),
-    // Stamped on every pass, including a re-assembly that leaves pubDate
+    // updatedDate is stamped further down, once there is a rebuilt body and a
+    // resolved pick list to judge the revision against.
+    //
+    // lastReviewed is stamped on every pass, including a re-assembly that leaves pubDate
     // alone. It is the date the piece was last rebuilt from its research and
     // checked against its sources - before the editor's sign-off at the
     // approval gate - which is a different promise from when it first went up,
@@ -91,6 +117,14 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
     if (heroAlt) frontmatter.heroAlt = heroAlt;
   }
 
+  // /go/ slugs the published version of this page already linked. Their rows
+  // are live: a reader clicking one today lands on a destination that may
+  // carry a marketplace-verified ASIN this pass has no way to re-derive. So a
+  // rebuilt row that could not verify an ASIN of its own is marked as
+  // protective rather than authoritative, and the publisher leaves whatever is
+  // there alone. A row that DID verify one is a revalidation and overwrites.
+  const liveGoSlugs = new Set(requalification?.goSlugs ?? []);
+
   // One affiliate row per /go/ slug in the body, straight from the dossier.
   const bySlug = new Map<string, AffiliateLinkRow>();
   for (const slug of slugsInBody) {
@@ -112,6 +146,7 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
         ...(verified ? { asins: { [verified.region]: verified.asin } } : {}),
       },
       note: `${product.name} — ${verified ? `ASIN ${verified.asin} (${verified.region}, verified ${today})` : 'search link (no verified ASIN)'}, used by ${brief.slug}`,
+      ...(liveGoSlugs.has(slug) && !verified ? { preserved: true } : {}),
     });
   }
 
@@ -189,6 +224,38 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
   if (entities.length > 0) frontmatter.entities = entities;
   if (picks.length > 0) frontmatter.picks = picks;
   frontmatter.currency = HOME_CURRENCY;
+
+  // The date the page shows, and the line beside it.
+  //
+  // A requalification republishes at the address it came from, so the date is
+  // the only thing telling a reader they are looking at a revision - which is
+  // exactly why stamping one on a rebuild that moved nothing is the artificial
+  // freshening Google's guidance names outright. So the date is earned: the
+  // rebuild is compared with the page it replaces, and where it differs it
+  // carries a note saying what moved, in this page's own product names. Where
+  // it does not, whatever the page already showed stands unchanged.
+  //
+  // Every other pass keeps the rule it always had: a re-assembly of a piece
+  // first published on an earlier day is an update, and says so.
+  const priorUpdated = typeof prior.updatedDate === 'string' ? prior.updatedDate : null;
+  const priorNote = typeof prior.updateNote === 'string' ? prior.updateNote : null;
+  const revision = livePage
+    ? describeRevision({
+        liveBody: livePage.body,
+        body,
+        picks,
+        sourceCount: sources.length,
+      })
+    : null;
+  if (revision ? revision.substantial : pubDate !== today) {
+    frontmatter.updatedDate = today;
+    // Only a requalification can say what changed - it is the only pass that
+    // has the page it replaced to compare against.
+    if (revision?.note) frontmatter.updateNote = revision.note;
+  } else if (priorUpdated) {
+    frontmatter.updatedDate = priorUpdated;
+    if (priorNote) frontmatter.updateNote = priorNote;
+  }
 
   // Anything left is a genuine contract violation (schema, raw merchant URL,
   // non-approved merchant destination).

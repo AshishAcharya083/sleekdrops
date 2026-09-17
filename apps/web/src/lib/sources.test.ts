@@ -21,6 +21,7 @@ import {
   REVIEW_INTERVAL_DAYS,
   sourceCountLabel,
   toSourceEntries,
+  updateLine,
   unverifiedCount,
 } from './sources.ts';
 import { buildArticleSchema } from './seo.ts';
@@ -136,6 +137,59 @@ test('a post with no logged review says so instead of claiming one', () => {
 
   assert.equal(status.inferred, true);
   assert.equal(status.date.toISOString().slice(0, 10), '2026-02-01');
+});
+
+test('an update with a note is shown, on the day of the review or not', () => {
+  // The pipeline stamps lastReviewed and updatedDate on the same pass, so a
+  // requalified page always has them equal - and without this the one line on
+  // the block that says what actually changed would never render.
+  const line = updateLine({
+    pubDate,
+    updatedDate: new Date('2026-09-11T00:00:00Z'),
+    reviewDate: new Date('2026-09-11T00:00:00Z'),
+    updateNote: 'Swapped the Shark Stratos for the Dyson V15 Detect.',
+  });
+
+  assert.equal(line?.sentence, 'Swapped the Shark Stratos for the Dyson V15 Detect.');
+  assert.equal(line?.date.toISOString().slice(0, 10), '2026-09-11');
+});
+
+test('an update with nothing to say is not given a line of its own', () => {
+  const sameDayAsTheReview = updateLine({
+    pubDate,
+    updatedDate: new Date('2026-09-11T00:00:00Z'),
+    reviewDate: new Date('2026-09-11T00:00:00Z'),
+  });
+  const sameDayAsPublication = updateLine({
+    pubDate,
+    updatedDate: pubDate,
+    reviewDate: new Date('2026-09-11T00:00:00Z'),
+  });
+  const neverUpdated = updateLine({ pubDate, reviewDate: pubDate });
+
+  assert.equal(sameDayAsTheReview, null);
+  assert.equal(sameDayAsPublication, null);
+  assert.equal(neverUpdated, null);
+});
+
+test('an update on its own day still says something, note or no note', () => {
+  const line = updateLine({
+    pubDate,
+    updatedDate: new Date('2026-02-01T00:00:00Z'),
+    reviewDate: new Date('2026-09-11T00:00:00Z'),
+  });
+
+  assert.match(line!.sentence, /re-researched/);
+  // A blank note is the same as none: it must never render as an empty reason.
+  assert.equal(
+    updateLine({
+      pubDate,
+      updatedDate: new Date('2026-02-01T00:00:00Z'),
+      reviewDate: new Date('2026-09-11T00:00:00Z'),
+      updateNote: '   ',
+    })?.sentence,
+    line!.sentence,
+  );
 });
 
 test('a review older than the published cadence reads as due', () => {

@@ -16,6 +16,10 @@ const AGENTS = [
   'writer',
   'seo_reviewer',
   'editor',
+  // Not an article stage: the corpus auditor grades pages that are already
+  // live, out of band, like the topic scout. It runs a prompt, so its model is
+  // overridable here too.
+  'corpus_auditor',
 ] as const;
 
 const SOURCE_LABEL: Record<string, string> = {

@@ -8,7 +8,7 @@ import type {
   ResearchDetail,
   StructureShape,
 } from '../api';
-import { api, apiUpload, duration, fmtCost, fmtTime } from '../api';
+import { REQUALIFIABLE_STATUSES, api, apiUpload, duration, fmtCost, fmtTime } from '../api';
 import { ApiErrorBanner, Badge } from '../components';
 import { HeroImageField } from '../HeroImageField';
 import { usePoll } from '../hooks';
@@ -395,6 +395,13 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
   const [feedback, setFeedback] = useState('');
   const [feedbackSent, setFeedbackSent] = useState(false);
 
+  // What this run will tell readers changed, if anything. Only a requalification
+  // writes one, and only when the rebuild actually moved something.
+  const updateNote =
+    typeof detail?.article.frontmatter?.updateNote === 'string'
+      ? detail.article.frontmatter.updateNote
+      : null;
+
   const load = () => {
     api<ArticleDetail>(`/api/articles/${id}`)
       .then(setDetail)
@@ -418,6 +425,45 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
       onChanged();
     } catch (e) {
       captureError(e, { action: path.replace(/-/g, '_'), article_id: id, surface: 'pipeline' });
+      setErr((e as Error).message);
+    }
+  };
+
+  /**
+   * Send the live page back to the research stage. Unlike "Publish again" -
+   * which re-runs the deterministic publish of what is already written - this
+   * rebuilds the article from scratch at the same slug, which is the only way
+   * a page written under the old prompts reaches the new standard.
+   */
+  const requalify = async () => {
+    const slug = detail?.article.slug;
+    if (!slug) return;
+    if (
+      !window.confirm(
+        `Requalify "${detail.article.title}"?\n\n${slug} goes back to the research stage and runs the ` +
+          'whole pipeline again. It keeps this slug and its /go/ links, and still passes the normal ' +
+          'publish gate. The page is dated as updated only if the rebuild actually moves something, ' +
+          'and then it says what changed. It costs a full article run.',
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await api<{ article_id: string; created: boolean; go_slugs: string[] }>(
+        `/api/articles/${id}/requalify`,
+        { method: 'POST' },
+      );
+      track(EVENTS.publishedPostRequalified, {
+        slug,
+        surface: 'pipeline',
+        article_id: res.article_id,
+        created_article: res.created,
+        go_slugs: res.go_slugs.length,
+      });
+      load();
+      onChanged();
+    } catch (e) {
+      captureError(e, { action: 'article_requalify', article_id: id, surface: 'pipeline' });
       setErr((e as Error).message);
     }
   };
@@ -462,7 +508,25 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
               <Badge value={detail.article.status} />
               <span className="muted mono">{detail.article.slug ?? 'no slug yet'}</span>
               <span className="muted">rev {detail.article.revision_round}</span>
+              {detail.article.requalification && (
+                <span
+                  className="badge violet"
+                  title={`Rebuild of the live page, requested ${fmtTime(detail.article.requalification.requestedAt)}. The slug is held and ${detail.article.requalification.goSlugs.length} /go/ link(s) are protected.`}
+                >
+                  🔁 requalification
+                </span>
+              )}
             </div>
+
+            {/* The one reader-facing claim the assembler writes on its own, and
+                the operator approving this run is the only person who checks it
+                before it is on the site. A rebuild that moved nothing writes
+                none, which is itself worth seeing. */}
+            {updateNote && (
+              <p className="muted" style={{ marginTop: 8 }}>
+                <strong>What the update will say:</strong> {updateNote}
+              </p>
+            )}
 
             <div className="row" style={{ marginTop: 12 }}>
               {detail.article.status === 'waiting_approval' && (
@@ -480,6 +544,16 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                   ♻️ Publish again
                 </button>
               )}
+              {detail.article.slug &&
+                REQUALIFIABLE_STATUSES.includes(detail.article.status) && (
+                  <button
+                    className="btn violet-outline"
+                    title="Send the live page back through the whole pipeline at the same slug"
+                    onClick={() => void requalify()}
+                  >
+                    🔁 Requalify
+                  </button>
+                )}
               {['queued', 'failed', 'waiting_approval'].includes(detail.article.status) && (
                 <button className="btn danger" onClick={() => action('cancel')}>
                   Cancel
