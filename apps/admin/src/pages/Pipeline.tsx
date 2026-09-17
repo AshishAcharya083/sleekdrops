@@ -422,6 +422,44 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
     }
   };
 
+  /**
+   * Send the live page back to the research stage. Unlike "Publish again" -
+   * which re-runs the deterministic publish of what is already written - this
+   * rebuilds the article from scratch at the same slug, which is the only way
+   * a page written under the old prompts reaches the new standard.
+   */
+  const requalify = async () => {
+    const slug = detail?.article.slug;
+    if (!slug) return;
+    if (
+      !window.confirm(
+        `Requalify "${detail.article.title}"?\n\n${slug} goes back to the research stage and runs the ` +
+          'whole pipeline again. It keeps this slug and its /go/ links, republishes with an updated date, ' +
+          'and still passes the normal publish gate. It costs a full article run.',
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await api<{ article_id: string; created: boolean; go_slugs: string[] }>(
+        `/api/articles/${id}/requalify`,
+        { method: 'POST' },
+      );
+      track(EVENTS.publishedPostRequalified, {
+        slug,
+        surface: 'pipeline',
+        article_id: res.article_id,
+        created_article: res.created,
+        go_slugs: res.go_slugs.length,
+      });
+      load();
+      onChanged();
+    } catch (e) {
+      captureError(e, { action: 'article_requalify', article_id: id, surface: 'pipeline' });
+      setErr((e as Error).message);
+    }
+  };
+
   const sendFeedback = async () => {
     if (!feedback.trim()) return;
     try {
@@ -462,6 +500,14 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
               <Badge value={detail.article.status} />
               <span className="muted mono">{detail.article.slug ?? 'no slug yet'}</span>
               <span className="muted">rev {detail.article.revision_round}</span>
+              {detail.article.requalification && (
+                <span
+                  className="badge violet"
+                  title={`Rebuild of the live page, requested ${fmtTime(detail.article.requalification.requestedAt)}. The slug is held and ${detail.article.requalification.goSlugs.length} /go/ link(s) are protected.`}
+                >
+                  🔁 requalification
+                </span>
+              )}
             </div>
 
             <div className="row" style={{ marginTop: 12 }}>
@@ -480,6 +526,16 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                   ♻️ Publish again
                 </button>
               )}
+              {detail.article.slug &&
+                ['done', 'failed', 'cancelled'].includes(detail.article.status) && (
+                  <button
+                    className="btn violet-outline"
+                    title="Send the live page back through the whole pipeline at the same slug"
+                    onClick={() => void requalify()}
+                  >
+                    🔁 Requalify
+                  </button>
+                )}
               {['queued', 'failed', 'waiting_approval'].includes(detail.article.status) && (
                 <button className="btn danger" onClick={() => action('cancel')}>
                   Cancel

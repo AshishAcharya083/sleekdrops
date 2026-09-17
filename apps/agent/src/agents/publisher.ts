@@ -33,14 +33,21 @@ export async function runPublisher(article: ArticleRow): Promise<PublishResult> 
   // nothing has claimed yet - it must not send the readers of an
   // already-published article to a search page instead of the product page
   // they had.
+  //
+  // A requalification adds the second reason to stand down: the slug belongs to
+  // the page being rebuilt, its row is already live, and a pass that could not
+  // verify an ASIN of its own must not replace a verified destination with a
+  // search link. Both cases insert where the slug is free and yield where it
+  // is not.
   for (const link of links) {
-    const onSlugTaken = link.healed
-      ? 'DO NOTHING'
-      : `DO UPDATE SET
-           default_url = excluded.default_url,
-           regions_json = excluded.regions_json,
-           note = excluded.note,
-           updated_at = datetime('now')`;
+    const onSlugTaken =
+      link.healed || link.preserved
+        ? 'DO NOTHING'
+        : `DO UPDATE SET
+             default_url = excluded.default_url,
+             regions_json = excluded.regions_json,
+             note = excluded.note,
+             updated_at = datetime('now')`;
     await d1Query(
       `INSERT INTO affiliate_links (slug, default_url, regions_json, note, created_at, updated_at)
        VALUES (?1, ?2, ?3, ?4, datetime('now'), datetime('now'))

@@ -9,7 +9,12 @@ import {
   POST_TYPES,
 } from '../content/contract.js';
 import { describeArticleShape } from '../pipeline/types.js';
-import type { EditorialAngle, KeywordPlan, TopicRow } from '../pipeline/types.js';
+import type {
+  EditorialAngle,
+  KeywordPlan,
+  RequalificationSource,
+  TopicRow,
+} from '../pipeline/types.js';
 
 /** Today in the audience's timezone (Australia/Sydney), e.g. "2026-07-13". */
 export function todayInSydney(): string {
@@ -77,6 +82,58 @@ beyond it and the research evidence.`,
   if (instructions) parts.push(`Operator instructions:\n${instructions}`);
   for (const [i, ref] of references.entries()) {
     parts.push(`--- reference ${i + 1}: ${ref.name} ---\n${ref.content.trim()}`);
+  }
+  return parts.join('\n\n');
+}
+
+/**
+ * How much of the published page the research prompt carries. Long enough to
+ * show what the page already covers and how thin its evidence is, short enough
+ * that it cannot crowd out the search evidence it is meant to be measured
+ * against.
+ */
+const REQUALIFY_BODY_CHARS = 9000;
+
+/**
+ * The brief for a page that is already live and is being rebuilt.
+ *
+ * The published body is deliberately framed as a specimen rather than a
+ * starting point. A stage handed "here is the article, improve it" edits it,
+ * and an edit of a generic article is a generic article - the whole reason
+ * this page is being requalified is that its evidence was never gathered, so
+ * the only useful instruction is to go and gather it.
+ *
+ * Empty string when the article is not a requalification, so callers can
+ * concatenate it unconditionally.
+ */
+export function requalificationBrief(
+  source: RequalificationSource | null | undefined,
+  options: { includeBody?: boolean } = {},
+): string {
+  if (!source) return '';
+  const { includeBody = true } = options;
+  const parts = [
+    `REQUALIFICATION - this piece is ALREADY PUBLISHED at /blog/${source.slug}/ and is
+being rebuilt in place. It was written under the old prompts and reads as
+templated, generic, automatically generated material: long enough, structurally
+complete, and saying nothing a spec sheet does not. That is an evidence
+deficiency, not a wording problem.
+
+The published version below is a SPECIMEN OF THE PROBLEM, not a draft to
+improve. Research the subject from scratch. Never carry a figure, a price, a
+spec, a product or a source over from it - anything it asserts is unverified
+until you confirm it yourself - and do not let its running order, its section
+headings or its product list decide yours. What it is useful for is the gap:
+what it already covers is the ground where new evidence has to beat it.`,
+  ];
+  if (source.angle) parts.push(`What the published version argued:\n${source.angle}`);
+  if (includeBody) {
+    const body = source.body.slice(0, REQUALIFY_BODY_CHARS);
+    parts.push(
+      `--- published body (${source.slug}) ---\n${body}${
+        source.body.length > body.length ? '\n[...truncated]' : ''
+      }`,
+    );
   }
   return parts.join('\n\n');
 }

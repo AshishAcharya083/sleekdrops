@@ -258,6 +258,8 @@ export const affiliateLinkSchema = z.object({
   note: z.string().optional(),
   /** Rebuilt from the draft, with no dossier product behind it (see AffiliateLinkRow). */
   healed: z.boolean().optional(),
+  /** A live destination this pass must not downgrade (see AffiliateLinkRow). */
+  preserved: z.boolean().optional(),
 });
 
 export type AffiliateLink = z.infer<typeof affiliateLinkSchema>;

@@ -66,6 +66,13 @@ export interface ArticleRow {
   hero_alt: string | null;
   /** Admin feedback awaiting application — consumed (cleared) by the editor stage. */
   feedback: string | null;
+  /**
+   * Set while this article is a rebuild of a page that is already live: the
+   * slug, angle and body the requalification started from. Null on a normal
+   * article. Its presence is what locks the slug and what makes the assembler
+   * keep the original publication date.
+   */
+  requalification: RequalificationSource | null;
   error: string | null;
   published_at: string | null;
   created_at: string;
@@ -76,6 +83,34 @@ export interface ArticleRow {
 export interface ReferenceMaterial {
   name: string;
   content: string;
+}
+
+/**
+ * The live page a requalification started from.
+ *
+ * A published article goes back through the whole pipeline - research, angle,
+ * outline, write, review, assemble, publish - and comes out at the same
+ * address. That only works if the things which make it *that page* survive the
+ * round trip, so they are captured once, when the operator asks for it, and
+ * read back at the three stages that would otherwise lose them: the researcher
+ * (which needs to know what is already there), the outliner (which is refused
+ * permission to move the slug) and the assembler (which keeps the original
+ * publication date and protects the live /go/ rows).
+ */
+export interface RequalificationSource {
+  /** The published slug. Locked: the rebuild republishes this page, not a new one. */
+  slug: string;
+  /** The live title, for the operator reading the session line. */
+  title: string;
+  /** What the live page argued, as precisely as the platform can state it. */
+  angle: string;
+  /** The live body at the moment requalification was requested. */
+  body: string;
+  /** The original publication date. Kept, with updatedDate stamped alongside. */
+  pubDate: string | null;
+  /** /go/ slugs the live body carried - their destinations have to survive. */
+  goSlugs: string[];
+  requestedAt: string;
 }
 
 export interface TopicRow {
@@ -508,4 +543,15 @@ export interface AffiliateLinkRow {
    * dossier-backed destination. Pipeline-side only: D1 has no such column.
    */
   healed?: boolean;
+  /**
+   * A destination the live site already has, which this pass must not
+   * downgrade. Set during a requalification for a /go/ slug the published body
+   * already carried when this pass could not verify an ASIN of its own: the
+   * row in D1 may hold a marketplace-verified product destination, and
+   * overwriting it with a search link would break the very link the rebuild
+   * was supposed to preserve. Like `healed`, it only ever fills a slug nothing
+   * has claimed - and unlike `healed`, the slug it is protecting is one we
+   * know is claimed, by this article's own published version.
+   */
+  preserved?: boolean;
 }

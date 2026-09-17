@@ -63,6 +63,11 @@ export const ENGINE_AGENTS = new Set([
   'writer',
   'seo_reviewer',
   'editor',
+  // Not an article stage: the corpus auditor grades pages that are already
+  // live. It is on the toggle because it is making the same judgement the SEO
+  // reviewer makes, and a cheaper model reading the corpus would produce a
+  // ranking nobody could act on.
+  'corpus_auditor',
 ]);
 
 /**
@@ -148,6 +153,21 @@ async function updateArticle(id: string, fields: Record<string, unknown>): Promi
     id,
     ...keys.map((k) => fields[k]),
   ]);
+}
+
+/**
+ * The slug an outlined article will publish at.
+ *
+ * A requalification republishes the page it came from. The slug is that page's
+ * address - its inbound links, its D1 row and the affiliate rows noted against
+ * it all key off it - so the outliner's proposal is overruled rather than
+ * uniqued: a "free" slug is still the wrong one here.
+ */
+export async function resolveArticleSlug(
+  article: Pick<ArticleRow, 'id' | 'requalification'>,
+  want: string,
+): Promise<string> {
+  return article.requalification ? article.requalification.slug : uniqueSlug(article.id, want);
 }
 
 /** Ensure the brief's slug doesn't collide with another article. */
@@ -289,7 +309,7 @@ export async function runStage(article: ArticleRow): Promise<void> {
       }
       case 'outline': {
         const brief = await runOutliner(article, model!, tracker);
-        brief.slug = await uniqueSlug(article.id, brief.slug);
+        brief.slug = await resolveArticleSlug(article, brief.slug);
         // The shape goes in its own column as well as inside the brief: the
         // brief is what carries it into the writer and reviewer prompts, the
         // column is the record of the decision an operator can see and query.
@@ -301,7 +321,9 @@ export async function runStage(article: ArticleRow): Promise<void> {
           slug: brief.slug,
           title: brief.seoTitle,
         });
-        summary = `"${brief.seoTitle}" — ${shape ? `${describeShapeSelection(shape)}, ` : ''}${brief.sections?.length ?? 0} sections, target ${brief.wordCountTarget} words`;
+        summary = `"${brief.seoTitle}" — ${shape ? `${describeShapeSelection(shape)}, ` : ''}${brief.sections?.length ?? 0} sections, target ${brief.wordCountTarget} words${
+          article.requalification ? `, slug held at ${brief.slug}` : ''
+        }`;
         next = { stage: 'write', status: 'queued' };
         break;
       }

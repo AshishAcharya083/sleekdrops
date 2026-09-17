@@ -54,6 +54,10 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
   // found, and stamps updatedDate instead.
   const prior = article.frontmatter ?? {};
   const pubDate = typeof prior.pubDate === 'string' ? prior.pubDate : today;
+  // Set when this pass is rebuilding a page that is already live. It changes
+  // two things below: the page always declares itself revised, and the /go/
+  // rows it already has are protected from being downgraded.
+  const requalification = article.requalification ?? null;
   const frontmatter: Record<string, unknown> = {
     title: brief.seoTitle,
     dek: brief.dek,
@@ -63,7 +67,10 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
     author: brief.author,
     tags: brief.tags,
     pubDate,
-    ...(pubDate !== today ? { updatedDate: today } : {}),
+    // A requalification carries an updatedDate even when the original went up
+    // this morning: the reader is looking at a revision, and saying so is the
+    // honest half of republishing at the same address.
+    ...(pubDate !== today || requalification ? { updatedDate: today } : {}),
     // Stamped on every pass, including a re-assembly that leaves pubDate
     // alone. It is the date the piece was last rebuilt from its research and
     // checked against its sources - before the editor's sign-off at the
@@ -91,6 +98,14 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
     if (heroAlt) frontmatter.heroAlt = heroAlt;
   }
 
+  // /go/ slugs the published version of this page already linked. Their rows
+  // are live: a reader clicking one today lands on a destination that may
+  // carry a marketplace-verified ASIN this pass has no way to re-derive. So a
+  // rebuilt row that could not verify an ASIN of its own is marked as
+  // protective rather than authoritative, and the publisher leaves whatever is
+  // there alone. A row that DID verify one is a revalidation and overwrites.
+  const liveGoSlugs = new Set(requalification?.goSlugs ?? []);
+
   // One affiliate row per /go/ slug in the body, straight from the dossier.
   const bySlug = new Map<string, AffiliateLinkRow>();
   for (const slug of slugsInBody) {
@@ -112,6 +127,7 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
         ...(verified ? { asins: { [verified.region]: verified.asin } } : {}),
       },
       note: `${product.name} — ${verified ? `ASIN ${verified.asin} (${verified.region}, verified ${today})` : 'search link (no verified ASIN)'}, used by ${brief.slug}`,
+      ...(liveGoSlugs.has(slug) && !verified ? { preserved: true } : {}),
     });
   }
 

@@ -4,6 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { getSetting, q } from '../db/pool.js';
+import { recoverStaleCorpusAudits } from './corpusAudit.js';
 import { runStage } from './runner.js';
 import { recoverStaleScoutRuns } from './scout.js';
 import type { ArticleRow } from './types.js';
@@ -73,4 +74,7 @@ export async function recoverStranded(): Promise<void> {
   // is released on this pass and on the same threshold. The scheduler repeats
   // it every tick, for a process that lives long enough to strand one itself.
   await recoverStaleScoutRuns();
+  // Same story for a corpus audit: a detached background sweep whose row is
+  // also its lock.
+  await recoverStaleCorpusAudits();
 }
