@@ -81,8 +81,14 @@ What makes it a rebuild of *that page* rather than a new article on the same sub
 | --- | --- | --- |
 | the slug | the `outline` stage overrules the outliner's proposal | the slug is the page's address: its inbound links, its D1 row and the affiliate rows noted against it all key off it |
 | the published body and angle | the `research` stage, as a specimen of the problem | the failure is an evidence deficiency, so the instruction is to research the subject again - never to edit what is there |
-| the original `pubDate` and hero image | the `assemble` stage | the page was published when it was published; `updatedDate` is stamped beside it, always, on a requalification |
+| the original `pubDate` and hero image | the `assemble` stage | the page was published when it was published; `updatedDate` is stamped beside it when the rebuild earns it (see below) |
 | the live `/go/` destinations | the `assemble` and `publish` stages | a row this pass could not re-verify is left exactly as the live site has it (`preserved`), and one that *was* re-verified overwrites |
+
+**The fresh date is earned, not automatic.**
+Republishing at the same address means the date is the only thing telling a reader they are looking at a revision, which is exactly why stamping one on a rebuild that moved nothing is the "artificially freshening" pattern Google's helpful-content guidance names as a negative signal - and the requalify button can be pressed on every page of the site.
+So `assemble` compares the rebuild with the page it replaces (`content/revision.ts`): prose that differs, or a recommendation added or dropped, is a substantial revision and takes today's `updatedDate` plus an `updateNote` naming what moved, in this page's own product names ("Swapped the Shark Stratos for the Dyson V15 Detect.").
+A rebuild that reproduces the live page keeps whatever date and note the page already showed.
+The note is rendered beside the date on the article, so the fresh date is a claim the reader can check.
 
 A page whose article is mid-pipeline is refused rather than reset underneath the stage that is running.
 A page with no pipeline article behind it - most of the site predates this platform - gets one created for it.
@@ -107,7 +113,7 @@ Against the live site, in order:
    - the piece argues something - a named loser, a buyer who should not buy, a con that costs the reader something;
    - specifics carry a named source and a date, and at least some of them come from owners rather than spec sheets;
    - it does **not** share a silhouette with the other two (structure shape, opening, whether it carries an FAQ);
-   - the slug is unchanged, `updatedDate` is today and `pubDate` is the original;
+   - the slug is unchanged, `updatedDate` is today, `pubDate` is the original, and `updateNote` describes what actually changed;
    - every `/go/` link still resolves to a product or a search page, not a 404.
 4. **Approve & publish**, wait for the rebuild (~90s), then load the live page and confirm the above on the rendered article.
 5. Re-run the corpus audit and record the before/after scores for the three.

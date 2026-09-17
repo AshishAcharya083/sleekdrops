@@ -395,6 +395,13 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
   const [feedback, setFeedback] = useState('');
   const [feedbackSent, setFeedbackSent] = useState(false);
 
+  // What this run will tell readers changed, if anything. Only a requalification
+  // writes one, and only when the rebuild actually moved something.
+  const updateNote =
+    typeof detail?.article.frontmatter?.updateNote === 'string'
+      ? detail.article.frontmatter.updateNote
+      : null;
+
   const load = () => {
     api<ArticleDetail>(`/api/articles/${id}`)
       .then(setDetail)
@@ -434,8 +441,9 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
     if (
       !window.confirm(
         `Requalify "${detail.article.title}"?\n\n${slug} goes back to the research stage and runs the ` +
-          'whole pipeline again. It keeps this slug and its /go/ links, republishes with an updated date, ' +
-          'and still passes the normal publish gate. It costs a full article run.',
+          'whole pipeline again. It keeps this slug and its /go/ links, and still passes the normal ' +
+          'publish gate. The page is dated as updated only if the rebuild actually moves something, ' +
+          'and then it says what changed. It costs a full article run.',
       )
     ) {
       return;
@@ -509,6 +517,16 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                 </span>
               )}
             </div>
+
+            {/* The one reader-facing claim the assembler writes on its own, and
+                the operator approving this run is the only person who checks it
+                before it is on the site. A rebuild that moved nothing writes
+                none, which is itself worth seeing. */}
+            {updateNote && (
+              <p className="muted" style={{ marginTop: 8 }}>
+                <strong>What the update will say:</strong> {updateNote}
+              </p>
+            )}
 
             <div className="row" style={{ marginTop: 12 }}>
               {detail.article.status === 'waiting_approval' && (

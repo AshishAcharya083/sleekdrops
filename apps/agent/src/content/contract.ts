@@ -222,6 +222,13 @@ export const frontmatterSchema = z.object({
    * the assembler stamped one carries none.
    */
   lastReviewed: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  /**
+   * What changed at the last update, in this page's own terms - written only
+   * when a requalification actually moved something (see content/revision.ts).
+   * It is what stops the fresh date being an assertion the page cannot back:
+   * a reader, and an ad reviewer, can check the sentence against the article.
+   */
+  updateNote: z.string().min(1).max(300).optional(),
   readTime: z.number().int().positive(),
   cover: z.enum(['fill-1', 'fill-2', 'fill-3', 'fill-4', 'fill-5', 'fill-6', 'fill-7', 'fill-8']),
   heroImage: z.string().url().optional(),

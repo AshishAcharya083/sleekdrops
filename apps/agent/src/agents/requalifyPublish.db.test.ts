@@ -169,6 +169,49 @@ test('the rebuilt page keeps its publication date and gains an updated one', { s
   assert.equal(assembled.frontmatter.lastReviewed, TODAY);
   assert.equal(assembled.frontmatter.heroImage, HERO, 'the image the page already had survives');
   assert.equal(assembled.frontmatter.heroAlt, 'A stick vacuum');
+  assert.equal(
+    assembled.frontmatter.updateNote,
+    'Rewritten from new research. The picks are unchanged: Shark Detect Pro and Dyson V15 Detect.',
+    'the fresh date says what earned it, in this page\'s own product names',
+  );
+});
+
+test('a rebuild that moved nothing leaves the page dated as it was', { skip }, async () => {
+  // The freshening failure, driven through the stage that would commit it: a
+  // requalification that reproduces the live page must not restamp it, because
+  // a date that moves without the content moving is the signal Google's
+  // helpful-content guidance names - and the operator can press this button on
+  // every page of the site.
+  stubNetwork();
+  const article = await seedRequalifiedArticle();
+  const unchanged = { ...article, draft_md: article.requalification!.body };
+
+  const assembled = await runAssembler(unchanged);
+
+  assert.equal(assembled.frontmatter.pubDate, PUB_DATE);
+  assert.equal(assembled.frontmatter.updatedDate, undefined, 'nothing changed, so nothing is claimed');
+  assert.equal(assembled.frontmatter.updateNote, undefined);
+  assert.equal(assembled.frontmatter.lastReviewed, TODAY, 'it was still checked against its sources');
+});
+
+test('an unchanged rebuild keeps the update the page already showed', { skip }, async () => {
+  // And it keeps that update's own note with it: the sentence belongs to the
+  // revision that earned the date, not to the pass that happened to run last.
+  stubNetwork();
+  const article = await seedRequalifiedArticle();
+  const priorNote = 'Swapped the budget pick after the Kmart model was discontinued.';
+  await q(
+    `UPDATE articles
+        SET frontmatter = frontmatter || jsonb_build_object('updatedDate', $2::text, 'updateNote', $3::text)
+      WHERE id = $1`,
+    [article.id, '2026-01-05', priorNote],
+  );
+  const [reloaded] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [article.id]);
+
+  const assembled = await runAssembler({ ...reloaded, draft_md: reloaded.requalification!.body });
+
+  assert.equal(assembled.frontmatter.updatedDate, '2026-01-05');
+  assert.equal(assembled.frontmatter.updateNote, priorNote);
 });
 
 test('a page published today still reports the rebuild', { skip }, async () => {
@@ -184,6 +227,26 @@ test('a page published today still reports the rebuild', { skip }, async () => {
   // Without the requalification marker this branch stamps nothing - pubDate
   // equals today - and the reader could not tell a rebuild from a first run.
   assert.equal(assembled.frontmatter.updatedDate, TODAY);
+});
+
+test('an editorial pass after the rebuild landed is not measured against the old page', { skip }, async () => {
+  // The marker stays on the row for good - it is what holds the slug on every
+  // later run - so once the rebuild is live, the page it replaced is gone and
+  // a feedback pass measured against it would describe a change the reader was
+  // shown at the rebuild. It is an ordinary edit from here, dated as one.
+  stubNetwork();
+  const article = await seedRequalifiedArticle();
+  await q('UPDATE articles SET published_at = now() WHERE id = $1', [article.id]);
+  const [republished] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [article.id]);
+
+  const assembled = await runAssembler(republished);
+
+  assert.equal(assembled.frontmatter.updatedDate, TODAY, 'an edit of a page published in June is an update');
+  assert.equal(
+    assembled.frontmatter.updateNote,
+    undefined,
+    'and it has nothing to say about what changed, so it says nothing',
+  );
 });
 
 test('a /go/ row this pass cannot re-verify is left as the live site has it', { skip }, async () => {
@@ -242,6 +305,7 @@ test('the publisher yields on a preserved row and refreshes a revalidated one', 
   assert.equal(posts.params[6], PUB_DATE, 'and with the date it was first published');
   const frontmatter = JSON.parse(String(posts.params[7])) as Record<string, unknown>;
   assert.equal(frontmatter.updatedDate, TODAY);
+  assert.match(String(frontmatter.updateNote), /^Rewritten from new research\./);
   assert.equal(frontmatter.heroImage, HERO);
 });
 

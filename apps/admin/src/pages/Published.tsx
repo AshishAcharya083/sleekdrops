@@ -89,8 +89,9 @@ export function Published() {
     if (
       !window.confirm(
         `Requalify "${title}"?\n\n${slug} goes back to the research stage and runs the whole pipeline again - ` +
-          'research, angle, outline, write, review, assemble, publish. It keeps this slug and its /go/ links, ' +
-          'and republishes with an updated date. It costs a full article run and still passes the normal publish gate.',
+          'research, angle, outline, write, review, assemble, publish. It keeps this slug and its /go/ links. ' +
+          'The page is dated as updated only if the rebuild actually moves something, and then it says what ' +
+          'changed. It costs a full article run and still passes the normal publish gate.',
       )
     ) {
       return;
