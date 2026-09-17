@@ -86,6 +86,17 @@ The operator started a topic-scout sweep by hand.
 
 Owning screen: `pages/Topics.tsx`.
 
+### Scout Lock Cleared
+
+The operator released a held scout lock by hand, from the banner the Topics tab shows while a sweep holds it.
+The run id is deliberately not sent: it is an opaque id, and the agent already logs the release under its own trace.
+
+| Property | Type | Notes |
+|---|---|---|
+| `surface` | string | `topics`. |
+
+Owning screen: `pages/Topics.tsx`.
+
 ### Manual Topic Saved
 
 The manual-topic drawer submitted a brief - as a draft, or on the way to an immediate approval.

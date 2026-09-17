@@ -12,6 +12,7 @@ import {
   EvidenceGateError,
   normaliseDate,
   normaliseDossier,
+  withDiscoveredProducts,
 } from './evidence.js';
 import type { ResearchDossier } from '../pipeline/types.js';
 
@@ -522,4 +523,40 @@ test('facts from a pre-tiering dossier count as untiered, not as a stratum', () 
   assert.equal(counts.untieredFacts, 2);
   assert.equal(counts.primaryFacts, 0);
   assert.equal(counts.datedFacts, 0);
+});
+
+// ── Product discovery, folded back in ────────────────────────────────────────
+// The keyword stage runs a discovery pass when research filed evidence but no
+// contenders. What it writes back has to be a repair, not a replacement: the
+// facts and the gate verdict on that dossier are the piece's whole evidence
+// base, and the panel renders them.
+
+test('rediscovered products replace the empty list and nothing else', () => {
+  const researched = assertEvidenceSufficient(sufficientGuide(), 'guide', 'Home');
+  const productless = { ...researched, products: [] };
+
+  const repaired = withDiscoveredProducts(productless, [
+    { name: 'Shark Detect Pro', brand: 'Shark', approxPrice: 'about A$1,199',
+      amazonUrl: null, goSlug: 'shark-detect-pro', notes: 'discovery pass' },
+  ]);
+
+  assert.deepEqual(repaired.products.map((p) => p.goSlug), ['shark-detect-pro']);
+  assert.deepEqual(repaired.facts, researched.facts);
+  assert.deepEqual(repaired.ownerComplaints, researched.ownerComplaints);
+  assert.equal(repaired.summary, researched.summary);
+  assert.equal(repaired.sufficiency?.pass, true, 'the gate verdict the panel renders survives');
+});
+
+test('a dossier that was never stored still comes back whole', () => {
+  // Nothing downstream reads a dossier through `?? []` twice: a stage that
+  // finds `research` null and one that finds it empty must see the same shape.
+  const repaired = withDiscoveredProducts(null, [
+    { name: 'Shark Detect Pro', brand: 'Shark', approxPrice: '',
+      amazonUrl: null, goSlug: 'shark-detect-pro', notes: '' },
+  ]);
+
+  assert.deepEqual(repaired.facts, []);
+  assert.deepEqual(repaired.testedClaims, []);
+  assert.deepEqual(repaired.keywords, { primary: '', secondary: [] });
+  assert.equal(repaired.products.length, 1);
 });

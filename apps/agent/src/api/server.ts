@@ -12,7 +12,12 @@ import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
-import { isScoutRunning, startScoutRun } from '../pipeline/scout.js';
+import {
+  clearScoutLock,
+  describeScoutLock,
+  heldScoutLock,
+  startScoutRun,
+} from '../pipeline/scout.js';
 import type { ReferenceMaterial } from '../pipeline/types.js';
 import { deleteD1Post, getD1PostHero, listD1Posts, setD1PostHero } from '../tools/d1.js';
 import { gcsConfigured } from '../tools/gcs.js';
@@ -233,42 +238,104 @@ export function createApp(): Hono<TraceEnv> {
     }
   });
 
+  // The panel's landing screen, polled every 4s. Each section settles on its
+  // own: one failing query degrades that figure and names itself in
+  // failedSections instead of collapsing the whole dashboard to a 500, and the
+  // failure is logged under the request's trace id with the section that
+  // produced it, so a recurring overview error can be attributed to a cause.
   app.get('/api/overview', async (c) => {
-    const [topicCounts, articleCounts, running, usage, recent, settings] = await Promise.all([
-      q<{ status: string; n: string }>('SELECT status, count(*) n FROM topics GROUP BY status'),
-      q<{ stage: string; status: string; n: string }>(
-        "SELECT stage, status, count(*) n FROM articles GROUP BY stage, status",
+    const failedSections: string[] = [];
+    const section = async <T>(name: string, load: () => Promise<T>, fallback: T): Promise<T> => {
+      try {
+        return await load();
+      } catch (err) {
+        failedSections.push(name);
+        log.error('overview section failed', {
+          section: name,
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+        return fallback;
+      }
+    };
+
+    const [topics, articles, runningSessions, usage30d, recentSessions, settings] = await Promise.all([
+      section(
+        'topics',
+        () => q<{ status: string; n: string }>('SELECT status, count(*) n FROM topics GROUP BY status'),
+        [] as Array<{ status: string; n: string }>,
       ),
-      q<{ n: string }>("SELECT count(*) n FROM agent_sessions WHERE status = 'running'"),
-      q<{ cost: string; tin: string; tout: string; runs: string }>(
-        `SELECT COALESCE(sum(cost_usd), 0) cost, COALESCE(sum(tokens_input), 0) tin,
-                COALESCE(sum(tokens_output), 0) tout, count(*) runs
-         FROM agent_sessions WHERE started_at > now() - interval '30 days'`,
+      section(
+        'articles',
+        () =>
+          q<{ stage: string; status: string; n: string }>(
+            'SELECT stage, status, count(*) n FROM articles GROUP BY stage, status',
+          ),
+        [] as Array<{ stage: string; status: string; n: string }>,
       ),
-      q(
-        `SELECT s.id, s.agent, s.model, s.status, s.summary, s.error, s.cost_usd,
-                s.tokens_input, s.tokens_output, s.started_at, s.ended_at, a.title article_title
-         FROM agent_sessions s LEFT JOIN articles a ON a.id = s.article_id
-         ORDER BY s.started_at DESC LIMIT 12`,
+      section(
+        'runningSessions',
+        async () => {
+          const rows = await q<{ n: string }>(
+            "SELECT count(*) n FROM agent_sessions WHERE status = 'running'",
+          );
+          return Number(rows[0]?.n ?? 0);
+        },
+        0,
       ),
-      Promise.all([
-        getSetting('publish_mode', 'approval'),
-        getSetting('worker_enabled', true),
-      ]),
+      section(
+        'usage30d',
+        async () => {
+          const rows = await q<{ cost: string; tin: string; tout: string; runs: string }>(
+            `SELECT COALESCE(sum(cost_usd), 0) cost, COALESCE(sum(tokens_input), 0) tin,
+                    COALESCE(sum(tokens_output), 0) tout, count(*) runs
+             FROM agent_sessions WHERE started_at > now() - interval '30 days'`,
+          );
+          return {
+            costUsd: Number(rows[0]?.cost ?? 0),
+            tokensInput: Number(rows[0]?.tin ?? 0),
+            tokensOutput: Number(rows[0]?.tout ?? 0),
+            runs: Number(rows[0]?.runs ?? 0),
+          };
+        },
+        { costUsd: 0, tokensInput: 0, tokensOutput: 0, runs: 0 },
+      ),
+      section(
+        'recentSessions',
+        () =>
+          q(
+            `SELECT s.id, s.agent, s.model, s.status, s.summary, s.error, s.cost_usd,
+                    s.tokens_input, s.tokens_output, s.started_at, s.ended_at,
+                    s.article_id, s.scout_run_id, a.title article_title
+             FROM agent_sessions s LEFT JOIN articles a ON a.id = s.article_id
+             ORDER BY s.started_at DESC LIMIT 12`,
+          ),
+        [] as unknown[],
+      ),
+      section(
+        'settings',
+        async () => {
+          const [publishMode, workerEnabled] = await Promise.all([
+            getSetting('publish_mode', 'approval'),
+            getSetting('worker_enabled', true),
+          ]);
+          return { publishMode, workerEnabled };
+        },
+        { publishMode: 'approval', workerEnabled: true },
+      ),
     ]);
+
     return c.json({
-      topics: topicCounts,
-      articles: articleCounts,
-      runningSessions: Number(running[0]?.n ?? 0),
-      usage30d: {
-        costUsd: Number(usage[0]?.cost ?? 0),
-        tokensInput: Number(usage[0]?.tin ?? 0),
-        tokensOutput: Number(usage[0]?.tout ?? 0),
-        runs: Number(usage[0]?.runs ?? 0),
-      },
-      recentSessions: recent,
-      publishMode: settings[0],
-      workerEnabled: settings[1],
+      topics,
+      articles,
+      runningSessions,
+      usage30d,
+      recentSessions,
+      publishMode: settings.publishMode,
+      workerEnabled: settings.workerEnabled,
+      // Sorted, so a poll every 4s cannot reorder the panel's banner just
+      // because the queries failed in a different order.
+      failedSections: failedSections.sort(),
     });
   });
 
@@ -448,10 +515,27 @@ export function createApp(): Hono<TraceEnv> {
 
   // ── Topic scout ───────────────────────────────────────────────────────────
   app.post('/api/scout', async (c) => {
-    if (await isScoutRunning()) return c.json({ error: 'a scout run is already in progress' }, 409);
+    const lock = await heldScoutLock();
+    // The refusal names the run, when it started and how long it has held the
+    // lock: "already in progress" alone left an operator nothing to look up.
+    if (lock) return c.json({ error: describeScoutLock(lock), lock }, 409);
     const id = await startScoutRun();
     log.info('scout run started', { scout_run_id: id });
     return c.json({ started: id });
+  });
+
+  // What the Topics tab polls to show whether a sweep holds the lock.
+  app.get('/api/scout/lock', async (c) => {
+    return c.json({ lock: await heldScoutLock() });
+  });
+
+  // The operator's release valve: a run whose lease is still fresh but whose
+  // process is plainly gone does not have to be waited out.
+  app.delete('/api/scout/lock', async (c) => {
+    const released = await clearScoutLock();
+    if (released.length === 0) return c.json({ error: 'no scout run is holding the lock' }, 409);
+    for (const run of released) log.info('scout lock cleared by operator', { scout_run_id: run.id });
+    return c.json({ cleared: released.length, runs: released });
   });
 
   app.get('/api/scout-runs', async (c) => {

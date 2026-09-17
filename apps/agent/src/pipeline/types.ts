@@ -497,4 +497,15 @@ export interface AffiliateLinkRow {
   default_url: string;
   regions_json?: AffiliateRegions | null;
   note?: string;
+  /**
+   * Rebuilt from the draft (its link text or its slug) because no dossier
+   * product stood behind it: a search destination, never a verified ASIN.
+   *
+   * `affiliate_links` is a site-wide slug → destination map and a product slug
+   * is deterministic, so the row for this slug may already belong to another
+   * article that resolved it properly. The publisher therefore only inserts a
+   * healed row where the slug is still free - a guess never overwrites a
+   * dossier-backed destination. Pipeline-side only: D1 has no such column.
+   */
+  healed?: boolean;
 }

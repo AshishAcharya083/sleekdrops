@@ -1,13 +1,18 @@
 import { useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
-import type { Topic } from '../api';
-import { api, fmtTime } from '../api';
-import { Badge } from '../components';
+import type { ScoutLock, Topic } from '../api';
+import { api, fmtAge, fmtTime } from '../api';
+import { ApiErrorBanner, Badge } from '../components';
 import { usePoll } from '../hooks';
 import { ManualTopicDrawer } from './ManualTopicDrawer';
 
 export function Topics() {
   const { data, error, refresh } = usePoll<{ topics: Topic[] }>('/api/topics');
+  // The scout lock, polled next to the topics: a sweep whose instance died used
+  // to hold it forever, so an operator has to be able to see who holds it.
+  const { data: lockData, refresh: refreshLock } = usePoll<{ lock: ScoutLock | null }>(
+    '/api/scout/lock',
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -15,7 +20,9 @@ export function Topics() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingDraft, setEditingDraft] = useState<Topic | null>(null);
   const [confirmApprove, setConfirmApprove] = useState<Topic | null>(null);
+  const [clearingLock, setClearingLock] = useState(false);
 
+  const lock = lockData?.lock ?? null;
   const topics = data?.topics ?? [];
   const drafts = topics.filter((t) => t.status === 'draft' && t.source === 'manual');
   const suggested = topics.filter((t) => t.status === 'suggested');
@@ -42,6 +49,7 @@ export function Topics() {
       setSelected(new Set());
       if (ok) setFlash(ok);
       refresh();
+      refreshLock();
     } catch (e) {
       captureError(e, { action: label, surface: 'topics' });
       setNotice((e as Error).message);
@@ -62,9 +70,30 @@ export function Topics() {
 
   return (
     <>
-      {error && <div className="error-banner">API unreachable: {error}</div>}
+      <ApiErrorBanner error={error} />
       {notice && <div className="error-banner">{notice}</div>}
       {flash && <div className="notice-banner">{flash}</div>}
+
+      {lock && (
+        // Deliberately not a live region: the ages in it are recomputed by the
+        // agent on every 4s poll, so role="status" would re-announce the whole
+        // sentence every four seconds.
+        <div className="warn-banner lock-banner">
+          <span className="lock-text">
+            A topic sweep holds the scout lock: run <code>{lock.id}</code> started{' '}
+            {fmtTime(lock.started_at)} ({fmtAge(lock.age_seconds)} ago), last heartbeat{' '}
+            {fmtAge(lock.heartbeat_age_seconds)} ago. A new sweep is refused until it finishes,
+            gives up its lease, or you release the lock.
+          </span>
+          <button
+            className="btn danger small"
+            disabled={busy !== null}
+            onClick={() => setClearingLock(true)}
+          >
+            Clear lock
+          </button>
+        </div>
+      )}
 
       <div className="row" style={{ marginBottom: 14 }}>
         <button className="btn violet" disabled={busy !== null} onClick={openNew}>
@@ -245,6 +274,46 @@ export function Topics() {
             refresh();
           }}
         />
+      )}
+
+      {/* Read off the live lock, not a copy taken when the dialog opened: the
+          age it quotes stays true, and a run that ends while the operator is
+          deciding takes the dialog with it - there is nothing left to clear. */}
+      {clearingLock && lock && (
+        <div
+          className="confirm-overlay"
+          onMouseDown={(e) => e.target === e.currentTarget && setClearingLock(false)}
+        >
+          <div className="confirm-modal" role="alertdialog" aria-modal="true">
+            <h3>Release the scout lock?</h3>
+            <p className="muted">
+              This marks run <code>{lock.id}</code> failed and lets a new sweep start.
+            </p>
+            <p className="muted">
+              It last reported being alive {fmtAge(lock.heartbeat_age_seconds)} ago. Do this when
+              the process running it is gone - if that sweep is genuinely still working, you can end
+              up with two running at once.
+            </p>
+            <div className="confirm-actions">
+              <button className="btn secondary" onClick={() => setClearingLock(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn danger"
+                disabled={busy !== null}
+                onClick={() => {
+                  setClearingLock(false);
+                  act(() => api('/api/scout/lock', { method: 'DELETE' }), 'clear-lock', {
+                    ok: 'Scout lock released - a new sweep can start.',
+                    onTracked: () => track(EVENTS.scoutLockCleared, { surface: 'topics' }),
+                  });
+                }}
+              >
+                Clear lock
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {confirmApprove && (

@@ -8,8 +8,9 @@ Implemented on `feat/seo-structured-data-research` (6 September 2026):
 - §3.1 `build.format: 'file'` and `trailingSlash: false` in the RSS feed, so the
   canonical URL is the one Cloudflare Pages serves. Verify after deploy with
   `curl -I https://sleekdrops.com/blog/<slug>` (expect 200) and
-  `curl -I https://sleekdrops.com/blog/<slug>/` (expect 308 back), then request
-  re-indexing in Search Console.
+  `curl -I https://sleekdrops.com/blog/<slug>/` (expect 200 as well since
+  12 September 2026 - see the follow-up in §3.1), then request re-indexing in
+  Search Console.
 - §3.2 `rel="sponsored noopener"` on every body `/go/` link (rehype plugin); CTA
   components drop `noreferrer`; the agent's link rules now require a CTA to name
   Amazon.
@@ -144,6 +145,15 @@ set `trailingSlash: false` in the `rss()` call in `src/pages/rss.xml.ts`; the
 feed currently emits `/blog/<slug>/` links because `@astrojs/rss` adds a slash
 regardless of config. Verify after deploy with the curl above, then request
 re-indexing in Search Console.
+
+> **Follow-up, 2026-09-12.** The reversed 308 above is no longer served. A
+> permanent redirect survives in the browser and at the edge, so every client
+> still holding the *old* `/blog/<slug>` → `/blog/<slug>/` met the reverse of it
+> and looped (`ERR_TOO_MANY_REDIRECTS`) on roughly half of page loads.
+> `functions/_middleware.js` now serves the trailing-slash form the canonical
+> asset with a **200** instead, which is the only leg that can break a loop whose
+> other half lives in the client. The canonical, sitemap, RSS and JSON-LD form is
+> unchanged. See `docs/deployment.md`.
 
 ### 3.2 Body affiliate links have no `rel`; CTA labels hide the destination (P0)
 

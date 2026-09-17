@@ -58,6 +58,19 @@ interface TagWindow {
   gtag?: (...args: unknown[]) => void;
 }
 
+/** Keep GA4's Consent Mode v2 state aligned with the site's analytics choice. */
+function updateGaConsent(granted: boolean): void {
+  const w = tagWindow();
+  if (!w) return;
+  w.dataLayer = w.dataLayer || [];
+  w.gtag = w.gtag || function gtag(): void {
+    w.dataLayer!.push(arguments);
+  };
+  w.gtag('consent', 'update', {
+    analytics_storage: granted ? 'granted' : 'denied',
+  });
+}
+
 const tagWindow = (): (Window & TagWindow) | null =>
   typeof window === 'undefined' ? null : (window as Window & TagWindow);
 
@@ -289,6 +302,7 @@ export function forgetGaCookies(): void {
 
 /** Stop the GA4 sink and take its identifier cookies with it. */
 export function stopGa(): void {
+  updateGaConsent(false);
   setGaOptOut(true);
   forgetGaCookies();
 }
@@ -308,12 +322,13 @@ export function startGa(log: GaLog): boolean {
     log('warn', 'GA4 NOT configured - PUBLIC_GA4_ID is empty or not a G- measurement id');
     return false;
   }
+  updateGaConsent(true);
   const tag = document.createElement('script');
   tag.async = true;
   tag.src = `https://www.googletagmanager.com/gtag/js?id=${id}`;
   document.head.appendChild(tag);
   w.dataLayer = w.dataLayer || [];
-  w.gtag = function gtag(): void {
+  w.gtag = w.gtag || function gtag(): void {
     w.dataLayer!.push(arguments);
   };
   w.gtag('js', new Date());

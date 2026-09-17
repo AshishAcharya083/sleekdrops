@@ -25,10 +25,9 @@ Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../sr
   One event per rendered list, never one per card.
 - **Outbound clicks** - when the dispatched event is `Affiliate Link Clicked`, `chrome.ts` mints a click id, puts it on the event, and rewrites the anchor's `/go/<slug>` href with it, this session's trace id, the placement and the position before the browser follows the link.
   The rules live in the pure [`src/lib/outbound.ts`](../src/lib/outbound.ts); the Function on the other end reads them back with [`functions/_lib/click.mjs`](../functions/_lib/click.mjs).
-- **Server-side redirects** - [`functions/_lib/redirect.mjs`](../functions/_lib/redirect.mjs), behind the `/go/<slug>` Pages Function, posts `Affiliate Redirect Served` straight to the DevTeam ingest endpoints.
-  It is the only event on this site that does not go through `src/lib/analytics.ts`, because it is emitted by a Worker rather than by a browser.
+- **Server-side redirects** - the handler retains a tested telemetry seam, but the deployed `/go/<slug>` route passes no processor credentials. Server-side click telemetry remains disabled until the processor has public privacy, jurisdiction and retention terms.
 - **Read completion** - `ArticleBody.astro` ends with a `[data-read-sentinel]`; `chrome.ts` watches it with an `IntersectionObserver` and an active-time stopwatch, and fires `Article Read` once when both halves of the gate hold ([`src/lib/read-completion.ts`](../src/lib/read-completion.ts)).
-- **Newsletter signups** - not currently emitted. There is no mailing list behind the site yet, so the newsletter band and the footer subscribe block carry no form at all; firing a conversion for a submission that stores nothing would report a signup that never happened. The event stays in the taxonomy for the capture that replaces them.
+- **Newsletter signups** - not currently emitted. No newsletter surface ships until a real mailing-list provider exists; the event stays reserved for that future integration.
 - **Chrome UI interactions** - the dark-mode toggle, share button, copy-link button, copy-code button, image lightbox, and TOC nav links already have dedicated event listeners in `chrome.ts` for their own behaviour; each fires its analytics event directly from that handler rather than through a `data-track` attribute.
 - **Experiment copy** - an element carries `data-experiment-copy="<feature key>"`; its default copy renders in the static HTML and `chrome.ts` swaps it in place once the flag payload resolves, rewriting the enclosing `data-track` element's `cta` prop so the funnel event reports the label the visitor actually saw.
 - **Experiment nav items** - a primary-nav anchor carries `data-experiment-nav-item="<feature key>"`; the item renders in the static HTML for every visitor and `chrome.ts` removes it from the DOM once a boolean flag resolves true, restoring it in its original slot if the value flips back.
@@ -38,8 +37,9 @@ DevTeam Analytics is initialised with `sendBeacon` transport so a click event st
 
 ### The two sinks, and how one payload reaches both
 
-Every event is scrubbed **once** at the `send()` chokepoint in [`src/lib/analytics.ts`](../src/lib/analytics.ts) and handed to both sinks from that one payload, so DevTeam Analytics and GA4 can never disagree about what was sent.
-Neither is conditional on the other being configured: an empty `PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY` disables the DevTeam sink and leaves GA4 counting, and an empty `PUBLIC_GA4_ID` does the reverse.
+Every event is scrubbed **once** at the `send()` chokepoint in [`src/lib/analytics.ts`](../src/lib/analytics.ts) and handed to every configured sink from that one payload.
+DevTeam Analytics is configured only in the develop workflow and starts there without a prompt. The production workflow supplies no key, and `analytics-env.ts` also discards any key from a build marked `PUBLIC_SITE_ENV=production`.
+The sinks remain independently configurable: an empty `PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY` disables the DevTeam sink and leaves a consented GA4 property counting, and an empty `PUBLIC_GA4_ID` does the reverse.
 
 GA4 is reached through [`src/lib/ga.ts`](../src/lib/ga.ts), the only module in the site that touches gtag.js.
 Which property it reports into is per-environment build configuration ([`src/lib/ga-env.ts`](../src/lib/ga-env.ts) reading `PUBLIC_GA4_ID`), never a constant — develop and production have their own, and a local `pnpm dev` has none and so tags nothing. See [`docs/deployment.md`](./deployment.md).
@@ -57,9 +57,9 @@ GA4 accepts neither this document's Title Case names nor the `$`-prefixed platfo
 Because the site dispatches its own page view (once per document per path, carrying `screen`, `category`, `slug` and `brand`), the tag is configured with `send_page_view: false` and that dispatch **is** GA4's `page_view`.
 The tag is also configured with a path-only `page_location` and `page_referrer`, and `config` parameters apply to every later event, so raw query strings never reach Google on any hit.
 
-GA4 is requested only while analytics is granted (on by default, off after an opt-out under Privacy preferences or a GPC/DNT signal) — stricter than Google Consent Mode, which loads the tag and asks it to restrict itself — so this site sends no Consent Mode signal.
+GA4 is requested only when the analytics decision in force is granted. Production defaults that decision to denied until it is explicitly enabled under Privacy preferences; the configured develop preview defaults it to granted. A stored opt-out or GPC/DNT signal keeps analytics off in either deployment.
 A withdrawal sets `ga-disable-<id>` and deletes the `_ga` cookies in the same page load.
-`Affiliate Redirect Served` never reaches GA4 at all: it is emitted server-side by a Pages Function, which has no browser to run gtag.js in.
+`Affiliate Redirect Served` is retained as a tested handler event, but the deployed route currently provides no telemetry credentials.
 
 ### The taxonomy is enforced, not just documented
 
@@ -129,6 +129,8 @@ Every page under `src/pages` passes a `screen`, so no `Page Viewed` arrives unna
 | `contact` | `/contact` |
 | `privacy` | `/privacy` |
 | `disclaimer` | `/disclaimer` |
+| `how-we-research` | `/how-we-research` |
+| `ai-disclosure` | `/ai-disclosure` |
 | `not-found` | the 404 page |
 
 The five names in use before this pass (`home`, `blog-listing`, `blog-post`, `deals-listing`, `deal-detail`) are unchanged, so their history is continuous.
@@ -215,7 +217,7 @@ Owning component: `chrome.ts` (`[data-copy-code]` handler), on `promos/[slug].as
 A click on an outbound affiliate "View deal" / "View price" button, as the **browser** saw it.
 Fires before the `/go/<slug>` (or direct merchant) navigation, and carries the page context the server never sees.
 
-This is the rich, lossy half of the click. It is dropped by ad blockers and can lose the race with the navigation, so the number reported as the primary conversion is `Affiliate Redirect Served` below; the two join on `click_id`.
+This browser event is the production click metric while server-side telemetry is disabled. It can be dropped by blockers or lose the navigation race.
 
 | Property | Type | Notes |
 |---|---|---|
@@ -231,7 +233,7 @@ Owning components: `deals/[slug].astro`, `promos/[slug].astro`, `Verdict.astro`,
 
 ### Affiliate Redirect Served
 
-**The primary conversion**, counted server-side by the `/go/<slug>` Pages Function once a destination has actually been resolved.
+The redirect handler's tested server-side event. **It is not emitted by the deployed route today:** the route deliberately supplies no processor credentials until public privacy, jurisdiction and retention terms are available.
 
 Server-side because the publisher owns nothing after the click and every affiliate network defines publisher performance with clicks as the denominator (EPC = commissions / clicks; network conversion rate = orders / clicks).
 A count taken on the anchor is lost to ad blockers and to the unload race; a redirect the edge actually served is not.
@@ -257,7 +259,7 @@ A row whose `href` points straight at a merchant bypasses the redirect entirely:
 
 No cookie, IP, user agent, device identifier or visitor identifier is sent with it.
 `distinct_id` on the wire is the constant `go-redirect`, naming the surface rather than a person, and `session_id` is the per-click random click id.
-The ingest key and host come from `context.env` (Pages *runtime* variables, uploaded by the deploy workflows) and never from a literal in the repo; an empty or missing key disables the sink silently and the 302 is served unchanged.
+The handler can accept an ingest key and host in tests, but the route supplies an empty environment. An empty key disables the sink silently and the 302 is served unchanged.
 Delivery is handed to `context.waitUntil` after the Response is built and cannot reject, so a slow or broken ingest host cannot change the redirect's status, its `Location` header or its latency.
 
 ### Article Read
@@ -290,7 +292,7 @@ the placeholder bands.
 |---|---|---|
 | `screen` | string | The screen the signup happened on, when known. |
 
-Owning components: none yet - `Newsletter.astro` and `Footer.astro` once the capture ships.
+Owning components: none yet.
 
 ### Theme Toggled
 
@@ -377,7 +379,7 @@ Two sources feed it, both through the same pipeline:
 
 Catches that are *not* wired to it are the ones where nothing was lost: a storage read that already degrades to "no decision on file", a JSON parse with a defined fallback, and the reporter's own guard - which has to stay silent, since it is what keeps a reporting failure from reaching the visitor.
 
-Both route through the consent gate (nothing is sent, stored or logged before the visitor opts in), the dedupe window (an identical signature reports at most once per 10 seconds, so a fault in a tight loop cannot flood the endpoint) and the `scrub()` chokepoint.
+Both route through the analytics decision gate (nothing is sent, stored or logged while analytics is disabled), the dedupe window (an identical signature reports at most once per 10 seconds, so a fault in a tight loop cannot flood the endpoint) and the `scrub()` chokepoint.
 Each report also emits an **error-level log** carrying the session's trace id, so the failure is findable in the platform's Logs view beside the lines around it rather than only as an event.
 A reporting failure is swallowed: it can never surface to the visitor or break rendering.
 
@@ -416,7 +418,7 @@ The stamp supplies that denominator and lets any funnel step be split by mode.
 The value is read at send time from the `data-theme` attribute on `<html>`, which the inline boot script in `SEOHead.astro` restores from `sd-theme` before first paint and `toggleTheme` maintains thereafter; no attribute means the `light` default.
 There is deliberately no new storage key, no `identify()` call and no `system` third value - the attribute is the only theme state the site has, and a static marketing site with no accounts has no user record to persist a preference to.
 
-Being merged in at the chokepoint, it inherits the consent gate, the pre-consent buffer and the `scrub()` pass exactly as event properties do: nothing is stamped before the visitor opts in, and `theme` is allowlisted by name in [`src/lib/pii.ts`](../src/lib/pii.ts).
+Being merged in at the chokepoint, it inherits the analytics decision gate, the pre-decision buffer and the `scrub()` pass exactly as event properties do: nothing is stamped while analytics is disabled, and `theme` is allowlisted by name in [`src/lib/pii.ts`](../src/lib/pii.ts).
 A call site that carries its own `theme` property wins over the stamp, which is what keeps `Theme Toggled` reporting the mode it switched **to** even if a buffered event flushes later.
 
 ### `event_id` (state property)
@@ -464,7 +466,7 @@ Flags are authored in the DevTeam **A/B Testing** tab; the code-side default is 
 Control keeps the nav as rendered; variant B removes the About item from the DOM after the payload resolves.
 Both variants ship in the same build - the split happens at runtime in the flag payload, never at merge time.
 
-Its exposure is **desktop-only by design**: `.site-nav` is `display: none` below 900px and there is no mobile drawer, so a narrow-viewport visitor cannot receive the treatment and the flag is never read for them (no bucketing, no `$experiment_viewed`).
+Its exposure is **desktop-only by design**: `.site-nav` is `display: none` below 900px, while the separate mobile menu is stable and not experimental. A narrow-viewport visitor therefore cannot receive the treatment and the flag is never read for them (no bucketing, no `$experiment_viewed`).
 Crossing the breakpoint upward re-checks and buckets at that point.
 Nothing about `/about` itself changes in either variant: the page, its indexability, its sitemap entry and its footer link are identical, so the experiment measures nav composition alone.
 
@@ -511,7 +513,7 @@ Every row additionally carries the `event_id` and `visit_id` keys and the `theme
 | `Image Lightbox Opened` | `chrome.ts` `[data-lightbox]` click/keydown handler | `screen` (when known) |
 | `TOC Link Clicked` | `chrome.ts` `[data-toc] a` click handler | `section` |
 
-Suppression is enforced in one place (`track()` in `analytics.ts`): events are buffered while consent is unknown, flushed on grant, dropped on deny, and `boot()` denies outright on a GPC/DNT signal - so nothing reaches DevTeam Analytics before consent or after a decline/GPC/DNT.
+Suppression is enforced in one place (`track()` in `analytics.ts`): events are buffered while the decision is unknown, flushed when the deployment default or a stored choice grants analytics, dropped on denial, and `boot()` denies outright on a GPC/DNT signal.
 Withdrawal is reachable from every page: the **Privacy preferences** control in the footer dispatches the `consent:open-preferences` document event owned by [`src/lib/consent-preferences.ts`](../src/lib/consent-preferences.ts), which reopens the consent island's dialog pre-filled from `consentStatus()` - the decision in force - so a visitor can turn analytics back off long after the banner is gone.
 Which surface that dialog opens over, and what closing it goes back to, is the state machine in [`src/lib/consent-surface.ts`](../src/lib/consent-surface.ts); the island script is the DOM wiring around it.
 Turning it back off stops **everything the grant started**, in the same page load and without a reload: the DevTeam client is detached and shut down; GA4 - which cannot be unloaded once its tag is in the DOM, and which emits `user_engagement` on its own - is switched off through its `window['ga-disable-<MEASUREMENT_ID>']` flag with its `_ga` / `_ga_*` cookies expired; and A/B testing is stopped through `stop()` in [`src/lib/experiments.ts`](../src/lib/experiments.ts), which closes the GrowthBook instance's subscription to the flag host, clears the 60s payload poll, drops the instance and only then clears the `sd-exp` stamps.
@@ -522,10 +524,11 @@ The GA4 flag is cleared and the A/B start guard released again on a re-grant, be
 
 This step needs a deployed/preview build with `PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY` set and access to the DevTeam Analytics platform's real-time event view; it cannot be exercised in the build sandbox (no deployed build, browser, or DevTeam Analytics access here). To close it out, deploy the preview, open the DevTeam Analytics platform, and:
 
-1. Before accepting consent, browse a few pages - confirm **no** events appear (buffered, not sent).
-2. Accept analytics, then walk the funnel: home (hero CTA), deal card click, deal-detail view, affiliate "View deal" click - confirm each event above lands with the listed properties and **no** PII (no emails, names, or query strings). There is no newsletter signup step while no form ships.
-3. Reset consent, decline (or enable GPC/DNT), repeat the walk - confirm **no** events appear.
-4. Hit the theme toggle once - confirm exactly **one** `Theme Toggled` lands, spelled exactly that, with `theme` = the mode switched to.
+1. On a fresh develop visit with no stored choice, confirm `Page Viewed` arrives without opening a consent prompt.
+2. Walk the funnel: home (hero CTA), deal card click, deal-detail view, affiliate "View deal" click - confirm each event above lands with the listed properties and **no** PII (no emails, names, or query strings). There is no newsletter signup step while no form ships.
+3. Open Privacy preferences from the footer, turn analytics off, and repeat the walk - confirm **no** events appear.
+4. With analytics enabled, hit the theme toggle once - confirm exactly **one** `Theme Toggled` lands, spelled exactly that, with `theme` = the mode switched to.
 5. On a fresh visit that never touches the toggle, confirm `Page Viewed` still carries the `theme` state stamp (`light` by default, `dark` for a visitor with the stored preference).
+6. Build with `PUBLIC_SITE_ENV=production` and the same DevTeam key - confirm the client is not created and no DevTeam request is sent.
 
 Record the operator, date, and Live View screenshots here once complete.

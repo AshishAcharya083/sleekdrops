@@ -4,6 +4,8 @@
 // change this too, or published rows will fail the site build.
 import { z } from 'zod';
 
+import { SOURCE_TIERS } from './sources.js';
+
 export const CATEGORIES = ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel'] as const;
 
 // `review` is deliberately absent: reviews require hands-on testing and are
@@ -169,14 +171,23 @@ export function defaultAuthorFor(category: string): AuthorProfile {
 }
 
 /**
- * A source behind the article, carried into the page's JSON-LD `citation`.
- * `date` is reserved for the researcher's per-fact publication date and is
- * left unset today.
+ * A source behind the article: one row of the visible sources block, and one
+ * `citation` node in the page's JSON-LD.
+ *
+ * `date` is whatever precision the source itself publishes - a spec sheet
+ * dated to the day, a lab test dated to the month, a standard dated to the
+ * year - because rounding a year up to a day is an invented fact. `tier` says
+ * what kind of evidence it is, 'unknown' included: a source the researcher
+ * could not place is shown as such rather than quietly promoted.
+ *
+ * `publisher` stays optional so the posts already in D1 keep validating; the
+ * assembler always writes one (sources.ts falls back to the hostname).
  */
 export const sourceSchema = z.object({
   url: z.string().url(),
   publisher: z.string().min(1).optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date: z.string().regex(/^\d{4}(?:-\d{2}(?:-\d{2})?)?$/).optional(),
+  tier: z.enum(SOURCE_TIERS).optional(),
 });
 
 /**
@@ -205,6 +216,12 @@ export const frontmatterSchema = z.object({
   tags: z.array(z.string()).min(1),
   pubDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   updatedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  /**
+   * When a human last reviewed the piece against its sources. Distinct from
+   * pubDate and updatedDate, and optional because every post published before
+   * the assembler stamped one carries none.
+   */
+  lastReviewed: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   readTime: z.number().int().positive(),
   cover: z.enum(['fill-1', 'fill-2', 'fill-3', 'fill-4', 'fill-5', 'fill-6', 'fill-7', 'fill-8']),
   heroImage: z.string().url().optional(),
@@ -239,6 +256,8 @@ export const affiliateLinkSchema = z.object({
   default_url: z.string().url(),
   regions_json: affiliateRegionsSchema.nullable().optional(),
   note: z.string().optional(),
+  /** Rebuilt from the draft, with no dossier product behind it (see AffiliateLinkRow). */
+  healed: z.boolean().optional(),
 });
 
 export type AffiliateLink = z.infer<typeof affiliateLinkSchema>;
@@ -310,6 +329,119 @@ export function slugify(text: string): string {
 
 export function goSlugsIn(body: string): string[] {
   return [...new Set([...body.matchAll(GO_LINK)].map((m) => m[1]))];
+}
+
+/** A markdown link whose destination is a /go/ slug, with its anchor text. */
+const GO_MARKDOWN_LINK = /\[([^\]]+)\]\(\/go\/([a-z0-9]+(?:-[a-z0-9]+)*)\)/g;
+
+/**
+ * Words that shop rather than name. A phrase built only from these ("check the
+ * price on Amazon AU", "our top pick") points at a product without ever saying
+ * which one, so there is nothing in it to rebuild a destination from.
+ *
+ * This is the second filter, not the first: what a phrase is *about* is
+ * decided by the slug it links (see `namingAnchor`). The list only has to
+ * settle phrases with no slug to measure against.
+ */
+const SHOPPING_WORDS = new Set([
+  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'it', 'one', 'here', 'now', 'today',
+  'todays', 'we', 'our', 'ours', 'us', 'you', 'your', 'yours', 'where', 'which', 'what',
+  'see', 'check', 'view', 'buy', 'shop', 'get', 'grab', 'find', 'compare', 'click', 'order',
+  'browse', 'read', 'pick', 'picks', 'top', 'option', 'options', 'model', 'review', 'reviews',
+  'price', 'prices', 'pricing', 'cost', 'deal', 'deals', 'offer', 'offers', 'link', 'sale',
+  'links', 'more', 'details', 'latest', 'current', 'new', 'best', 'cheapest', 'lowest', 'full',
+  'out', 'on', 'at', 'in', 'for', 'from', 'to', 'and', 'or', 'amazon', 'store', 'online',
+  'available', 'availability', 'stock',
+  // Marketplace qualifiers. The link contract tells the writer to say where a
+  // CTA goes ("view at Amazon AU"), so these ride along on shopping phrases.
+  'com', 'au', 'uk', 'nz', 'ca', 'de',
+]);
+
+/** The words of a phrase that could be naming a product rather than a click. */
+function namingWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.replace(/[^\p{L}]/gu, '').length >= 2 && !SHOPPING_WORDS.has(word));
+}
+
+export interface GoLinkSearchTerm {
+  /** What to search Amazon for. */
+  term: string;
+  /** Where it was read from - the provenance an affiliate row's note records. */
+  source: 'anchor text' | 'its /go/ slug';
+}
+
+/**
+ * The Amazon search term each /go/ *link* in the body is worth, keyed by slug.
+ *
+ * This is what lets a link with no dossier product behind it be rebuilt rather
+ * than deleted: a name is the only input a search destination needs, and the
+ * body carries the name twice - in the words the writer put on the link, and
+ * in the slug itself, which is that name kebab-cased.
+ *
+ * A bare `/go/` mention with no anchor around it is absent: there is no link
+ * for a reader to follow there, so there is nothing to heal.
+ */
+export function goLinkSearchTerms(body: string): Map<string, GoLinkSearchTerm> {
+  const anchorsBySlug = new Map<string, string[]>();
+  for (const [, anchor, slug] of body.matchAll(GO_MARKDOWN_LINK)) {
+    anchorsBySlug.set(slug, [...(anchorsBySlug.get(slug) ?? []), anchor]);
+  }
+
+  const terms = new Map<string, GoLinkSearchTerm>();
+  for (const [slug, anchors] of anchorsBySlug) {
+    const anchor = namingAnchor(anchors, slug);
+    if (anchor) terms.set(slug, { term: anchor, source: 'anchor text' });
+    else if (namingWords(slug).length > 0) {
+      terms.set(slug, { term: slug.split('-').join(' '), source: 'its /go/ slug' });
+    }
+  }
+  return terms;
+}
+
+/**
+ * The anchor that names the slug's product best, or '' when none of them does.
+ *
+ * A word the anchor and the slug share is the anchor talking about the product
+ * rather than about the click, and that - not a list of call-to-action
+ * phrasings to exclude - is the test. The link contract prescribes the
+ * phrasings (LINK_PLACEMENT_RULES: "Check price on Amazon" table cells, "See
+ * today's price on Amazon" CTAs, "view at Amazon AU"), so an anchor filter
+ * would be excluding exactly what the writer was told to produce, and an
+ * Amazon search for those words lands the reader on a page about nothing.
+ *
+ * Where several links share a slug - a comparison-table cell, a section CTA,
+ * the name in the prose - the anchor sharing the most of the slug's words
+ * wins, whichever came first in the body.
+ *
+ * The winner is kept whole (minus markdown emphasis) rather than reduced to
+ * the words it shares: the writer's own phrasing searches better than anything
+ * a word filter would leave behind.
+ */
+function namingAnchor(anchors: string[], slug: string): string {
+  const named = new Set(namingWords(slug));
+  let best = '';
+  let bestShared = 0;
+  for (const anchor of anchors) {
+    const text = plainAnchor(anchor);
+    const shared = new Set(namingWords(text).filter((word) => named.has(word))).size;
+    if (shared > bestShared) {
+      best = text;
+      bestShared = shared;
+    }
+  }
+  return best;
+}
+
+/** Anchor text as a reader sees it: no markdown emphasis, no edge punctuation. */
+function plainAnchor(anchor: string): string {
+  return anchor
+    .replace(/[*_`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N})]+$/gu, '');
 }
 
 export function estimateReadTime(body: string): number {

@@ -472,13 +472,20 @@ Score these dimensions 0-100 each:
    FAQ, a conclusion that relists the picks? A piece that reads like every
    other piece on this site is the failure this review exists to catch, and
    this dimension does not score above 50 when it does.
-4. citability - what a generative engine can lift. Are the extractable answers
-   where the shape spends them, self-contained, and inside its word range? Are
+4. citability - what a generative engine can lift. ${
+     shape
+       ? `Are the extractable answers
+   where the shape spends them, self-contained, and inside its word range?`
+       : `With no shape recorded for this
+   piece, expect every major H2 to open with a self-contained 40-60 word
+   answer.`
+   } Are
    claims paired with a named source and a year rather than an adjective? Are
-   entities named specifically? Where the shape requires an FAQ, is there an
-   "## FAQ" section with "### Question?" headings (the site builds FAQPage
-   schema by parsing it, so a missing or malformed one is a high-severity
-   issue)? Are recency signals present? Does it beat the snippet target above?
+   entities named specifically? Where the shape requires an FAQ, or the brief
+   carries faq entries, is there an "## FAQ" section with "### Question?"
+   headings and 40-60 word answers (the site builds FAQPage schema by parsing
+   it, so a missing or malformed one is a high-severity issue)? Are recency
+   signals present? Does it beat the snippet target above?
 5. links - every product link is /go/<slug> form, no raw merchant URLs, and the
    placement rules are followed: first mention per section, a link column in
    comparison tables, per-product CTA lines, linked conclusion picks.

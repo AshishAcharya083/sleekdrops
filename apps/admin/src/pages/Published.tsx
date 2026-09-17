@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
 import type { PublishedPost, RebuildResult } from '../api';
 import { api, apiUpload, fmtTime } from '../api';
-import { Badge } from '../components';
+import { ApiErrorBanner, Badge } from '../components';
 import { HeroImageField } from '../HeroImageField';
 import { usePoll } from '../hooks';
 
@@ -56,7 +56,7 @@ export function Published() {
 
   return (
     <>
-      {error && <div className="error-banner">API unreachable: {error}</div>}
+      <ApiErrorBanner error={error} />
       {err && <div className="error-banner">{err}</div>}
       {notice && <div className="card" style={{ padding: 10, marginBottom: 12 }}>{notice}</div>}
       <div className="card table-scroll" tabIndex={0} role="region" aria-label="Published posts">

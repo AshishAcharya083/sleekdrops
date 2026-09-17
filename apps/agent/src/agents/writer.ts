@@ -23,6 +23,7 @@
 import { chat, UsageTracker } from '../llm/index.js';
 import { authorById, defaultAuthorFor } from '../content/contract.js';
 import { structureBrief } from '../content/shapes.js';
+import { articleSources, numberedSourceList } from '../content/sources.js';
 import {
   ANTI_SLOP_RULES,
   authorVoiceBrief,
@@ -77,6 +78,10 @@ export async function runWriter(
   // Every dossier product is linkable: verified ASINs get a product page, the
   // rest resolve to an Amazon search for the product — so no /go/ slug can 404.
   const products = article.research?.products ?? [];
+  // The exact numbered list the published page will show under "Sources": the
+  // assembler derives it from the same dossier with the same function, so a
+  // marker the writer puts in the body points at the entry the reader sees.
+  const sources = articleSources(article.research?.facts ?? []);
   const operator = operatorBrief(topic);
 
   const result = await chat({
@@ -113,6 +118,22 @@ to /go/<slug>, e.g. [Sony WH-1000XM6](/go/sony-wh-1000xm6)):
 ${products.map((p) => `- ${p.name}: /go/${p.goSlug}`).join('\n') || '(no products — omit product links)'}
 
 Products NOT in that list must be mentioned WITHOUT any link (plain text only).
+
+${
+  sources.length > 0
+    ? `Sources, numbered exactly as the published page lists them:
+${numberedSourceList(sources)}
+
+Cite them. A claim that rests on one of these carries its marker in square
+brackets straight after the sentence's full stop - "Choice measured 210AW on
+the high setting in 2026.[2]" - where the number is the source the dossier
+attributes that fact to (match on the fact's sourceUrl). Never invent a number,
+never cite a source this list does not carry, never write a source URL in the
+body, and never group markers into a pile at the end of a paragraph. A marker
+pointing past the end of the list is stripped before publication, taking the
+attribution with it.`
+    : 'The dossier carries no citable source URLs, so write no citation markers.'
+}
 
 Requirements:
 - Length: about ${brief.wordCountTarget} words, from the live SERP read. Hit it with

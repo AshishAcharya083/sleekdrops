@@ -1,0 +1,290 @@
+---
+import { sourceCountLabel, toSourceEntries, unverifiedCount } from '@lib/sources';
+import type { SourceData } from '../../content/config';
+
+/**
+ * Sources — the numbered evidence block at the foot of an article.
+ *
+ * The rows are the research dossier's own sources, in its order, so entry 3
+ * here is what the body's `[3]` marker points at (see lib/rehype-citations.mjs).
+ * Each row carries the publisher, what kind of evidence it is and the date the
+ * source itself published, and says plainly when one of those is missing - an
+ * undated source, or one whose publisher we could not confirm, is shown as such
+ * rather than dropped, because hiding the weak evidence is how a sources list
+ * stops being one. The count above the list says how many are marked, so a
+ * reader meets the gaps in the summary rather than discovering them.
+ *
+ * A post with no sources renders the block's honest empty state instead: older
+ * hand-written pieces carry their links inline and were published before the
+ * pipeline recorded a source list.
+ */
+export interface Props {
+  sources?: SourceData[];
+  /** Health and Finance pieces carry the "this is not advice" line as well. */
+  highStakes?: boolean;
+  /** The review stamp's date, repeated at the foot where the evidence is. */
+  reviewedLabel?: string;
+  reviewedOn?: string;
+  /** When this category's next re-check falls due. */
+  nextCheck?: string;
+}
+
+const { sources = [], highStakes = false, reviewedLabel, reviewedOn, nextCheck } = Astro.props;
+const entries = toSourceEntries(sources);
+const unverified = unverifiedCount(entries);
+---
+
+<section class="sources" aria-labelledby="sources-title">
+  <div class="sources-head">
+    <h2 id="sources-title">Sources</h2>
+    {entries.length > 0 && (
+      <span class="sources-count">
+        {sourceCountLabel(entries.length)}
+        {unverified > 0 && ` · ${unverified} we could not fully verify`}
+      </span>
+    )}
+  </div>
+
+  {entries.length > 0 && (
+    <p class="sources-intro">
+      SleekDrops does not test products. Every claim here rests on published
+      specifications, independent test results, and owner reports — listed below
+      so you can check them yourself.
+      {unverified > 0 && ` ${unverified === 1 ? 'One of them we could' : `${unverified} of them we could`} not fully attribute or date; ${unverified === 1 ? 'it is' : 'they are'} marked below, and no recommendation rests on ${unverified === 1 ? 'it' : 'them'} alone.`}
+      {' '}<a href="/how-we-research">How we research</a>.
+    </p>
+  )}
+
+  {highStakes && (
+    <p class="sources-warning">
+      <strong>Important:</strong> This article is general consumer research, not
+      medical or financial advice, and has not been reviewed by a clinician or
+      licensed financial adviser. Check decisions with a qualified professional.
+    </p>
+  )}
+
+  {entries.length > 0 ? (
+    <ol class="sources-list">
+      {entries.map((entry) => (
+        <li id={`source-${entry.index}`}>
+          <span class="src-index" aria-hidden="true">{String(entry.index).padStart(2, '0')}</span>
+          <div class="src-body">
+            <div class="src-top">
+              <span class="src-publisher">{entry.publisher}</span>
+              {entry.tierLabel && (
+                <span class:list={['src-kind', entry.tier === 'unknown' && 'src-kind--unattributed']}>
+                  {entry.tierLabel}
+                </span>
+              )}
+            </div>
+            <a class="src-title" href={entry.url} target="_blank" rel="noopener nofollow">
+              {entry.linkLabel}
+            </a>
+            <div class="src-dates">
+              <span>{entry.dateLabel ? `Published ${entry.dateLabel}` : 'No date shown'}</span>
+            </div>
+            {entry.caution && (
+              <p class="src-note">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>
+                {entry.caution}
+              </p>
+            )}
+          </div>
+        </li>
+      ))}
+    </ol>
+  ) : (
+    <p class="sources-empty">
+      This piece was published before we recorded a source list, so its links
+      sit inline in the text. If a link is unavailable or a claim needs
+      correction, email
+      {' '}<a href="mailto:corrections@sleekdrops.com">corrections@sleekdrops.com</a>.
+    </p>
+  )}
+
+  {reviewedOn && (
+    <p class="sources-checked">
+      <span class="checked-label">{reviewedLabel}</span>
+      <span class="checked-date">{reviewedOn}</span>
+      {nextCheck && <span class="checked-next">Next check due {nextCheck}</span>}
+    </p>
+  )}
+
+  <div class="sources-foot">
+    <a href="/how-we-research">Our evidence standard</a>
+    <a href="/ai-disclosure">How AI is used here</a>
+    <a href="mailto:corrections@sleekdrops.com">Report a correction</a>
+  </div>
+</section>
+
+<style>
+  .sources {
+    margin-top: 48px;
+    padding: 24px 24px 16px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+  }
+  .sources-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .sources-head h2 {
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 1.2;
+    font-weight: 400;
+    margin: 0;
+  }
+  .sources-count {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .sources-intro,
+  .sources-empty {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--muted);
+    margin: 16px 0 0;
+    max-width: 70ch;
+  }
+  .sources-warning {
+    margin: 16px 0 0;
+    padding: 14px 16px;
+    border-left: 3px solid var(--warning);
+    background: var(--warning-soft);
+    border-radius: 0 var(--r-md) var(--r-md) 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--ink-2);
+    max-width: 70ch;
+  }
+
+  .sources-list {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+  }
+  .sources-list li {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--hairline);
+    scroll-margin-top: 100px;
+  }
+  .sources-list li:last-child { border-bottom: 0; }
+  .src-index {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--muted);
+    padding-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+  .src-body { min-width: 0; }
+  .src-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 3px;
+  }
+  .src-publisher { font-size: 14px; font-weight: 700; color: var(--ink); }
+  .src-kind {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: var(--r-full);
+    background: var(--surface-2);
+    border: 1px solid var(--hairline);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .src-kind--unattributed {
+    background: var(--warning-soft);
+    border-color: var(--warning-soft);
+    color: var(--warning);
+  }
+  .src-title {
+    display: inline-block;
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--ink);
+    word-break: break-word;
+    padding: 2px 0;
+  }
+  .src-dates {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 5px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .src-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 8px 0 0;
+    padding: 5px 10px;
+    border-radius: var(--r-sm);
+    background: var(--warning-soft);
+    color: var(--warning);
+    font-size: 12px;
+    line-height: 1.45;
+    font-weight: 600;
+    max-width: 60ch;
+  }
+  .src-note svg {
+    width: 13px;
+    height: 13px;
+    stroke: currentColor;
+    stroke-width: 2;
+    fill: none;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  /* The same neutral line the byline carries, repeated where the evidence is:
+     a reader who scrolled to check the sources should not have to scroll back
+     to find out when they were last checked. */
+  .sources-checked {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 16px 0 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .sources-checked .checked-label {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .sources-checked .checked-date { color: var(--ink-2); }
+
+  .sources-foot {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 16px 0 8px;
+    margin-top: 8px;
+    border-top: 1px solid var(--hairline);
+    font-size: 13px;
+  }
+  .sources-foot a { color: var(--muted); text-underline-offset: 3px; }
+  .sources-foot a:hover { color: var(--accent); }
+</style>

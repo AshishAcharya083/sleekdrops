@@ -7,18 +7,18 @@
  * privacy-signal boolean and acts on the result; `./ads` feeds it the same two
  * things for the advertising category.
  *
- * The model, since September 2026, is opt-out for analytics and opt-in for ads,
- * with no prompt of any kind:
+ * The model is deployment-aware for analytics. Advertising consent is collected
+ * by Google's certified CMP and is not decided by this record:
  *
- *  - Anonymous analytics is ON by default. The site is Australian, where the
- *    Privacy Act does not condition first-party, aggregate analytics on a prior
- *    opt-in, and the banner that used to ask was the first thing a visitor
- *    arriving from a search result saw. It can be switched off at any time from
- *    the footer's Privacy preferences, and the withdrawal path clears everything
- *    the grant stored.
- *  - Advertising is OFF by default and stays an explicit opt-in: the ad tag writes
- *    cookies and device storage the moment it runs, which is the thing ePrivacy
- *    conditions on consent for visitors it reaches.
+ *  - A configured non-production preview starts anonymous analytics silently.
+ *    Production and an unconfigured preview keep it off until the visitor
+ *    enables it from Privacy preferences.
+ *  - Withdrawal clears everything the grant stored and sends a Consent Mode v2
+ *    denial to Google Analytics. A stored opt-out always overrides a deployment
+ *    default.
+ *  - The legacy `ads` field stays readable so existing version-2 records migrate
+ *    safely, but it is always denied here. AdSense and its certified CMP own the
+ *    advertising decision independently.
  *  - A Global Privacy Control / Do-Not-Track signal switches every category off,
  *    over the default and over a stored grant alike.
  */
@@ -50,11 +50,11 @@ export type ConsentCategory = (typeof CONSENT_CATEGORIES)[number];
 export type ConsentGrants = Record<ConsentCategory, ConsentStatus>;
 
 /**
- * What applies when the visitor has decided nothing: anonymous analytics on,
- * advertising off. Also what a stored record falls back to for a category it
- * does not mention.
+ * The fail-safe baseline when no deployment-specific defaults are supplied:
+ * every non-essential site purpose is off. Also what a stored record falls back
+ * to for a category it does not mention.
  */
-export const DEFAULT_GRANTS: ConsentGrants = { analytics: 'granted', ads: 'denied' };
+export const DEFAULT_GRANTS: ConsentGrants = { analytics: 'denied', ads: 'denied' };
 
 export interface ConsentRecord {
   v: number;
@@ -159,18 +159,20 @@ export function parseConsent(raw: string | null): ConsentRecord | null {
 }
 
 /**
- * Resolve what to do on page load from the stored record and the browser's
- * privacy signal. A GPC/DNT signal always wins and counts as a decline for every
- * non-essential category; a stored record applies silently, category by
- * category, whatever policy version wrote it; with no record the site defaults
- * apply. Nothing is ever left pending, and nothing is ever prompted for.
+ * Resolve what to do on page load from the stored record, the browser's privacy
+ * signal and the defaults for this deployment. A GPC/DNT signal always wins and
+ * counts as a decline for every non-essential category; a stored record applies
+ * silently, category by category, whatever policy version wrote it; with no
+ * record the supplied deployment defaults apply. Nothing is ever left pending,
+ * and nothing is ever prompted for.
  */
 export function resolveConsent(
   record: ConsentRecord | null,
   privacySignal: boolean,
+  defaults: ConsentGrants = DEFAULT_GRANTS,
 ): ConsentResolution {
   if (privacySignal) return { effects: everyCategory('deny') };
-  const grants = record?.grants ?? DEFAULT_GRANTS;
+  const grants = record?.grants ?? defaults;
   return {
     effects: byCategory<ConsentEffect>((category) =>
       grants[category] === 'granted' ? 'grant' : 'deny',

@@ -4,7 +4,7 @@ import BaseLayout from '@layouts/BaseLayout.astro';
 import Breadcrumbs from '@components/seo/Breadcrumbs.astro';
 import ListingHero from '@components/blog/ListingHero.astro';
 import PostGrid from '@components/blog/PostGrid.astro';
-import { listAuthors, type Author } from '@data/authors';
+import { listAuthors, listBeats, type Author } from '@data/authors';
 import { getPostsByAuthor, type BlogPost } from '@lib/posts';
 import { buildAuthorSchema, buildMeta } from '@lib/seo';
 
@@ -18,6 +18,7 @@ export const getStaticPaths = (async () => {
 interface Props { author: Author; }
 const { author } = Astro.props;
 const posts: BlogPost[] = await getPostsByAuthor(author.id);
+const beatLabels = listBeats().map((beat) => beat.label).filter(Boolean);
 
 const meta = buildMeta({
   title: `${author.name} — ${author.role}`,
@@ -51,6 +52,34 @@ const meta = buildMeta({
   />
 
   <div class="container">
+    {/* The credibility panel: what this byline is, what stands behind it, and
+        where to check. A reader arriving from an article's byline is asking
+        "who wrote this", and the honest answer has to be on this page rather
+        than implied by an avatar and a one-line bio. */}
+    <section class="credibility" aria-labelledby="credibility-title">
+      <h2 id="credibility-title">What this byline <em>is</em></h2>
+      <div class="credibility-grid">
+        <div class="panel">
+          <h3>One accountable publisher</h3>
+          <p>{author.name} is the byline on every article here: an Australian publication, not a person and not a persona. Beat labels{beatLabels.length > 0 && <> — {beatLabels.join(', ')} —</>} describe the subject a piece was written on. There are no invented authors, no photographs of writers and no claimed credentials on this site.</p>
+        </div>
+        <div class="panel">
+          <h3>AI-assisted, human-reviewed</h3>
+          <p>Research and the first draft are produced with AI tools. An editor checks every claim against the sources listed on the article and signs it off before publication. The date each article shows as "last reviewed" is when it was last built from its research and checked against those sources.</p>
+          <a href="/ai-disclosure">Read the AI disclosure →</a>
+        </div>
+        <div class="panel">
+          <h3>Nothing here is tested</h3>
+          <p>We do not test products, we are not sent products, and we take no sponsorships or paid placement. Recommendations are built from published test results, manufacturer specifications and owner reports, each listed with its publisher and date on the article that used it.</p>
+          <a href="/how-we-research">Read the method →</a>
+        </div>
+        <div class="panel">
+          <h3>Corrections</h3>
+          <p>Factual errors are fixed as soon as we can confirm them, and the article's review date is re-stamped when they are. Email <a href="mailto:corrections@sleekdrops.com">corrections@sleekdrops.com</a> with the article and the claim; editorial questions go to <a href="mailto:desk@sleekdrops.com">desk@sleekdrops.com</a>.</p>
+        </div>
+      </div>
+    </section>
+
     {posts.length === 0 ? (
       <p class="empty">No posts from {author.name} yet.</p>
     ) : (
@@ -62,6 +91,51 @@ const meta = buildMeta({
 </BaseLayout>
 
 <style>
+  .credibility { padding: 48px 0 0; }
+  .credibility h2 {
+    font-family: var(--font-display);
+    font-size: 36px;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    margin: 0 0 24px;
+  }
+  .credibility h2 em { font-style: italic; }
+  .credibility-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .panel {
+    padding: 24px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+  }
+  .panel h3 {
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 0 0 8px;
+  }
+  .panel p {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--muted);
+    margin: 0;
+  }
+  .panel > a {
+    display: inline-block;
+    margin-top: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1.5px solid var(--accent);
+    padding-bottom: 2px;
+  }
+  .panel > a:hover { color: var(--accent); }
+
   .grid { padding: 48px 0 96px; }
   .empty {
     padding: 96px 0;
