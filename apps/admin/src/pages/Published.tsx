@@ -225,7 +225,7 @@ export function Published() {
                           title="Send this page back through the whole pipeline at the same slug"
                           onClick={() => void requalify(p.slug, p.title)}
                         >
-                          {busy === p.slug ? 'working…' : '♻️ Requalify'}
+                          {busy === p.slug ? 'working…' : '🔁 Requalify'}
                         </button>
                         <button
                           className="btn danger small"
@@ -400,7 +400,7 @@ function CorpusAuditSection({
                       disabled={busy === a.slug}
                       onClick={() => onRequalify(a)}
                     >
-                      {busy === a.slug ? 'working…' : '♻️ Requalify'}
+                      {busy === a.slug ? 'working…' : '🔁 Requalify'}
                     </button>
                   </td>
                 </tr>

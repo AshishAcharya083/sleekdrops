@@ -93,6 +93,9 @@ The note is rendered beside the date on the article, so the fresh date is a clai
 A page whose article is mid-pipeline is refused rather than reset underneath the stage that is running.
 A page with no pipeline article behind it - most of the site predates this platform - gets one created for it.
 The rebuild rejoins the normal pipeline, so `publish_mode = approval` still parks it at `waiting_approval`: requalifying can never put an unreviewed rewrite on the site.
+The one mode it cannot rejoin is `publish_mode = draft`, and a requalification is refused with a 409 while that is set.
+Draft mode parks whatever finishes in D1 as `status = 'draft'`, and the site build only selects published rows - so on a page that is already live it is not a parking space but a deletion: the rebuild overwrites the row the page is served from, the next build drops the page, and a URL people have linked to starts 404ing with no approval checkpoint anywhere in the run.
+The publisher refuses the same thing for the same reason, in case the mode is switched while a rebuild is in flight: the stage fails, and the live page is left exactly as it is.
 
 **Corpus audit** (`POST /api/corpus-audit`, read back with `GET /api/corpus-audit`) answers the other question: of everything already live, which page is worst.
 It pulls every published body out of D1, runs scanner v2 over each one *against the rest of the corpus* (the only way site-wide sameness is visible at all), adds a reviewer pass over what the page itself shows, and writes one ranked report the **Published** tab renders.
@@ -107,16 +110,39 @@ Like the topic scout, the audit is a detached background sweep, so its `running`
 The three pages named in the review are `beef tallow skincare`, `best cordless stick vacuums` and `best portable waterproof Bluetooth speakers`.
 Against the live site, in order:
 
-1. **Published** tab → **Audit the corpus**, and read the ranking. The three should be in the `requalify` band; anything else down there is worth the same treatment.
-2. **Requalify** each of the three. Each is a full article run (research → publish) and parks at *waiting approval*.
-3. Spot-check each draft by hand before approving. What to look for, because it is what the reviewer objected to:
+1. **Settings** → publish mode is *approval* (or *auto*). In *draft* mode the requalify button answers 409 rather than taking the live pages down.
+2. **Published** tab → **Audit the corpus**, and read the ranking. The three should be in the `requalify` band; anything else down there is worth the same treatment.
+3. **Requalify** each of the three. Each is a full article run (research → publish) and parks at *waiting approval*.
+4. Spot-check each draft by hand before approving. What to look for, because it is what the reviewer objected to:
    - the piece argues something - a named loser, a buyer who should not buy, a con that costs the reader something;
    - specifics carry a named source and a date, and at least some of them come from owners rather than spec sheets;
    - it does **not** share a silhouette with the other two (structure shape, opening, whether it carries an FAQ);
    - the slug is unchanged, `updatedDate` is today, `pubDate` is the original, and `updateNote` describes what actually changed;
    - every `/go/` link still resolves to a product or a search page, not a 404.
-4. **Approve & publish**, wait for the rebuild (~90s), then load the live page and confirm the above on the rendered article.
-5. Re-run the corpus audit and record the before/after scores for the three.
+5. **Approve & publish**, wait for the rebuild (~90s), then load the live page and confirm the above on the rendered article.
+6. Re-run the corpus audit and record the before/after scores for the three, in the run record below.
+
+#### Run record
+
+**Status: not yet run. Deferred to the operator who owns the AdSense re-review** - the person holding the live Cloudflare D1 credentials (`CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `CLOUDFLARE_D1_TOKEN`) and a Claude credential for the pipeline.
+Nothing in this branch can stand in for that: the three pages exist only in the production D1, each requalification is a full article run against a paid model, and the approval step is a human reading a draft.
+The code, the audit and the runbook above are what ships here; the runs themselves are the merge gate, and the acceptance criterion is met when this table is filled in on the card and in this file, not before.
+
+Fill in, per article, from the audits either side of the rebuild:
+
+| Article | Audit score / band before | Audit score / band after | Spot-check (all five checks in step 4) | Approved & live |
+| --- | --- | --- | --- | --- |
+| `beef-tallow-skincare` | | | | |
+| `best-cordless-stick-vacuums` | | | | |
+| `best-portable-waterproof-bluetooth-speakers` | | | | |
+
+The slugs above are the ones the review named; take the exact slugs off the **Published** tab before starting, and requalify by slug so there is no chance of rebuilding a different page.
+
+**One deviation to sign off with that record.**
+The card asks for a rebuild that "republishes with `updatedDate` set".
+The implementation stamps `updatedDate` only when `describeRevision()` finds the page substantially changed, for the reason under *The fresh date is earned, not automatic* above - a date that moves without the content moving is the freshening signal Google names, and this button can be pressed on every page of the site.
+In practice a real requalification rewrites the page and earns the date; a rebuild that reproduces it keeps the date it had.
+If the operator wants the literal reading - a fresh `updatedDate` on every requalification, earned or not - that is a one-line change in `content/revision.ts` and should be agreed before these three are published, not after.
 
 ## What the pipeline optimises for
 

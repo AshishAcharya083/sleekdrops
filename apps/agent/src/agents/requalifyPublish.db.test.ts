@@ -26,6 +26,7 @@ const { getSetting, setSetting } = await import('../db/pool.js');
 const { runStage } = await import('../pipeline/runner.js');
 const { runAssembler } = await import('./assembler.js');
 const { runPublisher } = await import('./publisher.js');
+const { requalifyPublished } = await import('../pipeline/requalify.js');
 
 import type { ArticleRow, ContentBrief, RequalificationSource } from '../pipeline/types.js';
 
@@ -72,6 +73,44 @@ function stubNetwork(): D1Call[] {
     return new Response(null, { status: 204 });
   }) as typeof fetch;
   return calls;
+}
+
+/** The live page a requalification reads, answered at the D1 REST boundary. */
+function stubLivePost(slug: string): void {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.ok(String(input).includes('api.cloudflare.com'), 'only D1 is stubbed here');
+    const { sql } = JSON.parse(String(init?.body)) as D1Call;
+    const results = /FROM posts WHERE slug = \?1/.test(sql)
+      ? [
+          {
+            slug,
+            status: 'published',
+            title: 'Best cordless stick vacuums',
+            category: 'Home',
+            post_type: 'guide',
+            pub_date: PUB_DATE,
+            frontmatter_json: JSON.stringify({ title: 'Best cordless stick vacuums', pubDate: PUB_DATE }),
+            body_md: draft,
+          },
+        ]
+      : [];
+    return Response.json({ success: true, result: [{ results }] });
+  }) as typeof fetch;
+}
+
+/**
+ * Run `body` with publish_mode set, and put the setting back afterwards.
+ * publish_mode is one row in a table every test file shares, so every test
+ * that depends on it lives in this file and none of them leaves it moved.
+ */
+async function withPublishMode<T>(mode: string, body: () => Promise<T>): Promise<T> {
+  const previous = await getSetting<string>('publish_mode', 'approval');
+  await setSetting('publish_mode', mode);
+  try {
+    return await body();
+  } finally {
+    await setSetting('publish_mode', previous);
+  }
 }
 
 const research = {
@@ -322,26 +361,72 @@ test('a requalification still stops at the approval gate', { skip }, async () =>
   );
   const atImage = async () => (await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [article.id]))[0];
 
-  const mode = await getSetting<string>('publish_mode', 'approval');
-  try {
-    await setSetting('publish_mode', 'approval');
+  await withPublishMode('approval', async () => {
     await runStage(await atImage());
-    let row = await atImage();
+    const row = await atImage();
     assert.equal(row.stage, 'publish');
     assert.equal(
       row.status,
       'waiting_approval',
       'a rebuild of a live page must not go out without the same review a new one gets',
     );
+  });
 
-    // And the operator who turned the gate off still gets what they asked for.
-    await q("UPDATE articles SET stage = 'image', status = 'running' WHERE id = $1", [article.id]);
-    await setSetting('publish_mode', 'auto');
+  // And the operator who turned the gate off still gets what they asked for.
+  await q("UPDATE articles SET stage = 'image', status = 'running' WHERE id = $1", [article.id]);
+  await withPublishMode('auto', async () => {
     await runStage(await atImage());
-    row = await atImage();
+    const row = await atImage();
     assert.equal(row.stage, 'publish');
     assert.equal(row.status, 'queued');
-  } finally {
-    await setSetting('publish_mode', mode);
-  }
+  });
+});
+
+test('a requalification that would unpublish the live page is refused', { skip }, async () => {
+  // Draft mode parks whatever finishes in D1 unpublished, and the site build
+  // only selects published rows - so on a page that is already live it is a
+  // deletion with no approval checkpoint in front of it. The refusal happens
+  // before the run costs anything.
+  const slug = nextSlug();
+  stubLivePost(slug);
+
+  const refused = await withPublishMode('draft', () => requalifyPublished(slug));
+  assert.equal(refused.ok, false);
+  assert.equal(refused.ok === false && refused.status, 409);
+  assert.match(
+    refused.ok === false ? refused.error : '',
+    /publish mode is "draft"/,
+    'and it says which setting to change',
+  );
+  const [orphan] = await q('SELECT id FROM articles WHERE slug = $1', [slug]);
+  assert.equal(orphan, undefined, 'nothing was queued against the live page');
+
+  // The same page, in a mode it can survive: approval still gates the rebuild.
+  const queued = await withPublishMode('approval', () => requalifyPublished(slug));
+  assert.equal(queued.ok, true, queued.ok === false ? queued.error : '');
+  if (queued.ok) created.push(queued.articleId);
+});
+
+test('the publisher will not unpublish a live page when the mode flips mid-run', { skip }, async () => {
+  const calls = stubNetwork();
+  const article = await seedRequalifiedArticle();
+
+  calls.length = 0;
+  await withPublishMode('draft', async () => {
+    await assert.rejects(
+      () => runPublisher(article),
+      /publish mode is "draft"/,
+      'the stage fails rather than replacing the live row with an unpublished one',
+    );
+    assert.equal(
+      calls.filter((call) => call.sql.includes('INSERT INTO posts')).length,
+      0,
+      'the live page is left exactly as it is',
+    );
+
+    // The mode still does what it is for on an article that is not a rebuild.
+    const fresh = await runPublisher({ ...article, requalification: null });
+    assert.equal(fresh.d1Status, 'draft');
+    assert.equal(fresh.dispatched, false);
+  });
 });

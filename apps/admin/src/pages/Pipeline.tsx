@@ -8,7 +8,7 @@ import type {
   ResearchDetail,
   StructureShape,
 } from '../api';
-import { api, apiUpload, duration, fmtCost, fmtTime } from '../api';
+import { REQUALIFIABLE_STATUSES, api, apiUpload, duration, fmtCost, fmtTime } from '../api';
 import { ApiErrorBanner, Badge } from '../components';
 import { HeroImageField } from '../HeroImageField';
 import { usePoll } from '../hooks';
@@ -545,7 +545,7 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                 </button>
               )}
               {detail.article.slug &&
-                ['done', 'failed', 'cancelled'].includes(detail.article.status) && (
+                REQUALIFIABLE_STATUSES.includes(detail.article.status) && (
                   <button
                     className="btn violet-outline"
                     title="Send the live page back through the whole pipeline at the same slug"

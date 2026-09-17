@@ -21,13 +21,20 @@
 // Nothing here publishes anything. The run rejoins the normal pipeline at
 // 'research/queued' and passes the same approval gate every other article
 // does, so a requalification cannot put an unreviewed rewrite on the site.
+// The one publish mode it cannot rejoin is 'draft', which would park the
+// rebuilt row unpublished and take the live page down with it - that is
+// refused here, before the run costs anything.
 import { CATEGORIES, goSlugsIn, POST_TYPES } from '../content/contract.js';
-import { q } from '../db/pool.js';
+import { getSetting, q } from '../db/pool.js';
 import { d1Configured, fetchD1Post } from '../tools/d1.js';
 import type { ArticleRow, RequalificationSource } from './types.js';
 
-/** Statuses a requalification may interrupt: nothing is mid-flight in any of them. */
-const REQUALIFIABLE_STATUSES = ['done', 'failed', 'cancelled'];
+/**
+ * Statuses a requalification may interrupt: nothing is mid-flight in any of
+ * them. The admin panel mirrors this list (apps/admin/src/api.ts) to decide
+ * whether to offer the button; this copy is the one that decides.
+ */
+export const REQUALIFIABLE_STATUSES = ['done', 'failed', 'cancelled'];
 
 export type RequalifyOutcome =
   | {
@@ -109,6 +116,25 @@ export async function requalifyPublished(slug: string): Promise<RequalifyOutcome
       status: 503,
       error:
         'Cloudflare D1 is not configured on the agent platform, so there is no live page to requalify - set CLOUDFLARE_ACCOUNT_ID, D1_DATABASE_ID and CLOUDFLARE_D1_TOKEN.',
+    };
+  }
+
+  // Draft mode parks whatever the pipeline finishes in D1 as `status =
+  // 'draft'`, and the site build only selects published rows. For a new
+  // article that is the whole point of the mode; for a page that is already
+  // live it is a deletion - the rebuild lands on the same row, the next build
+  // drops the page and a URL people have linked to starts 404ing, with no
+  // approval checkpoint anywhere in the run to catch it. So a requalification
+  // does not start while the mode is set that way.
+  const publishMode = await getSetting<string>('publish_mode', 'approval');
+  if (publishMode === 'draft') {
+    return {
+      ok: false,
+      status: 409,
+      error:
+        `publish mode is "draft", so the rebuild of ${slug} would land in D1 unpublished and take ` +
+        'the live page off the site at the next build. Set publish mode to approval (or auto) in ' +
+        'Settings first - approval still parks the rebuild for review before anything replaces the page.',
     };
   }
 

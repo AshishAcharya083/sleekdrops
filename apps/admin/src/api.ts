@@ -332,6 +332,14 @@ export interface CorpusAuditLock {
   heartbeat_age_seconds: number;
 }
 
+/**
+ * The statuses a published page can be requalified from - the ones in which
+ * nothing is mid-flight. Mirrors REQUALIFIABLE_STATUSES in
+ * apps/agent/src/pipeline/requalify.ts, which stays the authority: it answers
+ * 409 if this list ever drifts past it.
+ */
+export const REQUALIFIABLE_STATUSES = ['done', 'failed', 'cancelled'];
+
 /** What the requalify routes answer with. */
 export interface RequalifyResult {
   ok: boolean;
