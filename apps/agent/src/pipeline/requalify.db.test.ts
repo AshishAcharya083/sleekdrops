@@ -21,6 +21,7 @@ const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
 const { resolveArticleSlug } = await import('./runner.js');
 const { createApp } = await import('../api/server.js');
+const { holdPublishMode } = await import('../testing/publishMode.js');
 
 import type { ArticleRow, RequalificationSource } from './types.js';
 
@@ -31,6 +32,12 @@ const reachable = await pool
 const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to run these';
 
 if (reachable) await migrate();
+
+// Every requalification below expects to be served, and the one mode that
+// refuses one - 'draft' - is set for a window by requalifyPublish.db.test.ts,
+// in another process against this same database. Hold the mode as configured
+// for as long as this file runs so that window cannot open underneath it.
+const releasePublishMode = reachable ? await holdPublishMode() : null;
 
 const app = createApp();
 const AUTH = { Authorization: 'Bearer test-admin-token' };
@@ -82,6 +89,7 @@ after(async () => {
     await q('DELETE FROM articles WHERE id = ANY($1)', [created]);
     await q('DELETE FROM articles WHERE slug = $1', [SLUG]);
   }
+  await releasePublishMode?.();
   await pool.end();
 });
 

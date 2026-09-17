@@ -11,6 +11,10 @@
 // test of either stage alone: the original pubDate survives with updatedDate
 // stamped beside it, the hero the page already had survives, and a /go/ row
 // this pass could not re-verify is left exactly as the live site has it.
+//
+// Two of these tests move `publish_mode`, which is one row every test process
+// shares, so they move it through testing/publishMode.ts: the advisory lock
+// there keeps the window they open off the files that read the mode.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -22,7 +26,7 @@ process.env.GITHUB_TOKEN = 'test-github-token';
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
-const { getSetting, setSetting } = await import('../db/pool.js');
+const { withPublishMode } = await import('../testing/publishMode.js');
 const { runStage } = await import('../pipeline/runner.js');
 const { runAssembler } = await import('./assembler.js');
 const { runPublisher } = await import('./publisher.js');
@@ -96,21 +100,6 @@ function stubLivePost(slug: string): void {
       : [];
     return Response.json({ success: true, result: [{ results }] });
   }) as typeof fetch;
-}
-
-/**
- * Run `body` with publish_mode set, and put the setting back afterwards.
- * publish_mode is one row in a table every test file shares, so every test
- * that depends on it lives in this file and none of them leaves it moved.
- */
-async function withPublishMode<T>(mode: string, body: () => Promise<T>): Promise<T> {
-  const previous = await getSetting<string>('publish_mode', 'approval');
-  await setSetting('publish_mode', mode);
-  try {
-    return await body();
-  } finally {
-    await setSetting('publish_mode', previous);
-  }
 }
 
 const research = {
