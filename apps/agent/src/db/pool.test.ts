@@ -40,6 +40,7 @@ test('connection-level failures are transient, misconfiguration is not', () => {
   assert.ok(isTransientConnectionError({ code: 'ENOTFOUND' }));
   assert.ok(isTransientConnectionError({ code: 'ECONNRESET' }));
   assert.ok(isTransientConnectionError({ code: '57P03' }));
+  assert.ok(isTransientConnectionError({ code: 'ENETUNREACH' }));
   assert.ok(isTransientConnectionError(new Error('the database system is starting up')));
 
   assert.ok(!isTransientConnectionError({ code: '28P01' })); // invalid_password
@@ -49,6 +50,32 @@ test('connection-level failures are transient, misconfiguration is not', () => {
 
   assert.ok(isDatabaseUnreachableError({ code: 'ENOTFOUND' }));
   assert.ok(!isDatabaseUnreachableError({ code: '57P03' }));
+});
+
+// A host that resolves to several addresses - any dual-stack `localhost`, which
+// is what both .env.example and the `pg` default use - fails as an
+// AggregateError whose own code is only the FIRST attempt's. In a container
+// without usable IPv6 that is EADDRNOTAVAIL for `::1`, and judging by it alone
+// would neither retry a late Postgres nor print the hint below.
+test('a multi-address connect failure is judged by every attempt it bundles', () => {
+  const dualStack = new AggregateError(
+    [
+      Object.assign(new Error('connect EADDRNOTAVAIL ::1:5432'), { code: 'EADDRNOTAVAIL' }),
+      Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' }),
+    ],
+    'All attempts to connect failed',
+  );
+  Object.assign(dualStack, { code: 'EADDRNOTAVAIL' });
+
+  assert.ok(isTransientConnectionError(dualStack), 'a late Postgres behind IPv6 is not waited for');
+  assert.ok(isDatabaseUnreachableError(dualStack), 'the operator gets no hint about DATABASE_URL');
+
+  // Bundling does not make a permanent failure transient.
+  const credentials = new AggregateError(
+    [Object.assign(new Error('password authentication failed'), { code: '28P01' })],
+    'All attempts to connect failed',
+  );
+  assert.ok(!isTransientConnectionError(credentials));
 });
 
 // Both entrypoints print this when nothing answers - it is the whole operator

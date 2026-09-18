@@ -79,14 +79,25 @@ interface Booted {
   exited: Promise<number | null>;
 }
 
-/** Spawn `script` with `overrides` applied to its env; an undefined value unsets. */
-function bootAgent(overrides: Record<string, string | undefined>, script = ENTRYPOINT): Booted {
+interface BootOptions {
+  /** What to run: the agent entrypoint by default, or the standalone migrate CLI. */
+  script?: string;
+  /** An extra ESM module loaded before it, as a path or `data:` URL. */
+  preload?: string;
+}
+
+/** Spawn the process with `overrides` applied to its env; an undefined value unsets. */
+function bootAgent(
+  overrides: Record<string, string | undefined>,
+  { script = ENTRYPOINT, preload }: BootOptions = {},
+): Booted {
   // PORT 0 by default keeps a booting agent off a port another suite may want.
   const env: NodeJS.ProcessEnv = { ...process.env, PORT: '0', ...overrides };
   for (const [key, value] of Object.entries(overrides)) {
     if (value === undefined) delete env[key];
   }
-  const child = spawn(process.execPath, ['--import', 'tsx', script], {
+  const preloads = preload ? ['--import', preload] : [];
+  const child = spawn(process.execPath, ['--import', 'tsx', ...preloads, script], {
     cwd: PACKAGE_ROOT,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -128,6 +139,28 @@ function bootAgent(overrides: Record<string, string | undefined>, script = ENTRY
 /** The boot wait window - `waitForDatabase`'s own default, spent before giving up. */
 const BOOT_WAIT_MS = 30_000;
 
+/**
+ * A host resolving to two addresses, the way a container resolves `localhost` -
+ * which is what the `pg` default and .env.example both dial. `net` then tries
+ * every address, and when they all fail `pg` rejects with an AggregateError
+ * whose own `code` is only the FIRST attempt's: for `::1` in a container with
+ * no usable IPv6 that is EADDRNOTAVAIL, hiding the ECONNREFUSED underneath.
+ * DNS is the only way to make one connection attempt fan out, so the stub is
+ * preloaded into the child rather than reaching into the app.
+ */
+const DUAL_STACK_HOST = 'dualstack.test';
+const DUAL_STACK_DNS_STUB = `data:text/javascript,${encodeURIComponent(`
+import dns from 'node:dns';
+const real = dns.lookup;
+dns.lookup = (hostname, options, callback) => {
+  if (hostname !== ${JSON.stringify(DUAL_STACK_HOST)}) return real(hostname, options, callback);
+  const done = typeof options === 'function' ? options : callback;
+  const all = typeof options === 'object' && options !== null && options.all;
+  const addresses = [{ address: '::1', family: 6 }, { address: '127.0.0.1', family: 4 }];
+  process.nextTick(() => (all ? done(null, addresses) : done(null, addresses[0].address, 6)));
+};
+`)}`;
+
 test(
   'boot retries an unreachable database, then exits naming DATABASE_URL',
   { timeout: 120_000 },
@@ -150,6 +183,29 @@ test(
       assert.match(agent.output(), /no Postgres answering at 127\.0\.0\.1:1/);
       assert.match(agent.output(), /set DATABASE_URL to a reachable Postgres/);
       assert.doesNotMatch(agent.output(), /listening/);
+    } finally {
+      agent.child.kill('SIGKILL');
+      await agent.exited;
+    }
+  },
+);
+
+// The same wait, when the failure arrives bundled. Judging such an aggregate by
+// its top-level code alone made boot treat a merely-late Postgres as fatal.
+test(
+  'boot waits through a dual-stack failure that arrives as an AggregateError',
+  { timeout: 60_000 },
+  async () => {
+    const agent = bootAgent(
+      { DATABASE_URL: `postgres://unused:unused@${DUAL_STACK_HOST}:1/unreachable` },
+      { preload: DUAL_STACK_DNS_STUB },
+    );
+    try {
+      await agent.waitFor(/database not reachable yet, retrying/);
+      await agent.waitFor(/"attempt":2/);
+      assert.match(agent.output(), new RegExp(`"target":"${DUAL_STACK_HOST}:1"`));
+      assert.equal(agent.child.exitCode, null, 'the agent exited instead of waiting for Postgres');
+      assert.doesNotMatch(agent.output(), /\[agent\] fatal/);
     } finally {
       agent.child.kill('SIGKILL');
       await agent.exited;
@@ -269,7 +325,7 @@ test(
 test('the migrate CLI waits for the database instead of failing on the first refusal', async () => {
   const migration = bootAgent(
     { DATABASE_URL: 'postgres://unused:unused@127.0.0.1:1/unreachable' },
-    MIGRATE_CLI,
+    { script: MIGRATE_CLI },
   );
   try {
     await migration.waitFor(/database not reachable yet, retrying/);

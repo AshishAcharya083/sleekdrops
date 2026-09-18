@@ -49,17 +49,40 @@ export function unreachableDatabaseHint(): string {
   );
 }
 
-/** Nothing is listening, or the host does not resolve: the target itself is wrong. */
-const UNREACHABLE_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT']);
+/**
+ * Nothing is listening, the host does not resolve, or the route/address family
+ * is unusable: either way the target itself is what the operator must fix.
+ */
+const UNREACHABLE_CODES = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ETIMEDOUT',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'EADDRNOTAVAIL',
+]);
 
-function errorCode(err: unknown): string | undefined {
+/**
+ * Every code the failure carries. A connect error can arrive as an
+ * AggregateError - `net` tries every address the host resolves to, and a
+ * dual-stack `localhost` is two - whose own `code` is just the FIRST attempt's.
+ * In a container with no usable IPv6 that first code is EADDRNOTAVAIL/
+ * ENETUNREACH for `::1`, hiding the ECONNREFUSED from `127.0.0.1` underneath:
+ * judging the aggregate by its top-level code alone would neither retry a
+ * Postgres that is merely starting late nor print the hint naming DATABASE_URL.
+ */
+function errorCodes(err: unknown): string[] {
   const code = (err as { code?: unknown } | null)?.code;
-  return typeof code === 'string' ? code : undefined;
+  const codes = typeof code === 'string' ? [code] : [];
+  if (err instanceof AggregateError) {
+    for (const nested of err.errors) codes.push(...errorCodes(nested));
+  }
+  return codes;
 }
 
 export function isDatabaseUnreachableError(err: unknown): boolean {
-  const code = errorCode(err);
-  return code !== undefined && UNREACHABLE_CODES.has(code);
+  return errorCodes(err).some((code) => UNREACHABLE_CODES.has(code));
 }
 
 /**
@@ -70,7 +93,8 @@ export function isDatabaseUnreachableError(err: unknown): boolean {
  */
 export function isTransientConnectionError(err: unknown): boolean {
   if (isDatabaseUnreachableError(err)) return true;
-  if (errorCode(err) === 'ECONNRESET' || errorCode(err) === '57P03') return true;
+  const codes = errorCodes(err);
+  if (codes.includes('ECONNRESET') || codes.includes('57P03')) return true;
   return err instanceof Error && /the database system is starting up/i.test(err.message);
 }
 
