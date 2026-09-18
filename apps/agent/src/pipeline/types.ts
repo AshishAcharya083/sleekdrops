@@ -508,4 +508,92 @@ export interface AffiliateLinkRow {
    * dossier-backed destination. Pipeline-side only: D1 has no such column.
    */
   healed?: boolean;
+  /**
+   * Set when the destination came from an attached offer record rather than
+   * from the dossier. A human (or, later, the feed that took that record over)
+   * chose this URL, which is why it may point outside the Amazon marketplaces
+   * the pipeline is allowed to build destinations for on its own.
+   *
+   * Pipeline-side only, like `healed`: D1 has no such column.
+   */
+  manual?: boolean;
+}
+
+/**
+ * Who supplied an offer record, and therefore what its price is worth.
+ *
+ * 'editor' is a person typing what they can see on the merchant's page on
+ * announcement day. 'feed' and 'api' are the automated sources that take that
+ * record over once the merchant has published the SKU - later, better data for
+ * the same product, which is why they overwrite rather than sit beside it.
+ */
+export type OfferSource = 'editor' | 'feed' | 'api';
+
+export const OFFER_SOURCES: readonly OfferSource[] = ['editor', 'feed', 'api'];
+
+/**
+ * One product's offer on one article: where the reader is sent, what it cost,
+ * and when that price was seen.
+ *
+ * A launch-window SKU carries no feed row and cannot be polled through the
+ * Product Advertising API, so this record is the only thing standing between
+ * "announced today" and "has a real commissionable link today". `price` is
+ * nullable because a link with no price is still a link, and a figure invented
+ * to fill the column is exactly the misstatement the "as at" stamp exists to
+ * prevent.
+ *
+ * Dates are read as YYYY-MM-DD strings (see db/offers.ts) rather than as
+ * Date objects: what the reader is shown is a day, in the publication's own
+ * timezone, and a Date would drag the server's one into it.
+ */
+export interface ProductOffer {
+  id: string;
+  article_id: string;
+  go_slug: string;
+  product_name: string;
+  url: string;
+  /** NUMERIC, read back as a string so no cents are lost in a float. */
+  price: string | null;
+  currency: string;
+  price_observed_on: string | null;
+  preorder: boolean;
+  release_date: string | null;
+  merchant: string | null;
+  source: OfferSource;
+  entered_by: string | null;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One version of an offer as it was saved, newest first in the panel. */
+export interface ProductOfferRevision {
+  id: string;
+  go_slug: string;
+  url: string;
+  price: string | null;
+  currency: string;
+  price_observed_on: string | null;
+  preorder: boolean;
+  release_date: string | null;
+  merchant: string | null;
+  source: OfferSource;
+  entered_by: string | null;
+  saved_at: string;
+}
+
+/** The editable half of an offer - what a save writes. */
+export interface OfferInput {
+  goSlug: string;
+  productName: string;
+  url: string;
+  price: string | null;
+  currency: string;
+  priceObservedOn: string | null;
+  preorder: boolean;
+  releaseDate: string | null;
+  merchant: string | null;
+  source: OfferSource;
+  enteredBy: string;
+  note?: string | null;
 }

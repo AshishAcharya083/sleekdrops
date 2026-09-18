@@ -12,6 +12,7 @@ import { api, apiUpload, duration, fmtCost, fmtTime } from '../api';
 import { ApiErrorBanner, Badge } from '../components';
 import { HeroImageField } from '../HeroImageField';
 import { usePoll } from '../hooks';
+import { Offers } from './Offers';
 
 const LANES: Array<{ title: string; stages: string[] }> = [
   { title: 'Research & Brief', stages: ['research', 'keyword', 'angle', 'outline'] },
@@ -23,7 +24,20 @@ const LANES: Array<{ title: string; stages: string[] }> = [
 export function Pipeline() {
   const { data, error, refresh } = usePoll<{ articles: ArticleSummary[] }>('/api/articles');
   const [openId, setOpenId] = useState<string | null>(null);
+  // The offer screens take over the tab rather than stacking a second overlay
+  // on the article panel: the coverage table needs the width, and the card it
+  // belongs to is the context column beside it.
+  const [offersFor, setOffersFor] = useState<string | null>(null);
   const articles = data?.articles ?? [];
+
+  if (offersFor) {
+    return (
+      <>
+        <ApiErrorBanner error={error} />
+        <Offers articleId={offersFor} onClose={() => setOffersFor(null)} onChanged={refresh} />
+      </>
+    );
+  }
 
   return (
     <>
@@ -57,7 +71,14 @@ export function Pipeline() {
           );
         })}
       </div>
-      {openId && <ArticlePanel id={openId} onClose={() => setOpenId(null)} onChanged={refresh} />}
+      {openId && (
+        <ArticlePanel
+          id={openId}
+          onClose={() => setOpenId(null)}
+          onChanged={refresh}
+          onOpenOffers={() => setOffersFor(openId)}
+        />
+      )}
     </>
   );
 }
@@ -388,7 +409,17 @@ function PlanList({ label, items }: { label: string; items: string[] }) {
   );
 }
 
-function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
+function ArticlePanel({
+  id,
+  onClose,
+  onChanged,
+  onOpenOffers,
+}: {
+  id: string;
+  onClose: () => void;
+  onChanged: () => void;
+  onOpenOffers: () => void;
+}) {
   const [detail, setDetail] = useState<ArticleDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showDraft, setShowDraft] = useState(false);
@@ -602,6 +633,22 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                 </div>
               </div>
             )}
+
+            <div className="section">
+              <h2>
+                Offer coverage{' '}
+                <button className="btn secondary small" onClick={onOpenOffers}>
+                  review offers
+                </button>
+              </h2>
+              <div className="card">
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  Which products in this card carry a commissionable link and a dated price, and
+                  which fall back to a search. A launch-window SKU is in no feed and cannot be
+                  polled, so an offer only gets there by hand.
+                </p>
+              </div>
+            </div>
 
             {detail.article.affiliate_links && detail.article.affiliate_links.length > 0 && (
               <div className="section">

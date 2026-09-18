@@ -1,0 +1,457 @@
+/* ==========================================================================
+   Offer surfaces — coverage, the per-offer editor, and the reader preview.
+   ==========================================================================
+   Scoped under .offers-surface so the shipped panel styles keep their own
+   sizing: these screens raise every tap target to 44px and turn .detail-panel
+   into a static grid column rather than the fixed drawer the board uses.
+
+   Two palettes, deliberately. The control-room tokens are the panel's own; the
+   editorial ones (.reader-*) are the website's, verbatim, because a preview
+   that is not in the site's colours and type is not a preview.
+   ========================================================================== */
+.offers-surface {
+  --type-micro: 11px;
+  --type-eyebrow: 12px;
+  --type-caption: 13px;
+  --type-body-sm: 14px;
+  --type-body: 16px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-control: 10px;
+  --radius-pill: 999px;
+  --ease-out: cubic-bezier(0.2, 0.6, 0.2, 1);
+  --dur-fast: 120ms;
+
+  /* editorial palette — the public site's, for the reader preview */
+  --paper: #fafaf7;
+  --surface-alt: #f4f3ee;
+  --hairline: #e8e7e1;
+  --hairline-strong: #d5d3cb;
+  --ink: #0f0f0e;
+  --ink-muted: #6b6b66;
+  --ember: #c44f2a;
+  --ember-text: #a23e1f;
+  --font-editorial: 'Lora', 'Iowan Old Style', Georgia, serif;
+  --font-editorial-body: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ── the stage: context column + the panel that does the work ───────────── */
+/* The context column is capped narrow so the detail panel gets the width the
+   offer table needs; at 1280 that is ~840px, which is what stopped the action
+   column being starved by a long product title. */
+.offers-surface .stage {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(560px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 1040px) {
+  .offers-surface .stage { grid-template-columns: minmax(0, 1fr); }
+  .offers-surface .board-behind { display: none; }
+}
+.offers-surface .board-behind { opacity: 0.42; pointer-events: none; min-width: 0; }
+.offers-surface .board-behind .lane { margin-bottom: 12px; }
+.offers-surface .board-behind .lane h4 {
+  display: flex; justify-content: space-between; gap: 8px;
+}
+.offers-surface .board-behind .lane h4 .count { float: none; }
+.offers-surface .lane-more {
+  padding: 4px 8px 2px; color: var(--muted); font-size: var(--type-micro);
+}
+.offers-surface .board-behind .cardlet { cursor: default; }
+.offers-surface .cardlet.is-open {
+  border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+/* ── the detail panel (static here, not the fixed board drawer) ─────────── */
+.offers-surface .detail-panel {
+  width: auto; height: auto; overflow: visible; padding: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  display: flex; flex-direction: column; min-width: 0;
+}
+.offers-surface .panel-head {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 18px 22px 14px; border-bottom: 1px solid var(--border);
+}
+.offers-surface .panel-head .htext { flex: 1; min-width: 0; }
+.offers-surface .panel-head h2 {
+  margin: 0; font-size: var(--type-body); line-height: 1.35; overflow-wrap: anywhere;
+}
+.offers-surface .panel-head p {
+  margin: 7px 0 0; font-size: var(--type-eyebrow); color: var(--muted); line-height: 1.55;
+}
+.offers-surface .panel-head .sub {
+  margin: 7px 0 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+}
+/* A mono slug inside a sentence moves to the next line whole rather than
+   splitting at one of its own hyphens. Scoped to prose so a standalone badge
+   elsewhere keeps wrapping normally. */
+.offers-surface p .mono { white-space: nowrap; }
+.offers-surface .close-x {
+  float: none; background: none; border: none; color: var(--muted);
+  font-size: 20px; line-height: 1; cursor: pointer; flex: none;
+  padding: 4px 8px; border-radius: var(--radius-sm);
+  min-height: 36px; min-width: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.offers-surface .close-x:hover { color: var(--text); background: var(--panel-2); }
+.offers-surface .panel-body { padding: 18px 22px 20px; }
+.offers-surface .panel-body .section:first-child { margin-top: 0; }
+.offers-surface .panel-foot {
+  display: flex; align-items: center; gap: 12px; padding: 14px 22px;
+  border-top: 1px solid var(--border); background: var(--panel-2); flex-wrap: wrap;
+}
+.offers-surface .panel-foot .action-group {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto;
+}
+@media (max-width: 520px) {
+  .offers-surface .panel-head,
+  .offers-surface .panel-body,
+  .offers-surface .panel-foot { padding-left: 14px; padding-right: 14px; }
+  .offers-surface .panel-foot .action-group { margin-left: 0; width: 100%; }
+}
+
+/* ── buttons: 44px floor everywhere a finger lands ──────────────────────── */
+.offers-surface .btn {
+  padding: 11px 16px; min-height: 44px; border-radius: var(--radius-md);
+  font-size: var(--type-caption); font-weight: 600; font-family: inherit;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  text-decoration: none; cursor: pointer; border: none;
+  background: var(--accent); color: #fff;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.offers-surface .btn:hover:not(:disabled) { background: #87a1ff; }
+.offers-surface .btn:active:not(:disabled) { transform: translateY(1px); }
+.offers-surface .btn.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+.offers-surface .btn.secondary:hover:not(:disabled) { background: var(--panel-3); border-color: var(--border-strong); }
+.offers-surface .btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+.offers-surface .btn.ghost:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); background: transparent; }
+.offers-surface .btn.violet { background: var(--violet); color: #14101f; }
+.offers-surface .btn.violet:hover:not(:disabled) { background: #bda5ff; }
+.offers-surface .btn.violet-outline { background: transparent; color: var(--violet); border: 1px solid rgba(167, 139, 250, 0.5); }
+.offers-surface .btn.violet-outline:hover:not(:disabled) { background: var(--violet-soft); }
+/* Row actions inside the desktop table stay compact on purpose; on a phone the
+   table is replaced by cards and every action goes back to 44px. */
+.offers-surface .btn.small {
+  padding: 6px 10px; font-size: var(--type-eyebrow); min-height: 32px; white-space: nowrap;
+}
+.offers-surface .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (max-width: 680px) {
+  .offers-surface .btn.small { min-height: 44px; padding: 11px 14px; }
+  .offers-surface .close-x { min-height: 44px; min-width: 44px; }
+}
+
+/* ── banners ────────────────────────────────────────────────────────────── */
+/* The message and its Retry share one row until the panel is genuinely narrow,
+   instead of the button sitting alone under a wide empty band. */
+.offers-surface .error-banner,
+.offers-surface .notice-banner,
+.offers-surface .warn-banner {
+  display: flex; flex-direction: row; flex-wrap: wrap;
+  justify-content: space-between; align-items: center; gap: 10px;
+  line-height: 1.55;
+}
+.offers-surface .error-banner .banner-text,
+.offers-surface .warn-banner .banner-text,
+.offers-surface .notice-banner .banner-text { flex: 1 1 260px; min-width: 0; }
+
+/* A panel that holds prose rather than a table. Same box as .card; a separate
+   name so the layout suite's "every table sits in a scrolling card" scan is
+   never pointed at a card that was never holding one. */
+.offers-surface .note-card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius-control); padding: 16px;
+}
+
+/* ── coverage meter ─────────────────────────────────────────────────────── */
+.offers-surface .coverage {
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius-control); padding: 14px 16px; margin-bottom: 10px;
+}
+.offers-surface .coverage-top {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.offers-surface .coverage-top .lead { font-size: var(--type-body-sm); font-weight: 650; }
+.offers-surface .coverage-top .lead b { font-variant-numeric: tabular-nums; }
+.offers-surface .coverage-top .hint {
+  font-size: var(--type-eyebrow); color: var(--muted); margin-left: auto;
+}
+.offers-surface .meter {
+  display: flex; gap: 3px; height: 8px; border-radius: var(--radius-pill); overflow: hidden;
+}
+.offers-surface .meter span { flex: 1; border-radius: var(--radius-pill); background: var(--panel-3); }
+.offers-surface .meter span.editor { background: var(--violet); }
+.offers-surface .meter span.resolved { background: var(--accent); }
+.offers-surface .meter span.healed { background: var(--amber); }
+.offers-surface .meter span.none { background: var(--red); }
+.offers-surface .meter-key {
+  display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px;
+  font-size: var(--type-micro); color: var(--muted);
+}
+.offers-surface .meter-key i {
+  width: 8px; height: 8px; border-radius: 2px; display: inline-block;
+  margin-right: 6px; vertical-align: baseline;
+}
+.offers-surface .meter-key .k-editor i { background: var(--violet); }
+.offers-surface .meter-key .k-resolved i { background: var(--accent); }
+.offers-surface .meter-key .k-healed i { background: var(--amber); }
+.offers-surface .meter-key .k-none i { background: var(--red); }
+
+/* ── provenance chip: colour and text, never colour alone ───────────────── */
+.offers-surface .source-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px;
+  border-radius: var(--radius-pill); font-size: var(--type-micro); font-weight: 650;
+  letter-spacing: 0.2px; white-space: nowrap; border: 1px solid transparent;
+}
+.offers-surface .source-chip i { width: 7px; height: 7px; border-radius: var(--radius-pill); flex: none; }
+.offers-surface .source-chip.editor { background: var(--violet-soft); color: var(--violet); border-color: rgba(167, 139, 250, 0.32); }
+.offers-surface .source-chip.editor i { background: var(--violet); }
+.offers-surface .source-chip.resolved { background: var(--accent-soft); color: #9db0ff; border-color: rgba(108, 140, 255, 0.3); }
+.offers-surface .source-chip.resolved i { background: var(--accent); }
+.offers-surface .source-chip.healed { background: rgba(245, 184, 77, 0.13); color: var(--amber); border-color: rgba(245, 184, 77, 0.3); }
+.offers-surface .source-chip.healed i { background: var(--amber); }
+.offers-surface .source-chip.none { background: var(--red-soft); color: var(--red); border-color: rgba(244, 100, 125, 0.35); }
+.offers-surface .source-chip.none i { background: var(--red); }
+
+/* ── the offer table ────────────────────────────────────────────────────── */
+/* Fixed layout with percentage columns: in automatic layout the wrapping
+   product-title column competes for space with the action column and starves
+   it, which is what clipped the row buttons at 1280 and 834. */
+.offers-surface .offer-table { table-layout: fixed; min-width: 580px; }
+.offers-surface .offer-table col.c-product { width: 36%; }
+.offers-surface .offer-table col.c-offer { width: 28%; }
+.offers-surface .offer-table col.c-price { width: 14%; }
+.offers-surface .offer-table col.c-act { width: 22%; }
+.offers-surface .offer-table td { vertical-align: top; }
+.offers-surface .offer-table .act { text-align: right; }
+.offers-surface .offer-table .act .row-actions {
+  display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap;
+}
+.offers-surface .offer-table .p-name {
+  font-weight: 650; font-size: var(--type-caption); overflow-wrap: anywhere; display: block;
+}
+.offers-surface .offer-table .p-slug {
+  font-family: var(--mono); font-size: var(--type-micro); color: var(--muted);
+  display: inline-block; margin-top: 4px; overflow-wrap: anywhere;
+}
+.offers-surface .offer-table .dest {
+  font-family: var(--mono); font-size: var(--type-micro); color: var(--muted);
+  display: block; margin-top: 5px; overflow-wrap: break-word; line-height: 1.5;
+}
+/* A long destination truncates on one line instead of forcing the offer column
+   wider; the full value is on the element's title. */
+.offers-surface .offer-table .tok,
+.offers-surface .offer-card-item .oc-dest .tok {
+  display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; vertical-align: bottom;
+}
+.offers-surface .offer-table .by {
+  font-family: var(--mono); font-size: var(--type-micro); color: var(--muted);
+  display: block; margin-top: 4px;
+}
+.offers-surface .offer-table .price {
+  font-size: var(--type-caption); white-space: nowrap;
+  font-variant-numeric: tabular-nums; font-weight: 600;
+}
+.offers-surface .offer-table .asat {
+  display: block; font-size: var(--type-micro); color: var(--muted);
+  margin-top: 3px; white-space: nowrap; font-weight: 400;
+}
+.offers-surface .offer-table .asat.stale { color: var(--amber); }
+.offers-surface .offer-table tr.uncovered td { background: rgba(244, 100, 125, 0.05); }
+.offers-surface .offer-table tr:hover td { background: var(--panel-2); }
+.offers-surface .offer-table tr.uncovered:hover td { background: rgba(244, 100, 125, 0.09); }
+.offers-surface .tag-line { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+
+/* Last-good rows after a failed poll keep full contrast: the banner, the
+   "not refreshed" badge and the note above already carry the staleness, and
+   dimming pushed 11px slug text below AA. */
+.offers-surface .stale-rows { opacity: 1; }
+
+/* Below 680px the table is replaced by stacked cards with full-size actions. */
+.offers-surface .offer-cards { display: none; }
+.offers-surface .offer-card-item {
+  border: 1px solid var(--border); border-radius: var(--radius-control);
+  background: var(--panel-2); padding: 12px 14px; margin-bottom: 10px;
+}
+.offers-surface .offer-card-item.uncovered { border-color: rgba(244, 100, 125, 0.35); }
+.offers-surface .offer-card-item .oc-name { font-weight: 650; font-size: var(--type-caption); }
+.offers-surface .offer-card-item .oc-slug,
+.offers-surface .offer-card-item .oc-dest {
+  font-family: var(--mono); font-size: var(--type-micro); color: var(--muted);
+  display: block; margin-top: 4px; overflow-wrap: anywhere;
+}
+.offers-surface .offer-card-item .oc-row {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px;
+}
+.offers-surface .offer-card-item .oc-price { font-weight: 600; font-variant-numeric: tabular-nums; }
+.offers-surface .offer-card-item .oc-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.offers-surface .offer-card-item .oc-actions .btn { flex: 1 1 auto; }
+@media (max-width: 680px) {
+  .offers-surface .offer-cards { display: block; }
+  .offers-surface .offer-table-card { display: none; }
+}
+
+/* ── resolution order, as a native disclosure ───────────────────────────── */
+.offers-surface details.explain {
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--panel-2); margin-top: 10px; font-size: var(--type-eyebrow);
+}
+.offers-surface details.explain > summary {
+  cursor: pointer; padding: 9px 12px; color: var(--muted); list-style: none;
+  display: flex; align-items: center; gap: 8px; min-height: 38px; border-radius: var(--radius-md);
+}
+.offers-surface details.explain > summary::-webkit-details-marker { display: none; }
+.offers-surface details.explain > summary::after {
+  content: '▸'; margin-left: auto; transition: transform var(--dur-fast) var(--ease-out);
+}
+.offers-surface details.explain[open] > summary::after { transform: rotate(90deg); }
+.offers-surface details.explain > summary:hover { color: var(--text); }
+.offers-surface details.explain .ex-body { padding: 2px 14px 14px; color: var(--muted); line-height: 1.6; }
+.offers-surface ol.order { margin: 0; padding: 0 0 0 4px; list-style: none; counter-reset: ord; }
+.offers-surface ol.order li {
+  counter-increment: ord; position: relative; padding: 8px 0 8px 30px;
+  border-bottom: 1px dashed var(--border); color: var(--text);
+  font-size: var(--type-eyebrow); line-height: 1.6;
+}
+.offers-surface ol.order li:last-child { border-bottom: none; }
+.offers-surface ol.order li::before {
+  content: counter(ord); position: absolute; left: 0; top: 8px;
+  width: 19px; height: 19px; border-radius: var(--radius-pill);
+  background: var(--panel-3); color: var(--muted);
+  font-size: var(--type-micro); font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ── the editor form ────────────────────────────────────────────────────── */
+/* Two classes plus the element, so it outranks `.field > label{flex-wrap:wrap}`
+   and the checkbox cannot drop onto a line of its own. */
+.offers-surface .field > label.check {
+  flex-wrap: nowrap; align-items: center; gap: 9px; margin-bottom: 0;
+}
+.offers-surface .field > label.check input[type='checkbox'] {
+  width: 16px; height: 16px; flex: none; accent-color: var(--violet); margin: 0;
+}
+.offers-surface .field-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.offers-surface .field-row .field { flex: 1 1 160px; min-width: 0; }
+.offers-surface .input:focus,
+.offers-surface .select:focus { border-color: var(--violet); }
+
+/* A standalone status-line spinner is not inside a button, so it needs its own
+   size; the .btn rules below layer colour over it. */
+.offers-surface .spinner {
+  width: 13px; height: 13px; border-radius: 50%; display: inline-block;
+  border: 2px solid var(--border-strong); border-top-color: var(--text);
+  animation: offers-spin 0.8s linear infinite;
+}
+.offers-surface .btn .spinner { border-color: rgba(255, 255, 255, 0.4); border-top-color: #fff; }
+.offers-surface .btn.violet .spinner { border-color: rgba(20, 16, 31, 0.35); border-top-color: #14101f; }
+@keyframes offers-spin { to { transform: rotate(360deg); } }
+
+.offers-surface .foot-status {
+  display: flex; align-items: center; gap: 8px; font-size: var(--type-eyebrow); color: var(--muted);
+}
+.offers-surface .foot-status.invalid { color: var(--red); }
+
+/* ── offer history ──────────────────────────────────────────────────────── */
+.offers-surface .history-cards { display: none; }
+.offers-surface .history-card {
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--panel-2); padding: 10px 12px; margin-bottom: 8px;
+}
+.offers-surface .history-card .hc-top {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  font-size: var(--type-micro); color: var(--muted);
+}
+.offers-surface .history-card .hc-price {
+  font-weight: 650; font-size: var(--type-caption); margin-top: 6px;
+}
+.offers-surface .history-card .hc-meta {
+  font-size: var(--type-micro); color: var(--muted); margin-top: 4px;
+}
+@media (max-width: 680px) {
+  .offers-surface .history-cards { display: block; }
+  .offers-surface .history-table-card { display: none; }
+}
+
+/* ── reader preview: the website's own palette, inside the panel ─────────── */
+.offers-surface .preview-frame {
+  background: var(--paper); color: var(--ink); border-radius: var(--radius-control);
+  border: 1px solid var(--hairline-strong); padding: 18px;
+  font-family: var(--font-editorial-body);
+}
+.offers-surface .preview-frame + .preview-frame { margin-top: 14px; }
+.offers-surface .preview-label {
+  font-size: var(--type-micro); color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.5px; margin: 0 0 8px;
+}
+.offers-surface .reader-callout {
+  background: var(--ink); color: var(--paper); border-radius: 16px; padding: 22px;
+  display: grid; grid-template-columns: 1fr auto; gap: 16px 20px; align-items: start;
+}
+.offers-surface .reader-callout .r-eyebrow {
+  font-size: var(--type-micro); font-weight: 700; letter-spacing: 0.18em;
+  text-transform: uppercase; color: #e07a56;
+}
+.offers-surface .reader-callout h4 {
+  font-family: var(--font-editorial); font-size: 22px; font-weight: 400;
+  margin: 6px 0 0; letter-spacing: -0.015em;
+}
+.offers-surface .reader-callout .cta {
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+}
+.offers-surface .reader-callout .cta .price {
+  font-family: var(--font-editorial); font-size: 26px; letter-spacing: -0.02em;
+}
+.offers-surface .reader-cta-btn {
+  background: var(--ember); color: #fff; border-radius: var(--radius-pill);
+  padding: 10px 18px; font-size: var(--type-caption); font-weight: 600;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+/* The stamp sits with the price and the button, not in a row of its own under
+   the release line. */
+.offers-surface .reader-callout .cta .price-stamp {
+  margin: 0; font-size: var(--type-eyebrow); color: rgba(250, 250, 247, 0.72);
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end;
+}
+.offers-surface .reader-callout .preorder-line {
+  grid-column: 1 / -1; margin: 0; padding-top: 12px;
+  border-top: 1px solid rgba(250, 250, 247, 0.16);
+  font-size: var(--type-caption); color: rgba(250, 250, 247, 0.82);
+}
+/* The tap target is the padded link; the ember rule hugs the words, on the
+   inner span, rather than sitting at the bottom of the 44px box. */
+.offers-surface .check-link {
+  display: inline-flex; align-items: center; min-height: 44px; padding: 11px 0;
+  color: inherit; text-decoration: none; font-weight: 600; font-size: var(--type-eyebrow);
+}
+.offers-surface .check-link .lbl { box-shadow: inset 0 -1px 0 var(--ember); }
+.offers-surface .reader-callout .check-link { color: var(--paper); }
+.offers-surface .reader-strip {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px 20px;
+  flex-wrap: wrap; padding: 4px 16px; background: var(--surface-alt);
+  border: 1px solid var(--hairline); border-left: 3px solid var(--ember);
+  border-radius: var(--radius-md);
+}
+.offers-surface .reader-strip .s-text {
+  display: flex; align-items: baseline; gap: 6px 12px; flex-wrap: wrap;
+  padding: 10px 0; min-width: 0;
+}
+.offers-surface .reader-strip .s-name { font-weight: 700; font-size: var(--type-body-sm); }
+.offers-surface .reader-strip .s-price { font-family: var(--font-editorial); font-size: 18px; }
+.offers-surface .reader-strip .s-stamp { font-size: var(--type-eyebrow); color: var(--ink-muted); }
+.offers-surface .reader-strip .check-link { color: var(--ember-text); }
+.offers-surface .reader-placeholder {
+  border: 1px dashed var(--hairline-strong); border-radius: var(--radius-md);
+  padding: 18px; text-align: center; color: var(--ink-muted); font-size: var(--type-caption);
+}
+@media (max-width: 680px) {
+  .offers-surface .reader-callout { grid-template-columns: 1fr; }
+  .offers-surface .reader-callout .cta { align-items: flex-start; }
+  .offers-surface .reader-callout .cta .price-stamp { justify-content: flex-start; }
+}

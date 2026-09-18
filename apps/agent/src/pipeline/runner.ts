@@ -5,6 +5,7 @@
 import { MONETISED_INTENTS } from '../content/contract.js';
 import { withDiscoveredProducts } from '../content/evidence.js';
 import { describeShapeSelection } from '../content/shapes.js';
+import { offersForArticle } from '../db/offers.js';
 import { getSetting, q } from '../db/pool.js';
 import {
   claudeConfigured,
@@ -342,13 +343,21 @@ export async function runStage(article: ArticleRow): Promise<void> {
         break;
       }
       case 'assemble': {
-        const assembled = await runAssembler(article);
+        // The offers an editor attached are read here, not inside the
+        // assembler: the assembler stays a pure function of the card it is
+        // handed, which is what lets it be driven straight from a fixture.
+        const offers = await offersForArticle(article.id);
+        const assembled = await runAssembler(article, offers);
         await updateArticle(article.id, {
           draft_md: assembled.body,
           frontmatter: JSON.stringify(assembled.frontmatter),
           affiliate_links: JSON.stringify(assembled.affiliateLinks),
         });
         summary = `frontmatter + ${assembled.affiliateLinks.length} affiliate link(s) validated${
+          assembled.offerSlugs.length > 0
+            ? ` (${assembled.offerSlugs.length} from attached offer(s): ${assembled.offerSlugs.join(', ')})`
+            : ''
+        }${
           assembled.healedSlugs.length > 0
             ? ` (${assembled.healedSlugs.length} healed from the draft: ${assembled.healedSlugs.join(', ')})`
             : ''

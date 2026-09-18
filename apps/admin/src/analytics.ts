@@ -41,6 +41,7 @@ export const EVENTS = {
   manualTopicSaved: 'Manual Topic Saved',
   articleActioned: 'Article Actioned',
   articleFeedbackSubmitted: 'Article Feedback Submitted',
+  offerSaved: 'Offer Saved',
   publishedPostDeleted: 'Published Post Deleted',
   publishedHeroUpdated: 'Published Post Hero Updated',
   settingsSaved: 'Settings Saved',

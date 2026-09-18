@@ -9,6 +9,8 @@ import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { config } from '../config.js';
 import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
+import { offerCoverage, validateOfferInput } from '../content/offers.js';
+import { deleteOffer, offerRevisionsForArticle, offersForArticle, saveOffer } from '../db/offers.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
@@ -16,7 +18,12 @@ import {
   enqueueScoutRun,
   scoutQueueStatus,
 } from '../pipeline/scout.js';
-import type { ReferenceMaterial } from '../pipeline/types.js';
+import type {
+  AffiliateLinkRow,
+  ProductOfferRevision,
+  ReferenceMaterial,
+  ResearchDossier,
+} from '../pipeline/types.js';
 import { deleteD1Post, getD1PostHero, listD1Posts, setD1PostHero } from '../tools/d1.js';
 import { gcsConfigured } from '../tools/gcs.js';
 import { dispatchContentUpdated } from '../tools/github.js';
@@ -36,6 +43,57 @@ const MAX_REFERENCES = 5;
 const MAX_REFERENCE_BYTES = 2 * 1024 * 1024;
 
 type Validated<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** The card as the offer routes read it - enough to say what a reader gets. */
+interface OfferArticle {
+  id: string;
+  title: string;
+  slug: string | null;
+  stage: string;
+  status: string;
+  draft_md: string | null;
+  research: ResearchDossier | null;
+  affiliate_links: AffiliateLinkRow[] | null;
+  frontmatter: Record<string, unknown> | null;
+}
+
+/** Today in the publication's own terms - the day an "as at" stamp means. */
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Everything the offer screens render: the coverage of one card, and every
+ * version of every offer on it grouped by slug, so the editor drawer can show
+ * a record's history without a second round trip.
+ */
+async function offerCoverageResponse(article: OfferArticle): Promise<{
+  article: Pick<OfferArticle, 'id' | 'title' | 'slug' | 'stage' | 'status'>;
+  coverage: ReturnType<typeof offerCoverage>;
+  history: Record<string, ProductOfferRevision[]>;
+  today: string;
+}> {
+  const [offers, revisions] = await Promise.all([
+    offersForArticle(article.id),
+    offerRevisionsForArticle(article.id),
+  ]);
+  const history: Record<string, ProductOfferRevision[]> = {};
+  for (const revision of revisions) {
+    (history[revision.go_slug] ??= []).push(revision);
+  }
+  return {
+    article: {
+      id: article.id,
+      title: article.title,
+      slug: article.slug,
+      stage: article.stage,
+      status: article.status,
+    },
+    coverage: offerCoverage(article, offers, today()),
+    history,
+    today: today(),
+  };
+}
 
 /** What an approval reads off the topic to seed the article it creates. */
 interface ApprovedTopic {
@@ -690,6 +748,103 @@ export function createApp(): Hono<TraceEnv> {
       return c.json({ error: 'only a finished, published article can be republished' }, 409);
     }
     log.info('article re-queued for publish', { article_id: rows[0].id });
+    return c.json({ ok: true });
+  });
+
+  // ── Per-offer records (launch-window links and dated prices) ─────────────
+  // A launch-window SKU is in no feed and cannot be polled through the Product
+  // Advertising API, so these are the only routes by which a real destination
+  // and a real price reach a page on announcement day.
+  app.get('/api/articles/:id/offers', async (c) => {
+    const [article] = await q<OfferArticle>(
+      `SELECT id, title, slug, stage, status, draft_md, research, affiliate_links, frontmatter
+         FROM articles WHERE id = $1`,
+      [c.req.param('id')],
+    );
+    if (!article) return c.json({ error: 'not found' }, 404);
+    return c.json(await offerCoverageResponse(article));
+  });
+
+  // Attach (or replace) one product's offer. PUT because the record is keyed
+  // by (article, /go/ slug): saving the same slug twice is one record with two
+  // versions, not two records.
+  app.put('/api/articles/:id/offers/:slug', async (c) => {
+    const id = c.req.param('id');
+    const [article] = await q<OfferArticle>(
+      `SELECT id, title, slug, stage, status, draft_md, research, affiliate_links, frontmatter
+         FROM articles WHERE id = $1`,
+      [id],
+    );
+    if (!article) return c.json({ error: 'not found' }, 404);
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'expected a JSON body' }, 400);
+    }
+    // `source` is fixed rather than read off the body: this route is the
+    // editor surface, and a record that claims to have come from a feed is a
+    // claim about how much the price can be trusted. A feed sync writes its
+    // own records through saveOffer().
+    const parsed = validateOfferInput(
+      { ...(body as Record<string, unknown>), goSlug: c.req.param('slug'), source: 'editor' },
+      today(),
+    );
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+
+    await saveOffer(id, parsed.value);
+    log.info('offer attached to article', {
+      article_id: id,
+      go_slug: parsed.value.goSlug,
+      source: parsed.value.source,
+      preorder: parsed.value.preorder,
+    });
+    return c.json(await offerCoverageResponse(article));
+  });
+
+  // Detach. The revisions stay: what a reader was shown, and on whose
+  // authority, outlives the record.
+  app.delete('/api/articles/:id/offers/:slug', async (c) => {
+    const id = c.req.param('id');
+    const removed = await deleteOffer(id, c.req.param('slug'));
+    if (!removed) return c.json({ error: 'no offer attached to that slug' }, 404);
+    const [article] = await q<OfferArticle>(
+      `SELECT id, title, slug, stage, status, draft_md, research, affiliate_links, frontmatter
+         FROM articles WHERE id = $1`,
+      [id],
+    );
+    if (!article) return c.json({ error: 'not found' }, 404);
+    log.info('offer detached from article', { article_id: id, go_slug: c.req.param('slug') });
+    return c.json(await offerCoverageResponse(article));
+  });
+
+  // Rebuild the page from the offers now attached. Assembly is deterministic
+  // and LLM-free, so this costs nothing but the pass itself — and it is the
+  // only way an offer attached after the card was assembled reaches the
+  // reader, which is why the panel asks for it explicitly rather than
+  // re-queueing a card behind the operator's back.
+  //
+  // Only a card that has already been assembled once: sending a piece still in
+  // review forward to assemble would skip the stages it has not had yet, and a
+  // card that has never been assembled will pick the offers up on its first
+  // pass anyway. In approval mode the rebuilt card comes back to the gate.
+  app.post('/api/articles/:id/reassemble', async (c) => {
+    const rows = await q<{ id: string }>(
+      `UPDATE articles SET stage = 'assemble', status = 'queued', error = NULL, updated_at = now()
+       WHERE id = $1 AND status <> 'running'
+         AND stage IN ('assemble', 'image', 'publish', 'done')
+         AND draft_md IS NOT NULL AND outline IS NOT NULL AND frontmatter IS NOT NULL
+       RETURNING id`,
+      [c.req.param('id')],
+    );
+    if (rows.length === 0) {
+      return c.json(
+        { error: 'only a card that has already been assembled can be rebuilt, and not mid-stage' },
+        409,
+      );
+    }
+    log.info('article re-queued for assembly', { article_id: rows[0].id });
     return c.json({ ok: true });
   });
 

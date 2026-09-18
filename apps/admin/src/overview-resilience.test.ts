@@ -70,13 +70,15 @@ test('the Overview marks the sections the agent could not load', () => {
 test('no tab explains a failure as "API unreachable" any more', () => {
   for (const { name, source } of pollingPages) {
     assert.doesNotMatch(source, /API unreachable/, `${name}: the cause comes from the failure kind`);
-    assert.match(source, /<ApiErrorBanner error=\{error\} \/>/, `${name}: uses the shared banner`);
+    // Props beyond `error` are allowed (the offer screens pass onRetry); what
+    // this guards is that no tab writes its own banner copy.
+    assert.match(source, /<ApiErrorBanner error=\{error\}[^>]*\/>/, `${name}: uses the shared banner`);
   }
 });
 
 test('every polling tab is covered by that guarantee', () => {
   assert.deepEqual(
     pollingPages.map((p) => p.name).sort(),
-    ['Overview.tsx', 'Pipeline.tsx', 'Published.tsx', 'Sessions.tsx', 'Topics.tsx'],
+    ['Offers.tsx', 'Overview.tsx', 'Pipeline.tsx', 'Published.tsx', 'Sessions.tsx', 'Topics.tsx'],
   );
 });

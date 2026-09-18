@@ -110,12 +110,12 @@ A pipeline-board action on one article: one name, with the action in a property.
 
 | Property | Type | Notes |
 |---|---|---|
-| `action` | string | `retry`, `approve_publish`, `cancel`, `republish`, `hero_image_attached`, `hero_alt_saved` or `hero_image_removed`. |
+| `action` | string | `retry`, `approve_publish`, `cancel`, `republish`, `reassemble`, `hero_image_attached`, `hero_alt_saved` or `hero_image_removed`. |
 | `article_id` | string | The article acted on. |
 | `stage` | string | The stage it was in. |
 | `status` | string | The status it was in. |
 
-Owning screen: `pages/Pipeline.tsx` (article detail panel).
+Owning screen: `pages/Pipeline.tsx` (article detail panel), and `pages/Offers.tsx` for `reassemble` and the approval taken from the coverage screen.
 The hero-image actions report only that an image was attached, re-labelled or removed - never the file, its name or its URL.
 
 ### Article Feedback Submitted
@@ -129,6 +129,19 @@ Operator feedback queued an editor pass.
 | `stage` | string | The stage the article was in. |
 
 Owning screen: `pages/Pipeline.tsx`.
+
+### Offer Saved
+
+A per-offer record was attached, changed or detached on one product.
+
+| Property | Type | Notes |
+|---|---|---|
+| `action` | string | `attached`, `updated` or `detached`. |
+| `article_id` | string | The card the offer belongs to. |
+| `slug` | string | The product's `/go/` slug. Never the destination URL, the price or the merchant. |
+| `source` | string | `editor` for a hand-attached record; the sync's name once one takes it over. |
+
+Owning screen: `pages/Offers.tsx`.
 
 ### Published Post Deleted
 

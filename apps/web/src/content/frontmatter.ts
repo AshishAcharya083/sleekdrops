@@ -84,6 +84,34 @@ export const sourceSchema = z.object({
 export type SourceData = z.infer<typeof sourceSchema>;
 
 /**
+ * The offer behind a pick: a price somebody saw on a stated day, not a price
+ * anything is polling.
+ *
+ * A product announced this week carries no affiliate-feed row and cannot be
+ * read through Amazon's Product Advertising API, so a figure on the page is
+ * whatever a person (or a feed that has since gone quiet) last saw. `asAt` is
+ * therefore not decoration: with it the page quotes an RRP, without it the
+ * page misstates a live price. Mirrors `pickOfferSchema` in the agent's
+ * content/contract.ts.
+ */
+export const pickOfferSchema = z.object({
+  /** Formatted for the reader, e.g. "A$2,899". */
+  price: z.string().min(1),
+  currency: z.string().min(1),
+  /** The day the price was observed. */
+  asAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  source: z.enum(['editor', 'feed', 'api']),
+  /** True when the price must render as a dated RRP rather than as live. */
+  stale: z.boolean(),
+  merchant: z.string().min(1).optional(),
+  preorder: z.boolean().optional(),
+  /** When a pre-order ships — and therefore when the reader is charged. */
+  releaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+export type PickOfferData = z.infer<typeof pickOfferSchema>;
+
+/**
  * A product the article recommends — one per /go/ slug the body links, with a
  * matching affiliate_links row behind it. Guides and roundups turn these into
  * an ItemList of Product nodes.
@@ -92,12 +120,14 @@ export const pickSchema = z.object({
   name: z.string().min(1),
   brand: z.string().min(1).optional(),
   /**
-   * As the research stated it, e.g. "A$229". The digits are parsed out into
-   * the pick's `offers.price` (see src/lib/seo.ts); a pick with no parseable
-   * figure ships no Offer.
+   * As the research stated it, e.g. "A$229", or the attached offer's price
+   * when one exists. The digits are parsed out into the pick's `offers.price`
+   * (see src/lib/seo.ts); a pick with no parseable figure ships no Offer.
    */
   price: z.string().min(1).optional(),
   goSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  /** The attached offer, when the product carries one. */
+  offer: pickOfferSchema.optional(),
 });
 
 export type PickData = z.infer<typeof pickSchema>;
