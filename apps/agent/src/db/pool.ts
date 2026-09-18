@@ -37,6 +37,18 @@ export function databaseTarget(): string {
   return `${process.env.PGHOST || 'localhost'}:${process.env.PGPORT || '5432'}`;
 }
 
+/**
+ * The one sentence an operator can act on when nothing answers where we dialed.
+ * Shared by both entrypoints that connect - the server and `pnpm migrate`.
+ */
+export function unreachableDatabaseHint(): string {
+  return (
+    `no Postgres answering at ${databaseTarget()} - set DATABASE_URL to a reachable Postgres ` +
+    '(or PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE). Note port 5544 is the docker-compose ' +
+    'host mapping from `pnpm db:up`: it is not valid inside a container.'
+  );
+}
+
 /** Nothing is listening, or the host does not resolve: the target itself is wrong. */
 const UNREACHABLE_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT']);
 

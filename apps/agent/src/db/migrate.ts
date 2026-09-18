@@ -3,7 +3,12 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pool } from './pool.js';
+import {
+  isDatabaseUnreachableError,
+  pool,
+  unreachableDatabaseHint,
+  waitForDatabase,
+} from './pool.js';
 
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'migrations');
 
@@ -39,11 +44,15 @@ export async function migrate(): Promise<void> {
   }
 }
 
-// Allow `pnpm migrate` to run this standalone.
+// Allow `pnpm migrate` to run this standalone. It waits for the database like
+// boot does: `pnpm db:up && pnpm db:migrate` reaches this while the Postgres
+// container is still accepting no connections.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  migrate()
+  waitForDatabase()
+    .then(() => migrate())
     .then(() => pool.end())
     .catch((err) => {
+      if (isDatabaseUnreachableError(err)) console.error(`[migrate] ${unreachableDatabaseHint()}`);
       console.error('[migrate] failed:', err);
       process.exit(1);
     });

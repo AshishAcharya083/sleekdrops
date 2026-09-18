@@ -1,6 +1,6 @@
 // SleekDrops agent platform entrypoint: wait for db → migrate → recover → serve + work.
 import { migrate } from './db/migrate.js';
-import { databaseTarget, isDatabaseUnreachableError, waitForDatabase } from './db/pool.js';
+import { isDatabaseUnreachableError, unreachableDatabaseHint, waitForDatabase } from './db/pool.js';
 import { startScheduler } from './pipeline/scheduler.js';
 import { startScoutWorker } from './pipeline/scout.js';
 import { recoverStranded, startWorker } from './pipeline/worker.js';
@@ -19,13 +19,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  if (isDatabaseUnreachableError(err)) {
-    console.error(
-      `[agent] no Postgres answering at ${databaseTarget()} - set DATABASE_URL to a reachable ` +
-        'Postgres (or PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE). Note port 5544 is the ' +
-        'docker-compose host mapping from `pnpm db:up`: it is not valid inside a container.',
-    );
-  }
+  if (isDatabaseUnreachableError(err)) console.error(`[agent] ${unreachableDatabaseHint()}`);
   console.error('[agent] fatal:', err);
   process.exit(1);
 });

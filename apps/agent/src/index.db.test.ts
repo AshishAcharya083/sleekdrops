@@ -1,21 +1,24 @@
 // The container's CMD is `pnpm --filter @sleekdrops/agent start`, i.e. this
 // entrypoint - so the boot contract is tested the way the container runs it:
-// spawn src/index.ts and watch what the process actually does.
+// spawn the real process and watch what it does. `pnpm migrate` is the other
+// process that connects before anything else, and is spawned the same way.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
+import net from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const ENTRYPOINT = join(PACKAGE_ROOT, 'src', 'index.ts');
+const MIGRATE_CLI = join(PACKAGE_ROOT, 'src', 'db', 'migrate.ts');
 
 /** The live database this sandbox/CI provides, or nothing. */
 const liveUrl = process.env.DATABASE_URL ?? '';
 
-async function probe(connectionString: string): Promise<unknown> {
-  const probePool = new pg.Pool({ connectionString, max: 1 });
+async function probe(poolConfig: pg.PoolConfig): Promise<unknown> {
+  const probePool = new pg.Pool({ ...poolConfig, max: 1 });
   const result = await probePool
     .query('SELECT 1')
     .then(() => undefined)
@@ -24,13 +27,39 @@ async function probe(connectionString: string): Promise<unknown> {
   return result;
 }
 
-const reachable = liveUrl ? (await probe(liveUrl)) === undefined : false;
+const reachable = liveUrl ? (await probe({ connectionString: liveUrl })) === undefined : false;
+
+// What the agent resolves with no DATABASE_URL at all: `pg` reading PGHOST/
+// PGPORT/... and defaulting to localhost:5432. Probing it with the same empty
+// config the fixed pool builds is exactly the child's own resolution.
+const pgEnvReachable = (await probe({})) === undefined;
+
+/** Read through the same PG* resolution the child uses, so this proves its work. */
+async function migrationsRecorded(): Promise<boolean> {
+  const readPool = new pg.Pool({ max: 1 });
+  try {
+    const { rows } = await readPool.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM schema_migrations',
+    );
+    return Number(rows[0].count) > 0;
+  } finally {
+    await readPool.end();
+  }
+}
+
+async function freePort(): Promise<number> {
+  const probeServer = net.createServer();
+  await new Promise<void>((resolve) => probeServer.listen(0, '127.0.0.1', resolve));
+  const { port } = probeServer.address() as net.AddressInfo;
+  await new Promise<void>((resolve) => probeServer.close(() => resolve()));
+  return port;
+}
 
 /** A trust-auth server has no credential error to fail fast on. */
 async function rejectsWrongPassword(): Promise<boolean> {
   const wrongPassword = new URL(liveUrl);
   wrongPassword.password = 'definitely-not-the-password';
-  return (await probe(wrongPassword.href)) !== undefined;
+  return (await probe({ connectionString: wrongPassword.href })) !== undefined;
 }
 
 const skip = !reachable
@@ -46,12 +75,16 @@ interface Booted {
   exited: Promise<number | null>;
 }
 
-function bootAgent(databaseUrl: string): Booted {
-  const child = spawn(process.execPath, ['--import', 'tsx', ENTRYPOINT], {
+/** Spawn `script` with `overrides` applied to its env; an undefined value unsets. */
+function bootAgent(overrides: Record<string, string | undefined>, script = ENTRYPOINT): Booted {
+  // PORT 0 by default keeps a booting agent off a port another suite may want.
+  const env: NodeJS.ProcessEnv = { ...process.env, PORT: '0', ...overrides };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) delete env[key];
+  }
+  const child = spawn(process.execPath, ['--import', 'tsx', script], {
     cwd: PACKAGE_ROOT,
-    // PORT 0 keeps a booting agent off a port another suite may want; neither
-    // case here gets far enough to serve anyway.
-    env: { ...process.env, DATABASE_URL: databaseUrl, PORT: '0' },
+    env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -91,7 +124,7 @@ function bootAgent(databaseUrl: string): Booted {
 test('boot retries an unreachable database instead of exiting', { timeout: 60_000 }, async () => {
   // Port 1 is unbound, so every connection is refused - the shape of the
   // failure that used to kill the process before the server ever listened.
-  const agent = bootAgent('postgres://unused:unused@127.0.0.1:1/unreachable');
+  const agent = bootAgent({ DATABASE_URL: 'postgres://unused:unused@127.0.0.1:1/unreachable' });
   try {
     await agent.waitFor(/database not reachable yet, retrying/);
     await agent.waitFor(/"attempt":2/);
@@ -109,7 +142,7 @@ test(
   async () => {
     const wrongPassword = new URL(liveUrl);
     wrongPassword.password = 'definitely-not-the-password';
-    const agent = bootAgent(wrongPassword.href);
+    const agent = bootAgent({ DATABASE_URL: wrongPassword.href });
     const startedAt = Date.now();
     const exitCode = await agent.exited;
 
@@ -123,3 +156,60 @@ test(
     assert.doesNotMatch(agent.output(), /retrying/);
   },
 );
+
+// The demo failure exactly: nothing sets DATABASE_URL, so the old hardcoded
+// default dialed the compose-only :5544 and the process died before :8787 ever
+// listened. With no default, `pg` resolves the standard port and boot completes.
+test(
+  'with no DATABASE_URL the agent boots on the PG* environment and serves health',
+  {
+    skip: pgEnvReachable ? false : 'no Postgres on the PG*/localhost:5432 default',
+    timeout: 60_000,
+  },
+  async () => {
+    const port = await freePort();
+    const agent = bootAgent({
+      DATABASE_URL: undefined,
+      PORT: String(port),
+      // config.ts loads dotenv, and a laptop running ./up.sh has an
+      // apps/agent/.env holding the compose URL. Point dotenv at a file that
+      // does not exist so the child really resolves from PG*/the pg defaults.
+      DOTENV_CONFIG_PATH: join(PACKAGE_ROOT, '.env.does-not-exist'),
+      DOTENV_CONFIG_QUIET: 'true',
+    });
+    try {
+      await agent.waitFor(/admin API \+ panel listening/);
+
+      const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { ok: true });
+
+      // Migrations run before the server listens, so a 200 already implies
+      // they applied - the runner's own bookkeeping says so explicitly.
+      assert.ok(await migrationsRecorded(), 'the agent served health with no migrations recorded');
+      assert.doesNotMatch(agent.output(), /5544/);
+      assert.doesNotMatch(agent.output(), /\[agent\] fatal/);
+    } finally {
+      agent.child.kill('SIGKILL');
+      await agent.exited;
+    }
+  },
+);
+
+// `pnpm db:up && pnpm db:migrate` runs this while the Postgres container is
+// still starting, so the standalone runner needs the same patience as boot.
+test('the migrate CLI waits for the database instead of failing on the first refusal', async () => {
+  const migration = bootAgent(
+    { DATABASE_URL: 'postgres://unused:unused@127.0.0.1:1/unreachable' },
+    MIGRATE_CLI,
+  );
+  try {
+    await migration.waitFor(/database not reachable yet, retrying/);
+    await migration.waitFor(/"attempt":2/);
+    assert.equal(migration.child.exitCode, null, 'migrate exited instead of waiting for Postgres');
+    assert.doesNotMatch(migration.output(), /\[migrate\] failed/);
+  } finally {
+    migration.child.kill('SIGKILL');
+    await migration.exited;
+  }
+});

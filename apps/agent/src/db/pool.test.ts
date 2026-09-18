@@ -12,6 +12,7 @@ const {
   isDatabaseUnreachableError,
   isTransientConnectionError,
   pool,
+  unreachableDatabaseHint,
   waitForDatabase,
 } = await import('./pool.js');
 
@@ -48,4 +49,13 @@ test('connection-level failures are transient, misconfiguration is not', () => {
 
   assert.ok(isDatabaseUnreachableError({ code: 'ENOTFOUND' }));
   assert.ok(!isDatabaseUnreachableError({ code: '57P03' }));
+});
+
+// Both entrypoints print this when nothing answers - it is the whole operator
+// experience of a misconfigured deployment, so it has to stay actionable.
+test('the fatal hint names the dialed target and what to set', () => {
+  const hint = unreachableDatabaseHint();
+  assert.match(hint, /127\.0\.0\.1:1/);
+  assert.match(hint, /DATABASE_URL/);
+  assert.match(hint, /5544/);
 });

@@ -266,9 +266,9 @@ required in practice when the API is deployed on Cloud Run.
 the connection from `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` and
 falls back to `localhost:5432` - the standard port a sidecar or service-container
 Postgres listens on. Port 5544 is only the host-side mapping `pnpm db:up`
-publishes on a laptop, so it is never right inside a container. Boot waits up to
-30s for the database to answer before giving up, so the agent may start before
-Postgres does.
+publishes on a laptop, so it is never right inside a container. Boot - and
+`pnpm db:migrate` - waits up to 30s for the database to answer before giving up,
+so the agent may start before Postgres does.
 
 ## Tests
 
