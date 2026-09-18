@@ -1,6 +1,6 @@
 // SleekDrops agent platform entrypoint: wait for db → migrate → recover → serve + work.
 import { migrate } from './db/migrate.js';
-import { isDatabaseUnreachableError, unreachableDatabaseHint, waitForDatabase } from './db/pool.js';
+import { databaseConnectionHint, isDatabaseConnectionError, waitForDatabase } from './db/pool.js';
 import { startScheduler } from './pipeline/scheduler.js';
 import { startScoutWorker } from './pipeline/scout.js';
 import { recoverStranded, startWorker } from './pipeline/worker.js';
@@ -19,7 +19,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  if (isDatabaseUnreachableError(err)) console.error(`[agent] ${unreachableDatabaseHint()}`);
+  if (isDatabaseConnectionError(err)) console.error(`[agent] ${databaseConnectionHint(err)}`);
   console.error('[agent] fatal:', err);
   process.exit(1);
 });

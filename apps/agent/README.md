@@ -284,7 +284,20 @@ working query), while `usage.db.test.ts` and `overview.db.test.ts` need a live
 one - SQL that reads fine in review still only fails on a server, and a
 partially failing overview only exists there - and skip themselves when no
 `DATABASE_URL` answers.
-Give it one with `pnpm db:up` (then
+The boot suites are the slow ones - about a minute of wall clock, most of it
+one deliberate 30s wait - and the only ones that start real processes:
+`index.db.test.ts` spawns the agent entrypoint and the `pnpm migrate` CLI the
+way the container does, and `db/boot.db.test.ts` puts a TCP proxy in front of
+Postgres to make it arrive late.
+The cases that only need an unreachable database run anywhere; the ones that
+have to reach a real one - late-arriving database, booting on `PG*` with no
+`DATABASE_URL`, a rejected connection - skip themselves when no `DATABASE_URL`
+answers, and each gives its spawned agent a throwaway database of its own,
+because that child boots the whole pipeline and would otherwise recover and
+claim the rows other suites are asserting on.
+`db/pool.noDatabaseUrl.test.ts` covers what an unset `DATABASE_URL` resolves to
+without connecting at all, so it runs everywhere.
+Give it a live database with `pnpm db:up` (then
 `DATABASE_URL=postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent`);
 CI runs it against a Postgres service container.
 

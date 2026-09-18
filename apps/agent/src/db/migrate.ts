@@ -4,9 +4,9 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  isDatabaseUnreachableError,
+  databaseConnectionHint,
+  isDatabaseConnectionError,
   pool,
-  unreachableDatabaseHint,
   waitForDatabase,
 } from './pool.js';
 
@@ -52,7 +52,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     .then(() => migrate())
     .then(() => pool.end())
     .catch((err) => {
-      if (isDatabaseUnreachableError(err)) console.error(`[migrate] ${unreachableDatabaseHint()}`);
+      if (isDatabaseConnectionError(err)) console.error(`[migrate] ${databaseConnectionHint(err)}`);
       console.error('[migrate] failed:', err);
       process.exit(1);
     });

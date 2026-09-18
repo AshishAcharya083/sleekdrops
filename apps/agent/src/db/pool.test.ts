@@ -8,11 +8,12 @@ import assert from 'node:assert/strict';
 process.env.DATABASE_URL = 'postgres://unused:unused@127.0.0.1:1/unreachable';
 
 const {
+  databaseConnectionHint,
   databaseTarget,
+  isDatabaseConnectionError,
   isDatabaseUnreachableError,
   isTransientConnectionError,
   pool,
-  unreachableDatabaseHint,
   waitForDatabase,
 } = await import('./pool.js');
 
@@ -78,11 +79,34 @@ test('a multi-address connect failure is judged by every attempt it bundles', ()
   assert.ok(!isTransientConnectionError(credentials));
 });
 
-// Both entrypoints print this when nothing answers - it is the whole operator
-// experience of a misconfigured deployment, so it has to stay actionable.
+// Being turned away by a Postgres that answered is a connection failure too,
+// and the one an unset DATABASE_URL produces: `pg` then builds the startup
+// packet from PG* and the server rejects it. None of those errors mentions
+// DATABASE_URL, so without this they reach the operator unexplained.
+test('a refused handshake counts as a connection failure, a failed query does not', () => {
+  assert.ok(isDatabaseConnectionError({ code: 'ECONNREFUSED' }));
+  assert.ok(isDatabaseConnectionError({ code: '28000' })); // no user name in startup packet
+  assert.ok(isDatabaseConnectionError({ code: '28P01' })); // password authentication failed
+  assert.ok(isDatabaseConnectionError({ code: '3D000' })); // database does not exist
+  assert.ok(isDatabaseConnectionError({ code: '08006' })); // connection failure
+  assert.ok(isDatabaseConnectionError(new Error('SASL: client password must be a string')));
+
+  assert.ok(!isDatabaseConnectionError({ code: '42P01' })); // undefined_table
+  assert.ok(!isDatabaseConnectionError(new TypeError('stage is not a function')));
+  assert.ok(!isDatabaseConnectionError(undefined));
+});
+
+// Both entrypoints print this when a connection cannot be opened - it is the
+// whole operator experience of a misconfigured deployment, so it has to stay
+// actionable: where we dialed, what sets it, and what to do about it.
 test('the fatal hint names the dialed target and what to set', () => {
-  const hint = unreachableDatabaseHint();
-  assert.match(hint, /127\.0\.0\.1:1/);
-  assert.match(hint, /DATABASE_URL/);
-  assert.match(hint, /5544/);
+  const unreachable = databaseConnectionHint({ code: 'ECONNREFUSED' });
+  assert.match(unreachable, /no Postgres answering at 127\.0\.0\.1:1/);
+  assert.match(unreachable, /DATABASE_URL/);
+  assert.match(unreachable, /5544/);
+
+  // A server that answered and said no names the same target and variable.
+  const refused = databaseConnectionHint({ code: '28P01' });
+  assert.match(refused, /cannot open a database connection to 127\.0\.0\.1:1/);
+  assert.match(refused, /that target comes from DATABASE_URL/);
 });

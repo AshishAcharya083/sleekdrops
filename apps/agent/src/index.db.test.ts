@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,14 +30,8 @@ async function probe(poolConfig: pg.PoolConfig): Promise<unknown> {
 
 const reachable = liveUrl ? (await probe({ connectionString: liveUrl })) === undefined : false;
 
-// What the agent resolves with no DATABASE_URL at all: `pg` reading PGHOST/
-// PGPORT/... and defaulting to localhost:5432. Probing it with the same empty
-// config the fixed pool builds is exactly the child's own resolution.
-const pgEnvReachable = (await probe({})) === undefined;
-
-/** Read through the same PG* resolution the child uses, so this proves its work. */
-async function migrationsRecorded(): Promise<boolean> {
-  const readPool = new pg.Pool({ max: 1 });
+async function migrationsRecorded(url: URL): Promise<boolean> {
+  const readPool = new pg.Pool({ connectionString: url.href, max: 1 });
   try {
     const { rows } = await readPool.query<{ count: string }>(
       'SELECT count(*)::text AS count FROM schema_migrations',
@@ -45,6 +40,44 @@ async function migrationsRecorded(): Promise<boolean> {
   } finally {
     await readPool.end();
   }
+}
+
+/**
+ * A database of this child's own. `src/index.ts` boots the entire platform,
+ * not just migrate + serve: recoverStranded() re-queues articles and fails
+ * agent sessions older than 30 minutes, and startScoutWorker() immediately
+ * recovers stale scout runs and claims the oldest queued one. Those are the
+ * very rows the other *.db.test.ts suites seed and assert on, and node runs
+ * test files in parallel - so a spawned agent must never be pointed at the
+ * shared test database.
+ */
+async function scratchDatabase(): Promise<{ url: URL; drop: () => Promise<void> }> {
+  const name = `agent_boot_${randomUUID().replaceAll('-', '')}`;
+  const url = new URL(liveUrl);
+  url.pathname = `/${name}`;
+  await onLiveServer(`CREATE DATABASE "${name}"`);
+  return { url, drop: () => onLiveServer(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`) };
+}
+
+/** Run one statement on the ambient database, which owns no test fixtures. */
+async function onLiveServer(sql: string): Promise<void> {
+  const admin = new pg.Pool({ connectionString: liveUrl, max: 1 });
+  try {
+    await admin.query(sql);
+  } finally {
+    await admin.end();
+  }
+}
+
+/** The PG* form of a connection, for a child that must run with no DATABASE_URL. */
+function pgEnvironment(url: URL): Record<string, string> {
+  return {
+    PGHOST: url.hostname,
+    PGPORT: url.port || '5432',
+    PGUSER: decodeURIComponent(url.username),
+    PGPASSWORD: decodeURIComponent(url.password),
+    PGDATABASE: decodeURIComponent(url.pathname.slice(1)),
+  };
 }
 
 async function freePort(): Promise<number> {
@@ -181,7 +214,7 @@ test(
       const elapsed = Date.now() - startedAt;
       assert.ok(elapsed >= BOOT_WAIT_MS, `gave up after ${elapsed}ms, before the window was spent`);
       assert.match(agent.output(), /no Postgres answering at 127\.0\.0\.1:1/);
-      assert.match(agent.output(), /set DATABASE_URL to a reachable Postgres/);
+      assert.match(agent.output(), /Set DATABASE_URL to a reachable Postgres/);
       assert.doesNotMatch(agent.output(), /listening/);
     } finally {
       agent.child.kill('SIGKILL');
@@ -221,7 +254,8 @@ test(
   'boot recovers when the database only arrives after the app',
   { skip: skipLive, timeout: 90_000 },
   async () => {
-    const upstream = new URL(liveUrl);
+    const scratch = await scratchDatabase();
+    const upstream = scratch.url;
     const proxyPort = await freePort();
     const sockets = new Set<net.Socket>();
     const proxy = net.createServer((client) => {
@@ -256,6 +290,7 @@ test(
       await agent.exited;
       for (const socket of sockets) socket.destroy();
       await new Promise<void>((resolve) => proxy.close(() => resolve()));
+      await scratch.drop();
     }
   },
 );
@@ -283,21 +318,23 @@ test(
 
 // The demo failure exactly: nothing sets DATABASE_URL, so the old hardcoded
 // default dialed the compose-only :5544 and the process died before :8787 ever
-// listened. With no default, `pg` resolves the standard port and boot completes.
+// listened. With no default the child resolves everything through PG* like any
+// container does - here at a database of its own, since it boots the whole
+// pipeline. That the empty case then lands on localhost:5432 rather than 5544
+// is asserted without a server in db/pool.noDatabaseUrl.test.ts.
 test(
   'with no DATABASE_URL the agent boots on the PG* environment and serves health',
-  {
-    skip: pgEnvReachable ? false : 'no Postgres on the PG*/localhost:5432 default',
-    timeout: 60_000,
-  },
+  { skip: skipLive, timeout: 60_000 },
   async () => {
+    const scratch = await scratchDatabase();
     const port = await freePort();
     const agent = bootAgent({
       DATABASE_URL: undefined,
+      ...pgEnvironment(scratch.url),
       PORT: String(port),
       // config.ts loads dotenv, and a laptop running ./up.sh has an
       // apps/agent/.env holding the compose URL. Point dotenv at a file that
-      // does not exist so the child really resolves from PG*/the pg defaults.
+      // does not exist so the child really resolves from PG*.
       DOTENV_CONFIG_PATH: join(PACKAGE_ROOT, '.env.does-not-exist'),
       DOTENV_CONFIG_QUIET: 'true',
     });
@@ -310,13 +347,43 @@ test(
 
       // Migrations run before the server listens, so a 200 already implies
       // they applied - the runner's own bookkeeping says so explicitly.
-      assert.ok(await migrationsRecorded(), 'the agent served health with no migrations recorded');
-      assert.doesNotMatch(agent.output(), /5544/);
+      assert.ok(
+        await migrationsRecorded(scratch.url),
+        'the agent served health with no migrations recorded',
+      );
       assert.doesNotMatch(agent.output(), /\[agent\] fatal/);
     } finally {
       agent.child.kill('SIGKILL');
       await agent.exited;
+      await scratch.drop();
     }
+  },
+);
+
+// The other half of having no DATABASE_URL: the target is reachable and turns
+// the agent away. PG* that does not match the sidecar - here a database that
+// does not exist, in a container just as often a missing PGUSER/PGPASSWORD -
+// fails with a Postgres error that never mentions DATABASE_URL, which is the
+// same unactionable crash the compose-only default produced.
+test(
+  'a rejected connection with no DATABASE_URL still names DATABASE_URL',
+  { skip: skipLive, timeout: 60_000 },
+  async () => {
+    const absent = new URL(liveUrl);
+    absent.pathname = '/agent_boot_no_such_database';
+    const agent = bootAgent({
+      DATABASE_URL: undefined,
+      ...pgEnvironment(absent),
+      DOTENV_CONFIG_PATH: join(PACKAGE_ROOT, '.env.does-not-exist'),
+      DOTENV_CONFIG_QUIET: 'true',
+    });
+
+    assert.equal(await agent.exited, 1);
+    assert.match(agent.output(), /DATABASE_URL is unset/);
+    assert.match(agent.output(), /PGHOST\/PGPORT\/PGUSER\/PGPASSWORD\/PGDATABASE/);
+    assert.match(agent.output(), new RegExp(`cannot open a database connection to ${absent.host}`));
+    // Nothing about this fixes itself, so it must not spend the wait window.
+    assert.doesNotMatch(agent.output(), /retrying/);
   },
 );
 

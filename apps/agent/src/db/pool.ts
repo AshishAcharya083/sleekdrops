@@ -38,14 +38,33 @@ export function databaseTarget(): string {
 }
 
 /**
- * The one sentence an operator can act on when nothing answers where we dialed.
+ * Where the target came from, so the operator knows which knob to turn. The
+ * unset case is the one worth spelling out: `pg` then assembles the whole
+ * connection from PG* and its own defaults, and the failures a mismatch there
+ * produces - 28000 "no PostgreSQL user name specified in startup packet",
+ * `role "root" does not exist`, a SASL "client password must be a string" -
+ * never mention DATABASE_URL themselves.
+ */
+function databaseSource(): string {
+  return config.databaseUrl
+    ? 'that target comes from DATABASE_URL'
+    : 'DATABASE_URL is unset, so that target and its credentials are resolved from ' +
+        'PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE and the pg defaults';
+}
+
+/**
+ * The one sentence an operator can act on when a connection cannot be opened -
+ * whether nothing answered at all or the server rejected the handshake.
  * Shared by both entrypoints that connect - the server and `pnpm migrate`.
  */
-export function unreachableDatabaseHint(): string {
+export function databaseConnectionHint(err: unknown): string {
+  const problem = isDatabaseUnreachableError(err)
+    ? `no Postgres answering at ${databaseTarget()}`
+    : `cannot open a database connection to ${databaseTarget()}`;
   return (
-    `no Postgres answering at ${databaseTarget()} - set DATABASE_URL to a reachable Postgres ` +
-    '(or PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE). Note port 5544 is the docker-compose ' +
-    'host mapping from `pnpm db:up`: it is not valid inside a container.'
+    `${problem} - ${databaseSource()}. Set DATABASE_URL to a reachable Postgres, or correct ` +
+    'the PG* variables. Note port 5544 is the docker-compose host mapping from `pnpm db:up`: ' +
+    'it is not valid inside a container.'
   );
 }
 
@@ -81,8 +100,48 @@ function errorCodes(err: unknown): string[] {
   return codes;
 }
 
+/** Every message the failure carries, flattened the same way as its codes. */
+function errorMessages(err: unknown): string[] {
+  const messages = err instanceof Error ? [err.message] : [];
+  if (err instanceof AggregateError) {
+    for (const nested of err.errors) messages.push(...errorMessages(nested));
+  }
+  return messages;
+}
+
 export function isDatabaseUnreachableError(err: unknown): boolean {
   return errorCodes(err).some((code) => UNREACHABLE_CODES.has(code));
+}
+
+/**
+ * Postgres answered, but refused the connection rather than running any SQL:
+ * the connection-exception class (08xxx), invalid authorization (28xxx - both
+ * a wrong password and the 28000 an empty startup packet or a missing role
+ * produces), an unknown database (3D000), a server not taking connections yet
+ * (57P03) and a full connection slot table (53300).
+ */
+const CONNECTION_SQLSTATES = new Set(['3D000', '53300', '57P03']);
+const CONNECTION_SQLSTATE_CLASSES = ['08', '28'];
+
+/**
+ * The failure is about opening the connection, not about the SQL that ran - so
+ * it is the target and its credentials the operator has to fix, and the hint
+ * naming DATABASE_URL belongs on it. This deliberately reaches past
+ * ECONNREFUSED: with DATABASE_URL unset, a container whose PG* variables are
+ * absent or do not match the sidecar reaches a Postgres that is perfectly
+ * reachable and is turned away by it, which is the same unactionable crash
+ * unless it is explained the same way. The driver's own pre-handshake
+ * complaint - a SASL "client password must be a string" when no password is
+ * resolved - carries no code at all, so it is matched by message.
+ */
+export function isDatabaseConnectionError(err: unknown): boolean {
+  if (isDatabaseUnreachableError(err)) return true;
+  const rejected = errorCodes(err).some(
+    (code) =>
+      CONNECTION_SQLSTATES.has(code) || CONNECTION_SQLSTATE_CLASSES.includes(code.slice(0, 2)),
+  );
+  if (rejected) return true;
+  return errorMessages(err).some((message) => /(^SASL:)|password must be a string/i.test(message));
 }
 
 /**
@@ -95,7 +154,7 @@ export function isTransientConnectionError(err: unknown): boolean {
   if (isDatabaseUnreachableError(err)) return true;
   const codes = errorCodes(err);
   if (codes.includes('ECONNRESET') || codes.includes('57P03')) return true;
-  return err instanceof Error && /the database system is starting up/i.test(err.message);
+  return errorMessages(err).some((message) => /the database system is starting up/i.test(message));
 }
 
 const FIRST_RETRY_MS = 500;
