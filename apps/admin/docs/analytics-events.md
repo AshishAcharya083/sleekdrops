@@ -76,20 +76,9 @@ Owning screens: `pages/Topics.tsx`, `pages/ManualTopicDrawer.tsx`.
 
 Owning screen: `pages/Topics.tsx`.
 
-### Scout Run Started
+### Scout Run Queued
 
-The operator started a topic-scout sweep by hand.
-
-| Property | Type | Notes |
-|---|---|---|
-| `surface` | string | `topics`. |
-
-Owning screen: `pages/Topics.tsx`.
-
-### Scout Lock Cleared
-
-The operator released a held scout lock by hand, from the banner the Topics tab shows while a sweep holds it.
-The run id is deliberately not sent: it is an opaque id, and the agent already logs the release under its own trace.
+The operator added a topic search to the durable queue by hand.
 
 | Property | Type | Notes |
 |---|---|---|
