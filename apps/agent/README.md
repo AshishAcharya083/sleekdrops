@@ -256,6 +256,17 @@ cp apps/agent/.env.example apps/agent/.env  # fill in keys
 pnpm dev:agent                              # migrate + API + worker + admin UI on :8787
 ```
 
+`DATABASE_URL` is required whenever the platform is started by anything other
+than `./up.sh` (which writes it into `apps/agent/.env` from the example) - the
+code carries no default, so a deployment without it fails boot with the address
+it tried instead of quietly dialling a developer's laptop.
+`PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` are an accepted
+alternative, and usually the more natural wiring in a container: they are used
+whenever `DATABASE_URL` is unset.
+Mind the two ports - `5544` is only docker-compose's host-side mapping, the
+server itself listens on `5432`, so anything reaching Postgres over a container
+network wants the database's service hostname and `5432`.
+
 Required env: `GEMINI_API_KEY` (or Vertex on GCP) and `TAVILY_API_KEY`; add
 `CLAUDE_CODE_OAUTH_TOKEN` to write prose on your Claude plan. For publishing:
 `CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `CLOUDFLARE_D1_TOKEN` (D1 Edit),
@@ -275,8 +286,10 @@ the upload guards and the overview's degraded answer all resolve without a
 working query), while `usage.db.test.ts` and `overview.db.test.ts` need a live
 one - SQL that reads fine in review still only fails on a server, and a
 partially failing overview only exists there - and skip themselves when no
-`DATABASE_URL` answers.
-Give it one with `pnpm db:up` (then
+database answers.
+`boot.db.test.ts` is the same idea one layer out: it spawns the real entrypoint
+the way a container does, with `DATABASE_URL` unset and only `PG*` set.
+Give it a database with `pnpm db:up` (then
 `DATABASE_URL=postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent`);
 CI runs it against a Postgres service container.
 

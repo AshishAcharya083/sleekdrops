@@ -6,10 +6,12 @@ function env(key: string, fallback = ''): string {
 }
 
 export const config = {
-  databaseUrl: env(
-    'DATABASE_URL',
-    'postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent',
-  ),
+  // No default on purpose. The old one was a developer laptop's URL
+  // (localhost:5544, docker-compose's host mapping), which in any other
+  // topology points at nothing and silently overrode PGHOST/PGPORT. Empty
+  // means "no connection string" - db/pool.ts then lets pg resolve the
+  // standard PG* variables. ./up.sh writes the local value into .env.
+  databaseUrl: env('DATABASE_URL'),
 
   // Google AI Studio key — bills the GCP project it belongs to, so Google
   // Cloud credits apply. On Cloud Run, Vertex ADC replaces the key entirely.
