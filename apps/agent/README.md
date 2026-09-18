@@ -92,6 +92,8 @@ The note is rendered beside the date on the article, so the fresh date is a clai
 
 A page whose article is mid-pipeline is refused rather than reset underneath the stage that is running.
 A page with no pipeline article behind it - most of the site predates this platform - gets one created for it.
+A D1 row that is not `published` is refused too (409): the site build serves published rows only, so requalifying one would not rebuild a live page but put a withheld one up, and the approval gate in front of it would be reading a rebuild of something nobody was looking at.
+The **Published** tab disables the button on those rows for the same reason.
 The rebuild rejoins the normal pipeline, so `publish_mode = approval` still parks it at `waiting_approval`: requalifying can never put an unreviewed rewrite on the site.
 The one mode it cannot rejoin is `publish_mode = draft`, and a requalification is refused with a 409 while that is set.
 Draft mode parks whatever finishes in D1 as `status = 'draft'`, and the site build only selects published rows - so on a page that is already live it is not a parking space but a deletion: the rebuild overwrites the row the page is served from, the next build drops the page, and a URL people have linked to starts 404ing with no approval checkpoint anywhere in the run.
@@ -124,8 +126,10 @@ Against the live site, in order:
 
 #### Run record
 
-**Status: not yet run. Deferred to the operator who owns the AdSense re-review** - the person holding the live Cloudflare D1 credentials (`CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `CLOUDFLARE_D1_TOKEN`) and a Claude credential for the pipeline.
-Nothing in this branch can stand in for that: the three pages exist only in the production D1, each requalification is a full article run against a paid model, and the approval step is a human reading a draft.
+**Status: not yet run - blocked on credentials that have been requested, not on code.**
+The three pages exist only in the production Cloudflare D1, so the runs need `CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID` and `CLOUDFLARE_D1_TOKEN` pointed at production plus a Claude credential (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) for the pipeline; none of them exist in any environment this branch was built in.
+They have been requested through the platform's configuration channel, which holds this card until the person who owns the AdSense re-review supplies them.
+Two parts of the procedure stay human whatever the credentials are: each requalification is a full article run against a paid model, and step 4-5 is a person reading a draft and approving it onto the live site.
 The code, the audit and the runbook above are what ships here; the runs themselves are the merge gate, and the acceptance criterion is met when this table is filled in on the card and in this file, not before.
 
 Fill in, per article, from the audits either side of the rebuild:
@@ -138,11 +142,12 @@ Fill in, per article, from the audits either side of the rebuild:
 
 The slugs above are the ones the review named; take the exact slugs off the **Published** tab before starting, and requalify by slug so there is no chance of rebuilding a different page.
 
-**One deviation to sign off with that record.**
-The card asks for a rebuild that "republishes with `updatedDate` set".
-The implementation stamps `updatedDate` only when `describeRevision()` finds the page substantially changed, for the reason under *The fresh date is earned, not automatic* above - a date that moves without the content moving is the freshening signal Google names, and this button can be pressed on every page of the site.
-In practice a real requalification rewrites the page and earns the date; a rebuild that reproduces it keeps the date it had.
-If the operator wants the literal reading - a fresh `updatedDate` on every requalification, earned or not - that is a one-line change in `content/revision.ts` and should be agreed before these three are published, not after.
+**One deviation, decided.**
+The card asks for a rebuild that "republishes with `updatedDate` set", unconditionally.
+This branch stamps `updatedDate` only when `describeRevision()` finds the page substantially changed, for the reason under *The fresh date is earned, not automatic* above: a date that moves without the content moving is the freshening signal Google's helpful-content guidance names, this button can be pressed on every page of the site, and the requirement's purpose - telling a reader the page was revised - is not served by a date on a page that was not.
+The decision on this branch is to keep the condition.
+It costs nothing in practice: a requalification runs the whole pipeline off fresh research, so a rebuild that reproduces the live page word for word does not happen in a real run - every rebuild observed so far earned the stamp, and step 4's spot-check fails any that did not.
+If the literal reading is wanted later, it is `describeRevision()`'s `substantial` in `content/revision.ts` and nothing else; changing it is not worth a second round of these three runs, so it belongs before they are published, not after.
 
 ## What the pipeline optimises for
 
