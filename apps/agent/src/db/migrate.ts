@@ -3,6 +3,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MISSING_DATABASE_URL, config } from '../config.js';
 import { pool } from './pool.js';
 
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'migrations');
@@ -41,6 +42,13 @@ export async function migrate(): Promise<void> {
 
 // Allow `pnpm migrate` to run this standalone.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  // Same precondition the entrypoint checks: without a resolved DSN pg would
+  // quietly fall back to its own localhost defaults and blame the wrong host.
+  if (!config.databaseUrl) {
+    console.error(`[migrate] ${MISSING_DATABASE_URL}`);
+    process.exit(1);
+  }
+  console.log(`[migrate] database ${config.databaseLabel}`);
   migrate()
     .then(() => pool.end())
     .catch((err) => {

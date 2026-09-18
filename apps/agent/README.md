@@ -262,6 +262,15 @@ Required env: `GEMINI_API_KEY` (or Vertex on GCP) and `TAVILY_API_KEY`; add
 `GITHUB_TOKEN` (repo dispatch). Optional: `ADMIN_TOKEN` to protect the API —
 required in practice when the API is deployed on Cloud Run.
 
+`DATABASE_URL` is the one variable with a local default, and it is local only:
+host port 5544 is the docker-compose mapping and listens on a developer laptop
+and nowhere else. Every deployed or preview environment must supply its own DSN
+(or let the platform inject `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/
+`PGDATABASE`, which the agent assembles into one). With `NODE_ENV=production`
+and neither supplied the agent refuses to boot instead of dialling 5544, and
+the target it did resolve is logged - credentials stripped - as
+`[agent] database <host>:<port>/<db>` before the first query.
+
 ## Tests
 
 ```bash
