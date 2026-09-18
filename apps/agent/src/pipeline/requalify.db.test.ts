@@ -270,6 +270,23 @@ test('a live page with an empty body has nothing to requalify from', { skip }, a
   assert.match(String(body.error), /carries no body/);
 });
 
+test('a post that is not live is refused rather than published by the rebuild', { skip }, async () => {
+  await q('DELETE FROM articles WHERE slug = $1', [SLUG]);
+  // A row parked as a draft is deliberately not on the site. The publisher
+  // writes status = 'published' for every mode but draft, so letting this run
+  // finish would put the page up - through a button labelled "requalify" and
+  // an approval gate showing a rebuild of a page nobody could read.
+  stubD1({ ...LIVE_POST, status: 'draft' });
+  const { status, body } = await postRequalify(
+    `/api/published/${encodeURIComponent(SLUG)}/requalify`,
+  );
+  assert.equal(status, 409);
+  assert.match(String(body.error), /is not live - its D1 row is "draft"/);
+
+  const [orphan] = await q('SELECT id FROM articles WHERE slug = $1', [SLUG]);
+  assert.equal(orphan, undefined, 'and nothing was queued');
+});
+
 test('a page the pipeline could not publish is refused before it costs a run', { skip }, async () => {
   await q('DELETE FROM articles WHERE slug = $1', [SLUG]);
   // The old site published `review` posts; this pipeline never does, and the

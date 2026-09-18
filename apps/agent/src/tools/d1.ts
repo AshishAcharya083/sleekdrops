@@ -95,7 +95,7 @@ export async function fetchPublishedBodies(
   );
 }
 
-/** A live post, whole - what a requalification reads to rebuild it. */
+/** A post row, whole - what a requalification reads to rebuild it. */
 export interface PublishedPostDetail {
   slug: string;
   status: string;
@@ -107,7 +107,12 @@ export interface PublishedPostDetail {
   body_md: string | null;
 }
 
-/** One live post by slug, or null when the site has no such page. */
+/**
+ * One post row by slug - draft rows included, so `status` is part of the shape
+ * above rather than a filter here. A caller that needs the page to be live
+ * checks it and says so (pipeline/requalify.ts), which beats a 404 that cannot
+ * tell "no such page" from "that page is not published".
+ */
 export async function fetchD1Post(slug: string): Promise<PublishedPostDetail | null> {
   const [post] = await d1Query<PublishedPostDetail>(
     `SELECT slug, status, title, category, post_type, pub_date, frontmatter_json, body_md

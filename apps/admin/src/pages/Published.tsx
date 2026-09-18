@@ -21,6 +21,16 @@ const BAND_COLOR: Record<string, string> = {
 };
 
 /**
+ * Only a page that is actually on the site can be requalified: the rebuild
+ * republishes at the same address, and the publisher marks what it finishes as
+ * published, so running it on a row deliberately parked as a draft would put
+ * that page up rather than rebuild it. The agent refuses the same thing with a
+ * 409 (apps/agent/src/pipeline/requalify.ts) and stays the authority; this is
+ * what stops the operator spending a click to find out.
+ */
+const LIVE_STATUS = 'published';
+
+/**
  * Published - the live site's content (Cloudflare D1 posts table).
  *
  * Two things happen here that happen nowhere else. Deleting a row removes it
@@ -221,8 +231,12 @@ export function Published() {
                         </button>
                         <button
                           className="btn violet-outline small"
-                          disabled={busy === p.slug}
-                          title="Send this page back through the whole pipeline at the same slug"
+                          disabled={busy === p.slug || p.status !== LIVE_STATUS}
+                          title={
+                            p.status === LIVE_STATUS
+                              ? 'Send this page back through the whole pipeline at the same slug'
+                              : `This post is ${p.status}, not live - requalifying rebuilds a page that is already on the site`
+                          }
                           onClick={() => void requalify(p.slug, p.title)}
                         >
                           {busy === p.slug ? 'working…' : '🔁 Requalify'}

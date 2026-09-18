@@ -141,6 +141,25 @@ export async function requalifyPublished(slug: string): Promise<RequalifyOutcome
   const post = await fetchD1Post(slug);
   if (!post) return { ok: false, status: 404, error: 'no live post with that slug' };
 
+  // Requalification is for pages that are on the site: it rebuilds the live
+  // body and republishes at the same address. A D1 row parked as `draft` is
+  // not on the site - the build selects published rows only - and the
+  // publisher writes `status = 'published'` for every mode but draft, so
+  // finishing this run would put a page that was deliberately withheld in
+  // front of readers. The approval gate would ask a human to sign off on a
+  // "requalification of a live page" that was never live. Refused here: an
+  // unpublished row is a publishing decision, not a rebuild.
+  if (post.status !== 'published') {
+    return {
+      ok: false,
+      status: 409,
+      error:
+        `${slug} is not live - its D1 row is "${post.status}", and the site build only serves ` +
+        'published rows. Requalifying rebuilds a page that is already on the site; putting this ' +
+        'one up for the first time is a separate decision.',
+    };
+  }
+
   const body = post.body_md?.trim() ?? '';
   if (body === '') {
     return {
