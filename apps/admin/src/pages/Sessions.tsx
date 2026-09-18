@@ -29,7 +29,7 @@ export function Sessions() {
             {sessions.map((s) => (
               <tr key={s.id}>
                 <td className="mono">{s.agent}</td>
-                <td>{s.article_title ?? (s.scout_run_id ? 'topic sweep' : '—')}</td>
+                <td>{s.article_title ?? (s.scout_run_id ? 'topic search' : '—')}</td>
                 <td>
                   <Badge value={s.status} />
                 </td>

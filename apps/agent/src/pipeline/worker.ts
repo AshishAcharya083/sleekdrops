@@ -69,8 +69,6 @@ export async function recoverStranded(): Promise<void> {
     `UPDATE agent_sessions SET status = 'failed', error = 'process restarted mid-run', ended_at = now()
      WHERE status = 'running' AND started_at < now() - interval '30 minutes'`,
   );
-  // A scout sweep is not an article, but it strands the same way, so its lock
-  // is released on this pass and on the same threshold. The scheduler repeats
-  // it every tick, for a process that lives long enough to strand one itself.
+  // Topic-search jobs use their own queue but share the same recovery pass.
   await recoverStaleScoutRuns();
 }

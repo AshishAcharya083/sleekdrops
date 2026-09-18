@@ -13,10 +13,8 @@ import { getSetting, q, setSetting } from '../db/pool.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
 import {
-  clearScoutLock,
-  describeScoutLock,
-  heldScoutLock,
-  startScoutRun,
+  enqueueScoutRun,
+  scoutQueueStatus,
 } from '../pipeline/scout.js';
 import type { ReferenceMaterial } from '../pipeline/types.js';
 import { deleteD1Post, getD1PostHero, listD1Posts, setD1PostHero } from '../tools/d1.js';
@@ -515,27 +513,13 @@ export function createApp(): Hono<TraceEnv> {
 
   // ── Topic scout ───────────────────────────────────────────────────────────
   app.post('/api/scout', async (c) => {
-    const lock = await heldScoutLock();
-    // The refusal names the run, when it started and how long it has held the
-    // lock: "already in progress" alone left an operator nothing to look up.
-    if (lock) return c.json({ error: describeScoutLock(lock), lock }, 409);
-    const id = await startScoutRun();
-    log.info('scout run started', { scout_run_id: id });
-    return c.json({ started: id });
+    const id = await enqueueScoutRun();
+    log.info('scout run queued', { scout_run_id: id });
+    return c.json({ queued: id }, 202);
   });
 
-  // What the Topics tab polls to show whether a sweep holds the lock.
-  app.get('/api/scout/lock', async (c) => {
-    return c.json({ lock: await heldScoutLock() });
-  });
-
-  // The operator's release valve: a run whose lease is still fresh but whose
-  // process is plainly gone does not have to be waited out.
-  app.delete('/api/scout/lock', async (c) => {
-    const released = await clearScoutLock();
-    if (released.length === 0) return c.json({ error: 'no scout run is holding the lock' }, 409);
-    for (const run of released) log.info('scout lock cleared by operator', { scout_run_id: run.id });
-    return c.json({ cleared: released.length, runs: released });
+  app.get('/api/scout/queue', async (c) => {
+    return c.json(await scoutQueueStatus());
   });
 
   app.get('/api/scout-runs', async (c) => {

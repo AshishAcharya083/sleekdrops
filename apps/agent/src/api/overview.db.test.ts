@@ -41,9 +41,8 @@ async function getOverview(): Promise<{ status: number; body: OverviewBody }> {
   return { status: res.status, body: (await res.json()) as OverviewBody };
 }
 
-/** A scout session: the sweep has no article, only the run it belongs to.
- *  The run is seeded finished on purpose - a 'running' scout_runs row holds
- *  the scout lock, and this fixture must not take it from a parallel test. */
+/** A scout session: the search has no article, only the run it belongs to.
+ *  The run is seeded finished so it cannot be claimed by the queue worker. */
 let scoutRunId = '';
 
 before(async () => {
@@ -93,7 +92,7 @@ test('a scout session carries the run it swept for', { skip }, async () => {
 
   assert.ok(session, 'the seeded session is in the recent list');
   // Without this column the panel can only ever render the em-dash placeholder,
-  // never its "topic sweep" label, because a sweep has no article title.
+  // never its "topic search" label, because a search has no article title.
   assert.equal(session.scout_run_id, scoutRunId);
   assert.equal(session.article_title, null);
 });
