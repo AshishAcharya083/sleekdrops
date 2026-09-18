@@ -6,10 +6,11 @@ function env(key: string, fallback = ''): string {
 }
 
 export const config = {
-  databaseUrl: env(
-    'DATABASE_URL',
-    'postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent',
-  ),
+  // No fallback on purpose: the docker-compose URL (port 5544 is a host-side
+  // mapping that exists only on a laptop running `pnpm db:up`) is documentation
+  // in .env.example, not a universal default. Empty means "let the `pg` driver
+  // resolve PGHOST/PGPORT/... itself" - see db/pool.ts.
+  databaseUrl: env('DATABASE_URL'),
 
   // Google AI Studio key — bills the GCP project it belongs to, so Google
   // Cloud credits apply. On Cloud Run, Vertex ADC replaces the key entirely.

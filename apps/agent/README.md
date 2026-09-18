@@ -262,6 +262,14 @@ Required env: `GEMINI_API_KEY` (or Vertex on GCP) and `TAVILY_API_KEY`; add
 `GITHUB_TOKEN` (repo dispatch). Optional: `ADMIN_TOKEN` to protect the API —
 required in practice when the API is deployed on Cloud Run.
 
+`DATABASE_URL` has no built-in default. Left unset, the `pg` driver resolves
+the connection from `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` and
+falls back to `localhost:5432` - the standard port a sidecar or service-container
+Postgres listens on. Port 5544 is only the host-side mapping `pnpm db:up`
+publishes on a laptop, so it is never right inside a container. Boot waits up to
+30s for the database to answer before giving up, so the agent may start before
+Postgres does.
+
 ## Tests
 
 ```bash
