@@ -1,0 +1,89 @@
+---
+import { provenanceCopy } from '@lib/evidence';
+import type { ReviewUnitData } from '../../content/config';
+
+/**
+ * ReviewProvenance - how we got the unit, stated beside the content rather
+ * than on a policy page.
+ *
+ * This is the disclosure the ACCC's reviews sweep found missing most often,
+ * and its standard is about placement as much as wording: a benefit received
+ * in connection with a review - a loaned product counts - must be disclosed
+ * clearly and prominently, with the content itself. Burying it in a terms page
+ * is explicitly not prominent disclosure.
+ *
+ * The wording is generated from the record, never hand-written, so the block
+ * cannot drift from what actually happened - and the 'none' state is a real
+ * one, not a fallback. "We were not sent a unit" is the fact a reader of a
+ * no-sponsored-posts site is owed, and it is the case where silence would let
+ * a reader assume the opposite.
+ */
+export interface Props {
+  unit: ReviewUnitData;
+}
+
+const { unit } = Astro.props;
+const copy = provenanceCopy(unit);
+---
+
+<p class:list={['provenance', `provenance--${copy.variant}`]}>
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7"/>
+    <rect x="2" y="7" width="20" height="5" rx="1"/>
+    <path d="M12 21V7"/>
+    <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7Z"/>
+    <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7Z"/>
+  </svg>
+  <span>
+    <span class="prov-label">{copy.label}</span>
+    <strong>{copy.lead}</strong>{' '}
+    {copy.detail}{' '}
+    {copy.independence}
+  </span>
+</p>
+
+<style>
+  .provenance {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 0;
+    padding: 12px 16px;
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--ink);
+    border-radius: 0 var(--r-md) var(--r-md) 0;
+    background: var(--surface);
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+  .provenance svg {
+    width: 16px;
+    height: 16px;
+    stroke: var(--ink);
+    stroke-width: 1.7;
+    fill: none;
+    flex-shrink: 0;
+    margin-top: 3px;
+  }
+  .prov-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink);
+    margin-bottom: 2px;
+  }
+  .provenance strong { color: var(--ink-2); font-weight: 700; }
+
+  /* A loan is the state a reader has most reason to weigh, so it is the one
+     that carries a colour. It is not a warning about the product. */
+  .provenance--loan { border-left-color: var(--warning); }
+  .provenance--loan svg { stroke: var(--warning-text); }
+  .provenance--loan .prov-label { color: var(--warning-text); }
+
+  .provenance--desk { border-left-color: var(--hairline-strong); }
+  .provenance--desk svg { stroke: var(--muted); }
+  .provenance--desk .prov-label { color: var(--muted); }
+</style>

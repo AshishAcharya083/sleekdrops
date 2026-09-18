@@ -1,6 +1,8 @@
 ---
 import { agoLabel, reviewStatus } from '@lib/sources';
 import { formatLong, formatMonth } from '@lib/format';
+import ReviewProvenance from './ReviewProvenance.astro';
+import type { ReviewUnitData } from '../../content/config';
 
 /**
  * TrustStack — the four lines under an article's byline that say how the piece
@@ -32,9 +34,17 @@ export interface Props {
   category?: string;
   /** The accountable byline, named in the stamp. */
   reviewedBy: string;
+  /**
+   * How the unit under review was obtained. When the pipeline recorded one,
+   * the provenance block states it in full and the independence line below
+   * drops the sentence it would otherwise repeat - and contradict, on a piece
+   * where we did have a unit. Posts assembled before the pipeline recorded
+   * this carry none, and render exactly as they did.
+   */
+  reviewUnit?: ReviewUnitData;
 }
 
-const { pubDate, updatedDate, lastReviewed, category, reviewedBy } = Astro.props;
+const { pubDate, updatedDate, lastReviewed, category, reviewedBy, reviewUnit } = Astro.props;
 const review = reviewStatus({ pubDate, updatedDate, lastReviewed, category });
 // Who signed it off, or why there is no sign-off to name. Composed here rather
 // than as conditional fragments in the markup, where the whitespace between
@@ -84,13 +94,22 @@ const updated =
     </p>
   )}
 
-  <p class="independence">
-    <strong>We do not test products.</strong> Nothing here is bought, borrowed or
-    supplied for review. Every recommendation is built from published
-    specifications, independent test results and owner reports, each one listed
-    and linked at the foot of the page. No brand pays for a place, and no brand
-    sees a piece before it runs.
-  </p>
+  {reviewUnit && <ReviewProvenance unit={reviewUnit} />}
+
+  {reviewUnit ? (
+    <p class="independence">
+      Every recommendation here is built from the evidence listed and linked at
+      the foot of the page, and each figure says who produced it.
+    </p>
+  ) : (
+    <p class="independence">
+      <strong>We do not test products.</strong> Nothing here is bought, borrowed or
+      supplied for review. Every recommendation is built from published
+      specifications, independent test results and owner reports, each one listed
+      and linked at the foot of the page. No brand pays for a place, and no brand
+      sees a piece before it runs.
+    </p>
+  )}
 
   <p class="ai-note">
     <span class="ai-mark" aria-hidden="true">

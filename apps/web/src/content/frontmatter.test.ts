@@ -133,3 +133,94 @@ test('a review post still has to carry its product object', () => {
   const result = blogFrontmatterSchema.safeParse({ ...assemblerOutput, postType: 'review' });
   assert.equal(result.success, false);
 });
+
+/**
+ * Verbatim `runAssembler` output for a launch-window piece: a tier-labelled
+ * claim carrying both halves of a disputed spec, the release date, and the
+ * review-unit record.
+ */
+const launchOutput = {
+  ...assemblerOutput,
+  category: 'Tech',
+  claims: [
+    {
+      subject: 'iPhone 18 Pro',
+      goSlug: 'iphone-18-pro',
+      metric: 'Peak brightness',
+      tier: 'independent',
+      value: '1,684 nits',
+      attribution: 'Notebookcheck',
+      conditions: 'spectrophotometer, 10% APL',
+      date: '2026-09-16',
+      sourceUrl: 'https://www.notebookcheck.net/iphone-18-pro',
+      withdrawn: '2,140 nits',
+      claimed: {
+        value: '3,000 nits',
+        by: 'Apple',
+        conditions: 'HDR highlights, outdoors',
+        sourceUrl: 'https://www.apple.com/au/iphone-18-pro/',
+      },
+    },
+  ],
+  launch: {
+    product: 'iPhone 18 Pro',
+    releaseDate: '2026-09-11',
+    sourceUrl: 'https://www.apple.com/au/newsroom/',
+  },
+  reviewUnit: { acquisition: 'loan', supplier: 'Apple Australia', returned: '2026-10' },
+  sources: [
+    {
+      url: 'https://www.notebookcheck.net/iphone-18-pro',
+      publisher: 'Notebookcheck',
+      date: '2026-09-16',
+      tier: 'expert',
+      metric: 'Peak brightness',
+      measured: '1,684 nits',
+      conditions: 'spectrophotometer, 10% APL',
+      withdrawn: '2,140 nits',
+    },
+  ],
+  picks: [
+    { name: 'iPhone 18 Pro', brand: 'Apple', price: 'A$2,199', goSlug: 'iphone-18-pro',
+      evidence: 'researched' },
+  ],
+};
+
+test('the launch-window evidence fields survive the collection schema intact', () => {
+  const parsed = blogFrontmatterSchema.parse(launchOutput);
+  assert.deepEqual(parsed.claims, launchOutput.claims);
+  assert.deepEqual(parsed.launch, launchOutput.launch);
+  assert.deepEqual(parsed.reviewUnit, launchOutput.reviewUnit);
+  assert.deepEqual(parsed.sources, launchOutput.sources);
+  assert.equal(parsed.picks?.[0].evidence, 'researched');
+});
+
+test('a tier outside the vocabulary is refused rather than rendered as nothing', () => {
+  // The label is the whole surface: a tier the page cannot draw would leave a
+  // figure on screen with no provenance beside it.
+  const result = blogFrontmatterSchema.safeParse({
+    ...launchOutput,
+    claims: [{ ...launchOutput.claims[0], tier: 'tested-by-someone' }],
+  });
+  assert.equal(result.success, false);
+});
+
+test('a claim with no attribution is refused', () => {
+  // An unattributed number read in the page's own voice is the exposure.
+  for (const attribution of ['', undefined]) {
+    const { attribution: _dropped, ...rest } = launchOutput.claims[0];
+    const result = blogFrontmatterSchema.safeParse({
+      ...launchOutput,
+      claims: [{ ...rest, ...(attribution === undefined ? {} : { attribution })}],
+    });
+    assert.equal(result.success, false);
+  }
+});
+
+test('a post carrying none of the evidence fields still validates', () => {
+  const parsed = blogFrontmatterSchema.parse(assemblerOutput);
+  assert.equal(parsed.claims, undefined);
+  assert.equal(parsed.launch, undefined);
+  assert.equal(parsed.reviewUnit, undefined);
+  assert.equal(parsed.picks?.[0].evidence, undefined);
+});

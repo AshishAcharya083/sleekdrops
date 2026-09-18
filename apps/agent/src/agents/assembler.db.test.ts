@@ -167,3 +167,95 @@ test('the panel reads the sources and the review date back off the row', { skip 
   );
   assert.match(String(seen.frontmatter?.lastReviewed), /^\d{4}-\d{2}-\d{2}$/);
 });
+
+// ── The launch-window surface, through both JSONB columns ────────────────────
+// assembler.test.ts proves the derivation in memory. What only SQL can prove is
+// that a dossier's claims survive the `research` round trip with their nulls
+// intact, and that the tier labels, the launch date and the review-unit record
+// come back out of `frontmatter` in the shape the page renders from.
+
+const launchResearch = {
+  ...research,
+  facts: [
+    {
+      fact: 'Apple states a 3,000-nit peak brightness.',
+      sourceUrl: 'https://www.apple.com/au/iphone-18-pro/',
+      tier: 'primary',
+      date: '2026-09-09',
+      publisher: 'Apple',
+    },
+  ],
+  products: [
+    { name: 'iPhone 18 Pro', brand: 'Apple', approxPrice: 'A$2,199', amazonUrl: null,
+      goSlug: 'iphone-18-pro', notes: '' },
+  ],
+  claims: [
+    {
+      subject: 'iPhone 18 Pro',
+      metric: 'Peak brightness',
+      claimedValue: '3,000 nits',
+      claimedBy: 'Apple',
+      claimedSourceUrl: 'https://www.apple.com/au/iphone-18-pro/',
+      claimedConditions: 'HDR highlights, outdoors',
+      measuredValue: '1,684 nits',
+      measuredBy: 'Notebookcheck',
+      conditions: 'spectrophotometer, 10% APL',
+      measuredOn: '2026-09-16',
+      measuredSourceUrl: 'https://www.notebookcheck.net/iphone-18-pro',
+      withdrawnValue: '2,140 nits',
+      ownTest: false,
+      covers: null,
+    },
+  ],
+  launch: { product: 'iPhone 18 Pro', releaseDate: '2026-09-11', sourceUrl: 'https://www.apple.com/au/newsroom/' },
+  reviewUnit: { acquisition: 'loan', supplier: 'Apple Australia', paid: null, returned: '2026-10' },
+};
+
+test('claims, the launch date and the review unit survive both JSONB columns', { skip }, async () => {
+  const [inserted] = await q<ArticleRow>(
+    `INSERT INTO articles (title, category, post_type, stage, status, research, outline, draft_md)
+     VALUES ($1, 'Tech', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
+    [
+      'iPhone 18 Pro, four days in',
+      JSON.stringify(launchResearch),
+      JSON.stringify({ ...brief, slug: `iphone-18-pro-${randomUUID().slice(0, 8)}` }),
+      '## The screen\n\nThe [iPhone 18 Pro](/go/iphone-18-pro) ships on 11 September.[1]',
+    ],
+  );
+  const [article] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [inserted.id]);
+  // The nulls the researcher files are the difference between "we looked and
+  // nobody has measured it" and "the field is missing", so they have to survive.
+  assert.equal((article.research as { claims: Array<{ covers: unknown }> }).claims[0].covers, null);
+
+  const assembled = await runAssembler(article);
+  await q('UPDATE articles SET frontmatter = $2 WHERE id = $1', [
+    article.id,
+    JSON.stringify(assembled.frontmatter),
+  ]);
+  const [stored] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [article.id]);
+
+  const claims = stored.frontmatter?.claims as Array<Record<string, unknown>>;
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].tier, 'independent');
+  assert.equal(claims[0].value, '1,684 nits');
+  assert.equal(claims[0].withdrawn, '2,140 nits');
+  assert.deepEqual(claims[0].claimed, {
+    value: '3,000 nits',
+    by: 'Apple',
+    conditions: 'HDR highlights, outdoors',
+    sourceUrl: 'https://www.apple.com/au/iphone-18-pro/',
+  });
+  assert.deepEqual(stored.frontmatter?.launch, {
+    product: 'iPhone 18 Pro',
+    releaseDate: '2026-09-11',
+    sourceUrl: 'https://www.apple.com/au/newsroom/',
+  });
+  assert.deepEqual(stored.frontmatter?.reviewUnit, {
+    acquisition: 'loan',
+    supplier: 'Apple Australia',
+    returned: '2026-10',
+  });
+  const sources = stored.frontmatter?.sources as Array<Record<string, unknown>>;
+  assert.equal(sources.at(-1)?.measured, '1,684 nits');
+  assert.equal(sources.at(-1)?.conditions, 'spectrophotometer, 10% APL');
+});

@@ -1,0 +1,269 @@
+---
+import { launchStatus, nameList } from '@lib/evidence';
+import { formatLong, formatMonth } from '@lib/format';
+import type { ClaimData, LaunchData } from '../../content/config';
+
+/**
+ * LaunchNotice - the standing notice on a piece written inside a product's
+ * launch window.
+ *
+ * It exists because of a gap that is structural rather than lazy: inside the
+ * first eight weeks of a release no Australian lab result exists to cite.
+ * CHOICE runs smartphone tests through ICRT labs in Europe and publishes weeks
+ * to months later, Canstar Blue is a brand-level satisfaction survey, and
+ * ProductReview is owner reviews. A reader deciding whether to buy on day four
+ * is owed that fact plainly, and owed a commitment about what happens when the
+ * results land.
+ *
+ * One component, three states, decided at render time from the release date
+ * and the claims the page carries - never from a stored sentence, because
+ * "no independent test exists yet" is true the day it is written and false
+ * three months later.
+ */
+export interface Props {
+  launch: LaunchData;
+  claims?: ClaimData[];
+  /** Where a tested update will appear - the promise made concrete. */
+  updatesHref?: string;
+}
+
+const { launch, claims = [], updatesHref = '/how-we-research' } = Astro.props;
+const status = launchStatus(launch, claims);
+const released = formatLong(status.releaseDate);
+const dayLabel =
+  status.daysSinceRelease < 0
+    ? 'Pre-order'
+    : status.daysSinceRelease === 0
+      ? 'Day one'
+      : `Day ${status.daysSinceRelease}`;
+const testers = nameList(status.measuredBy);
+const statusLabel =
+  status.state === 'closed'
+    ? 'Window closed'
+    : status.state === 'first-result'
+      ? 'First results in'
+      : 'Awaiting lab results';
+---
+
+<aside class="launch-notice launch-notice--split" aria-labelledby="launch-notice-title">
+  <div class="ln-main">
+    <div class="ln-head">
+      <span class="ln-eyebrow">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Launch window
+      </span>
+      {status.open && <span class="ln-day">{dayLabel}</span>}
+    </div>
+
+    {status.state === 'awaiting' && (
+      <>
+        <h2 id="launch-notice-title">
+          {launch.product} went on sale on {released}. No independent lab has
+          measured one yet.
+        </h2>
+        <p>
+          That is not an oversight, it is the calendar. No Australian lab result
+          exists inside the first weeks of a release: CHOICE tests phones through
+          ICRT labs in Europe and publishes weeks to months after launch, Canstar
+          Blue surveys brand satisfaction rather than models, and ProductReview
+          collects owner reviews from people who have not had one long enough to
+          write them.
+        </p>
+        <p>
+          So every figure on this page is labelled with who produced it. Where
+          the only number is the maker's, it says so and it is not written in our
+          voice. <strong>We will update this page when protocol-publishing
+          testers report</strong> - the first measured result replaces the claim
+          it disputes, and the change is dated at the foot of the page.
+        </p>
+      </>
+    )}
+
+    {status.state === 'first-result' && (
+      <>
+        <h2 id="launch-notice-title">
+          {launch.product} went on sale on {released}. The first independent
+          measurements are in.
+        </h2>
+        <p>
+          {testers} {status.measuredBy.length === 1 ? 'has' : 'have'} published
+          measured figures with the protocol behind them, and those are marked on
+          this page as independently measured. The rest of the numbers are still
+          the maker's own, labelled as such until someone measures them.
+        </p>
+        <p>
+          <strong>We will keep updating this page as further tested results
+          publish</strong>, and every change is dated at the foot of the page.
+        </p>
+      </>
+    )}
+
+    {status.state === 'closed' && (
+      <>
+        <h2 id="launch-notice-title">
+          {launch.product} went on sale on {released}. Its launch window has
+          closed.
+        </h2>
+        <p>
+          {status.measuredBy.length > 0
+            ? `Independent results are now in, from ${testers}, and the figures they measured are marked on this page.`
+            : 'No protocol-publishing tester has measured one yet, which is now worth saying plainly rather than putting down to the calendar. Nothing here rests on a figure we have not attributed.'}
+        </p>
+      </>
+    )}
+  </div>
+
+  <div class="ln-side">
+    <dl class="ln-dates">
+      <div><dt>On sale</dt><dd>{released}</dd></div>
+      <div><dt>Window closes</dt><dd>{formatMonth(status.windowEnds)}</dd></div>
+      <div><dt>Status</dt><dd>{statusLabel}</dd></div>
+    </dl>
+    {/* Only while we are still waiting: a list of testers "we are watching"
+        under a notice saying their results are in reads as a page that has not
+        noticed its own update. */}
+    {status.open && (
+    <p class="ln-watch">
+      <span class="watch-label">Testers we are watching</span>
+      <span class="chip">GSMArena</span>
+      <span class="chip">Notebookcheck</span>
+      <span class="chip">DXOMARK</span>
+      <span class="chip">CHOICE</span>
+    </p>
+    )}
+    <p class="ln-link"><a href={updatesHref}>How we research</a></p>
+  </div>
+</aside>
+
+<style>
+  .launch-notice {
+    margin: 24px 0 0;
+    padding: 20px 24px;
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--info);
+    border-radius: 0 var(--r-lg) var(--r-lg) 0;
+    background: var(--info-soft);
+  }
+  .ln-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .ln-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--info);
+  }
+  .ln-eyebrow svg {
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    fill: none;
+  }
+  .ln-day {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--info);
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    padding: 3px 9px;
+    border-radius: var(--r-full);
+  }
+  .launch-notice h2 {
+    font-family: var(--font-display);
+    font-size: clamp(20px, 2.4vw, 26px);
+    line-height: 1.25;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin: 0 0 10px;
+    max-width: 34ch;
+  }
+  .launch-notice p {
+    margin: 0 0 10px;
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--ink-2);
+    max-width: 68ch;
+  }
+  .launch-notice p:last-child { margin-bottom: 0; }
+  .launch-notice strong { color: var(--ink); font-weight: 700; }
+  .launch-notice a { color: var(--ink-2); text-underline-offset: 3px; }
+
+  /* The side column needs its own top spacing on a phone: it no longer sits in
+     a grid track with a column gap once the layout collapses to one column. */
+  .ln-side { margin-top: 20px; }
+  .ln-dates {
+    display: flex;
+    gap: 8px 18px;
+    flex-wrap: wrap;
+    margin: 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--hairline);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .ln-dates > div { display: flex; gap: 6px; }
+  .ln-dates dt { margin: 0; }
+  .ln-dates dd { margin: 0; color: var(--ink-2); }
+  .ln-watch {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 12px;
+  }
+  /* Its own line: inline, it left one chip stranded beside the label and the
+     rest wrapped beneath, which read as a broken row rather than a list. */
+  .ln-watch .watch-label { flex-basis: 100%; font-size: 12px; color: var(--muted); }
+  .ln-watch .chip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-full);
+    padding: 3px 9px;
+  }
+  .ln-link { margin-top: 12px; font-size: 13px; }
+
+  /* Wide placement: the status column uses the space the prose measure leaves
+     rather than 500px of empty slab. Both columns stretch to the same row
+     height so the divider runs edge to edge instead of stopping short. */
+  @media (min-width: 900px) {
+    .launch-notice--split {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(240px, 0.5fr);
+      gap: 32px;
+      align-items: stretch;
+    }
+    .launch-notice--split .ln-side {
+      margin-top: 0;
+      padding-left: 28px;
+      border-left: 1px solid var(--hairline);
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+    .launch-notice--split .ln-dates {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      border-top: 0;
+    }
+    .launch-notice--split .ln-watch,
+    .launch-notice--split .ln-link { margin-top: 0; }
+  }
+</style>

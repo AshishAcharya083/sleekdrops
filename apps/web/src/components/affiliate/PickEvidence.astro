@@ -1,0 +1,289 @@
+---
+import Button from '@components/ui/Button.astro';
+import { toClaimEntries } from '@lib/evidence';
+import { EVENTS } from '@lib/analytics';
+import type { ClaimData, PickData } from '../../content/config';
+
+/**
+ * PickEvidence - the picks on a guide or roundup, each carrying the same
+ * evidence chip in the same slot.
+ *
+ * The chip is always filled. An unbadged pick sitting beside badged ones with
+ * an empty slot reads as a defect in the product; the same pick saying
+ * "Researched, not tested" reads as a fact about our evidence, which is what
+ * it is. Disclosure experiments are consistent on this: a bare admission of a
+ * limitation costs trust, and the same admission paired with what we did check
+ * earns it - so the untested pick states the procedure, the bar and the
+ * provenance rather than apologising.
+ *
+ * What the chip must never do is read as "we did not do our job". Independent
+ * testing is the reason a buying guide exists, so the wording says our badge
+ * has a bar this pick has not cleared yet - never "unverified", never
+ * "untested" in badge position.
+ */
+export interface Props {
+  picks?: PickData[];
+  claims?: ClaimData[];
+  /** Guides and roundups say "picks"; a single-product piece does not use this at all. */
+  title?: string;
+}
+
+const { picks = [], claims = [], title = 'The picks, and what each one rests on' } = Astro.props;
+const entries = toClaimEntries(claims);
+// Rendered only for posts the pipeline labelled. A post assembled before the
+// evidence chip existed carries none, and gets the page it has always had
+// rather than a new section full of blanks.
+const labelled = picks.filter((pick) => pick.evidence !== undefined || pick.badge !== undefined);
+
+const cards = labelled.map((pick) => {
+  const mine = entries.filter(
+    (entry) =>
+      (entry.goSlug !== undefined && entry.goSlug === pick.goSlug) ||
+      entry.subject.trim().toLowerCase() === pick.name.trim().toLowerCase(),
+  );
+  const measured = mine.filter((entry) => entry.tier === 'measured' || entry.tier === 'independent');
+  return {
+    pick,
+    tested: pick.evidence === 'tested',
+    measured,
+    // Three short pairs is what balances the card against a longer one beside
+    // it; more turns the card into a spec table nobody reads.
+    stats: mine.slice(0, 3),
+  };
+});
+---
+
+{cards.length > 0 && (
+  <section class="pick-evidence" aria-labelledby="pick-evidence-title">
+    <h2 id="pick-evidence-title">{title}</h2>
+    <div class="pick-grid">
+      {cards.map(({ pick, tested, measured, stats }, index) => (
+        <article class="pick-card">
+          <div class="pick-head">
+            <span class:list={['pick-chip', tested ? 'pick-chip--tested' : 'pick-chip--researched']}>
+              {tested ? 'Tested by us' : 'Researched, not tested'}
+            </span>
+            {pick.badge && <span class="pick-badge">{pick.badge}</span>}
+          </div>
+
+          <h3 class="pick-name">{pick.name}</h3>
+          {pick.brand && <p class="pick-brand">{pick.brand}{pick.price ? ` · ${pick.price}` : ''}</p>}
+
+          {pick.badge && measured.length > 0 && (
+            <div class="pick-basis">
+              <span class="basis-label">This badge rests on</span>
+              <ul>
+                {measured.map((entry) => (
+                  <li>{entry.metric}: <b>{entry.value}</b> - {entry.attributionLine}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {stats.length > 0 && (
+            <dl class="pick-stats">
+              {stats.map((entry) => (
+                <div class="pick-stat">
+                  <dt>{entry.metric}</dt>
+                  <dd>
+                    {entry.value}
+                    <span class="stat-by">{entry.tier === 'manufacturer' ? `${entry.attribution} claim` : entry.attribution}</span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+
+          {/* Procedure, bar and provenance in one sentence - the combination
+              the disclosure research rewards. Which sentence depends on
+              whether anybody has measured one, because "the numbers are the
+              maker's own" beside two independent measurements is simply
+              untrue. */}
+          {!tested && measured.length === 0 && (
+            <p class="pick-provenance">
+              We picked this on price history, warranty and owner reports. The
+              performance numbers are the maker's own - published by
+              {' '}{pick.brand ?? 'the brand'}, not measured by us - so it cannot
+              carry our badge yet.
+            </p>
+          )}
+          {!tested && measured.length > 0 && (
+            <p class="pick-provenance">
+              The figures above were measured by testers who publish the protocol
+              behind them, and each says who. We have not run one ourselves, so
+              this pick rests on their results alongside price history, warranty
+              and owner reports.
+            </p>
+          )}
+
+          <div class="pick-actions">
+            <Button
+              href={`/go/${pick.goSlug}`}
+              variant="accent"
+              rel="sponsored nofollow"
+              data={{
+                track: EVENTS.affiliateClick,
+                'track-props': JSON.stringify({
+                  slug: pick.goSlug,
+                  ...(pick.brand ? { brand: pick.brand } : {}),
+                  placement: 'pick-evidence',
+                  position: index,
+                }),
+              }}
+            >
+              Check price
+            </Button>
+            {!tested && (
+              <span class="pick-status">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                Review pending our testing
+              </span>
+            )}
+          </div>
+        </article>
+      ))}
+    </div>
+  </section>
+)}
+
+<style>
+  .pick-evidence { margin: 48px 0 0; }
+  .pick-evidence h2 {
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 1.2;
+    font-weight: 400;
+    margin: 0 0 20px;
+  }
+  /* Each card sizes to its own content. Stretching them to a common height
+     bottom-pins every CTA at the same line, which is tidy when the cards carry
+     comparable content and leaves a card's worth of void under the shorter one
+     when they do not - and a pick with nothing measured has genuinely less to
+     say, which is the point of the chip above it. */
+  .pick-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    align-items: start;
+    gap: 20px;
+  }
+  .pick-card {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 20px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+  }
+  .pick-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pick-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 11px;
+    border-radius: var(--r-full);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .pick-chip--tested { background: var(--ink); color: var(--paper); border: 1px solid var(--ink); }
+  .pick-chip--researched { background: transparent; color: var(--ink-2); border: 1px solid var(--hairline-strong); }
+  .pick-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 11px;
+    border-radius: var(--r-full);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .pick-name {
+    font-family: var(--font-display);
+    font-size: 22px;
+    line-height: 1.25;
+    font-weight: 500;
+    color: var(--ink);
+    margin: 14px 0 0;
+  }
+  .pick-brand { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+
+  .pick-basis {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--success);
+    border-radius: 0 var(--r-md) var(--r-md) 0;
+    background: var(--success-soft);
+  }
+  .basis-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--success);
+    margin-bottom: 6px;
+  }
+  .pick-basis ul { margin: 0; padding-left: 16px; }
+  .pick-basis li { font-size: 13px; line-height: 1.55; color: var(--ink-2); }
+
+  /* Three short pairs, so a tested card with less prose than the untested one
+     beside it still fills its height rather than leaving a void above the
+     bottom-pinned CTA row. */
+  .pick-stats {
+    display: grid;
+    gap: 8px;
+    margin: 16px 0 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--hairline);
+  }
+  .pick-stat { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .pick-stat dt { margin: 0; font-size: 13px; color: var(--muted); min-width: 0; }
+  .pick-stat dd {
+    margin: 0;
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .pick-stat .stat-by { display: block; font-size: 10px; color: var(--muted); letter-spacing: 0.04em; }
+
+  .pick-provenance {
+    margin: 16px 0 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+
+  .pick-actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding-top: 18px;
+  }
+  /* Plain text at full strength, not a disabled pill. A greyed-out
+     button-shaped element opposite a working CTA reads as a dead control the
+     reader failed to earn; this is a status line about our evidence. */
+  .pick-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .pick-status svg {
+    width: 13px;
+    height: 13px;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    fill: none;
+    flex-shrink: 0;
+  }
+</style>

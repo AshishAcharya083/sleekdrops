@@ -127,3 +127,64 @@ test('the indexes a body cites are reported in ascending order, deduped', () => 
 
   assert.deepEqual(citedSourceIndexes(body), [1, 3]);
 });
+
+// ── Measurements, carried through rather than rebuilt ────────────────────────
+// A protocol is what makes a figure checkable, so it travels with the figure.
+// The tier, the publisher and the date already rode through; what was being
+// thrown away was what the source actually measured.
+
+const measuredClaim = {
+  metric: 'Peak brightness',
+  measuredValue: '1,684 nits',
+  measuredBy: 'Notebookcheck',
+  conditions: 'spectrophotometer, 10% APL',
+  measuredOn: '2026-09-16',
+  measuredSourceUrl: 'https://www.notebookcheck.net/iphone-18-pro',
+  withdrawnValue: '2,140 nits',
+};
+
+test('a measurement lands on the source row the fact already carried', () => {
+  const [source] = articleSources(
+    [
+      {
+        fact: 'Measured 1,684 nits.',
+        sourceUrl: 'https://www.notebookcheck.net/iphone-18-pro',
+        tier: 'expert',
+        date: '2026-09-16',
+        publisher: 'Notebookcheck',
+      },
+    ],
+    [measuredClaim],
+  );
+  assert.equal(source.metric, 'Peak brightness');
+  assert.equal(source.measured, '1,684 nits');
+  assert.equal(source.conditions, 'spectrophotometer, 10% APL');
+  assert.equal(source.withdrawn, '2,140 nits', 'a withdrawn figure stays visible beside the corrected one');
+});
+
+test('a tester the facts never quoted is appended, never inserted', () => {
+  // The body's citation markers are numbered against the fact rows, so a new
+  // row among them would renumber every marker after it.
+  const sources = articleSources(
+    [
+      { fact: 'Apple states 3,000 nits.', sourceUrl: 'https://www.apple.com/au/iphone', tier: 'primary',
+        date: '2026-09-09', publisher: 'Apple' },
+    ],
+    [measuredClaim],
+  );
+  assert.deepEqual(sources.map((s) => s.publisher), ['Apple', 'Notebookcheck']);
+  assert.equal(sources[1].tier, 'expert', 'somebody who published a protocol is the expert stratum');
+  assert.equal(sources[1].date, '2026-09-16');
+});
+
+test('a claim nobody measured adds no source row', () => {
+  const sources = articleSources([], [{ ...measuredClaim, measuredValue: null, measuredSourceUrl: null }]);
+  assert.deepEqual(sources, []);
+});
+
+test('a post with no claims produces exactly the list it always did', () => {
+  const facts = [
+    { fact: 'a', sourceUrl: 'https://a.test/1', tier: 'primary' as const, date: '2026-01', publisher: 'A' },
+  ];
+  assert.deepEqual(articleSources(facts), articleSources(facts, []));
+});

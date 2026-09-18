@@ -29,6 +29,24 @@ export interface DossierFact {
   publisher?: string | null;
 }
 
+/**
+ * The measurement a source published, when it published one.
+ *
+ * Carried through to the page so the evidence panel can say what was measured
+ * and under what conditions, rather than only who said something. A protocol
+ * is what makes a number checkable, so it travels with the number.
+ */
+export interface SourceMeasurement {
+  /** What was measured: "Peak brightness", "Battery life, screen-on". */
+  metric: string;
+  /** The figure, as the source published it. */
+  measured: string;
+  /** The protocol or conditions, in the tester's words. */
+  conditions?: string;
+  /** A figure this source has since corrected away from, kept visible. */
+  withdrawn?: string;
+}
+
 /** One entry of the article's `sources` frontmatter, and of the visible list. */
 export interface ArticleSource {
   url: string;
@@ -36,6 +54,25 @@ export interface ArticleSource {
   /** 'YYYY', 'YYYY-MM' or 'YYYY-MM-DD', as the source itself gives it. */
   date?: string;
   tier?: SourceTier;
+  /** What was measured: "Peak brightness". */
+  metric?: string;
+  /** The figure, as published. */
+  measured?: string;
+  /** The protocol the figure was measured under. */
+  conditions?: string;
+  /** A figure this source has since corrected away from. */
+  withdrawn?: string;
+}
+
+/** The parts of a dossier claim this module reads. */
+export interface DossierClaim {
+  metric: string;
+  measuredValue: string | null;
+  measuredBy: string | null;
+  conditions: string | null;
+  measuredOn: string | null;
+  measuredSourceUrl: string | null;
+  withdrawnValue: string | null;
 }
 
 /** The three date shapes a source may carry; anything else is not a date. */
@@ -51,6 +88,30 @@ function statedTier(tier: string | null | undefined): SourceTier | undefined {
 }
 
 /**
+ * A source URL we could actually put in front of a reader, parsed.
+ *
+ * What is stored is the parser's normalised serialisation, never the raw
+ * string: a source URL is attacker-influenceable (the researcher collects them
+ * from search results), and `new URL()` percent-encodes the characters that
+ * would otherwise let one break out of the `<script type="application/ld+json">`
+ * block it is rendered into.
+ */
+function parseSourceUrl(stated: string | null | undefined): URL | null {
+  const raw = stated?.trim();
+  if (!raw) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed : null;
+}
+
+const normaliseSourceUrl = (stated: string | null | undefined): string | null =>
+  parseSourceUrl(stated)?.toString() ?? null;
+
+/**
  * The dossier's sources, deduplicated by URL and limited to web pages.
  *
  * What is stored is the parser's normalised serialisation, never the raw
@@ -63,19 +124,33 @@ function statedTier(tier: string | null | undefined): SourceTier | undefined {
  * The publisher falls back to the hostname so the list never shows a reader a
  * blank attribution; the date and tier are omitted rather than guessed.
  */
-export function articleSources(facts: readonly DossierFact[]): ArticleSource[] {
+export function articleSources(
+  facts: readonly DossierFact[],
+  claims: readonly DossierClaim[] = [],
+): ArticleSource[] {
   const seen = new Set<string>();
   const sources: ArticleSource[] = [];
+  // Keyed by the same normalised URL the rows are deduplicated on, so a
+  // measurement attaches to its source however the two spelled the address.
+  const measurements = new Map<string, SourceMeasurement>();
+  for (const claim of claims) {
+    const url = normaliseSourceUrl(claim.measuredSourceUrl);
+    const metric = claim.metric?.trim();
+    // A measurement with nothing to say it measured is not one, and the
+    // frontmatter schema refuses a blank metric - which would fail the whole
+    // article over one incomplete row.
+    if (url === null || !metric || !claim.measuredValue?.trim() || measurements.has(url)) continue;
+    measurements.set(url, {
+      metric,
+      measured: claim.measuredValue.trim(),
+      ...(claim.conditions ? { conditions: claim.conditions } : {}),
+      ...(claim.withdrawnValue ? { withdrawn: claim.withdrawnValue } : {}),
+    });
+  }
+
   for (const fact of facts) {
-    const stated = fact.sourceUrl?.trim();
-    if (!stated) continue;
-    let parsed: URL;
-    try {
-      parsed = new URL(stated);
-    } catch {
-      continue;
-    }
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
+    const parsed = parseSourceUrl(fact.sourceUrl);
+    if (parsed === null) continue;
     const url = parsed.toString();
     if (seen.has(url)) continue;
     seen.add(url);
@@ -85,8 +160,39 @@ export function articleSources(facts: readonly DossierFact[]): ArticleSource[] {
     if (!publisher) continue;
     const date = statedDate(fact.date);
     const tier = statedTier(fact.tier);
-    sources.push({ url, publisher, ...(date ? { date } : {}), ...(tier ? { tier } : {}) });
+    sources.push({
+      url,
+      publisher,
+      ...(date ? { date } : {}),
+      ...(tier ? { tier } : {}),
+      ...(measurements.get(url) ?? {}),
+    });
   }
+
+  // A page that measured something cites the measurement, so a tester the
+  // facts never happened to quote still belongs in the list. Appended rather
+  // than merged in order: the body's citation markers are numbered against the
+  // fact rows above, and inserting anything among them would renumber them.
+  for (const claim of claims) {
+    const parsed = parseSourceUrl(claim.measuredSourceUrl);
+    if (parsed === null) continue;
+    const url = parsed.toString();
+    if (seen.has(url)) continue;
+    const publisher = claim.measuredBy?.trim() || parsed.hostname.replace(/^www\./, '');
+    if (!publisher) continue;
+    seen.add(url);
+    const date = statedDate(claim.measuredOn);
+    sources.push({
+      url,
+      publisher,
+      ...(date ? { date } : {}),
+      // Somebody who published a figure and the protocol behind it is the
+      // expert stratum by definition - that is what the tier means.
+      tier: 'expert',
+      ...(measurements.get(url) ?? {}),
+    });
+  }
+
   return sources;
 }
 

@@ -227,9 +227,13 @@ test('sources, entities, picks and the currency ride through frontmatter', async
     { url: 'https://www.productreview.com.au/shark', publisher: 'productreview.com.au' },
   ]);
   assert.deepEqual(frontmatter.entities, ['Dyson', 'Shark', 'HEPA filtration']);
+  // Every pick carries an evidence chip, always filled: an empty badge slot
+  // beside a filled one reads as a defect in the product rather than as a fact
+  // about our evidence. Nothing here was measured by us, so both say so.
   assert.deepEqual(frontmatter.picks, [
-    { name: 'Shark Detect Pro', brand: 'Shark', price: 'A$1,199', goSlug: 'shark-detect-pro' },
-    { name: 'Dyson V15 Detect', brand: 'Dyson', goSlug: 'dyson-v15-detect' },
+    { name: 'Shark Detect Pro', brand: 'Shark', price: 'A$1,199', goSlug: 'shark-detect-pro',
+      evidence: 'researched' },
+    { name: 'Dyson V15 Detect', brand: 'Dyson', goSlug: 'dyson-v15-detect', evidence: 'researched' },
   ]);
   assert.equal(frontmatter.currency, 'AUD');
 });
@@ -566,4 +570,167 @@ test('an article with no research or keyword plan carries no structured-data fie
   assert.equal('entities' in frontmatter, false);
   assert.equal('picks' in frontmatter, false);
   assert.equal(frontmatter.currency, 'AUD');
+});
+
+// ── Launch-window evidence, through the real assembler ───────────────────────
+// The assembler is the only writer of frontmatter, so this is the layer the
+// page's tier labels, launch notice and provenance line actually come from.
+
+/** The dossier a launch piece files: no lab result yet, both halves of one spec. */
+const launchResearch = {
+  summary: 'The iPhone 18 Pro, four days in.',
+  facts: [
+    { fact: 'Apple states a 3,000-nit peak.', sourceUrl: 'https://www.apple.com/au/iphone-18-pro/',
+      tier: 'primary', date: '2026-09-09', publisher: 'Apple' },
+  ],
+  products: [
+    { name: 'iPhone 18 Pro', brand: 'Apple', approxPrice: 'A$2,199', amazonUrl: null,
+      goSlug: 'iphone-18-pro', notes: '' },
+  ],
+  failureModes: [],
+  whoShouldNotBuy: [],
+  ownerComplaints: [],
+  priceObservations: [],
+  testedClaims: [],
+  claims: [
+    {
+      subject: 'iPhone 18 Pro',
+      metric: 'Peak brightness',
+      claimedValue: '3,000 nits',
+      claimedBy: 'Apple',
+      claimedSourceUrl: 'https://www.apple.com/au/iphone-18-pro/',
+      claimedConditions: 'HDR highlights, outdoors',
+      measuredValue: '1,684 nits',
+      measuredBy: 'Notebookcheck',
+      conditions: 'spectrophotometer, 10% APL',
+      measuredOn: '2026-09-16',
+      measuredSourceUrl: 'https://www.notebookcheck.net/iphone-18-pro',
+      withdrawnValue: '2,140 nits',
+      ownTest: false,
+      covers: null,
+    },
+  ],
+  launch: { product: 'iPhone 18 Pro', releaseDate: '2026-09-11',
+    sourceUrl: 'https://www.apple.com/au/newsroom/' },
+  keywords: { primary: 'iphone 18 pro', secondary: [] },
+  competitorNotes: '',
+  faqIdeas: [],
+};
+
+const launchDraft = '## The screen\n\nThe [iPhone 18 Pro](/go/iphone-18-pro) ships on 11 September.[1]';
+
+test('the tier-labelled claims, the launch date and the provenance all reach frontmatter', async () => {
+  const { frontmatter } = await runAssembler(
+    article({ research: launchResearch as never, draft_md: launchDraft }),
+  );
+
+  assert.deepEqual(frontmatter.claims, [
+    {
+      subject: 'iPhone 18 Pro',
+      goSlug: 'iphone-18-pro',
+      metric: 'Peak brightness',
+      tier: 'independent',
+      value: '1,684 nits',
+      attribution: 'Notebookcheck',
+      conditions: 'spectrophotometer, 10% APL',
+      date: '2026-09-16',
+      sourceUrl: 'https://www.notebookcheck.net/iphone-18-pro',
+      withdrawn: '2,140 nits',
+      claimed: {
+        value: '3,000 nits',
+        by: 'Apple',
+        conditions: 'HDR highlights, outdoors',
+        sourceUrl: 'https://www.apple.com/au/iphone-18-pro/',
+      },
+    },
+  ]);
+  assert.deepEqual(frontmatter.launch, {
+    product: 'iPhone 18 Pro',
+    releaseDate: '2026-09-11',
+    sourceUrl: 'https://www.apple.com/au/newsroom/',
+  });
+  // Stated even - especially - when there was no unit: silence is the case
+  // where the reader's assumption is the wrong one.
+  assert.deepEqual(frontmatter.reviewUnit, { acquisition: 'none' });
+});
+
+test('the measuring source joins the list with its protocol, after the facts', async () => {
+  const { frontmatter } = await runAssembler(
+    article({ research: launchResearch as never, draft_md: launchDraft }),
+  );
+  assert.deepEqual(frontmatter.sources, [
+    { url: 'https://www.apple.com/au/iphone-18-pro/', publisher: 'Apple', date: '2026-09-09', tier: 'primary' },
+    {
+      url: 'https://www.notebookcheck.net/iphone-18-pro',
+      publisher: 'Notebookcheck',
+      date: '2026-09-16',
+      tier: 'expert',
+      metric: 'Peak brightness',
+      measured: '1,684 nits',
+      conditions: 'spectrophotometer, 10% APL',
+      withdrawn: '2,140 nits',
+    },
+  ]);
+});
+
+test('every pick carries an evidence chip, and an unmeasured one says so', async () => {
+  const { frontmatter } = await runAssembler(
+    article({ research: launchResearch as never, draft_md: launchDraft }),
+  );
+  assert.deepEqual(frontmatter.picks, [
+    { name: 'iPhone 18 Pro', brand: 'Apple', price: 'A$2,199', goSlug: 'iphone-18-pro',
+      evidence: 'researched' },
+  ]);
+});
+
+test('a badge resting on a maker claim alone fails assembly', async () => {
+  // The correct terminal failure: a roundup whose picks rest on the maker's
+  // own numbers has nothing to award a badge on.
+  const makerOnly = {
+    ...launchResearch,
+    claims: [
+      {
+        ...launchResearch.claims[0],
+        measuredValue: null,
+        measuredBy: null,
+        measuredSourceUrl: null,
+        withdrawnValue: null,
+      },
+    ],
+  };
+  await assert.rejects(
+    runAssembler(
+      article({
+        research: makerOnly as never,
+        draft_md: launchDraft,
+        frontmatter: { picks: [{ goSlug: 'iphone-18-pro', badge: 'Best overall' }] },
+      }),
+    ),
+    /never rests on a manufacturer claim alone/,
+  );
+});
+
+test('a brand survey attached to a model it does not cover fails assembly', async () => {
+  const brandSurvey = {
+    ...launchResearch,
+    claims: [
+      {
+        ...launchResearch.claims[0],
+        metric: 'Customer satisfaction',
+        claimedValue: null,
+        claimedBy: null,
+        claimedSourceUrl: null,
+        claimedConditions: null,
+        measuredValue: '4 stars',
+        measuredBy: 'Canstar Blue',
+        measuredSourceUrl: 'https://www.canstarblue.com.au/phones/apple/',
+        withdrawnValue: null,
+        covers: 'Apple as a brand, 2026 mobile phone provider survey',
+      },
+    ],
+  };
+  await assert.rejects(
+    runAssembler(article({ research: brandSurvey as never, draft_md: launchDraft })),
+    /never evidence about a model it does not cover/,
+  );
 });
