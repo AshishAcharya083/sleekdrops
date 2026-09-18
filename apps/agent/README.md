@@ -262,6 +262,14 @@ Required env: `GEMINI_API_KEY` (or Vertex on GCP) and `TAVILY_API_KEY`; add
 `GITHUB_TOKEN` (repo dispatch). Optional: `ADMIN_TOKEN` to protect the API —
 required in practice when the API is deployed on Cloud Run.
 
+`DATABASE_URL` has no built-in default. Left unset, the `pg` driver resolves
+the connection from `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` and
+falls back to `localhost:5432` - the standard port a sidecar or service-container
+Postgres listens on. Port 5544 is only the host-side mapping `pnpm db:up`
+publishes on a laptop, so it is never right inside a container. Boot - and
+`pnpm db:migrate` - waits up to 30s for the database to answer before giving up,
+so the agent may start before Postgres does.
+
 ## Tests
 
 ```bash
@@ -276,7 +284,20 @@ working query), while `usage.db.test.ts` and `overview.db.test.ts` need a live
 one - SQL that reads fine in review still only fails on a server, and a
 partially failing overview only exists there - and skip themselves when no
 `DATABASE_URL` answers.
-Give it one with `pnpm db:up` (then
+The boot suites are the slow ones - about a minute of wall clock, most of it
+one deliberate 30s wait - and the only ones that start real processes:
+`index.db.test.ts` spawns the agent entrypoint and the `pnpm migrate` CLI the
+way the container does, and `db/boot.db.test.ts` puts a TCP proxy in front of
+Postgres to make it arrive late.
+The cases that only need an unreachable database run anywhere; the ones that
+have to reach a real one - late-arriving database, booting on `PG*` with no
+`DATABASE_URL`, a rejected connection - skip themselves when no `DATABASE_URL`
+answers, and each gives its spawned agent a throwaway database of its own,
+because that child boots the whole pipeline and would otherwise recover and
+claim the rows other suites are asserting on.
+`db/pool.noDatabaseUrl.test.ts` covers what an unset `DATABASE_URL` resolves to
+without connecting at all, so it runs everywhere.
+Give it a live database with `pnpm db:up` (then
 `DATABASE_URL=postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent`);
 CI runs it against a Postgres service container.
 
