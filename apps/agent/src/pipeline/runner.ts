@@ -2,6 +2,12 @@
 // records an agent_session (model, tokens, cost, duration), and routes the
 // article to its next stage. Verdict-driven, bounded revision loop —
 // a light version of devteam-platform's card lane pattern.
+//
+// A stage that throws is classified before it is failed (pipeline/failures.ts):
+// a transient fault costs a retry with backoff, a genuine one fails the card
+// immediately with the operator-facing reason intact. Either way the card
+// carries the class and the attempt count, so the panel can say whether the
+// failure needs a human or just another run.
 import { MONETISED_INTENTS } from '../content/contract.js';
 import { withDiscoveredProducts } from '../content/evidence.js';
 import { describeShapeSelection } from '../content/shapes.js';
@@ -25,6 +31,7 @@ import { runPublisher } from '../agents/publisher.js';
 import { runProductDiscovery, runResearcher } from '../agents/researcher.js';
 import { runSeoReviewer } from '../agents/seoReviewer.js';
 import { runWriter } from '../agents/writer.js';
+import { classifyFailure, MAX_STAGE_ATTEMPTS, stageRetryDelayMs } from './failures.js';
 import type { ArticleRow, SeoReview, Stage, TopicRow } from './types.js';
 
 /** The agent that runs each stage. A stage missing here has no named session. */
@@ -163,7 +170,212 @@ async function uniqueSlug(articleId: string, want: string): Promise<string> {
   return `${want}-${articleId.slice(0, 8)}`;
 }
 
-export async function runStage(article: ArticleRow): Promise<void> {
+/**
+ * One attempt at a stage's work: run the agent, write what it produced, and
+ * report where the article goes next. Everything about recording the attempt —
+ * the session row, the failure class, the retry — belongs to runStage, so this
+ * function is free to just throw.
+ */
+async function executeStage(
+  stage: Exclude<Stage, 'done'>,
+  article: ArticleRow,
+  model: string | null,
+  tracker: UsageTracker,
+): Promise<{ summary: string; next: { stage: Stage; status: string } }> {
+  let next: { stage: Stage; status: string } = { stage: 'done', status: 'done' };
+  let summary = '';
+
+  switch (stage) {
+    case 'research': {
+      const topic = article.topic_id
+        ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
+        : null;
+      const dossier = await runResearcher(article, topic, model!, tracker);
+      await updateArticle(article.id, { research: JSON.stringify(dossier) });
+      summary = `${dossier.facts?.length ?? 0} facts, ${dossier.products?.length ?? 0} products, primary keyword "${dossier.keywords?.primary}"`;
+      next = { stage: 'keyword', status: 'queued' };
+      break;
+    }
+    case 'keyword': {
+      const topic = article.topic_id
+        ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
+        : null;
+      const plan = await runKeywordStrategist(article, topic, model!, tracker);
+      await updateArticle(article.id, { keyword_plan: JSON.stringify(plan) });
+      // Earliest point at which "this piece has nothing to link" is knowable:
+      // the dossier is built, and the SERP read has just named the intent.
+      // Deal with it here rather than at assemble - outline, write, review
+      // and up to two edit rounds all run on Opus 5 in between.
+      //
+      // A missing product list is a narrow, recoverable fault, so it gets a
+      // discovery pass before the card is failed: the research stage filed
+      // its evidence and skipped the contenders, and one focused search is
+      // what it takes to fill that in. Only an empty result is terminal.
+      let discoveryNote = '';
+      if ((article.research?.products?.length ?? 0) === 0 && MONETISED_INTENTS.has(plan.intent)) {
+        const products = await runProductDiscovery(
+          article,
+          topic,
+          plan.primaryKeyword,
+          model!,
+          tracker,
+        );
+        if (products.length === 0) {
+          throw new Error(
+            `the dossier has no products and a discovery pass for "${plan.primaryKeyword}" found ` +
+              `none either, but the SERP read says this is a ${plan.intent} query - there would be ` +
+              `nothing on the page for a reader to click. Re-run research (a "${article.post_type}" ` +
+              `is not required to find products, so it did not) or add them to the topic brief by hand.`,
+          );
+        }
+        await updateArticle(article.id, {
+          research: JSON.stringify(withDiscoveredProducts(article.research, products)),
+        });
+        discoveryNote = `, ${products.length} product(s) recovered by a discovery pass`;
+      }
+      summary = `"${plan.primaryKeyword}" — ${plan.intent}, ${plan.difficulty} difficulty, ${plan.zeroClickRisk} zero-click risk, ${plan.wordCountTarget} words, ${plan.contentGaps.length} gap(s) to exploit${discoveryNote}`;
+      next = { stage: 'angle', status: 'queued' };
+      break;
+    }
+    case 'angle': {
+      const topic = article.topic_id
+        ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
+        : null;
+      const angle = await runAngleEditor(article, topic, model!, tracker);
+      await updateArticle(article.id, { editorial_angle: JSON.stringify(angle) });
+      summary = angle.defensible
+        ? `"${angle.thesis}" - ${angle.shape} shape, ${angle.informationGain.length} claim(s) the top results miss, ${angle.byline} beat`
+        : `no defensible take recorded (${angle.weakness}) - ${angle.shape} shape, ${angle.byline} beat`;
+      next = { stage: 'outline', status: 'queued' };
+      break;
+    }
+    case 'outline': {
+      const brief = await runOutliner(article, model!, tracker);
+      brief.slug = await uniqueSlug(article.id, brief.slug);
+      // The shape goes in its own column as well as inside the brief: the
+      // brief is what carries it into the writer and reviewer prompts, the
+      // column is the record of the decision an operator can see and query.
+      // Both are written here so they can never disagree.
+      const shape = brief.structureShape ?? null;
+      await updateArticle(article.id, {
+        outline: JSON.stringify(brief),
+        structure_shape: shape ? JSON.stringify(shape) : null,
+        slug: brief.slug,
+        title: brief.seoTitle,
+      });
+      summary = `"${brief.seoTitle}" — ${shape ? `${describeShapeSelection(shape)}, ` : ''}${brief.sections?.length ?? 0} sections, target ${brief.wordCountTarget} words`;
+      next = { stage: 'write', status: 'queued' };
+      break;
+    }
+    case 'write': {
+      const topic = article.topic_id
+        ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
+        : null;
+      const draft = await runWriter(article, topic, model!, tracker);
+      await updateArticle(article.id, { draft_md: draft });
+      summary = `draft written (${draft.split(/\s+/).length} words)`;
+      next = { stage: 'seo_review', status: 'queued' };
+      break;
+    }
+    case 'seo_review': {
+      const review = await runSeoReviewer(article, model!, tracker);
+      const maxRounds = await getSetting<number>('max_revision_rounds', 2);
+      if (!review.pass && article.revision_round >= maxRounds) {
+        review.forcedThrough = true;
+      }
+      await updateArticle(article.id, { seo_review: JSON.stringify(review) });
+      summary = summariseReview(review);
+      next =
+        review.pass || review.forcedThrough
+          ? { stage: 'assemble', status: 'queued' }
+          : { stage: 'edit', status: 'queued' };
+      break;
+    }
+    case 'edit': {
+      const revised = await runEditor(article, model!, tracker);
+      await updateArticle(article.id, {
+        draft_md: revised,
+        revision_round: article.revision_round + 1,
+        // Admin feedback is consumed by exactly one edit pass.
+        feedback: null,
+      });
+      summary = `revision round ${article.revision_round + 1} applied${article.feedback ? ' (incl. admin feedback)' : ''}`;
+      next = { stage: 'seo_review', status: 'queued' };
+      break;
+    }
+    case 'assemble': {
+      const assembled = await runAssembler(article);
+      await updateArticle(article.id, {
+        draft_md: assembled.body,
+        frontmatter: JSON.stringify(assembled.frontmatter),
+        affiliate_links: JSON.stringify(assembled.affiliateLinks),
+      });
+      summary = `frontmatter + ${assembled.affiliateLinks.length} affiliate link(s) validated${
+        assembled.healedSlugs.length > 0
+          ? ` (${assembled.healedSlugs.length} healed from the draft: ${assembled.healedSlugs.join(', ')})`
+          : ''
+      }${
+        assembled.droppedSlugs.length > 0
+          ? `; stripped unlinkable: ${assembled.droppedSlugs.join(', ')}`
+          : ''
+      }`;
+      next = { stage: 'image', status: 'queued' };
+      break;
+    }
+    case 'image': {
+      const existing = article.frontmatter ?? {};
+      if (article.hero_image_url) {
+        // The operator dropped a file in the admin panel; the assembler has
+        // already stamped it into frontmatter. Searching would be waste.
+        summary = 'operator-supplied hero image — image search skipped';
+      } else if (existing.heroImage) {
+        summary = 'hero image already set — keeping it';
+      } else {
+        const image = await runImageAgent(article, model!);
+        if (image.heroImage) {
+          await updateArticle(article.id, {
+            frontmatter: JSON.stringify({
+              ...existing,
+              heroImage: image.heroImage,
+              heroAlt: image.heroAlt ?? undefined,
+            }),
+          });
+        }
+        summary = image.summary;
+      }
+      const publishMode = await getSetting<string>('publish_mode', 'approval');
+      next =
+        publishMode === 'approval'
+          ? { stage: 'publish', status: 'waiting_approval' }
+          : { stage: 'publish', status: 'queued' };
+      break;
+    }
+    case 'publish': {
+      const result = await runPublisher(article);
+      await updateArticle(article.id, { published_at: new Date().toISOString() });
+      if (article.topic_id) {
+        await q("UPDATE topics SET status = 'approved', updated_at = now() WHERE id = $1", [
+          article.topic_id,
+        ]);
+      }
+      summary = `${result.slug} → D1 as '${result.d1Status}'${result.dispatched ? ', site rebuild dispatched' : ''}`;
+      next = { stage: 'done', status: 'done' };
+      break;
+    }
+  }
+
+  return { summary, next };
+}
+
+/** Overridable seams. Only the clock, and only so a test can skip the wait. */
+export interface StageDeps {
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function runStage(article: ArticleRow, deps: StageDeps = {}): Promise<void> {
+  const sleep = deps.sleep ?? wait;
   const stage = article.stage;
   if (stage === 'done') return;
   const agent = STAGE_AGENT[stage];
@@ -172,6 +384,11 @@ export async function runStage(article: ArticleRow): Promise<void> {
   // happens before there is a session row to fail. Record one anyway: an
   // article left 'running' would be re-queued by recoverStranded every 30
   // minutes forever, with nothing on screen to say why.
+  //
+  // Not retried here whatever the class says: nothing about the next few
+  // seconds supplies a credential, and the claim is released either way, so an
+  // operator retry re-runs it. The class is still recorded — it is the whole
+  // point of the column that a card says which kind of failure it hit.
   let model: string | null;
   try {
     model = NO_LLM_AGENTS.has(agent) ? null : await modelFor(agent);
@@ -185,6 +402,8 @@ export async function runStage(article: ArticleRow): Promise<void> {
     await updateArticle(article.id, {
       status: 'failed',
       error: message,
+      failure_class: classifyFailure(err).failureClass,
+      stage_attempts: 1,
       claimed_by: null,
       claimed_at: null,
     });
@@ -192,234 +411,111 @@ export async function runStage(article: ArticleRow): Promise<void> {
     return;
   }
 
-  const tracker = new UsageTracker();
+  // Each attempt gets its own session row, so the tokens a failed attempt
+  // spent stay on the record instead of being overwritten by the one that
+  // worked.
+  let current = article;
+  for (let attempt = 1; ; attempt++) {
+    const tracker = new UsageTracker();
 
-  const [session] = await q<{ id: string }>(
-    `INSERT INTO agent_sessions (article_id, agent, model) VALUES ($1, $2, $3) RETURNING id`,
-    [article.id, agent, model],
-  );
-
-  const finishSession = async (status: 'done' | 'failed', summary: string, error?: string) => {
-    await q(
-      `UPDATE agent_sessions SET status = $2, summary = $3, error = $4,
-         tokens_input = $5, tokens_output = $6, cost_usd = $7, llm_calls = $8,
-         model = COALESCE($9, model), ended_at = now()
-       WHERE id = $1`,
-      [
-        session.id,
-        status,
-        summary,
-        error ?? null,
-        tracker.tokensInput,
-        tracker.tokensOutput,
-        tracker.costUsd,
-        tracker.llmCalls,
-        tracker.models.size > 0 ? [...tracker.models].join(',') : null,
-      ],
+    const [session] = await q<{ id: string }>(
+      `INSERT INTO agent_sessions (article_id, agent, model) VALUES ($1, $2, $3) RETURNING id`,
+      [article.id, agent, model],
     );
-  };
 
-  try {
-    let next: { stage: Stage; status: string } = { stage: 'done', status: 'done' };
-    let summary = '';
+    const finishSession = async (status: 'done' | 'failed', summary: string, error?: string) => {
+      await q(
+        `UPDATE agent_sessions SET status = $2, summary = $3, error = $4,
+           tokens_input = $5, tokens_output = $6, cost_usd = $7, llm_calls = $8,
+           model = COALESCE($9, model), ended_at = now()
+         WHERE id = $1`,
+        [
+          session.id,
+          status,
+          summary,
+          error ?? null,
+          tracker.tokensInput,
+          tracker.tokensOutput,
+          tracker.costUsd,
+          tracker.llmCalls,
+          tracker.models.size > 0 ? [...tracker.models].join(',') : null,
+        ],
+      );
+    };
 
-    switch (stage) {
-      case 'research': {
-        const topic = article.topic_id
-          ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
-          : null;
-        const dossier = await runResearcher(article, topic, model!, tracker);
-        await updateArticle(article.id, { research: JSON.stringify(dossier) });
-        summary = `${dossier.facts?.length ?? 0} facts, ${dossier.products?.length ?? 0} products, primary keyword "${dossier.keywords?.primary}"`;
-        next = { stage: 'keyword', status: 'queued' };
-        break;
-      }
-      case 'keyword': {
-        const topic = article.topic_id
-          ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
-          : null;
-        const plan = await runKeywordStrategist(article, topic, model!, tracker);
-        await updateArticle(article.id, { keyword_plan: JSON.stringify(plan) });
-        // Earliest point at which "this piece has nothing to link" is knowable:
-        // the dossier is built, and the SERP read has just named the intent.
-        // Deal with it here rather than at assemble - outline, write, review
-        // and up to two edit rounds all run on Opus 5 in between.
-        //
-        // A missing product list is a narrow, recoverable fault, so it gets a
-        // discovery pass before the card is failed: the research stage filed
-        // its evidence and skipped the contenders, and one focused search is
-        // what it takes to fill that in. Only an empty result is terminal.
-        let discoveryNote = '';
-        if ((article.research?.products?.length ?? 0) === 0 && MONETISED_INTENTS.has(plan.intent)) {
-          const products = await runProductDiscovery(
-            article,
-            topic,
-            plan.primaryKeyword,
-            model!,
-            tracker,
-          );
-          if (products.length === 0) {
-            throw new Error(
-              `the dossier has no products and a discovery pass for "${plan.primaryKeyword}" found ` +
-                `none either, but the SERP read says this is a ${plan.intent} query - there would be ` +
-                `nothing on the page for a reader to click. Re-run research (a "${article.post_type}" ` +
-                `is not required to find products, so it did not) or add them to the topic brief by hand.`,
-            );
-          }
-          await updateArticle(article.id, {
-            research: JSON.stringify(withDiscoveredProducts(article.research, products)),
-          });
-          discoveryNote = `, ${products.length} product(s) recovered by a discovery pass`;
-        }
-        summary = `"${plan.primaryKeyword}" — ${plan.intent}, ${plan.difficulty} difficulty, ${plan.zeroClickRisk} zero-click risk, ${plan.wordCountTarget} words, ${plan.contentGaps.length} gap(s) to exploit${discoveryNote}`;
-        next = { stage: 'angle', status: 'queued' };
-        break;
-      }
-      case 'angle': {
-        const topic = article.topic_id
-          ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
-          : null;
-        const angle = await runAngleEditor(article, topic, model!, tracker);
-        await updateArticle(article.id, { editorial_angle: JSON.stringify(angle) });
-        summary = angle.defensible
-          ? `"${angle.thesis}" - ${angle.shape} shape, ${angle.informationGain.length} claim(s) the top results miss, ${angle.byline} beat`
-          : `no defensible take recorded (${angle.weakness}) - ${angle.shape} shape, ${angle.byline} beat`;
-        next = { stage: 'outline', status: 'queued' };
-        break;
-      }
-      case 'outline': {
-        const brief = await runOutliner(article, model!, tracker);
-        brief.slug = await uniqueSlug(article.id, brief.slug);
-        // The shape goes in its own column as well as inside the brief: the
-        // brief is what carries it into the writer and reviewer prompts, the
-        // column is the record of the decision an operator can see and query.
-        // Both are written here so they can never disagree.
-        const shape = brief.structureShape ?? null;
+    try {
+      const { summary, next } = await executeStage(stage, current, model, tracker);
+
+      await finishSession('done', summary);
+      await updateArticle(article.id, {
+        stage: next.stage,
+        status: next.status,
+        error: null,
+        failure_class: null,
+        stage_attempts: attempt,
+        claimed_by: null,
+        claimed_at: null,
+      });
+      console.log(
+        `[pipeline] ${article.id} ${stage} done → ${next.stage}/${next.status}: ${summary}` +
+          (attempt > 1 ? ` (recovered on attempt ${attempt})` : ''),
+      );
+      return;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const { failureClass, signal } = classifyFailure(err);
+      const retrying = failureClass === 'transient' && attempt < MAX_STAGE_ATTEMPTS;
+
+      await finishSession(
+        'failed',
+        retrying
+          ? `${stage} failed (${signal}, attempt ${attempt} of ${MAX_STAGE_ATTEMPTS}) - retrying`
+          : `${stage} failed`,
+        message,
+      );
+
+      if (!retrying) {
         await updateArticle(article.id, {
-          outline: JSON.stringify(brief),
-          structure_shape: shape ? JSON.stringify(shape) : null,
-          slug: brief.slug,
-          title: brief.seoTitle,
+          status: 'failed',
+          error: message,
+          failure_class: failureClass,
+          stage_attempts: attempt,
+          claimed_by: null,
+          claimed_at: null,
         });
-        summary = `"${brief.seoTitle}" — ${shape ? `${describeShapeSelection(shape)}, ` : ''}${brief.sections?.length ?? 0} sections, target ${brief.wordCountTarget} words`;
-        next = { stage: 'write', status: 'queued' };
-        break;
+        console.error(`[pipeline] ${article.id} ${stage} FAILED (${failureClass}): ${message}`);
+        return;
       }
-      case 'write': {
-        const topic = article.topic_id
-          ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
-          : null;
-        const draft = await runWriter(article, topic, model!, tracker);
-        await updateArticle(article.id, { draft_md: draft });
-        summary = `draft written (${draft.split(/\s+/).length} words)`;
-        next = { stage: 'seo_review', status: 'queued' };
-        break;
+
+      // The count lands before the wait, not after it: an operator watching a
+      // card that is mid-backoff should see that it is on its second run.
+      // `claimed_at` is renewed at the same time, because the claim is a lease
+      // — a card on its third attempt is being worked on, not stranded, and
+      // recoverStranded must not hand it to a second worker mid-retry.
+      await updateArticle(article.id, {
+        failure_class: failureClass,
+        stage_attempts: attempt,
+        claimed_at: new Date(),
+      });
+      const delay = stageRetryDelayMs(attempt);
+      console.warn(
+        `[pipeline] ${article.id} ${stage} transient failure (${signal}) on attempt ${attempt}, ` +
+          `retrying in ${delay}ms: ${message}`,
+      );
+      await sleep(delay);
+
+      // Re-read rather than retry against the row we claimed: a failed attempt
+      // may have written part of its work, and an operator may have cancelled
+      // the card while we waited. Anything that is no longer ours to run ends
+      // the loop without touching the row.
+      const [reloaded] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [article.id]);
+      if (!reloaded || reloaded.status !== 'running' || reloaded.stage !== stage) {
+        console.warn(
+          `[pipeline] ${article.id} ${stage} retry abandoned - the article moved on while we waited`,
+        );
+        return;
       }
-      case 'seo_review': {
-        const review = await runSeoReviewer(article, model!, tracker);
-        const maxRounds = await getSetting<number>('max_revision_rounds', 2);
-        if (!review.pass && article.revision_round >= maxRounds) {
-          review.forcedThrough = true;
-        }
-        await updateArticle(article.id, { seo_review: JSON.stringify(review) });
-        summary = summariseReview(review);
-        next =
-          review.pass || review.forcedThrough
-            ? { stage: 'assemble', status: 'queued' }
-            : { stage: 'edit', status: 'queued' };
-        break;
-      }
-      case 'edit': {
-        const revised = await runEditor(article, model!, tracker);
-        await updateArticle(article.id, {
-          draft_md: revised,
-          revision_round: article.revision_round + 1,
-          // Admin feedback is consumed by exactly one edit pass.
-          feedback: null,
-        });
-        summary = `revision round ${article.revision_round + 1} applied${article.feedback ? ' (incl. admin feedback)' : ''}`;
-        next = { stage: 'seo_review', status: 'queued' };
-        break;
-      }
-      case 'assemble': {
-        const assembled = await runAssembler(article);
-        await updateArticle(article.id, {
-          draft_md: assembled.body,
-          frontmatter: JSON.stringify(assembled.frontmatter),
-          affiliate_links: JSON.stringify(assembled.affiliateLinks),
-        });
-        summary = `frontmatter + ${assembled.affiliateLinks.length} affiliate link(s) validated${
-          assembled.healedSlugs.length > 0
-            ? ` (${assembled.healedSlugs.length} healed from the draft: ${assembled.healedSlugs.join(', ')})`
-            : ''
-        }${
-          assembled.droppedSlugs.length > 0
-            ? `; stripped unlinkable: ${assembled.droppedSlugs.join(', ')}`
-            : ''
-        }`;
-        next = { stage: 'image', status: 'queued' };
-        break;
-      }
-      case 'image': {
-        const existing = article.frontmatter ?? {};
-        if (article.hero_image_url) {
-          // The operator dropped a file in the admin panel; the assembler has
-          // already stamped it into frontmatter. Searching would be waste.
-          summary = 'operator-supplied hero image — image search skipped';
-        } else if (existing.heroImage) {
-          summary = 'hero image already set — keeping it';
-        } else {
-          const image = await runImageAgent(article, model!);
-          if (image.heroImage) {
-            await updateArticle(article.id, {
-              frontmatter: JSON.stringify({
-                ...existing,
-                heroImage: image.heroImage,
-                heroAlt: image.heroAlt ?? undefined,
-              }),
-            });
-          }
-          summary = image.summary;
-        }
-        const publishMode = await getSetting<string>('publish_mode', 'approval');
-        next =
-          publishMode === 'approval'
-            ? { stage: 'publish', status: 'waiting_approval' }
-            : { stage: 'publish', status: 'queued' };
-        break;
-      }
-      case 'publish': {
-        const result = await runPublisher(article);
-        await updateArticle(article.id, { published_at: new Date().toISOString() });
-        if (article.topic_id) {
-          await q("UPDATE topics SET status = 'approved', updated_at = now() WHERE id = $1", [
-            article.topic_id,
-          ]);
-        }
-        summary = `${result.slug} → D1 as '${result.d1Status}'${result.dispatched ? ', site rebuild dispatched' : ''}`;
-        next = { stage: 'done', status: 'done' };
-        break;
-      }
+      current = reloaded;
     }
-
-    await finishSession('done', summary);
-    await updateArticle(article.id, {
-      stage: next.stage,
-      status: next.status,
-      error: null,
-      claimed_by: null,
-      claimed_at: null,
-    });
-    console.log(`[pipeline] ${article.id} ${stage} done → ${next.stage}/${next.status}: ${summary}`);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await finishSession('failed', `${stage} failed`, message);
-    await updateArticle(article.id, {
-      status: 'failed',
-      error: message,
-      claimed_by: null,
-      claimed_at: null,
-    });
-    console.error(`[pipeline] ${article.id} ${stage} FAILED: ${message}`);
   }
 }

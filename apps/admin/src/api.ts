@@ -69,6 +69,15 @@ export interface ArticleSummary {
   seo_score: string | null;
   hero_image_url: string | null;
   error: string | null;
+  /**
+   * How the last stage run failed: 'transient' (the pipeline retried it and
+   * kept hitting a parse, timeout or transport fault) or 'genuine' (the stage
+   * rejected the content itself). Null on a card that has not failed, and on
+   * one that failed before the taxonomy existed.
+   */
+  failure_class: string | null;
+  /** Attempts the last stage run took, the successful one included. */
+  stage_attempts: number;
   published_at: string | null;
   created_at: string;
   updated_at: string;
