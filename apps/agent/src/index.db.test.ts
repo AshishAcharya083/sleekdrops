@@ -62,8 +62,12 @@ async function rejectsWrongPassword(): Promise<boolean> {
   return (await probe({ connectionString: wrongPassword.href })) !== undefined;
 }
 
-const skip = !reachable
-  ? 'no reachable DATABASE_URL - start Postgres to run these'
+const skipLive: string | false = reachable
+  ? false
+  : 'no reachable DATABASE_URL - start Postgres to run these';
+
+const skip: string | false = skipLive
+  ? skipLive
   : (await rejectsWrongPassword())
     ? false
     : 'this Postgres accepts any password - no credential error to surface';
@@ -121,20 +125,84 @@ function bootAgent(overrides: Record<string, string | undefined>, script = ENTRY
   };
 }
 
-test('boot retries an unreachable database instead of exiting', { timeout: 60_000 }, async () => {
-  // Port 1 is unbound, so every connection is refused - the shape of the
-  // failure that used to kill the process before the server ever listened.
-  const agent = bootAgent({ DATABASE_URL: 'postgres://unused:unused@127.0.0.1:1/unreachable' });
-  try {
-    await agent.waitFor(/database not reachable yet, retrying/);
-    await agent.waitFor(/"attempt":2/);
-    assert.equal(agent.child.exitCode, null, 'the agent exited instead of waiting for Postgres');
-    assert.doesNotMatch(agent.output(), /\[agent\] fatal/);
-  } finally {
-    agent.child.kill('SIGKILL');
-    await agent.exited;
-  }
-});
+/** The boot wait window - `waitForDatabase`'s own default, spent before giving up. */
+const BOOT_WAIT_MS = 30_000;
+
+test(
+  'boot retries an unreachable database, then exits naming DATABASE_URL',
+  { timeout: 120_000 },
+  async () => {
+    // Port 1 is unbound, so every connection is refused - the shape of the
+    // failure that used to kill the process before the server ever listened.
+    const agent = bootAgent({ DATABASE_URL: 'postgres://unused:unused@127.0.0.1:1/unreachable' });
+    const startedAt = Date.now();
+    try {
+      await agent.waitFor(/database not reachable yet, retrying/);
+      await agent.waitFor(/"attempt":2/);
+      assert.equal(agent.child.exitCode, null, 'the agent exited instead of waiting for Postgres');
+
+      // Only when the whole window is spent does it give up - and what the
+      // operator reads then is the dialed target and the variable to set,
+      // rather than the bare ECONNREFUSED the demo failure produced.
+      assert.equal(await agent.exited, 1, 'boot did not exit 1 once the wait window ran out');
+      const elapsed = Date.now() - startedAt;
+      assert.ok(elapsed >= BOOT_WAIT_MS, `gave up after ${elapsed}ms, before the window was spent`);
+      assert.match(agent.output(), /no Postgres answering at 127\.0\.0\.1:1/);
+      assert.match(agent.output(), /set DATABASE_URL to a reachable Postgres/);
+      assert.doesNotMatch(agent.output(), /listening/);
+    } finally {
+      agent.child.kill('SIGKILL');
+      await agent.exited;
+    }
+  },
+);
+
+// The demo ordering itself: the app starts first and the database only answers
+// seconds later. A TCP proxy stands in for the database container - it refuses
+// connections until it starts listening - so boot has to recover and go on to
+// migrate and serve instead of dying on the first refusal.
+test(
+  'boot recovers when the database only arrives after the app',
+  { skip: skipLive, timeout: 90_000 },
+  async () => {
+    const upstream = new URL(liveUrl);
+    const proxyPort = await freePort();
+    const sockets = new Set<net.Socket>();
+    const proxy = net.createServer((client) => {
+      const server = net.connect(Number(upstream.port || 5432), upstream.hostname);
+      for (const socket of [client, server]) {
+        sockets.add(socket);
+        socket.on('close', () => sockets.delete(socket));
+        socket.on('error', () => {
+          client.destroy();
+          server.destroy();
+        });
+      }
+      client.pipe(server).pipe(client);
+    });
+    const proxyUrl = new URL(upstream.href);
+    proxyUrl.hostname = '127.0.0.1';
+    proxyUrl.port = String(proxyPort);
+
+    const port = await freePort();
+    const agent = bootAgent({ DATABASE_URL: proxyUrl.href, PORT: String(port) });
+    try {
+      await agent.waitFor(/database not reachable yet, retrying/);
+      proxy.listen(proxyPort, '127.0.0.1');
+
+      await agent.waitFor(/admin API \+ panel listening/);
+      const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { ok: true });
+      assert.doesNotMatch(agent.output(), /\[agent\] fatal/);
+    } finally {
+      agent.child.kill('SIGKILL');
+      await agent.exited;
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  },
+);
 
 test(
   'boot fails fast on a credential error rather than waiting out the window',
