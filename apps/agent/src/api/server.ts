@@ -531,7 +531,8 @@ export function createApp(): Hono<TraceEnv> {
   app.get('/api/articles', async (c) => {
     const rows = await q(
       `SELECT id, topic_id, title, slug, category, post_type, stage, status,
-              revision_round, error, published_at, created_at, updated_at,
+              revision_round, error, failure_class, stage_attempts,
+              published_at, created_at, updated_at,
               hero_image_url, (seo_review ->> 'score') seo_score
        FROM articles ORDER BY updated_at DESC LIMIT 200`,
     );
@@ -550,7 +551,10 @@ export function createApp(): Hono<TraceEnv> {
 
   app.post('/api/articles/:id/retry', async (c) => {
     const rows = await q(
-      `UPDATE articles SET status = 'queued', error = NULL, updated_at = now()
+      // The class goes with the message: what the card carries next is
+      // whatever this run produces, not the verdict on the last one.
+      `UPDATE articles SET status = 'queued', error = NULL, failure_class = NULL,
+              stage_attempts = 0, updated_at = now()
        WHERE id = $1 AND status IN ('failed', 'cancelled') RETURNING id`,
       [c.req.param('id')],
     );

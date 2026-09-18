@@ -6,7 +6,7 @@
 // published a buying guide with an empty affiliate table.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractJson, requireKeys } from './index.js';
+import { extractJson, JSON_REPROMPT_BUDGET, repromptJson, requireKeys } from './index.js';
 
 test('a bare JSON object parses', () => {
   assert.deepEqual(extractJson('{"a":1}'), { a: 1 });
@@ -63,4 +63,83 @@ test('requireKeys tolerates a null-valued key but not a missing one', () => {
   const check = requireKeys<{ amazonUrl: unknown }>('amazonUrl');
   assert.equal(check({ amazonUrl: null }), null);
   assert.match(String(check({})), /amazonUrl/);
+});
+
+// ── The reprompt budget ────────────────────────────────────────────────────
+//
+// The card that started this: the outliner replied with malformed JSON, was
+// reprompted once, replied with malformed JSON again, and the article died on
+// "Expected ',' or ']' in JSON at position 2546". Two bad replies in a row now
+// cost a third ask instead of the card.
+
+/**
+ * A brief whose section array drops a comma between two objects - balanced
+ * braces, malformed content. This is the exact shape that produced the
+ * reported "Expected ',' or ']' after array element in JSON at position 2546".
+ */
+const MALFORMED_BRIEF =
+  `{"seoTitle":"Best cordless stick vacuums in Australia","dek":"Tested picks.",` +
+  `"slug":"best-cordless-stick-vacuums","sections":[{"h2":"How we picked"}` +
+  `{"h2":"The shortlist"}],"wordCountTarget":2200}`;
+
+const GOOD_BRIEF =
+  `{"seoTitle":"Best cordless stick vacuums in Australia","dek":"Tested picks.",` +
+  `"slug":"best-cordless-stick-vacuums","sections":[{"h2":"How we picked"}],` +
+  `"wordCountTarget":2200}`;
+
+test('the reported outliner parse failure now recovers on the third ask', async () => {
+  const prompts: string[] = [];
+  const replies = [MALFORMED_BRIEF, MALFORMED_BRIEF, GOOD_BRIEF];
+  const brief = await repromptJson<{ seoTitle: string }>(
+    async (prompt) => {
+      prompts.push(prompt);
+      return replies[prompts.length - 1];
+    },
+    'Create the SEO content brief for this piece.',
+    requireKeys<{ seoTitle: unknown; slug: unknown; sections: unknown }>('seoTitle', 'slug', 'sections'),
+  );
+
+  assert.equal(brief.seoTitle, 'Best cordless stick vacuums in Australia');
+  assert.equal(prompts.length, 3, 'one call plus the two reprompts the budget allows');
+  assert.match(prompts[1], /could not be used/, 'the model is told what was wrong with the reply');
+  assert.match(prompts[2], /2 unusable replies/, 'the second reprompt escalates rather than repeating');
+});
+
+test('a reply that is never usable still fails, with the parse error intact', async () => {
+  let calls = 0;
+  await assert.rejects(
+    repromptJson<unknown>(async () => {
+      calls++;
+      return MALFORMED_BRIEF;
+    }, 'Create the SEO content brief for this piece.'),
+    /in JSON at position/,
+    'the message the stage runner classifies as a transient parse failure',
+  );
+  assert.equal(calls, 1 + JSON_REPROMPT_BUDGET, 'the budget is bounded, not a loop');
+});
+
+test('a shape complaint is reprompted, and the complaint is what the model is told', async () => {
+  const prompts: string[] = [];
+  const value = await repromptJson<{ facts: unknown[] }>(
+    async (prompt) => {
+      prompts.push(prompt);
+      return prompts.length === 1 ? '{"summary":"..."}' : '{"summary":"...","facts":[]}';
+    },
+    'Synthesize a research dossier.',
+    requireKeys<{ facts: unknown }>('facts'),
+  );
+  assert.deepEqual(value.facts, []);
+  assert.match(prompts[1], /Missing required field\(s\): facts/);
+});
+
+test('a transport fault is not reprompted — chat() has already retried it', async () => {
+  let calls = 0;
+  await assert.rejects(
+    repromptJson<unknown>(async () => {
+      calls++;
+      throw new TypeError('fetch failed');
+    }, 'Plan web research for this piece.'),
+    /fetch failed/,
+  );
+  assert.equal(calls, 1, 're-asking a down socket for better JSON buys nothing');
 });

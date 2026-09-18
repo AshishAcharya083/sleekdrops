@@ -10,6 +10,7 @@ import type {
 } from '../api';
 import { api, apiUpload, duration, fmtCost, fmtTime } from '../api';
 import { ApiErrorBanner, Badge } from '../components';
+import { failureNote } from '../failure';
 import { HeroImageField } from '../HeroImageField';
 import { usePoll } from '../hooks';
 
@@ -42,6 +43,7 @@ export function Pipeline() {
                   <div className="meta">
                     <Badge value={a.stage} />
                     <Badge value={a.status} />
+                    <FailureBadge article={a} />
                     {a.seo_score && <span className="badge">SEO {a.seo_score}</span>}
                     {a.hero_image_url && <span className="badge violet">🖼️ hero</span>}
                   </div>
@@ -59,6 +61,48 @@ export function Pipeline() {
       </div>
       {openId && <ArticlePanel id={openId} onClose={() => setOpenId(null)} onChanged={refresh} />}
     </>
+  );
+}
+
+/**
+ * Whether a failed card needs a person or just another run, at a glance. Shows
+ * nothing at all on a card that has not failed, or on one that failed before
+ * the pipeline classified its failures.
+ */
+function FailureBadge({
+  article,
+}: {
+  article: Pick<ArticleSummary, 'status' | 'failure_class' | 'stage_attempts'>;
+}) {
+  const note = failureNote(article);
+  if (!note) return null;
+  return (
+    <span className={`badge ${note.tone}`} title={note.title}>
+      {note.badge}
+    </span>
+  );
+}
+
+/**
+ * The same verdict spelled out above the error message, where an operator who
+ * has opened the card is deciding what to do about it. The hover on the badge
+ * is not discoverable enough to carry this on its own.
+ */
+function FailureExplainer({
+  article,
+}: {
+  article: Pick<ArticleSummary, 'status' | 'failure_class' | 'stage_attempts'>;
+}) {
+  const note = failureNote(article);
+  if (!note) return null;
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <strong>
+        {article.failure_class} failure, {article.stage_attempts}{' '}
+        {article.stage_attempts === 1 ? 'attempt' : 'attempts'} — {note.label}
+      </strong>
+      <div style={{ fontSize: 12, marginTop: 2 }}>{note.title}</div>
+    </div>
   );
 }
 
@@ -460,6 +504,7 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
             <div className="row">
               <Badge value={detail.article.stage} />
               <Badge value={detail.article.status} />
+              <FailureBadge article={detail.article} />
               <span className="muted mono">{detail.article.slug ?? 'no slug yet'}</span>
               <span className="muted">rev {detail.article.revision_round}</span>
             </div>
@@ -493,6 +538,7 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
               // Collapsed to one line it is unreadable at exactly the moment
               // an operator needs to read it.
               <div className="error-banner" style={{ marginTop: 12, whiteSpace: 'pre-wrap' }}>
+                <FailureExplainer article={detail.article} />
                 {detail.article.error}
               </div>
             )}
