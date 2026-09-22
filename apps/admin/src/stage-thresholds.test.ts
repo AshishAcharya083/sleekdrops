@@ -1,9 +1,9 @@
 /**
  * The threshold scale, the stage bookkeeping and the fixed operator copy.
  *
- * Both sides of the platform apply the same two boundaries - the agent decides
- * which runs land on the Overview's stuck surface, the panel decides how a
- * cell is coloured - so a disagreement here is a run that is listed as stuck
+ * Both sides of the platform apply the same two boundaries - the agent stops a
+ * run at its budget, the panel decides which runs are listed as stuck and how
+ * a cell is coloured - so a disagreement here is a run that is listed as stuck
  * and then renders as ordinary. stages.ts is pure, so unlike the rest of the
  * panel this is a real unit test rather than a source-level guard.
  */
@@ -30,9 +30,12 @@ import {
   stopControlHint,
   stopControlLabel,
   stoppedNotice,
+  STAGE_AGENT,
+  stuckRuns,
   timedOutSentence,
   UNTESTABLE_STAGE_HINT,
   type StageSession,
+  type StuckArticle,
 } from './stages.ts';
 
 const HOUR = 3600;
@@ -303,4 +306,145 @@ test('publish is the one stage an isolated test never offers to run', () => {
   assert.equal(isTestableStage('publish'), false, 'writing to the live site is all it does');
   assert.equal(isTestableStage('done'), false, 'and done runs no agent at all');
   assert.match(UNTESTABLE_STAGE_HINT, /cannot be tested on its own/);
+});
+
+/**
+ * The Overview surface, derived off the two payloads the tab holds. The agent
+ * reports no stuck section of its own, so this derivation is the surface: if
+ * it answers nothing, a wedged run is invisible on the landing screen, which
+ * is the exact failure this feature exists to end.
+ */
+const NOW = Date.parse('2026-09-22T12:00:00.000Z');
+const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();
+
+const article = (over: Partial<StuckArticle> & { status: string }): StuckArticle => ({
+  id: 'a1',
+  title: 'Best cordless stick vacuums',
+  stage: 'seo_review',
+  ...over,
+});
+
+test('a run past the soft bound of its stage budget is surfaced, one inside it is not', () => {
+  const list = [
+    article({ id: 'slow', status: 'running', claimed_at: ago(31), lease_expires_at: ago(-4) }),
+    article({ id: 'fine', status: 'running', claimed_at: ago(20), lease_expires_at: ago(-4) }),
+  ];
+  const runs = stuckRuns(list, [], null, NOW);
+  assert.deepEqual(runs.map((r) => r.article_id), ['slow'], 'only the one past half its hour');
+  assert.equal(Math.round(runs[0].elapsed_seconds ?? 0), 31 * 60, 'measured from the claim');
+  assert.equal(runs[0].budget_seconds, HOUR);
+  assert.equal(runs[0].agent, 'seo_reviewer', 'named by the agent its stage runs under');
+  assert.equal(runs[0].lease_expired, false);
+});
+
+test('a run the budget already stopped is always surfaced, however long ago', () => {
+  const runs = stuckRuns(
+    [article({ id: 'stopped', status: 'timed_out', stage: 'write', updated_at: ago(600) })],
+    [
+      {
+        id: 's1',
+        article_id: 'stopped',
+        agent: 'writer',
+        status: 'timed_out',
+        started_at: ago(660),
+        ended_at: ago(600),
+      },
+    ],
+    null,
+    NOW,
+  );
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].session_id, 's1', 'linked at the session that recorded it');
+  assert.equal(Math.round(runs[0].elapsed_seconds ?? 0), 60 * 60, 'off the session that ran it');
+  assert.equal(runs[0].agent, 'writer');
+});
+
+test('a stopped run whose session has aged off the list reports no elapsed time', () => {
+  // The reaper clears the lease columns as it stops the run, so nothing on the
+  // article says when it started. An invented figure would be the one number
+  // on this surface that measured nothing.
+  const [run] = stuckRuns([article({ status: 'timed_out', updated_at: ago(5) })], [], null, NOW);
+  assert.equal(run.elapsed_seconds, null);
+  assert.equal(run.budget_seconds, HOUR, 'the budget it was stopped by is still known');
+});
+
+test('a claim whose lease has lapsed is surfaced before it is past any bound', () => {
+  const [run] = stuckRuns(
+    [article({ status: 'running', claimed_at: ago(6), lease_expires_at: ago(1) })],
+    [],
+    null,
+    NOW,
+  );
+  assert.equal(run.lease_expired, true, 'nothing is renewing it - it is wedged, not slow');
+  assert.equal(elapsedBand(run.elapsed_seconds ?? 0, run.budget_seconds), 'normal');
+});
+
+test('a healthy pipeline produces an empty surface, not a hidden one', () => {
+  const list = [
+    article({ id: 'queued', status: 'queued' }),
+    article({ id: 'done', status: 'done', stage: 'done' }),
+    article({ id: 'failed', status: 'failed' }),
+    article({ id: 'live', status: 'running', claimed_at: ago(4), lease_expires_at: ago(-4) }),
+  ];
+  assert.deepEqual(stuckRuns(list, [], null, NOW), []);
+});
+
+test('the surface reads the budgets the agent reported, not a built-in hour', () => {
+  const budgets = { default_seconds: 600, per_stage: { seo_review: 1200 } };
+  const [run] = stuckRuns(
+    [article({ status: 'running', claimed_at: ago(11), lease_expires_at: ago(-4) })],
+    [],
+    budgets,
+    NOW,
+  );
+  assert.equal(run.budget_seconds, 1200, 'the stage override, not the default');
+  const onDefault = stuckRuns(
+    [article({ status: 'running', stage: 'write', claimed_at: ago(6), lease_expires_at: ago(-4) })],
+    [],
+    budgets,
+    NOW,
+  );
+  assert.equal(onDefault[0].budget_seconds, 600);
+});
+
+test('an isolated test run never describes the state of the article', () => {
+  const [run] = stuckRuns(
+    [article({ status: 'timed_out' })],
+    [
+      { id: 't1', article_id: 'a1', agent: 'seo_reviewer', kind: 'test', status: 'timed_out', started_at: ago(90), ended_at: ago(30) },
+    ],
+    null,
+    NOW,
+  );
+  assert.equal(run.session_id, null, 'a test wrote nothing and stopped nothing');
+  assert.equal(run.elapsed_seconds, null);
+});
+
+test('every stage names the agent that runs it, both ways round', () => {
+  for (const [agent, stage] of Object.entries(AGENT_STAGE)) {
+    assert.equal(STAGE_AGENT[stage], agent);
+  }
+});
+
+test('a stage the run has passed is no longer out of date, even if it never ran', () => {
+  // `edit` runs only when seo_review fails. A retry from write whose new draft
+  // passes review first time skips it - and the marker has to clear anyway, or
+  // a live, published article carries "Out of date" for ever.
+  const stale = outOfDateStages({ stale_from_stage: 'write', stage: 'done', attempt: 2 }, [
+    session({ agent: 'writer', attempt: 2, status: 'done' }),
+    session({ agent: 'seo_reviewer', attempt: 2, status: 'done' }),
+    session({ agent: 'assembler', attempt: 2, status: 'done' }),
+    session({ agent: 'image_agent', attempt: 2, status: 'done' }),
+    session({ agent: 'publisher', attempt: 2, status: 'done' }),
+  ]);
+  assert.equal(stale.size, 0, 'nothing on a published article is labelled stale');
+});
+
+test('the marker still holds on everything the run has not reached again', () => {
+  const stale = outOfDateStages({ stale_from_stage: 'write', stage: 'assemble', attempt: 2 }, []);
+  assert.equal(stale.has('write'), false, 'the run is past it');
+  assert.equal(stale.has('edit'), false, 'skipped, and behind the run');
+  for (const stage of ['assemble', 'image', 'publish']) {
+    assert.ok(stale.has(stage), `${stage} has not been regenerated yet`);
+  }
 });

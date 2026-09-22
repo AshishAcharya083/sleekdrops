@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
-import type { Overview as OverviewData, StuckRun } from '../api';
+import type { ArticleList, Overview as OverviewData, StuckRun } from '../api';
 import {
   api,
   budgetMinutes,
@@ -12,11 +12,12 @@ import {
   fmtTokens,
   isStoppable,
   sessionBudgetSeconds,
-  stageBudgetSeconds,
   stopControlHint,
   stopControlLabel,
   stoppedNotice,
+  stuckRuns,
   timedOutSentence,
+  type ElapsedBand,
 } from '../api';
 import { toApiError, type ApiError } from '../api-error';
 import { ApiErrorBanner, Badge, Elapsed, Stat } from '../components';
@@ -30,11 +31,16 @@ const SECTION_LABELS: Record<string, string> = {
   usage30d: '30-day usage',
   recentSessions: 'recent sessions',
   settings: 'publish settings',
-  stuck: 'stuck runs',
 };
 
 export function Overview({ onOpenRun }: { onOpenRun?: (articleId: string) => void }) {
   const { data, error, refresh } = usePoll<OverviewData>('/api/overview');
+  // The triage surface is derived from the article list, not read off the
+  // overview: the agent's overview reports counts, and it is the article list
+  // that carries the claim, the lease and the stage budgets a run is slow or
+  // stuck against. Polled here rather than lifted into the shell so the tab
+  // keeps owning its own data, the way every other tab does.
+  const board = usePoll<ArticleList>('/api/articles');
   // The landing screen keeps the last payload it loaded: a failing poll adds a
   // banner above the dashboard instead of emptying it, and only a first load
   // that has never succeeded shows the placeholder.
@@ -57,10 +63,19 @@ export function Overview({ onOpenRun }: { onOpenRun?: (articleId: string) => voi
   const stale = (section: string) => failedSections.includes(section);
   /** A figure the agent could not load is shown as unknown, never as a zero. */
   const figure = (section: string, value: string | number) => (stale(section) ? '—' : value);
+  /**
+   * The runs that need an operator, off the two payloads this tab already
+   * holds: the article list decides which runs they are, and the recent
+   * sessions name the agent behind each and carry the elapsed time of a run
+   * whose claim was cleared as the budget stopped it.
+   */
+  const stuck = board.data
+    ? stuckRuns(board.data.articles, data.recentSessions, board.data.budgets)
+    : undefined;
 
   return (
     <>
-      <ApiErrorBanner error={error} />
+      <ApiErrorBanner error={error ?? board.error} />
       {failedSections.length > 0 && (
         <div className="warn-banner" role="status">
           The agent could not load {failedSections.map((s) => SECTION_LABELS[s] ?? s).join(', ')} -
@@ -71,10 +86,13 @@ export function Overview({ onOpenRun }: { onOpenRun?: (articleId: string) => voi
       {/* First on screen on purpose: a wedged run is the one thing on this tab
           that will not fix itself, so it sits above the stat row. */}
       <NeedsAttention
-        runs={data.stuck}
-        failed={stale('stuck')}
+        runs={stuck}
+        failed={!board.data && Boolean(board.error)}
         onOpenRun={onOpenRun}
-        onChanged={refresh}
+        onChanged={() => {
+          refresh();
+          board.refresh();
+        }}
       />
 
       <div className="grid cols-4">
@@ -148,7 +166,7 @@ export function Overview({ onOpenRun }: { onOpenRun?: (articleId: string) => voi
                         went 2702 minutes cannot read as an ordinary duration. */}
                     <Elapsed
                       seconds={elapsedSeconds(s.started_at, s.ended_at)}
-                      budgetSeconds={sessionBudgetSeconds(s)}
+                      budgetSeconds={sessionBudgetSeconds(s, board.data?.budgets)}
                       status={s.status}
                     />
                   </td>
@@ -176,7 +194,7 @@ export function Overview({ onOpenRun }: { onOpenRun?: (articleId: string) => voi
   );
 }
 
-/** The two groups the stuck surface splits into, in the order they are read. */
+/** The groups the stuck surface splits into, in the order they are read. */
 const STUCK_GROUPS: Array<{ key: string; title: string; match: (run: StuckRun) => boolean }> = [
   {
     key: 'timed_out',
@@ -184,9 +202,14 @@ const STUCK_GROUPS: Array<{ key: string; title: string; match: (run: StuckRun) =
     match: (run) => run.status === 'timed_out',
   },
   {
+    key: 'stalled',
+    title: 'Stalled - the worker holding the claim stopped reporting',
+    match: (run) => run.status !== 'timed_out' && Boolean(run.lease_expired),
+  },
+  {
     key: 'running',
     title: 'Running long - past the soft bound, nothing has stopped it',
-    match: (run) => run.status !== 'timed_out',
+    match: (run) => run.status !== 'timed_out' && !run.lease_expired,
   },
 ];
 
@@ -197,7 +220,7 @@ const STUCK_GROUPS: Array<{ key: string; title: string; match: (run: StuckRun) =
  * the ties the agent's own ordering would otherwise leave free.
  */
 const byLongestRunning = (a: StuckRun, b: StuckRun): number =>
-  b.elapsed_seconds - a.elapsed_seconds || a.article_id.localeCompare(b.article_id);
+  (b.elapsed_seconds ?? 0) - (a.elapsed_seconds ?? 0) || a.article_id.localeCompare(b.article_id);
 
 /**
  * Stuck / timed out, above the stat row. A run that has wedged is the only
@@ -205,9 +228,9 @@ const byLongestRunning = (a: StuckRun, b: StuckRun): number =>
  * failure mode was that it read the same as a healthy one: a 2702-minute
  * session sat in the sessions table with an error of "…" and no way out.
  *
- * The surface hides itself entirely when the agent reports no `stuck` section
- * at all - an older agent cannot answer the question, and a false all-clear is
- * worse than no panel.
+ * `runs` is the derived list, absent only until the article list has loaded
+ * once. A list that could not be loaded at all is reported as unknown rather
+ * than as an all-clear the panel never checked.
  */
 function NeedsAttention({
   runs,
@@ -291,10 +314,8 @@ function NeedsAttention({
     onOpenRun?.(articleId);
   };
 
-  // A section the agent could not read is unknown, not clear - and an agent
-  // that has no stuck section at all cannot answer the question, so the
-  // surface hides rather than claiming an all-clear it has not checked.
-  if (!runs && !failed) return null;
+  // Nothing loaded and nothing failed is the first poll, not an all-clear.
+  if (!runs && !failed) return <NeedsAttentionSkeleton />;
 
   if (failed) {
     return (
@@ -303,7 +324,7 @@ function NeedsAttention({
           <h2>Stuck / timed out</h2>
         </div>
         <p className="attn-empty">
-          The agent could not read the stuck runs this time - this surface is unknown, not clear.
+          The article list could not be read this time - this surface is unknown, not clear.
         </p>
       </section>
     );
@@ -386,26 +407,37 @@ function StuckRow({
   onOpen: () => void;
   onStop: () => void;
 }) {
-  const budget = run.budget_seconds ?? stageBudgetSeconds(run.stage);
-  const band = elapsedBand(run.elapsed_seconds, budget, run.status);
+  const budget = run.budget_seconds;
+  const minutes = budgetMinutes(budget);
+  // A run whose elapsed time is on no payload the panel holds still has a band:
+  // one the budget stopped is over it by definition, and a live one would not
+  // be on this surface unless it were at least at the soft bound.
+  const band: ElapsedBand =
+    run.elapsed_seconds === null
+      ? run.status === 'timed_out'
+        ? 'over'
+        : 'warn'
+      : elapsedBand(run.elapsed_seconds, budget, run.status);
+  const ran = run.elapsed_seconds === null ? null : fmtSeconds(run.elapsed_seconds);
   const running = run.status === 'running';
   // State-gated: a run the budget already stopped has nothing left to stop, so
   // most rows carry no destructive target at all.
   const stoppable = isStoppable(run.status);
+  const lapsed = ran ? `Running ${ran} on a lapsed claim` : 'Its claim has lapsed';
   const why =
     run.status === 'timed_out'
       ? timedOutSentence(budget)
-      : run.status === 'queued'
-        ? `Waiting ${fmtSeconds(run.elapsed_seconds)} to start, against a ${budgetMinutes(budget)} minute budget it has not spent yet.`
+      : run.lease_expired
+        ? `${lapsed} - nothing is renewing it, and the next worker tick stops it on the budget.`
         : band === 'over'
-          ? `Still running ${fmtSeconds(run.elapsed_seconds)} into a ${budgetMinutes(budget)} minute budget - nothing has stopped it.`
-          : `Past half of its ${budgetMinutes(budget)} minute budget and still running.`;
+          ? `Still running${ran ? ` ${ran}` : ''} into a ${minutes} minute budget - nothing has stopped it.`
+          : `Past half of its ${minutes} minute budget and still running.`;
 
   return (
     <div className="attn-row">
       <div className="who">
         <div className="agent">
-          {running && <span className="live" aria-hidden="true" />} {run.agent}
+          {running && <span className="live" aria-hidden="true" />} {run.agent ?? 'agent unknown'}
           {run.stage ? ` · ${run.stage}` : ''}
         </div>
         <div className="title">{run.title}</div>

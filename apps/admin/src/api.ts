@@ -94,6 +94,8 @@ export interface ArticleSummary {
   review_stale?: boolean;
   /** A cancel is in flight against a stage that is still running. */
   cancel_requested?: boolean;
+  /** When the worker running this article's stage claimed it. */
+  claimed_at?: string | null;
   heartbeat_at?: string | null;
   lease_expires_at?: string | null;
 }
@@ -136,26 +138,16 @@ export interface Overview {
    * Absent on an agent older than that change.
    */
   failedSections?: string[];
-  /**
-   * Runs at or past the soft bound of their stage budget, plus the ones the
-   * budget already stopped. Absent on an agent without the stage budget, and
-   * the Overview surface is hidden then rather than claiming all-clear.
-   */
-  stuck?: StuckRun[];
 }
 
-/** One wedged run, as the Overview's stuck surface lists it. */
-export interface StuckRun {
-  article_id: string;
-  session_id?: string | null;
-  title: string;
-  stage?: string | null;
-  agent: string;
-  /** 'running' (past the soft bound) or 'timed_out' (stopped by the budget). */
-  status: string;
-  started_at: string;
-  elapsed_seconds: number;
-  budget_seconds?: number;
+/**
+ * GET /api/articles - the pipeline board, and the list the Overview's stuck
+ * surface is derived from. The budgets ride along with it because the same
+ * payload has to answer "how long was this stage allowed?".
+ */
+export interface ArticleList {
+  articles: ArticleSummary[];
+  budgets?: StageBudgets;
 }
 
 /** Keyword strategist output — mirrors KeywordPlan in the agent app. */
@@ -286,6 +278,12 @@ export interface ArticleDetail {
   sessions: Session[];
   /** Stage budgets as the agent has them configured. Read-only, never posted. */
   budgets?: StageBudgets;
+  /**
+   * The stages the agent itself reports as superseded by a retry. Its answer
+   * is the one the retry guards and the publisher are written against, so the
+   * panel renders it rather than its own derivation wherever it is sent.
+   */
+  outOfDateStages?: string[];
   /**
    * The staleness verdict alongside `article.review_stale`, and the agent's
    * own wording for it - the sentence its 409 would carry, so the disabled

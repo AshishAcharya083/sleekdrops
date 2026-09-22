@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
 import type {
   ArticleDetail,
-  ArticleSummary,
+  ArticleList,
   EditorialAngle,
   KeywordPlan,
   ResearchDetail,
@@ -56,7 +56,7 @@ export function Pipeline({
   openArticleId?: string | null;
   onOpened?: () => void;
 } = {}) {
-  const { data, error, refresh } = usePoll<{ articles: ArticleSummary[] }>('/api/articles');
+  const { data, error, refresh } = usePoll<ArticleList>('/api/articles');
   const [openId, setOpenId] = useState<string | null>(openArticleId ?? null);
   const articles = data?.articles ?? [];
 
@@ -549,7 +549,17 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
   };
 
   const sessions = detail?.sessions ?? [];
-  const outOfDate = article ? outOfDateStages(article, sessions) : new Set<string>();
+  /**
+   * The agent answers this itself, and its answer is the one its retry guards
+   * and its publisher are written against, so a stage it has re-passed stops
+   * being labelled here at the same moment it stops being blocked there. The
+   * local derivation stands in for an agent that does not send it.
+   */
+  const outOfDate = detail?.outOfDateStages
+    ? new Set(detail.outOfDateStages)
+    : article
+      ? outOfDateStages(article, sessions)
+      : new Set<string>();
   /** The session the budget stopped, which is what the detail block quotes. */
   const timedOutSession = [...sessions].reverse().find((s) => s.status === 'timed_out') ?? null;
   const stoppedStage = (timedOutSession && sessionStage(timedOutSession)) ?? article?.stage ?? null;

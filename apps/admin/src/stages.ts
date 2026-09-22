@@ -73,6 +73,15 @@ export const AGENT_STAGE: Record<string, Stage> = {
 };
 
 /**
+ * The same map read the other way: which agent a stage runs under. A claimed
+ * article names its stage, not its agent, so this is how a run that has no
+ * session on the payload is still reported by the thing operating it.
+ */
+export const STAGE_AGENT: Record<string, string> = Object.fromEntries(
+  Object.entries(AGENT_STAGE).map(([agent, stage]) => [stage, agent]),
+);
+
+/**
  * The stage one session ran: the reported field when the agent sends one, else
  * the stage that session's agent owns. Null means genuinely unplaceable - a
  * topic search, or an agent this panel does not know.
@@ -222,18 +231,168 @@ export const stoppedNotice = (title: string, cancelling: boolean): string =>
     ? `Stopping “${title}” - it stops where it is, and any partial output is kept as a draft.`
     : `“${title}” stopped - any partial output is kept as a draft.`;
 
+/** One wedged run, as the Overview's triage surface lists it. */
+export interface StuckRun {
+  article_id: string;
+  session_id?: string | null;
+  title: string;
+  stage?: string | null;
+  /** Null only for a stage this panel knows no agent for. */
+  agent: string | null;
+  /** 'running' (past the soft bound, or its claim lapsed) or 'timed_out'. */
+  status: string;
+  started_at: string | null;
+  /**
+   * Null when the run's own clock is on no payload the panel holds: the reaper
+   * clears the lease columns as it stops a run, so a stopped run's start
+   * survives only on its session, and the session list is finite.
+   */
+  elapsed_seconds: number | null;
+  budget_seconds: number;
+  /** The claim's lease ran out - nothing is renewing it any more. */
+  lease_expired?: boolean;
+}
+
+/** The article-list row this surface reads. */
+export interface StuckArticle {
+  id: string;
+  title: string;
+  stage: string;
+  status: string;
+  claimed_at?: string | null;
+  lease_expires_at?: string | null;
+  updated_at?: string | null;
+}
+
+/** The session-list row it reads alongside it. */
+export interface StuckSession extends StageSession {
+  id?: string;
+  article_id?: string | null;
+  ended_at?: string | null;
+}
+
+const millis = (iso?: string | null): number | null => {
+  if (!iso) return null;
+  const ms = new Date(iso).getTime();
+  return Number.isFinite(ms) ? ms : null;
+};
+
+/**
+ * The session that ran this article's current state: same article, same
+ * status, latest start. It carries the agent's name and, for a run that has
+ * already stopped, the only surviving record of how long it ran. An isolated
+ * test never describes the article's own state.
+ */
+function runSession(article: StuckArticle, sessions: StuckSession[]): StuckSession | null {
+  let latest: StuckSession | null = null;
+  let latestAt = -Infinity;
+  for (const session of sessions) {
+    if (session.article_id !== article.id || session.status !== article.status) continue;
+    if (session.kind === 'test') continue;
+    const startedAt = millis(session.started_at) ?? -Infinity;
+    if (startedAt >= latestAt) {
+      latest = session;
+      latestAt = startedAt;
+    }
+  }
+  return latest;
+}
+
+/**
+ * How long this run has been on its stage. A live claim is measured the way
+ * the agent's own reaper measures it - from the claim, else the article's last
+ * write - so the panel and the thing that will stop the run agree on the
+ * figure. A stopped run is measured off its session, because the claim it ran
+ * under was cleared as it was stopped.
+ */
+function runElapsedSeconds(
+  article: StuckArticle,
+  session: StuckSession | null,
+  now: number,
+): number | null {
+  if (article.status !== 'timed_out') {
+    const start =
+      millis(article.claimed_at) ?? millis(session?.started_at) ?? millis(article.updated_at);
+    return start === null ? null : Math.max(0, (now - start) / 1000);
+  }
+  const start = millis(session?.started_at);
+  if (start === null) return null;
+  return Math.max(0, ((millis(session?.ended_at) ?? now) - start) / 1000);
+}
+
+/**
+ * The runs the Overview puts above everything else: the ones the stage budget
+ * already stopped, and the live ones that are past the soft bound of it or
+ * whose claim has lapsed.
+ *
+ * Derived here rather than read off a field, because the agent's overview
+ * reports no such section - what it serves is the article list, with the claim,
+ * the lease and the budgets on it, which is exactly what the question is
+ * decided from. Pure and clock-injectable, so the bands are tested rather than
+ * eyeballed against a running pipeline.
+ */
+export function stuckRuns(
+  articles: StuckArticle[],
+  sessions: StuckSession[] = [],
+  budgets?: StageBudgets | null,
+  now: number = Date.now(),
+): StuckRun[] {
+  const runs: StuckRun[] = [];
+  for (const article of articles) {
+    if (article.status !== 'running' && article.status !== 'timed_out') continue;
+    const budget = stageBudgetSeconds(article.stage, budgets);
+    const session = runSession(article, sessions);
+    const elapsed = runElapsedSeconds(article, session, now);
+    const leaseExpired =
+      article.status === 'running' && (millis(article.lease_expires_at) ?? Infinity) < now;
+    // A live run inside the soft bound with its lease being renewed is simply
+    // working, and listing it here would cost the surface its meaning.
+    const inHand =
+      article.status === 'running' &&
+      !leaseExpired &&
+      (elapsed === null || elapsedBand(elapsed, budget) === 'normal');
+    if (inHand) continue;
+    runs.push({
+      article_id: article.id,
+      session_id: session?.id ?? null,
+      title: article.title,
+      stage: article.stage,
+      agent: session?.agent ?? STAGE_AGENT[article.stage] ?? null,
+      status: article.status,
+      started_at: session?.started_at ?? article.claimed_at ?? null,
+      elapsed_seconds: elapsed,
+      budget_seconds: budget,
+      lease_expired: leaseExpired,
+    });
+  }
+  return runs;
+}
+
 /**
  * The stages a retry left behind: the one it restarted from and everything
- * after it, until a pipeline session for that stage completes on the current
- * attempt. A test run never clears the marker - it writes nothing.
+ * after it that the run has not been through again. The agent answers this
+ * itself on the run detail, and this is the local derivation for an agent that
+ * does not - it has to reach the same answer, because a marker that outlives
+ * the content it describes is the one label this surface cannot afford to get
+ * wrong.
+ *
+ * A stage clears once the run has moved past it, not only once a session for
+ * it completed: the pipeline skips stages legitimately - `edit` runs only when
+ * the review fails - and a skipped stage that stayed marked would leave a
+ * live, published article carrying "Out of date" forever. A completed pipeline
+ * session on the current attempt clears it too, for the moment between a stage
+ * finishing and the run being moved on. A test run never clears anything - it
+ * writes nothing.
  */
 export function outOfDateStages(
-  article: { stale_from_stage?: string | null; attempt?: number },
+  article: { stale_from_stage?: string | null; stage?: string | null; attempt?: number },
   sessions: StageSession[],
 ): Set<string> {
   const from = article.stale_from_stage;
   const start = from ? STAGE_ORDER.indexOf(from as Stage) : -1;
   if (start === -1) return new Set();
+  /** Where the run stands now. -1 when the article does not report it. */
+  const reached = article.stage ? STAGE_ORDER.indexOf(article.stage as Stage) : -1;
   const currentAttempt = article.attempt ?? 1;
   const regenerated = (stage: string): boolean =>
     sessions.some(
@@ -244,7 +403,9 @@ export function outOfDateStages(
         (s.attempt ?? 1) >= currentAttempt,
     );
   return new Set(
-    STAGE_ORDER.slice(start).filter((stage) => stage !== 'done' && !regenerated(stage)),
+    STAGE_ORDER.filter(
+      (stage, i) => i >= start && i >= reached && stage !== 'done' && !regenerated(stage),
+    ),
   );
 }
 

@@ -54,13 +54,23 @@ test('the Overview surfaces stuck runs above the stat row', () => {
   const grid = overview.indexOf('<div className="grid cols-4">');
   assert.ok(surface !== -1, 'the stuck surface is rendered');
   assert.ok(surface < grid, 'a wedged run is read before the stat figures');
-  assert.match(overview, /runs=\{data\.stuck\}/, 'it lists exactly what the agent reported as stuck');
+  // The agent's /api/overview has no stuck section - it reports counts. The
+  // list it does serve carries the claim, the lease and the budgets, which is
+  // what the question is actually decided from, so the surface is derived from
+  // that rather than from a field no agent sends.
+  assert.match(overview, /usePoll<ArticleList>\('\/api\/articles'\)/);
   assert.match(
     overview,
-    /if \(!runs && !failed\) return null;/,
-    'an agent without the section hides the surface, but a failed one still says so',
+    /stuckRuns\(board\.data\.articles, data\.recentSessions, board\.data\.budgets\)/,
+    'off the two payloads the tab already holds',
   );
-  assert.match(overview, /stuck: 'stuck runs'/, 'a failed stuck section names itself in the banner');
+  assert.doesNotMatch(overview, /data\.stuck/, 'never off a section the agent does not send');
+  assert.match(
+    overview,
+    /if \(!runs && !failed\) return <NeedsAttentionSkeleton \/>;/,
+    'the first poll is a skeleton, not a silent surface',
+  );
+  assert.match(overview, /failed=\{!board\.data && Boolean\(board\.error\)\}/, 'a list that would not load is unknown, not clear');
   assert.match(overview, /className="attn calm"/, 'all-clear is a state of the same surface');
   assert.match(overview, /function NeedsAttentionSkeleton/, 'and so is the first load');
 });
@@ -247,7 +257,12 @@ test('a stale review blocks approval, with the reason stated', () => {
 
 test('attempts are grouped per stage, and downstream stages are labelled', () => {
   assert.match(pipeline, /groupAttempts\(sessions\)/);
-  assert.match(pipeline, /outOfDateStages\(article, sessions\)/);
+  assert.match(
+    pipeline,
+    /detail\?\.outOfDateStages\s*\n?\s*\? new Set\(detail\.outOfDateStages\)/,
+    "the agent's own answer is what is labelled, so a re-passed stage stops being marked",
+  );
+  assert.match(pipeline, /outOfDateStages\(article, sessions\)/, 'derived locally only when it sends none');
   assert.match(pipeline, /<OutOfDateBadge \/>/);
   assert.match(components, /OUT_OF_DATE_LABEL/);
   assert.match(pipeline, /Sessions without a stage/, 'a session with no stage is listed, never guessed');

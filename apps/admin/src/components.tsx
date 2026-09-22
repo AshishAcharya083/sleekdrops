@@ -62,6 +62,15 @@ const BAND_WORD: Record<ElapsedBand, string> = {
 };
 
 /**
+ * The band of a run whose own clock is on no payload the panel holds: one the
+ * budget stopped is past it by definition, and a live one is only ever shown
+ * this way on the triage surface, which it reached by being at least at the
+ * soft bound.
+ */
+const unmeasuredBand = (status?: string | null): ElapsedBand =>
+  status === 'timed_out' ? 'over' : 'warn';
+
+/**
  * An elapsed time against the budget its stage runs under. The band carries a
  * glyph and prints the budget next to the figure, so the warning never rests
  * on the colour alone - and a run that has been going for 2702 minutes cannot
@@ -70,7 +79,9 @@ const BAND_WORD: Record<ElapsedBand, string> = {
  * A null budget is a run this panel cannot place on a stage - a topic search,
  * or an agent it does not know. That one prints as a plain duration: there is
  * no threshold it is measured against, and printing one would be a claim the
- * panel cannot make.
+ * panel cannot make. A null elapsed is the same rule for the other figure: the
+ * band and the budget still render, the duration itself prints as unknown
+ * rather than as a number nothing measured.
  */
 export function Elapsed({
   seconds,
@@ -78,28 +89,31 @@ export function Elapsed({
   status,
   meter = false,
 }: {
-  seconds: number;
+  seconds: number | null;
   budgetSeconds: number | null;
   status?: string | null;
   meter?: boolean;
 }) {
+  const time = seconds === null ? '—' : fmtSeconds(seconds);
   if (budgetSeconds === null) {
     return (
-      <span className="elapsed unbudgeted" title={`${fmtSeconds(seconds)} - no stage budget applies`}>
-        <span className="t">{fmtSeconds(seconds)}</span>
+      <span className="elapsed unbudgeted" title={`${time} - no stage budget applies`}>
+        <span className="t">{time}</span>
       </span>
     );
   }
-  const band = elapsedBand(seconds, budgetSeconds, status);
+  const band =
+    seconds === null ? unmeasuredBand(status) : elapsedBand(seconds, budgetSeconds, status);
   const minutes = budgetMinutes(budgetSeconds);
-  const filled = Math.min(100, Math.round((seconds / Math.max(budgetSeconds, 1)) * 100));
+  const filled =
+    seconds === null ? 100 : Math.min(100, Math.round((seconds / Math.max(budgetSeconds, 1)) * 100));
   return (
     <>
-      <span className={`elapsed ${band}`} title={`${fmtSeconds(seconds)} - ${BAND_WORD[band]}`}>
+      <span className={`elapsed ${band}`} title={`${time} - ${BAND_WORD[band]}`}>
         <span className="mark" aria-hidden="true">
           {BAND_MARK[band]}
         </span>
-        <span className="t">{fmtSeconds(seconds)}</span>
+        <span className="t">{time}</span>
         <span className="cap">/ {minutes}m</span>
       </span>
       {meter && (

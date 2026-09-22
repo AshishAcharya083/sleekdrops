@@ -401,8 +401,9 @@ td .title-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; 
    card scroll instead of squeezing, and the single-column stat row on a
    phone. */
 
-/* Row-level controls ("Open run", "Cancel run", "Retry now") are touch targets
-   from tablet down - 834px is a finger width, not just 520px. */
+/* Row-level controls ("Open run", "Stop run" / "Cancel run", "Retry from this
+   stage", "Test this step only") are touch targets from tablet down - 834px is
+   a finger width, not just 520px. */
 @media (max-width: 900px) {
   button.btn.small { min-height: 44px; padding: 8px 12px; }
 }
