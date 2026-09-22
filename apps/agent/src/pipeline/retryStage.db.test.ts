@@ -21,8 +21,9 @@ const { migrate } = await import('../db/migrate.js');
 const { createApp } = await import('../api/server.js');
 const { stageBudgetSeconds } = await import('./budgets.js');
 const { STAGE_ORDER } = await import('./types.js');
-const { runStage } = await import('./runner.js');
-const { STAGE_LEASE_SECONDS } = await import('./lease.js');
+const { runStage, updateArticle } = await import('./runner.js');
+const { renewLease, STAGE_LEASE_SECONDS } = await import('./lease.js');
+const { claimIdentity } = await import('./worker.js');
 
 import type { ArticleRow, ContentBrief, Stage } from './types.js';
 
@@ -294,12 +295,15 @@ test('an article that was never retried has nothing out of date', { skip }, asyn
 async function claimForWorker(id: string): Promise<ArticleRow> {
   const [claimed] = await q<ArticleRow>(
     `UPDATE articles
-        SET status = 'running', claimed_by = 'retry-test-worker', claimed_at = now(),
+        SET status = 'running', claimed_by = $3, claimed_at = now(),
             heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => $2),
             updated_at = now()
       WHERE id = $1 AND status = 'queued'
       RETURNING *`,
-    [id, STAGE_LEASE_SECONDS],
+    // The identity a real claim takes, from the worker itself: two claims made
+    // by one process are two identities, and that is what the tests below are
+    // about.
+    [id, STAGE_LEASE_SECONDS, claimIdentity()],
   );
   assert.ok(claimed, 'the retry left a queued article for the worker to claim');
   return claimed;
@@ -421,6 +425,81 @@ test('a mid-stage article must be cancelled before it can be retried', { skip },
   // reads those columns straight off the row.
   assert.equal(requeued.heartbeat_at, null);
   assert.equal(requeued.lease_expires_at, null);
+});
+
+test('the run a cancel stopped cannot write over the retry that replaced it', { skip }, async () => {
+  // The hazard the claim identity exists for. Cancel expires the lease, but
+  // the stage behind it is a promise nobody can cancel: it runs on until its
+  // next write. By then the operator has retried and the same worker process
+  // has claimed the article again - same process, same status - so the only
+  // thing left to tell the two runs apart is the claim itself.
+  const id = await seed({ stage: 'write', status: 'queued' });
+  const cancelled = await claimForWorker(id);
+
+  assert.deepEqual(await post(`/api/articles/${id}/cancel`), {
+    status: 200,
+    body: { ok: true, pending: true },
+  });
+  assert.equal((await post(`/api/articles/${id}/retry-stage`, { stage: 'write' })).status, 200);
+  const retried = await claimForWorker(id);
+  assert.notEqual(retried.claimed_by, cancelled.claimed_by, 'each claim is its own identity');
+
+  // The stage that was cancelled comes back with an answer: it is dropped, and
+  // the run is stopped rather than left to spend more of the budget.
+  await assert.rejects(
+    updateArticle(cancelled, { draft_md: 'written by the run that was cancelled' }),
+    /lease lost/,
+  );
+  // Its heartbeat finds the claim gone too, so it unwinds instead of holding a
+  // lease the new run needs.
+  assert.equal(await renewLease(id, cancelled.claimed_by!), false);
+
+  assert.equal((await row(id)).draft_md, draft, 'the retry keeps the draft it started from');
+  await updateArticle(retried, { draft_md: 'written by the retry' });
+  assert.equal((await row(id)).draft_md, 'written by the retry');
+});
+
+test('the plain retry releases the claim of the run that stopped', { skip }, async () => {
+  const id = await seed({ stage: 'write', status: 'queued' });
+  const cancelled = await claimForWorker(id);
+  await post(`/api/articles/${id}/cancel`);
+
+  assert.equal((await post(`/api/articles/${id}/retry`)).status, 200);
+
+  const requeued = await row(id);
+  assert.equal(requeued.status, 'queued');
+  assert.equal(requeued.stage, 'write', 'the cheap lever re-runs the stage it stopped on');
+  assert.equal(requeued.attempt, 2, 'a re-run an operator asked for is its own attempt');
+  assert.equal(requeued.claimed_by, null);
+  assert.equal(requeued.lease_expires_at, null);
+  await assert.rejects(updateArticle(cancelled, { draft_md: 'too late' }), /lease lost/);
+});
+
+// ── Revision budget ────────────────────────────────────────────────────────
+
+test('a retry that regenerates the draft restarts its revision budget', { skip }, async () => {
+  // revision_round only counts up, and the reviewer force-passes a failing
+  // review once it reaches max_revision_rounds. An article that spent its
+  // rounds would otherwise come back from a retry with the write → review →
+  // edit loop already disabled, and publish a piece the editor never touched.
+  const id = await seed({ stage: 'seo_review', status: 'failed', revision_round: 2 });
+
+  assert.equal((await post(`/api/articles/${id}/retry-stage`, { stage: 'write' })).status, 200);
+  assert.equal((await row(id)).revision_round, 0);
+});
+
+test('a retry of the review reads the same draft, so its rounds still count', { skip }, async () => {
+  const id = await seed({ stage: 'assemble', status: 'failed', revision_round: 2 });
+
+  assert.equal((await post(`/api/articles/${id}/retry-stage`, { stage: 'seo_review' })).status, 200);
+  assert.equal((await row(id)).revision_round, 2, 'the draft under review already spent them');
+});
+
+test('rerun-all starts the revision budget over with the run', { skip }, async () => {
+  const id = await seed({ stage: 'publish', status: 'failed', revision_round: 2 });
+
+  assert.equal((await post(`/api/articles/${id}/rerun-all`)).status, 200);
+  assert.equal((await row(id)).revision_round, 0, 'a clean run from research has had no revisions');
 });
 
 test('a running article whose lease has already expired is retryable', { skip }, async () => {
@@ -676,12 +755,11 @@ test('the publisher can never be reached by a test run', { skip }, async () => {
     status: 400,
     body: { error: 'the publish stage cannot be tested in isolation' },
   });
-  // 'done' is refused the same way publish is: for a test the question is
-  // which stages may be run in isolation, not which stages a run can restart
-  // from, so both get the one sentence.
+  // 'done' is refused too, but for its own reason: it runs nothing at all, and
+  // an operator who typed it is not asking about publish.
   assert.deepEqual(await post(`/api/articles/${id}/test-stage`, { stage: 'done' }), {
     status: 400,
-    body: { error: 'the publish stage cannot be tested in isolation' },
+    body: { error: 'done is not a runnable stage' },
   });
 });
 

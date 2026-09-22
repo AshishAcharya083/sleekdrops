@@ -72,6 +72,56 @@ export async function renewLease(articleId: string, claimedBy: string): Promise<
 }
 
 /**
+ * The claim a run is working under. Every write that run makes is conditional
+ * on it still holding: same row, same status, same holder.
+ */
+export interface ClaimedArticle {
+  id: string;
+  status: string;
+  claimed_by: string | null;
+}
+
+/**
+ * Write to the article this run is working, and only while the claim it
+ * started under still holds. A run that was reaped, cancelled or claimed again
+ * can still be in flight - a promise has no cancel - and nothing it produces
+ * after that describes the article any more.
+ *
+ * `claimed_by` carries a token unique to the claim (worker.ts
+ * `claimIdentity()`), so "claimed again by the same worker process" fails this
+ * guard exactly as another worker's claim does.
+ */
+export async function updateClaimed(
+  article: ClaimedArticle,
+  fields: Record<string, unknown>,
+): Promise<boolean> {
+  const keys = Object.keys(fields);
+  const sets = keys.map((key, i) => `${key} = $${i + 4}`).join(', ');
+  const applied = await q(
+    `UPDATE articles SET ${sets}, updated_at = now()
+     WHERE id = $1 AND status = $2 AND claimed_by IS NOT DISTINCT FROM $3
+     RETURNING id`,
+    [article.id, article.status, article.claimed_by ?? null, ...keys.map((key) => fields[key])],
+  );
+  return applied.length > 0;
+}
+
+/**
+ * The same question without a write, for the work that happens outside the
+ * database: whether this run may still act for this article at all. The
+ * publisher asks it before pushing to the live site, because that push is not
+ * an article write the guard above could drop.
+ */
+export async function claimHeld(article: ClaimedArticle): Promise<boolean> {
+  const held = await q(
+    `SELECT 1 FROM articles
+      WHERE id = $1 AND status = $2 AND claimed_by IS NOT DISTINCT FROM $3`,
+    [article.id, article.status, article.claimed_by ?? null],
+  );
+  return held.length > 0;
+}
+
+/**
  * Renew this article's lease every HEARTBEAT_MS until the returned function is
  * called, and say so the first time a renewal finds the claim gone. Unref'd: a
  * heartbeat is not a reason for the process to stay alive. The interval is a

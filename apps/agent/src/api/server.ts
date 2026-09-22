@@ -19,6 +19,7 @@ import {
   isReviewStale,
   outOfDateStages,
   parseStageParam,
+  requeueInPlace,
   rerunAll,
   retryFromStage,
   reviewStaleSql,
@@ -616,15 +617,14 @@ export function createApp(): Hono<TraceEnv> {
   });
 
   // Re-queue where it stands. The retry-forward action below is the one that
-  // picks a stage; this stays the cheap "run that again" lever.
+  // picks a stage; this stays the cheap "run that again" lever, and goes
+  // through the same engine so it carries the same bookkeeping - the claim of
+  // the run that stopped is released, and the re-run is its own attempt.
   app.post('/api/articles/:id/retry', async (c) => {
-    const rows = await q(
-      `UPDATE articles SET status = 'queued', error = NULL, updated_at = now()
-       WHERE id = $1 AND status IN ('failed', 'timed_out', 'cancelled') RETURNING id`,
-      [c.req.param('id')],
-    );
-    if (rows.length === 0) return c.json({ error: 'not retryable' }, 409);
-    log.info('article re-queued for retry', { article_id: rows[0].id });
+    const id = c.req.param('id');
+    const result = await requeueInPlace(id);
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    log.info('article re-queued for retry', { article_id: id, attempt: result.article.attempt });
     return c.json({ ok: true });
   });
 
@@ -901,8 +901,19 @@ export function createApp(): Hono<TraceEnv> {
   });
 
   app.delete('/api/published/:slug', async (c) => {
-    const result = await deleteD1Post(c.req.param('slug'));
+    const slug = c.req.param('slug');
+    const result = await deleteD1Post(slug);
     if (!result) return c.json({ error: 'not found' }, 404);
+    // The publisher skips the site rebuild when what it is about to push
+    // matches `published_digest`, the receipt of the last version pushed live.
+    // The post it describes has just been removed from D1, so the receipt has
+    // to go with it: leaving it would make the operator's usual
+    // delete-then-republish recovery compute the same digest, skip the
+    // dispatch, and leave the page missing from the live site. `pub_date`
+    // stays - restoring a post is not re-publishing it on a new date.
+    await q('UPDATE articles SET published_digest = NULL, updated_at = now() WHERE slug = $1', [
+      slug,
+    ]);
     // Rebuild so the site actually drops the page; deletion already succeeded,
     // so a dispatch failure is reported, not thrown.
     let dispatched = false;

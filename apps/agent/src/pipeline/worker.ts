@@ -27,6 +27,24 @@ let stopped = false;
 let ticks = 0;
 
 /**
+ * What one claim writes into `claimed_by`: this worker, plus a token unique to
+ * the claim itself.
+ *
+ * The suffix is load-bearing. Every article write a run makes is guarded on
+ * the claim it started under (lease.ts `updateClaimed`), and `claimed_by` is
+ * the identity in that guard - but a per-process id alone cannot tell "still
+ * mine" from "cancelled, re-queued and claimed again by this same process".
+ * Both are `status = 'running'` under the same worker id, so the run an
+ * operator cancelled would find its guard passing again the moment the retry
+ * it was cancelled for gets picked up here, and would write its abandoned
+ * output over the run that replaced it. A fresh token per claim makes every
+ * claim its own identity, whichever endpoint re-queued the article.
+ */
+export function claimIdentity(): string {
+  return `${workerId}/${randomUUID()}`;
+}
+
+/**
  * Claim the longest-waiting queued article, taking the lease with it. The
  * claim and the lease are one statement on purpose: a worker that died between
  * the two would hold a claim nothing could ever reap.
@@ -48,7 +66,7 @@ export async function claimNext(): Promise<ArticleRow | null> {
        FOR UPDATE SKIP LOCKED
      )
      RETURNING *`,
-    [workerId, STAGE_LEASE_SECONDS],
+    [claimIdentity(), STAGE_LEASE_SECONDS],
   );
   return rows[0] ?? null;
 }

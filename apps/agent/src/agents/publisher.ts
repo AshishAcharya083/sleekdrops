@@ -11,10 +11,24 @@
 // actually different from what was pushed last time.
 import { createHash } from 'node:crypto';
 import { getSetting, q } from '../db/pool.js';
+import { createLogger } from '../lib/log.js';
 import { d1Query } from '../tools/d1.js';
 import { dispatchContentUpdated } from '../tools/github.js';
+import { claimHeld, LeaseLostError, updateClaimed } from '../pipeline/lease.js';
 import { isReviewStale, PUBLISHER_REVIEW_STALE_ERROR } from '../pipeline/retry.js';
 import type { ArticleRow } from '../pipeline/types.js';
+
+const log = createLogger('publisher');
+
+export interface PublishOptions {
+  /**
+   * The publish mode this pass runs under, instead of reading the admin
+   * setting. Only a test passes it: `publish_mode` is one global settings row,
+   * so a suite that flipped it to drive the draft path would be flipping it
+   * under every other suite running against the same database at the time.
+   */
+  publishMode?: string;
+}
 
 export interface PublishResult {
   slug: string;
@@ -58,7 +72,25 @@ async function publishState(
   return { pub_date: row?.pub_date ?? null, published_digest: row?.published_digest ?? null };
 }
 
-export async function runPublisher(article: ArticleRow): Promise<PublishResult> {
+/**
+ * The publish receipt, written the way every other stage writes to its
+ * article: only while this run still holds the claim it started under. The
+ * push to D1 has already happened by the time these run, so a lost claim is
+ * noted rather than thrown - the live post stands, and the article row now
+ * belongs to whatever replaced this run.
+ */
+async function stamp(article: ArticleRow, fields: Record<string, unknown>): Promise<void> {
+  if (await updateClaimed(article, fields)) return;
+  log.warn('publish receipt dropped: the article moved on while the publish ran', {
+    article_id: article.id,
+    columns: Object.keys(fields),
+  });
+}
+
+export async function runPublisher(
+  article: ArticleRow,
+  options: PublishOptions = {},
+): Promise<PublishResult> {
   const slug = article.slug!;
   const frontmatter = article.frontmatter!;
   const body = article.draft_md!;
@@ -70,7 +102,18 @@ export async function runPublisher(article: ArticleRow): Promise<PublishResult> 
   // last word on that is here, where the push actually happens.
   if (await isReviewStale(article.id)) throw new Error(PUBLISHER_REVIEW_STALE_ERROR);
 
-  const publishMode = await getSetting<string>('publish_mode', 'approval');
+  // Nothing below this line is an article write the claim guard can drop: it
+  // pushes a post to the live site and asks GitHub to rebuild it. So the claim
+  // is read directly, where the run can still stop for free. Publish is the
+  // stage that hangs on an external service, which is exactly when an operator
+  // reaches for cancel - and a cancelled article that is live in D1 with no
+  // published_at is the state that lever exists to prevent.
+  const abandonIfTaken = async () => {
+    if (!(await claimHeld(article))) throw new LeaseLostError();
+  };
+  await abandonIfTaken();
+
+  const publishMode = options.publishMode ?? (await getSetting<string>('publish_mode', 'approval'));
   // "draft" mode parks the row in D1 unpublished; anything else goes live.
   const d1Status = publishMode === 'draft' ? 'draft' : 'published';
 
@@ -110,6 +153,11 @@ export async function runPublisher(article: ArticleRow): Promise<PublishResult> 
       ? frontmatter.pubDate
       : new Date().toISOString().slice(0, 10));
 
+  // Asked again on the doorstep of the push itself: every affiliate write
+  // above is a D1 round trip, and the cancel worth honouring is the one that
+  // arrives while one of them is hanging.
+  await abandonIfTaken();
+
   await d1Query(
     `INSERT INTO posts (slug, status, title, category, post_type, author, pub_date,
                         frontmatter_json, body_md, created_at, updated_at)
@@ -141,27 +189,24 @@ export async function runPublisher(article: ArticleRow): Promise<PublishResult> 
   // content (a retry that reached here again, a republish after a no-op edit)
   // upserts the same row and must not queue another site rebuild.
   //
-  // Deliberate deviation from the agreed contract, which pins the digest as
-  // stored "in the same statement that stamps pub_date": stamping both at once
-  // would record a version as delivered before the dispatch that delivers it,
-  // so a dispatch that failed would never be retried - the rebuild would be
-  // lost with nothing left to say it is owed. The date is stamped here, the
-  // digest only after the dispatch has actually been asked for.
+  // Deviation from the agreed contract, which pins the digest as stored "in
+  // the same statement that stamps pub_date": stamping both at once would
+  // record a version as delivered before the dispatch that delivers it, so a
+  // dispatch that failed would never be retried - the rebuild would be lost
+  // with nothing left to say it is owed. The date is stamped here, the digest
+  // only after the dispatch has actually been asked for. Raised with the
+  // contract owner on SLE-104 rather than settled here: no counterpart card
+  // reads published_digest, so the pin can be amended without a re-pin of the
+  // payload, but the amendment is theirs to make.
   const digest = publishedDigest(slug, d1Status, frontmatter, body);
-  await q('UPDATE articles SET pub_date = $2, updated_at = now() WHERE id = $1', [
-    article.id,
-    pubDate,
-  ]);
+  await stamp(article, { pub_date: pubDate });
 
   const dispatched = d1Status === 'published' && digest !== state.published_digest;
   if (dispatched) await dispatchContentUpdated();
   // Recorded only once the rebuild has actually been asked for, so a failed
   // dispatch is retried by the next pass rather than silently marked as
   // delivered.
-  await q('UPDATE articles SET published_digest = $2, updated_at = now() WHERE id = $1', [
-    article.id,
-    digest,
-  ]);
+  await stamp(article, { published_digest: digest });
 
   return { slug, d1Status, dispatched };
 }

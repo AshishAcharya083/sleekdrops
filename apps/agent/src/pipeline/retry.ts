@@ -204,6 +204,22 @@ const CLAIM_CLEARED =
   'claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL, lease_expires_at = NULL';
 
 /**
+ * Whether re-running `stage` regenerates the draft itself, which is what
+ * decides the revision budget of the run that follows.
+ *
+ * `revision_round` only ever counts up - the edit stage increments it and
+ * nothing clears it - and the reviewer force-passes a failing review once it
+ * reaches `max_revision_rounds`. So an article that already spent its rounds
+ * would come back from a retry with the write → review → edit loop silently
+ * disabled: the first review of the new draft would be stamped "max revisions
+ * reached, proceeding" on a run that has had no revisions at all. A retry at
+ * or before 'write' produces a new draft, so the budget restarts with it. A
+ * retry of seo_review or later is the same draft being read again, and the
+ * rounds that draft already spent still count against it.
+ */
+const restartsTheDraft = (stage: Stage): boolean => stageIndex(stage) <= stageIndex('write');
+
+/**
  * Re-run `stage` against the article's stored upstream columns and continue
  * forward. The upstream columns are deliberately left untouched - that is the
  * retry-forward guarantee, and the reason this costs one stage rather than a
@@ -222,10 +238,11 @@ export async function retryFromStage(id: string, stage: Stage): Promise<RetryOut
     }
   }
 
+  const restartRevisions = restartsTheDraft(stage) ? 'revision_round = 0, ' : '';
   const [article] = await q<RequeuedArticle>(
     `UPDATE articles
         SET attempt = attempt + 1, stage = $2, status = 'queued', error = NULL,
-            stale_from_stage = $2, ${CLAIM_CLEARED}, updated_at = now()
+            stale_from_stage = $2, ${restartRevisions}${CLAIM_CLEARED}, updated_at = now()
       WHERE id = $1 AND (status IN ${RETRYABLE_STATUSES} OR ${LEASE_LAPSED})
       RETURNING id, stage, status, attempt, stale_from_stage`,
     [id, stage],
@@ -248,12 +265,42 @@ export async function rerunAll(id: string): Promise<RetryOutcome> {
   const [article] = await q<RequeuedArticle>(
     `UPDATE articles
         SET attempt = attempt + 1, stage = 'research', status = 'queued', error = NULL,
-            stale_from_stage = 'research', ${CLAIM_CLEARED}, updated_at = now()
+            stale_from_stage = 'research', revision_round = 0, ${CLAIM_CLEARED},
+            updated_at = now()
       WHERE id = $1 AND (status <> 'running' OR ${LEASE_LAPSED})
       RETURNING id, stage, status, attempt, stale_from_stage`,
     [id],
   );
   if (!article) return { ok: false, status: 409, error: MID_STAGE_RERUN_ERROR };
+  return { ok: true, article };
+}
+
+/**
+ * The cheap lever behind POST /api/articles/:id/retry: run the stage the
+ * article stopped on again, without naming one.
+ *
+ * It re-queues through the same bookkeeping as a retry-forward rather than a
+ * bare status flip, because the two have the same hazards. The claim and the
+ * lease of the run that stopped go with it - a queued row holding a claim
+ * nobody holds is what the panel reads as a live worker - and the pass takes
+ * its own attempt number, so the sessions of the re-run are distinguishable
+ * from the ones that failed. `stale_from_stage` is left alone: nothing
+ * upstream of where the article already is has been superseded.
+ */
+export async function requeueInPlace(id: string): Promise<RetryOutcome> {
+  const target = await loadTarget(id);
+  if (!target) return { ok: false, status: 404, error: 'not found' };
+  if (target.lease_held) return { ok: false, status: 409, error: MID_STAGE_RETRY_ERROR };
+
+  const [article] = await q<RequeuedArticle>(
+    `UPDATE articles
+        SET attempt = attempt + 1, status = 'queued', error = NULL,
+            ${CLAIM_CLEARED}, updated_at = now()
+      WHERE id = $1 AND status IN ('failed', 'timed_out', 'cancelled')
+      RETURNING id, stage, status, attempt, stale_from_stage`,
+    [id],
+  );
+  if (!article) return { ok: false, status: 409, error: 'not retryable' };
   return { ok: true, article };
 }
 

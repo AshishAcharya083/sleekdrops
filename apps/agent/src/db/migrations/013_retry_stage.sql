@@ -10,12 +10,21 @@
 -- rebuild for content that has not changed.
 
 -- ── Borrowed from 012_stage_lease.sql (SLE-103's file, not this one's) ──────
--- Repeated here character for character so this migration is runnable on a
--- database where 012 has not been applied yet. ADD COLUMN IF NOT EXISTS makes
--- each statement a no-op the moment 012 lands, in either order.
+-- Every schema statement 012 makes, repeated character for character so this
+-- migration is runnable on a database where 012 has not been applied yet -
+-- retry.ts clears heartbeat_at and the article payloads select it, so the
+-- three columns alone would not be enough. IF NOT EXISTS makes each statement
+-- a no-op the moment 012 lands, in either order. 012's backfill of claims that
+-- predate the lease is not repeated: it is a one-off over rows only 012's own
+-- deploy can have.
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
 ALTER TABLE articles       ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
 ALTER TABLE articles       ADD COLUMN IF NOT EXISTS attempt INT NOT NULL DEFAULT 1;
 ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS attempt INT NOT NULL DEFAULT 1;
+
+CREATE INDEX IF NOT EXISTS articles_lease_idx
+  ON articles (lease_expires_at)
+  WHERE status = 'running';
 
 -- ── This migration's own columns ───────────────────────────────────────────
 ALTER TABLE articles       ADD COLUMN IF NOT EXISTS stale_from_stage TEXT;

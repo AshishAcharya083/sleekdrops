@@ -19,13 +19,16 @@ import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
+process.env.ADMIN_TOKEN = 'test-admin-token';
 process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
 process.env.D1_DATABASE_ID = 'test-database';
 process.env.CLOUDFLARE_D1_TOKEN = 'test-d1-token';
 process.env.GITHUB_TOKEN = 'test-github-token';
 
-const { getSetting, pool, q, setSetting } = await import('../db/pool.js');
+const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
+const { createApp } = await import('../api/server.js');
+const { cancelArticle } = await import('../pipeline/retry.js');
 const { runPublisher } = await import('./publisher.js');
 
 import type { AffiliateLinkRow, ArticleRow } from '../pipeline/types.js';
@@ -63,6 +66,25 @@ function captureD1(): D1Capture {
       return Response.json({ success: true, result: [{ results: [] }] });
     }
     // The content-updated repository dispatch.
+    capture.dispatches += 1;
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
+  return capture;
+}
+
+/**
+ * The same D1, holding the post already: what the delete route reads before it
+ * removes it. Everything else answers empty, as above.
+ */
+function captureD1Holding(body: string): D1Capture {
+  const capture: D1Capture = { statements: [], dispatches: 0 };
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('api.cloudflare.com')) {
+      const statement = JSON.parse(String(init?.body)) as { sql: string; params: unknown[] };
+      capture.statements.push(statement);
+      const held = statement.sql.startsWith('SELECT body_md FROM posts WHERE slug');
+      return Response.json({ success: true, result: [{ results: held ? [{ body_md: body }] : [] }] });
+    }
     capture.dispatches += 1;
     return new Response(null, { status: 204 });
   }) as typeof fetch;
@@ -260,20 +282,111 @@ test('parking a post as a draft and publishing it again rebuilds the site', { sk
   captureD1();
   await runPublisher(row);
 
-  const mode = await getSetting<string>('publish_mode', 'approval');
-  try {
-    await setSetting('publish_mode', 'draft');
-    const parked = captureD1();
-    assert.equal((await runPublisher(await reload(row.id))).d1Status, 'draft');
-    assert.equal(parked.dispatches, 0, 'a draft pass never rebuilds the site');
+  // The draft pass is asked for directly rather than by flipping the
+  // `publish_mode` setting: that setting is one global row, every *.db.test.ts
+  // file shares this database and `node --test` runs them concurrently, so a
+  // suite that flipped it would be flipping it under the pipeline suites too -
+  // the image stage reads it to choose between waiting_approval and queued.
+  const parked = captureD1();
+  assert.equal(
+    (await runPublisher(await reload(row.id), { publishMode: 'draft' })).d1Status,
+    'draft',
+  );
+  assert.equal(parked.dispatches, 0, 'a draft pass never rebuilds the site');
 
-    await setSetting('publish_mode', mode === 'draft' ? 'approval' : mode);
-    const relive = captureD1();
-    // The text has not changed, but the live row has: it went from draft back
-    // to published, and the site has to be rebuilt to carry it again.
-    assert.equal((await runPublisher(await reload(row.id))).dispatched, true);
-    assert.equal(relive.dispatches, 1);
-  } finally {
-    await setSetting('publish_mode', mode);
-  }
+  const relive = captureD1();
+  // The text has not changed, but the live row has: it went from draft back to
+  // published, and the site has to be rebuilt to carry it again.
+  assert.equal((await runPublisher(await reload(row.id))).dispatched, true);
+  assert.equal(relive.dispatches, 1);
+});
+
+// ── Cancel ─────────────────────────────────────────────────────────────────
+// Publish is the stage that hangs on an external service, which is when an
+// operator reaches for cancel. Nothing the publisher does is an article write
+// the claim guard could drop for it - the post goes live in D1 and the site is
+// rebuilt - so the claim is what it has to read for itself.
+
+/** The claim a worker holds while it runs the publish stage. */
+async function claimForPublish(id: string): Promise<ArticleRow> {
+  const [claimed] = await q<ArticleRow>(
+    `UPDATE articles
+        SET status = 'running', claimed_by = 'publish-test-worker/' || gen_random_uuid(),
+            claimed_at = now(), heartbeat_at = now(),
+            lease_expires_at = now() + interval '5 minutes', updated_at = now()
+      WHERE id = $1 RETURNING *`,
+    [id],
+  );
+  return claimed;
+}
+
+test('an article cancelled mid-publish never reaches the live site', { skip }, async () => {
+  const row = await claimForPublish((await article([resolved])).id);
+  assert.deepEqual(await cancelArticle(row.id), { ok: true, pending: true });
+
+  const capture = captureD1();
+  await assert.rejects(runPublisher(row), /lease lost/);
+
+  assert.equal(capture.statements.length, 0, 'nothing reached D1');
+  assert.equal(capture.dispatches, 0);
+  const after = await reload(row.id);
+  assert.equal(after.pub_date, null, 'and no publish receipt was stamped on the cancelled row');
+  assert.equal(after.published_digest, null);
+});
+
+test('a cancel that lands while D1 is answering stops the post going live', { skip }, async () => {
+  const row = await claimForPublish((await article([resolved])).id);
+
+  const statements: string[] = [];
+  let dispatches = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('api.cloudflare.com')) {
+      statements.push((JSON.parse(String(init?.body)) as { sql: string }).sql);
+      // The operator cancels while the affiliate write is in flight - the
+      // window that matters, because D1 is what a wedged publish is waiting on.
+      await cancelArticle(row.id);
+      return Response.json({ success: true, result: [{ results: [] }] });
+    }
+    dispatches += 1;
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
+
+  await assert.rejects(runPublisher(row), /lease lost/);
+
+  assert.ok(
+    statements.every((sql) => !sql.includes('INSERT INTO posts')),
+    'the push itself is re-checked against the claim, not just the start of the stage',
+  );
+  assert.equal(dispatches, 0);
+});
+
+// ── Delete and restore ─────────────────────────────────────────────────────
+
+test('a post deleted from D1 rebuilds the site when it is published again', { skip }, async () => {
+  const app = createApp();
+  const row = await article([resolved]);
+  const first = captureD1();
+  await runPublisher(row);
+  assert.equal(first.dispatches, 1);
+
+  // The operator's recovery path: remove the post, then publish it again. The
+  // dispatch gate is a digest of what was last pushed live, so deleting the
+  // post it describes has to clear it - otherwise the re-publish computes the
+  // same digest, skips the rebuild, and the page stays missing from the site.
+  captureD1Holding(BODY);
+  const removed = await app.fetch(
+    new Request(`http://localhost/api/published/${row.slug}`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer test-admin-token' },
+    }),
+  );
+  assert.equal(removed.status, 200);
+  assert.equal((await reload(row.id)).published_digest, null);
+
+  const restored = captureD1();
+  assert.equal((await runPublisher(await reload(row.id))).dispatched, true);
+  assert.equal(restored.dispatches, 1);
+  // The date the piece was first published survives the round trip: restoring
+  // a post is not publishing it on a new day.
+  assert.equal(await storedPubDate(row.id), '2026-09-14');
 });

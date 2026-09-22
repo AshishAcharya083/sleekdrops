@@ -37,21 +37,19 @@ export interface TestStageResult {
   durationMs: number;
 }
 
-/** Stages that cannot be run in isolation: publishing is the one thing a test
- *  must never do, and 'done' runs nothing at all. */
-export const UNTESTABLE_STAGES: readonly Stage[] = ['publish', 'done'];
-
+/** Publishing is the one thing a test must never do: it would push to the live
+ *  site, which is the opposite of running a stage in isolation. */
 export const UNTESTABLE_STAGE_ERROR = 'the publish stage cannot be tested in isolation';
 
 /**
  * The `stage` body param of a test-stage request. Same validation as the retry
- * path, except that an untestable stage is refused as untestable: what a test
- * asks is which stages may be run in isolation, and publish and 'done' answer
- * that the same way, so they get the same sentence.
+ * path, plus the one refusal that only applies here: publish is a runnable
+ * stage that a test may not run. 'done' is left to the shared parser, which
+ * already answers that it runs nothing at all - an operator who typed 'done'
+ * should not be told about publish.
  */
 export function parseTestStageParam(input: unknown): StageParse {
-  const requested = typeof input === 'string' ? input.trim() : '';
-  if ((UNTESTABLE_STAGES as readonly string[]).includes(requested)) {
+  if (typeof input === 'string' && input.trim() === 'publish') {
     return { ok: false, error: UNTESTABLE_STAGE_ERROR };
   }
   return parseStageParam(input);
