@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
-import type { ArticleList, Overview as OverviewData, StuckRun } from '../api';
+import type { ArticleList, Overview as OverviewData, Session, StuckRun } from '../api';
 import {
   api,
   budgetMinutes,
@@ -41,6 +41,13 @@ export function Overview({ onOpenRun }: { onOpenRun?: (articleId: string) => voi
   // stuck against. Polled here rather than lifted into the shell so the tab
   // keeps owning its own data, the way every other tab does.
   const board = usePoll<ArticleList>('/api/articles');
+  // A wider session window than the overview's own twelve newest, because a
+  // run the budget stopped started a whole budget before it stopped: on a busy
+  // pipeline its session is off the newest-twelve list almost immediately, and
+  // that session is the only surviving record of how long the run actually
+  // went - the reaper clears the claim and the lease as it stops the row. The
+  // Sessions tab already polls this endpoint the same way.
+  const history = usePoll<{ sessions: Session[] }>('/api/sessions?limit=200');
   // The landing screen keeps the last payload it loaded: a failing poll adds a
   // banner above the dashboard instead of emptying it, and only a first load
   // that has never succeeded shows the placeholder.
@@ -64,18 +71,22 @@ export function Overview({ onOpenRun }: { onOpenRun?: (articleId: string) => voi
   /** A figure the agent could not load is shown as unknown, never as a zero. */
   const figure = (section: string, value: string | number) => (stale(section) ? '—' : value);
   /**
-   * The runs that need an operator, off the two payloads this tab already
-   * holds: the article list decides which runs they are, and the recent
-   * sessions name the agent behind each and carry the elapsed time of a run
-   * whose claim was cleared as the budget stopped it.
+   * The runs that need an operator: the article list decides which runs they
+   * are, and the session history names the agent behind each and carries the
+   * elapsed time of a run whose claim was cleared as the budget stopped it.
+   * The overview's own twelve stand in until that wider window has loaded.
    */
   const stuck = board.data
-    ? stuckRuns(board.data.articles, data.recentSessions, board.data.budgets)
+    ? stuckRuns(
+        board.data.articles,
+        history.data?.sessions ?? data.recentSessions,
+        board.data.budgets,
+      )
     : undefined;
 
   return (
     <>
-      <ApiErrorBanner error={error ?? board.error} />
+      <ApiErrorBanner error={error ?? board.error ?? history.error} />
       {failedSections.length > 0 && (
         <div className="warn-banner" role="status">
           The agent could not load {failedSections.map((s) => SECTION_LABELS[s] ?? s).join(', ')} -
@@ -424,9 +435,13 @@ function StuckRow({
   // most rows carry no destructive target at all.
   const stoppable = isStoppable(run.status);
   const lapsed = ran ? `Running ${ran} on a lapsed claim` : 'Its claim has lapsed';
+  // A stopped run whose session has aged out of the window carries no duration
+  // at all, so the row says when it stopped instead of printing only a dash:
+  // the stop time is the part of its clock the reaper leaves on the article.
+  const stopped = ran === null && run.stopped_at ? ` Stopped ${fmtTime(run.stopped_at)}.` : '';
   const why =
     run.status === 'timed_out'
-      ? timedOutSentence(budget)
+      ? `${timedOutSentence(budget)}${stopped}`
       : run.lease_expired
         ? `${lapsed} - nothing is renewing it, and the next worker tick stops it on the budget.`
         : band === 'over'

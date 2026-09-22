@@ -36,6 +36,7 @@ import {
   STAGE_ORDER,
   stagesKeptBy,
   stagesRegeneratedBy,
+  stoppedSession,
   timedOutSentence,
   UNTESTABLE_STAGE_HINT,
 } from '../api';
@@ -563,8 +564,13 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
     : article
       ? outOfDateStages(article, sessions)
       : new Set<string>();
-  /** The session the budget stopped, which is what the detail block quotes. */
-  const timedOutSession = [...sessions].reverse().find((s) => s.status === 'timed_out') ?? null;
+  /**
+   * The session the budget stopped, which is what the detail block quotes.
+   * Pipeline runs only: an isolated test can hit the same budget, and a run
+   * that wrote nothing must never be what the stop card, the stage it names
+   * or the scrubbed detail below it describe.
+   */
+  const timedOutSession = stoppedSession(sessions);
   const stoppedStage = (timedOutSession && sessionStage(timedOutSession)) ?? article?.stage ?? null;
   const budgetSeconds = stageBudgetSeconds(stoppedStage, detail?.budgets);
   /**

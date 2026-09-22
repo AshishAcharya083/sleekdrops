@@ -578,8 +578,6 @@ button.btn.danger[aria-disabled='true'] {
   flex: 1 1 220px; min-width: 0; color: var(--muted); font-size: 12px; line-height: 1.5;
   align-self: center;
 }
-.actions .skel-btn { height: 44px; width: 160px; }
-.actions .skel-badge { height: 20px; width: 92px; }
 
 /* ── stage timeline ───────────────────────────────────────────────────── */
 .stages { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }

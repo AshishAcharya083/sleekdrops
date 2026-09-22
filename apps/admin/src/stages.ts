@@ -242,6 +242,24 @@ export const retryBlockedReason = (status: string): string => {
   return 'This run has finished. Run the whole pipeline again to rebuild it from research.';
 };
 
+/**
+ * The session the stage budget stopped, as the run detail speaks for it: the
+ * last pipeline run that timed out.
+ *
+ * An isolated test runs under the same budget and can hit it, but it wrote
+ * nothing when it did - so it never describes the article's own state, the
+ * same rule the timeline, the attempt history and the triage surface already
+ * follow. Pure and exported so that rule is unit-tested rather than repeated
+ * inline in a page nothing can import.
+ */
+export function stoppedSession<T extends StageSession>(sessions: readonly T[]): T | null {
+  for (let i = sessions.length - 1; i >= 0; i--) {
+    const session = sessions[i];
+    if (session.status === 'timed_out' && session.kind !== 'test') return session;
+  }
+  return null;
+}
+
 /** Marker on a stage whose stored output a retry has superseded. */
 export const OUT_OF_DATE_LABEL = 'Out of date';
 
@@ -294,6 +312,12 @@ export interface StuckRun {
    * survives only on its session, and the session list is finite.
    */
   elapsed_seconds: number | null;
+  /**
+   * When the budget stopped it, off the article's own row - the one part of a
+   * stopped run's clock the reaper does leave behind. It is what the row says
+   * instead when the session carrying the duration has aged off the list.
+   */
+  stopped_at: string | null;
   budget_seconds: number;
   /** The claim's lease ran out - nothing is renewing it any more. */
   lease_expired?: boolean;
@@ -407,6 +431,8 @@ export function stuckRuns(
       status: article.status,
       started_at: session?.started_at ?? article.claimed_at ?? null,
       elapsed_seconds: elapsed,
+      stopped_at:
+        article.status === 'timed_out' ? (session?.ended_at ?? article.updated_at ?? null) : null,
       budget_seconds: budget,
       lease_expired: leaseExpired,
     });

@@ -33,6 +33,7 @@ import {
   stopControlHint,
   stopControlLabel,
   stoppedNotice,
+  stoppedSession,
   STAGE_AGENT,
   stuckRuns,
   timedOutSentence,
@@ -362,13 +363,45 @@ test('a run the budget already stopped is always surfaced, however long ago', ()
   assert.equal(runs[0].agent, 'writer');
 });
 
-test('a stopped run whose session has aged off the list reports no elapsed time', () => {
+test('a stopped run whose session has aged off the list reports when it stopped', () => {
   // The reaper clears the lease columns as it stops the run, so nothing on the
-  // article says when it started. An invented figure would be the one number
-  // on this surface that measured nothing.
+  // article says when it started. An invented duration would be the one number
+  // on this surface that measured nothing - the stop time it does leave behind
+  // is what the row says instead.
   const [run] = stuckRuns([article({ status: 'timed_out', updated_at: ago(5) })], [], null, NOW);
   assert.equal(run.elapsed_seconds, null);
+  assert.equal(run.stopped_at, ago(5), 'off the article row, which outlives every session list');
   assert.equal(run.budget_seconds, HOUR, 'the budget it was stopped by is still known');
+});
+
+test('a stopped run reports the moment its own session recorded, when it has one', () => {
+  const [run] = stuckRuns(
+    [article({ status: 'timed_out', stage: 'write', updated_at: ago(58) })],
+    [
+      {
+        id: 's1',
+        article_id: 'a1',
+        agent: 'writer',
+        status: 'timed_out',
+        started_at: ago(120),
+        ended_at: ago(60),
+      },
+    ],
+    null,
+    NOW,
+  );
+  assert.equal(Math.round(run.elapsed_seconds ?? 0), 60 * 60);
+  assert.equal(run.stopped_at, ago(60), 'the session end, not the row\'s last write');
+});
+
+test('a live run is never given a stop time it has not reached', () => {
+  const [run] = stuckRuns(
+    [article({ status: 'running', claimed_at: ago(40), lease_expires_at: ago(-4), updated_at: ago(40) })],
+    [],
+    null,
+    NOW,
+  );
+  assert.equal(run.stopped_at, null);
 });
 
 test('a claim whose lease has lapsed is surfaced before it is past any bound', () => {
@@ -421,6 +454,42 @@ test('an isolated test run never describes the state of the article', () => {
   );
   assert.equal(run.session_id, null, 'a test wrote nothing and stopped nothing');
   assert.equal(run.elapsed_seconds, null);
+});
+
+test('an isolated test run never speaks for the run the budget stopped', () => {
+  // The same rule the triage surface follows, on the one payload the run
+  // detail quotes: a test that hit the budget wrote nothing, so the stop card,
+  // the stage it names and the scrubbed detail under it must not be its story.
+  const testRun: StageSession & { id: string } = {
+    id: 't1',
+    agent: 'seo_reviewer',
+    kind: 'test',
+    status: 'timed_out',
+    started_at: '2026-09-22T09:00:00.000Z',
+  };
+  const pipelineRun: StageSession & { id: string } = {
+    id: 'p1',
+    agent: 'writer',
+    status: 'timed_out',
+    started_at: '2026-09-22T08:00:00.000Z',
+  };
+  assert.equal(stoppedSession([pipelineRun, testRun])?.id, 'p1', 'the run that moved the article');
+  assert.equal(stoppedSession([testRun]), null, 'and nothing at all when only a test stopped');
+  assert.equal(
+    sessionStage(stoppedSession([pipelineRun, testRun]) as StageSession),
+    'write',
+    'so the stage the stop card names is the one the pipeline was on',
+  );
+});
+
+test('the stopped session is the last one the budget stopped, not the last of any kind', () => {
+  const sessions: Array<StageSession & { id: string }> = [
+    { id: 'a', agent: 'writer', status: 'timed_out', started_at: '2026-09-22T08:00:00.000Z' },
+    { id: 'b', agent: 'writer', status: 'timed_out', started_at: '2026-09-22T09:00:00.000Z' },
+    { id: 'c', agent: 'seo_reviewer', status: 'done', started_at: '2026-09-22T10:00:00.000Z' },
+  ];
+  assert.equal(stoppedSession(sessions)?.id, 'b');
+  assert.equal(stoppedSession([]), null);
 });
 
 test('every stage names the agent that runs it, both ways round', () => {

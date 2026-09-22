@@ -61,8 +61,23 @@ test('the Overview surfaces stuck runs above the stat row', () => {
   assert.match(overview, /usePoll<ArticleList>\('\/api\/articles'\)/);
   assert.match(
     overview,
-    /stuckRuns\(board\.data\.articles, data\.recentSessions, board\.data\.budgets\)/,
-    'off the two payloads the tab already holds',
+    /stuckRuns\(\s*\n?\s*board\.data\.articles,\s*\n?\s*history\.data\?\.sessions \?\? data\.recentSessions,\s*\n?\s*board\.data\.budgets,?\s*\n?\s*\)/,
+    'off the payloads the tab holds, with the wider session window when it has one',
+  );
+  // The overview's own session block is the twelve globally newest. A run the
+  // budget stopped started a whole budget before it stopped, so on a busy
+  // pipeline its session - the only record of how long it ran - is off that
+  // list almost at once, and the headline 2702-minute row would print no
+  // figure at all on the surface built for it.
+  assert.match(
+    overview,
+    /usePoll<\{ sessions: Session\[\] \}>\('\/api\/sessions\?limit=200'\)/,
+    'the triage list reads a window wide enough to still hold a stopped run',
+  );
+  assert.match(
+    overview,
+    /\$\{timedOutSentence\(budget\)\}\$\{stopped\}/,
+    'and a run whose session has aged out even of that says when it stopped',
   );
   assert.doesNotMatch(overview, /data\.stuck/, 'never off a section the agent does not send');
   assert.match(
@@ -73,6 +88,24 @@ test('the Overview surfaces stuck runs above the stat row', () => {
   assert.match(overview, /failed=\{!board\.data && Boolean\(board\.error\)\}/, 'a list that would not load is unknown, not clear');
   assert.match(overview, /className="attn calm"/, 'all-clear is a state of the same surface');
   assert.match(overview, /function NeedsAttentionSkeleton/, 'and so is the first load');
+});
+
+test('the run detail speaks for the pipeline run, never for an isolated test', () => {
+  // stages.ts holds the rule and stage-thresholds.test.ts proves it; this is
+  // the run detail actually using it, rather than re-deriving the last
+  // timed-out session of any kind and describing a run that wrote nothing.
+  assert.match(pipeline, /const timedOutSession = stoppedSession\(sessions\);/);
+  assert.doesNotMatch(
+    pipeline,
+    /reverse\(\)\.find\(\(s\) => s\.status === 'timed_out'\)/,
+    'the unfiltered derivation is gone',
+  );
+  for (const reader of [
+    /const runs = attempts\.filter\(\(s\) => s\.kind !== 'test'\)/,
+    /const runs = group\.sessions\.filter\(\(s\) => s\.kind !== 'test'\)/,
+  ]) {
+    assert.match(pipeline, reader, 'the timeline and the attempt history hold the same rule');
+  }
 });
 
 test('the row controls carry the run they act on into their accessible name', () => {
