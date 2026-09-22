@@ -17,8 +17,9 @@ import { runResearcher } from '../agents/researcher.js';
 import { runSeoReviewer } from '../agents/seoReviewer.js';
 import { runWriter } from '../agents/writer.js';
 import { UsageTracker } from '../llm/index.js';
-import type { RetryArticleRow } from './retry.js';
+import { parseStageParam, type StageParse } from './retry.js';
 import { modelFor, NO_LLM_AGENTS, STAGE_AGENT } from './runner.js';
+import { scrubSecrets } from './stageTimeout.js';
 import type { ArticleRow, Stage, TopicRow } from './types.js';
 
 export interface TestStageResult {
@@ -40,8 +41,18 @@ export const UNTESTABLE_STAGES: readonly Stage[] = ['publish', 'done'];
 
 export const UNTESTABLE_STAGE_ERROR = 'the publish stage cannot be tested in isolation';
 
-export function isTestableStage(stage: Stage): boolean {
-  return !UNTESTABLE_STAGES.includes(stage);
+/**
+ * The `stage` body param of a test-stage request. Same validation as the retry
+ * path, except that an untestable stage is refused as untestable: what a test
+ * asks is which stages may be run in isolation, and publish and 'done' answer
+ * that the same way, so they get the same sentence.
+ */
+export function parseTestStageParam(input: unknown): StageParse {
+  const requested = typeof input === 'string' ? input.trim() : '';
+  if ((UNTESTABLE_STAGES as readonly string[]).includes(requested)) {
+    return { ok: false, error: UNTESTABLE_STAGE_ERROR };
+  }
+  return parseStageParam(input);
 }
 
 async function topicFor(article: ArticleRow): Promise<TopicRow | null> {
@@ -83,7 +94,7 @@ async function callAgent(
 
 /** Record the test run's spend against the article without touching it. */
 async function recordSession(
-  article: RetryArticleRow,
+  article: ArticleRow,
   agent: string,
   model: string | null,
   status: 'done' | 'failed',
@@ -115,12 +126,24 @@ async function recordSession(
 }
 
 /**
+ * What a failure here is allowed to say. A test run spawns the same agents the
+ * pipeline does, so the message is whatever an SDK wrote about the child
+ * process it just ran - and that child's environment is where our credentials
+ * live. It is persisted on the session and served back to the browser as the
+ * 500 body, so it goes through the same scrubber runStage uses before either.
+ */
+function scrubbedFailure(err: unknown): Error {
+  const message = scrubSecrets(err instanceof Error ? err.message : String(err));
+  return new Error(message, { cause: err });
+}
+
+/**
  * Run one stage's agent against the article's stored input and return what it
  * produced. Writes nothing to `articles`; the only row this creates is the
  * test session. A failing agent is rethrown (the caller answers 500) after its
  * session has been recorded, so a failed test still shows its cost.
  */
-export async function runTestStage(article: RetryArticleRow, stage: Stage): Promise<TestStageResult> {
+export async function runTestStage(article: ArticleRow, stage: Stage): Promise<TestStageResult> {
   const agent = STAGE_AGENT[stage as Exclude<Stage, 'done'>];
   const tracker = new UsageTracker();
   const startedAt = Date.now();
@@ -129,9 +152,17 @@ export async function runTestStage(article: RetryArticleRow, stage: Stage): Prom
   try {
     model = NO_LLM_AGENTS.has(agent) ? null : await modelFor(agent);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await recordSession(article, agent, null, 'failed', `${stage} test could not start`, message, tracker);
-    throw err;
+    const failure = scrubbedFailure(err);
+    await recordSession(
+      article,
+      agent,
+      null,
+      'failed',
+      `${stage} test could not start`,
+      failure.message,
+      tracker,
+    );
+    throw failure;
   }
 
   try {
@@ -158,8 +189,8 @@ export async function runTestStage(article: RetryArticleRow, stage: Stage): Prom
       durationMs: Date.now() - startedAt,
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await recordSession(article, agent, model, 'failed', `${stage} test failed`, message, tracker);
-    throw err;
+    const failure = scrubbedFailure(err);
+    await recordSession(article, agent, model, 'failed', `${stage} test failed`, failure.message, tracker);
+    throw failure;
   }
 }

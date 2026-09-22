@@ -13,45 +13,7 @@
 // that nothing may publish or approve output the run has not re-passed.
 import { q } from '../db/pool.js';
 import { STAGE_AGENT } from './runner.js';
-import type { ArticleRow, Stage } from './types.js';
-
-/**
- * An article row including the retry bookkeeping columns. SLE-103 declares all
- * six on `ArticleRow` itself (three are its own 012 columns, three are 013's)
- * while it restructures the runner; until that merges this widening is what
- * keeps the retry paths typed without editing its file.
- */
-export type RetryArticleRow = ArticleRow & {
-  attempt: number;
-  lease_expires_at: string | null;
-  stale_from_stage: string | null;
-  pub_date: string | null;
-  published_digest: string | null;
-};
-
-/**
- * Linear pipeline order — the canonical "is X downstream of Y" answer.
- * 'edit' loops back to 'seo_review' at runtime; this list is the order a run
- * advances through, not the graph it can walk.
- *
- * SLE-103 adds the same list to pipeline/types.ts as STAGE_ORDER while it
- * restructures runStage; this copy is what keeps the retry engine runnable
- * before that merge and is replaced by the import at the rebase.
- * retry.test.ts pins it against STAGE_AGENT so the two cannot drift.
- */
-export const STAGE_ORDER: readonly Stage[] = [
-  'research',
-  'keyword',
-  'angle',
-  'outline',
-  'write',
-  'seo_review',
-  'edit',
-  'assemble',
-  'image',
-  'publish',
-  'done',
-];
+import { STAGE_ORDER, type Stage } from './types.js';
 
 /** Stages inside the write → review → edit loop, where a newer draft than the
  *  last review is the expected state rather than a stale one. */
@@ -120,21 +82,15 @@ export function outOfDateStages(
 }
 
 /**
- * Whether the stored seo_review predates the draft it is supposed to have
- * reviewed. True only outside the write/review/edit loop, where a newer draft
- * is expected: past that point a draft regenerated after the last review means
- * the piece would publish with a review that never saw it, which on a site
- * whose promise is independent review is not something to warn about and let
- * through.
- *
- * Written as one SQL expression so the list, the detail and the publisher all
- * answer the question the same way. `alias` is the `articles` alias in scope.
+ * The stored seo_review predates the draft it is supposed to have reviewed: a
+ * writer or editor pass finished after the last completed review. Written as
+ * one SQL expression so the list, the detail, the retry guards and the
+ * publisher all answer the question the same way. `alias` is the `articles`
+ * alias in scope.
  */
-export function reviewStaleSql(alias = 'a'): string {
-  const loop = REVIEW_LOOP_STAGES.map((s) => `'${s}'`).join(', ');
+function draftNewerThanReviewSql(alias: string): string {
   return `(
     ${alias}.seo_review IS NOT NULL
-    AND ${alias}.stage NOT IN (${loop})
     AND EXISTS (
       SELECT 1 FROM agent_sessions w
        WHERE w.article_id = ${alias}.id
@@ -147,6 +103,18 @@ export function reviewStaleSql(alias = 'a'): string {
               AND r.agent = 'seo_reviewer')
     )
   )`;
+}
+
+/**
+ * Whether the article as it stands is carrying a stale review. True only
+ * outside the write/review/edit loop, where a newer draft is expected: past
+ * that point a draft regenerated after the last review means the piece would
+ * publish with a review that never saw it, which on a site whose promise is
+ * independent review is not something to warn about and let through.
+ */
+export function reviewStaleSql(alias = 'a'): string {
+  const loop = REVIEW_LOOP_STAGES.map((s) => `'${s}'`).join(', ');
+  return `(${alias}.stage NOT IN (${loop}) AND ${draftNewerThanReviewSql(alias)})`;
 }
 
 /** The same question for one article, for the guards that have only an id. */
@@ -164,7 +132,14 @@ interface RetryTargetRow {
   stage: Stage;
   status: string;
   lease_held: boolean;
-  review_stale: boolean;
+  /**
+   * Staleness judged for a publish target rather than for the stage the row is
+   * sitting on, which is why it drops reviewStaleSql()'s loop-stage exemption:
+   * a run that stopped inside the write/review/edit loop after a retry
+   * regenerated the draft is exactly the case the exemption exists to allow -
+   * and exactly the case that must not be sent straight to the publisher.
+   */
+  publish_review_stale: boolean;
 }
 
 export interface RequeuedArticle {
@@ -195,7 +170,7 @@ async function loadTarget(id: string): Promise<RetryTargetRow | null> {
   const [row] = await q<RetryTargetRow>(
     `SELECT a.id, a.stage, a.status,
             COALESCE(a.status = 'running' AND a.lease_expires_at > now(), false) AS lease_held,
-            ${reviewStaleSql('a')} AS review_stale
+            ${draftNewerThanReviewSql('a')} AS publish_review_stale
        FROM articles a WHERE a.id = $1`,
     [id],
   );
@@ -217,7 +192,7 @@ export async function retryFromStage(id: string, stage: Stage): Promise<RetryOut
   const target = await loadTarget(id);
   if (!target) return { ok: false, status: 404, error: 'not found' };
   if (target.lease_held) return { ok: false, status: 409, error: MID_STAGE_RETRY_ERROR };
-  if (stage === 'publish' && target.review_stale) {
+  if (stage === 'publish' && target.publish_review_stale) {
     return { ok: false, status: 409, error: REVIEW_STALE_RETRY_ERROR };
   }
 

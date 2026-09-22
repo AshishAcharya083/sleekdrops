@@ -12,6 +12,7 @@ import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
+import { stageBudgetSeconds } from '../pipeline/budgets.js';
 import {
   cancelArticle,
   groupAttempts,
@@ -22,15 +23,15 @@ import {
   reviewStaleSql,
   REVIEW_STALE_PUBLISH_ERROR,
   REVIEW_STALE_REASON,
-  type RetryArticleRow,
   type SessionAttemptRow,
 } from '../pipeline/retry.js';
 import {
   enqueueScoutRun,
   scoutQueueStatus,
 } from '../pipeline/scout.js';
-import { isTestableStage, runTestStage, UNTESTABLE_STAGE_ERROR } from '../pipeline/testStage.js';
-import type { ReferenceMaterial } from '../pipeline/types.js';
+import { scrubSecrets } from '../pipeline/stageTimeout.js';
+import { parseTestStageParam, runTestStage } from '../pipeline/testStage.js';
+import { STAGE_ORDER, type ArticleRow, type ReferenceMaterial, type Stage } from '../pipeline/types.js';
 import { deleteD1Post, getD1PostHero, listD1Posts, setD1PostHero } from '../tools/d1.js';
 import { gcsConfigured } from '../tools/gcs.js';
 import { dispatchContentUpdated } from '../tools/github.js';
@@ -184,6 +185,19 @@ async function requestRebuild(): Promise<{
       logged: { dispatched: false },
     };
   }
+}
+
+/**
+ * Every stage's wall-clock budget, for the panel that turns "running for 52
+ * minutes" into slow or stuck. Resolved per request rather than at module load
+ * so a redeployed AGENT_RUN_TIMEOUT_SECONDS shows up on the next poll, and
+ * resolved here rather than in the panel so one number governs the runner, the
+ * reaper and the surface an operator reads it off.
+ */
+function stageBudgets(): Record<Stage, number> {
+  return Object.fromEntries(
+    STAGE_ORDER.map((stage) => [stage, stageBudgetSeconds(stage)]),
+  ) as Record<Stage, number>;
 }
 
 const ADMIN_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../../admin/dist');
@@ -544,27 +558,24 @@ export function createApp(): Hono<TraceEnv> {
   // ── Articles (the pipeline board) ────────────────────────────────────────
   // attempt / stale_from_stage / review_stale ride along on the list because
   // the panel renders "attempt 2", "out of date" and a disabled publish
-  // control straight off a row - none of that is re-derived client-side.
-  //
-  // Two more fields belong on both article responses and are not here yet:
-  // `stageBudgets` (from pipeline/budgets.ts) and `articles.heartbeat_at`.
-  // Both are SLE-103's - the budget module and the column do not exist until
-  // its migration 012 lands - so they are wired in when this branch rebases
-  // onto it, not invented here against a schema that would then diverge.
+  // control straight off a row - none of that is re-derived client-side. The
+  // lease columns and `stageBudgets` are there for the same reason: how long a
+  // claim has left, and how long its stage was allowed, are what decide
+  // whether a running article is slow or stuck.
   app.get('/api/articles', async (c) => {
     const rows = await q(
       `SELECT a.id, a.topic_id, a.title, a.slug, a.category, a.post_type, a.stage, a.status,
               a.revision_round, a.error, a.published_at, a.created_at, a.updated_at,
               a.hero_image_url, (a.seo_review ->> 'score') seo_score,
-              a.attempt, a.stale_from_stage, a.claimed_at, a.lease_expires_at,
+              a.attempt, a.stale_from_stage, a.claimed_at, a.heartbeat_at, a.lease_expires_at,
               ${reviewStaleSql('a')} AS review_stale
        FROM articles a ORDER BY a.updated_at DESC LIMIT 200`,
     );
-    return c.json({ articles: rows });
+    return c.json({ articles: rows, stageBudgets: stageBudgets() });
   });
 
   app.get('/api/articles/:id', async (c) => {
-    const [article] = await q<RetryArticleRow & { review_stale: boolean }>(
+    const [article] = await q<ArticleRow & { review_stale: boolean }>(
       `SELECT a.*, ${reviewStaleSql('a')} AS review_stale FROM articles a WHERE a.id = $1`,
       [c.req.param('id')],
     );
@@ -581,6 +592,7 @@ export function createApp(): Hono<TraceEnv> {
       // way the pipeline ran them rather than as a flat session log.
       attempts: groupAttempts(sessions),
       outOfDateStages: outOfDateStages(article.stale_from_stage, article.stage),
+      stageBudgets: stageBudgets(),
       reviewStale,
       reviewStaleReason: reviewStale ? REVIEW_STALE_REASON : null,
     });
@@ -624,12 +636,11 @@ export function createApp(): Hono<TraceEnv> {
   // the tokens it spends still show up in /api/usage.
   app.post('/api/articles/:id/test-stage', async (c) => {
     const body = (await c.req.json().catch(() => null)) as { stage?: unknown } | null;
-    const parsed = parseStageParam(body?.stage);
+    const parsed = parseTestStageParam(body?.stage);
     if (!parsed.ok) return c.json({ error: parsed.error }, 400);
-    if (!isTestableStage(parsed.stage)) return c.json({ error: UNTESTABLE_STAGE_ERROR }, 400);
 
     const id = c.req.param('id');
-    const [article] = await q<RetryArticleRow>('SELECT * FROM articles WHERE id = $1', [id]);
+    const [article] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [id]);
     if (!article) return c.json({ error: 'not found' }, 404);
     if (article.status === 'running') {
       return c.json({ error: 'the article is mid-stage - try again when it finishes' }, 409);
@@ -645,7 +656,9 @@ export function createApp(): Hono<TraceEnv> {
       });
       return c.json(result);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // Scrubbed again at the boundary that serves it: the panel renders this
+      // sentence verbatim, and redaction is this side's job.
+      const message = scrubSecrets(err instanceof Error ? err.message : String(err));
       log.error('stage test failed', { article_id: id, stage: parsed.stage, error: message });
       return c.json({ error: message }, 500);
     }

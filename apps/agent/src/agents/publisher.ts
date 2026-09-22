@@ -140,6 +140,13 @@ export async function runPublisher(article: ArticleRow): Promise<PublishResult> 
   // One dispatch per published version. Re-entering publish with the same
   // content (a retry that reached here again, a republish after a no-op edit)
   // upserts the same row and must not queue another site rebuild.
+  //
+  // Deliberate deviation from the agreed contract, which pins the digest as
+  // stored "in the same statement that stamps pub_date": stamping both at once
+  // would record a version as delivered before the dispatch that delivers it,
+  // so a dispatch that failed would never be retried - the rebuild would be
+  // lost with nothing left to say it is owed. The date is stamped here, the
+  // digest only after the dispatch has actually been asked for.
   const digest = publishedDigest(slug, d1Status, frontmatter, body);
   await q('UPDATE articles SET pub_date = $2, updated_at = now() WHERE id = $1', [
     article.id,

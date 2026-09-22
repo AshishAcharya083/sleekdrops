@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 
 process.env.DATABASE_URL = 'postgres://unused:unused@127.0.0.1:1/unreachable';
 
-const { groupAttempts, outOfDateStages, parseStageParam, STAGE_ORDER } = await import('./retry.js');
+const { groupAttempts, outOfDateStages, parseStageParam } = await import('./retry.js');
+const { STAGE_ORDER } = await import('./types.js');
 const { STAGE_AGENT } = await import('./runner.js');
 
 test('the pipeline order covers exactly the stages that have an agent', () => {

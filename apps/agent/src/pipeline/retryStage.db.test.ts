@@ -11,10 +11,16 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
+/** A credential in this process's environment, which is the environment every
+ *  agent's child process inherits. Nothing reads it - it is here to be leaked
+ *  into an agent failure message, and redacted out of it again. */
+process.env.SLE104_TEST_TOKEN = 'sk-ant-oat01-not-a-real-credential';
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
 const { createApp } = await import('../api/server.js');
+const { stageBudgetSeconds } = await import('./budgets.js');
+const { STAGE_ORDER } = await import('./types.js');
 
 import type { ContentBrief, Stage } from './types.js';
 
@@ -497,6 +503,35 @@ test('a newer draft inside the write-review-edit loop is not stale', { skip }, a
   assert.equal((await detail(id)).reviewStale, false);
 });
 
+test('retrying to publish from inside the loop is refused too', { skip }, async () => {
+  // The case the guard exists for: a retry regenerated the draft and the run
+  // then stopped inside the write/review/edit loop, where a newer draft is the
+  // expected state. The article is not stale where it stands - but the stage
+  // being asked for is publish, and that draft has never been reviewed.
+  const id = await seedStaleReview('edit', 'failed');
+  assert.equal((await detail(id)).reviewStale, false, 'not stale for the stage it is on');
+
+  const { status, body } = await post(`/api/articles/${id}/retry-stage`, { stage: 'publish' });
+
+  assert.equal(status, 409);
+  assert.equal(body.error, 'seo_review must re-run before this article can publish');
+  const after = await row(id);
+  assert.equal(after.attempt, 1, 'nothing was re-queued');
+  assert.equal(after.stale_from_stage, null);
+  assert.equal(after.stage, 'edit', 'and the article is left where the run stopped');
+});
+
+test('retrying to an earlier stage is still allowed while the review is stale', { skip }, async () => {
+  // Only publish is refused: re-running the reviewer is exactly the fix the
+  // refusal asks for, so the retry that resolves it must go through.
+  const id = await seedStaleReview('publish', 'failed');
+
+  const { status } = await post(`/api/articles/${id}/retry-stage`, { stage: 'seo_review' });
+
+  assert.equal(status, 200);
+  assert.equal((await row(id)).stage, 'seo_review');
+});
+
 test('an isolated test run of the writer does not make the review stale', { skip }, async () => {
   const id = await seed({ stage: 'publish', status: 'waiting_approval', seo_review: JSON.stringify(seoReview) });
   await session(id, 'writer', 30);
@@ -554,9 +589,12 @@ test('the publisher can never be reached by a test run', { skip }, async () => {
     status: 400,
     body: { error: 'the publish stage cannot be tested in isolation' },
   });
+  // 'done' is refused the same way publish is: for a test the question is
+  // which stages may be run in isolation, not which stages a run can restart
+  // from, so both get the one sentence.
   assert.deepEqual(await post(`/api/articles/${id}/test-stage`, { stage: 'done' }), {
     status: 400,
-    body: { error: 'done is not a runnable stage' },
+    body: { error: 'the publish stage cannot be tested in isolation' },
   });
 });
 
@@ -566,6 +604,29 @@ test('a mid-stage article is not tested underneath the worker', { skip }, async 
   const { status, body } = await post(`/api/articles/${id}/test-stage`, { stage: 'assemble' });
   assert.equal(status, 409);
   assert.equal(body.error, 'the article is mid-stage - try again when it finishes');
+});
+
+test('a failing agent message is redacted before it is stored or served', { skip }, async () => {
+  // The article's own category reaches the assembler's validation message, so
+  // this is an agent failure carrying a string from outside the code - which
+  // is what an SDK error about the child process it just ran is too, except
+  // that one carries the child's environment.
+  const leaked = process.env.SLE104_TEST_TOKEN!;
+  const id = await seed({ stage: 'assemble', status: 'failed', category: leaked });
+
+  const { status, body } = await post(`/api/articles/${id}/test-stage`, { stage: 'assemble' });
+
+  assert.equal(status, 500);
+  const served = body.error as string;
+  assert.ok(served.includes('[redacted SLE104_TEST_TOKEN]'), served);
+  assert.ok(!served.includes(leaked), 'the 500 body is what the panel renders verbatim');
+
+  const [recorded] = await q<{ error: string }>(
+    "SELECT error FROM agent_sessions WHERE article_id = $1 AND kind = 'test'",
+    [id],
+  );
+  assert.ok(recorded.error.includes('[redacted SLE104_TEST_TOKEN]'), recorded.error);
+  assert.ok(!recorded.error.includes(leaked), 'and the session row keeps no copy of it');
 });
 
 test('a failing test run still records what it spent', { skip }, async () => {
@@ -598,5 +659,18 @@ test('the board carries the retry state so the panel derives nothing', { skip },
   assert.equal(listed.attempt, 2);
   assert.equal(listed.stale_from_stage, 'write');
   assert.equal(listed.review_stale, false, 'back inside the write loop, a newer draft is expected');
-  assert.ok('claimed_at' in listed && 'lease_expires_at' in listed);
+  assert.ok('claimed_at' in listed && 'heartbeat_at' in listed && 'lease_expires_at' in listed);
+});
+
+test('both article payloads carry the stage budgets the panel measures against', { skip }, async () => {
+  const id = await seed();
+  const expected = Object.fromEntries(STAGE_ORDER.map((stage) => [stage, stageBudgetSeconds(stage)]));
+
+  const res = await app.fetch(new Request('http://localhost/api/articles', { headers: AUTH }));
+  const list = (await res.json()) as { stageBudgets: Record<string, number> };
+  assert.deepEqual(list.stageBudgets, expected);
+  // Whether a run is slow or stuck is this number against the elapsed time, so
+  // the detail view cannot be left to guess it either.
+  assert.deepEqual((await detail(id)).stageBudgets, expected);
+  assert.equal(typeof list.stageBudgets.write, 'number');
 });
