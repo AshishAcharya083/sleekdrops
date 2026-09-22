@@ -551,7 +551,7 @@ export function createApp(): Hono<TraceEnv> {
   app.post('/api/articles/:id/retry', async (c) => {
     const rows = await q(
       `UPDATE articles SET status = 'queued', error = NULL, updated_at = now()
-       WHERE id = $1 AND status IN ('failed', 'cancelled') RETURNING id`,
+       WHERE id = $1 AND status IN ('failed', 'cancelled', 'timed_out') RETURNING id`,
       [c.req.param('id')],
     );
     if (rows.length === 0) return c.json({ error: 'not retryable' }, 409);
@@ -573,7 +573,7 @@ export function createApp(): Hono<TraceEnv> {
   app.post('/api/articles/:id/cancel', async (c) => {
     const rows = await q(
       `UPDATE articles SET status = 'cancelled', updated_at = now()
-       WHERE id = $1 AND status IN ('queued', 'failed', 'waiting_approval') RETURNING id`,
+       WHERE id = $1 AND status IN ('queued', 'failed', 'timed_out', 'waiting_approval') RETURNING id`,
       [c.req.param('id')],
     );
     return rows.length > 0 ? c.json({ ok: true }) : c.json({ error: 'not cancellable' }, 409);

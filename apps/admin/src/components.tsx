@@ -9,6 +9,8 @@ const STATUS_COLOR: Record<string, string> = {
   suggested: 'blue',
   draft: 'gray',
   waiting_approval: 'amber',
+  // A stopped run is not a reported failure, and reads as its own state.
+  timed_out: 'amber',
   failed: 'red',
   rejected: 'red',
   cancelled: 'red',

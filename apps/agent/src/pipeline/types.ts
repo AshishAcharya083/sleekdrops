@@ -25,9 +25,68 @@ export type ArticleStatus =
   | 'queued'
   | 'running'
   | 'failed'
+  /**
+   * The stage ran out of wall-clock time, or the worker holding it stopped
+   * reporting. Terminal and deliberately distinct from 'failed': nothing
+   * reported an error, so "failed" would send an operator looking for one -
+   * what actually happened is that the run was stopped, and whatever it had
+   * already written is still on the article as a draft.
+   */
+  | 'timed_out'
   | 'waiting_approval'
   | 'cancelled'
   | 'done';
+
+/** Status of one agent_sessions row. Mirrors ArticleStatus's timeout state. */
+export type SessionStatus = 'running' | 'done' | 'failed' | 'timed_out';
+
+/** Why a stage stopped: it spent its budget, or its lease went unrenewed. */
+export type StageTimeoutCause = 'budget' | 'lease';
+
+/**
+ * What an operator needs to know about a stopped stage, and the payload the
+ * error message is built from.
+ */
+export interface StageTimeoutDetail {
+  agent: string;
+  stage: Stage;
+  budgetSeconds: number;
+  elapsedSeconds: number;
+  /**
+   * The last LLM call the stage started, rendered for a human ("claude-opus-5
+   * with web search, retry 2 of 3, in flight for 41m"). Empty when the stage
+   * had not reached a model yet, or when the run was reaped by another process
+   * that cannot see what it was doing.
+   */
+  lastCall: string;
+  cause: StageTimeoutCause;
+}
+
+/**
+ * A stage stopped by its wall-clock budget. Carries the detail rather than
+ * only a message so callers route on the type (a timeout is not a failure)
+ * without parsing text. The message is built - and scrubbed - by
+ * pipeline/stageTimeout.ts, which is the only thing that should construct one.
+ */
+export class StageTimeoutError extends Error {
+  readonly agent: string;
+  readonly stage: Stage;
+  readonly budgetSeconds: number;
+  readonly elapsedSeconds: number;
+  readonly lastCall: string;
+  readonly cause: StageTimeoutCause;
+
+  constructor(message: string, detail: StageTimeoutDetail) {
+    super(message);
+    this.name = 'StageTimeoutError';
+    this.agent = detail.agent;
+    this.stage = detail.stage;
+    this.budgetSeconds = detail.budgetSeconds;
+    this.elapsedSeconds = detail.elapsedSeconds;
+    this.lastCall = detail.lastCall;
+    this.cause = detail.cause;
+  }
+}
 
 export interface ArticleRow {
   id: string;
@@ -67,6 +126,15 @@ export interface ArticleRow {
   /** Admin feedback awaiting application — consumed (cleared) by the editor stage. */
   feedback: string | null;
   error: string | null;
+  /**
+   * Lease bookkeeping for the stage this article is currently claimed for, all
+   * NULL while it is not claimed. The worker renews both while it works; a
+   * claim whose `lease_expires_at` has passed is reaped to 'timed_out'.
+   */
+  heartbeat_at: string | null;
+  lease_expires_at: string | null;
+  /** How many times this article has been claimed for a stage run. */
+  attempt: number;
   published_at: string | null;
   created_at: string;
   updated_at: string;

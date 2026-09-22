@@ -5,6 +5,40 @@ function env(key: string, fallback = ''): string {
   return process.env[key] || fallback;
 }
 
+/**
+ * A positive number from the environment, or the fallback. Anything else -
+ * blank, a typo, a negative - falls back rather than propagating: these values
+ * bound a safety guard, and a guard configured to zero is worse than no guard.
+ */
+function positiveNumber(key: string, fallback: number): number {
+  const value = Number(env(key, String(fallback)));
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/**
+ * Wall-clock budget for one pipeline stage, and the ceiling no configuration
+ * can raise.
+ *
+ * Deliberately not an operator setting. Comparable tooling treats an execution
+ * timeout as a build/config-time value with a fixed platform ceiling (Zapier's
+ * 30s is unchangeable, Make's 40min is a guardrail, GitHub Actions caps at
+ * 360min, n8n's author-facing field is bounded by an admin-set maximum) - a
+ * free-form number in the admin panel turns a guard into a support surface
+ * ("someone set it to 5 seconds and everything fails") for no operator
+ * benefit. What the operator sees is the outcome: a 'timed_out' run whose
+ * error names the limit. A stage that genuinely needs longer gets a per-stage
+ * override in the stage definition map in pipeline/runner.ts.
+ */
+export const DEFAULT_STAGE_TIMEOUT_SECONDS = 3600;
+
+/**
+ * The hard ceiling, in code so no environment can raise it. Four hours is
+ * already far past any healthy stage - the longest legitimate run measured
+ * here is an seo_review at roughly 90 minutes - so a budget above this is a
+ * misconfiguration, not a long job.
+ */
+export const MAX_STAGE_TIMEOUT_SECONDS = 4 * 60 * 60;
+
 export const config = {
   // No fallback on purpose: the docker-compose URL (port 5544 is a host-side
   // mapping that exists only on a laptop running `pnpm db:up`) is documentation
@@ -59,4 +93,22 @@ export const config = {
   port: Number(env('PORT', '8787')),
   workerConcurrency: Number(env('WORKER_CONCURRENCY', '2')),
   pollMs: Number(env('POLL_MS', '5000')),
+
+  /**
+   * Wall-clock budget for one stage run. Clamped to MAX_STAGE_TIMEOUT_SECONDS
+   * where it is read (pipeline/stageTimeout.ts) - this value is what the
+   * deployment asked for, not necessarily what it gets.
+   */
+  agentRunTimeoutSeconds: positiveNumber(
+    'AGENT_RUN_TIMEOUT_SECONDS',
+    DEFAULT_STAGE_TIMEOUT_SECONDS,
+  ),
+
+  /**
+   * How many worker polls between reaper sweeps. At the default poll of 5s
+   * that is a sweep a minute: often enough that a wedged run is noticed while
+   * the process is alive, rare enough that the sweep is not most of what the
+   * worker does.
+   */
+  reaperEveryTicks: positiveNumber('REAPER_EVERY_TICKS', 12),
 };
