@@ -33,25 +33,41 @@ test('a table card scrolls horizontally instead of widening the page', () => {
   assert.match(scroll, /padding:\s*0/, 'a table card keeps the flush edges the markup used to inline as padding: 0');
 });
 
+/**
+ * The two scroll containers in the panel: a table card, and the per-stage
+ * attempt history inside a `details` (which cannot be a card - it is already
+ * inside one region and has its own summary row).
+ */
+const SCROLLERS = ['card table-scroll', 'abody'];
+const openingTag = (className: string): RegExp =>
+  new RegExp(`<div className="${className}"[^>]*>`, 'g');
+
 test('the scroll container is reachable and visible to keyboard users', () => {
   assert.match(rule('.card.table-scroll:focus-visible'), /outline:/, 'a focusable region needs a focus ring');
+  assert.match(rule('.abody:focus-visible'), /outline:/, 'an attempt table is a region of its own');
+  assert.match(rule('.abody'), /overflow-x:\s*auto/, 'the attempt table scrolls inside its details');
   for (const { name, source } of pages) {
-    for (const opening of source.match(/<div className="card table-scroll"[^>]*>/g) ?? []) {
-      assert.match(opening, /tabIndex=\{0\}/, `${name}: a scrollable region must be keyboard-focusable`);
-      assert.match(opening, /aria-label="[^"]+"/, `${name}: the region needs a name`);
+    for (const scroller of SCROLLERS) {
+      for (const opening of source.match(openingTag(scroller)) ?? []) {
+        assert.match(opening, /tabIndex=\{0\}/, `${name}: a scrollable region must be keyboard-focusable`);
+        assert.match(opening, /role="region"/, `${name}: the region needs a role`);
+        assert.match(opening, /aria-label=[{"]/, `${name}: the region needs a name`);
+      }
     }
   }
 });
 
-test('every table sits in a scrolling card', () => {
+test('every table sits in a scrolling container', () => {
   for (const { name, source } of pages) {
     for (const table of source.matchAll(/<table[\s>]/g)) {
-      const enclosingCard = source.slice(0, table.index).lastIndexOf('<div className="card');
-      assert.notEqual(enclosingCard, -1, `${name}: a table outside a card cannot scroll`);
-      assert.match(
-        source.slice(enclosingCard),
-        /^<div className="card table-scroll"/,
-        `${name}: this table's card cannot scroll`,
+      const enclosing = Math.max(
+        ...SCROLLERS.map((scroller) => source.slice(0, table.index).lastIndexOf(`<div className="${scroller}"`)),
+        source.slice(0, table.index).lastIndexOf('<div className="card'),
+      );
+      assert.notEqual(enclosing, -1, `${name}: a table outside a container cannot scroll`);
+      assert.ok(
+        SCROLLERS.some((scroller) => source.slice(enclosing).startsWith(`<div className="${scroller}"`)),
+        `${name}: this table's container cannot scroll`,
       );
     }
   }

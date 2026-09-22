@@ -10,6 +10,13 @@
 import { TRACE_HEADER, captureError, getTraceId, log } from './analytics';
 import { ApiError, apiErrorFromResponse } from './api-error';
 
+// The stage order, the threshold scale, the operator copy and the attempt
+// grouping live in stages.ts: pure, dependency-free and unit-tested in
+// isolation, the same way scrub.ts is. Re-exported here so a page keeps one
+// import point for everything it reads off the API.
+export * from './stages';
+import { fmtSeconds, type StageBudgets } from './stages';
+
 /** A markdown reference the operator supplied (uploaded file or pasted block). */
 export interface ReferenceMaterial {
   name: string;
@@ -72,6 +79,23 @@ export interface ArticleSummary {
   published_at: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Everything below arrives from the retry engine and the stage-budget
+   * reaper. Each one is optional on purpose: against an agent that has not
+   * shipped them the field is absent and the panel hides the affordance
+   * rather than inventing a value, the same way `Overview.failedSections`
+   * and `SeoReviewDetail.dimensions` already degrade.
+   */
+  /** 1-based run attempt for the article as a whole. */
+  attempt?: number;
+  /** Earliest stage whose stored output is superseded by a retry. */
+  stale_from_stage?: string | null;
+  /** The draft changed after its last SEO review - publishing is blocked. */
+  review_stale?: boolean;
+  /** A cancel is in flight against a stage that is still running. */
+  cancel_requested?: boolean;
+  heartbeat_at?: string | null;
+  lease_expires_at?: string | null;
 }
 
 export interface Session {
@@ -90,6 +114,12 @@ export interface Session {
   started_at: string;
   ended_at: string | null;
   article_title?: string | null;
+  /** Stage this session ran. Null on scout runs and on pre-retry rows. */
+  stage?: string | null;
+  /** 1-based attempt of that stage. */
+  attempt?: number;
+  /** 'pipeline' (moves the article) or 'test' (isolated, writes nothing). */
+  kind?: string;
 }
 
 export interface Overview {
@@ -106,6 +136,26 @@ export interface Overview {
    * Absent on an agent older than that change.
    */
   failedSections?: string[];
+  /**
+   * Runs at or past the soft bound of their stage budget, plus the ones the
+   * budget already stopped. Absent on an agent without the stage budget, and
+   * the Overview surface is hidden then rather than claiming all-clear.
+   */
+  stuck?: StuckRun[];
+}
+
+/** One wedged run, as the Overview's stuck surface lists it. */
+export interface StuckRun {
+  article_id: string;
+  session_id?: string | null;
+  title: string;
+  stage?: string | null;
+  agent: string;
+  /** 'running' (past the soft bound) or 'timed_out' (stopped by the budget). */
+  status: string;
+  started_at: string;
+  elapsed_seconds: number;
+  budget_seconds?: number;
 }
 
 /** Keyword strategist output — mirrors KeywordPlan in the agent app. */
@@ -234,6 +284,26 @@ export interface ArticleDetail {
     affiliate_links: Array<{ slug: string; default_url: string; note?: string }> | null;
   };
   sessions: Session[];
+  /** Stage budgets as the agent has them configured. Read-only, never posted. */
+  budgets?: StageBudgets;
+}
+
+/**
+ * What POST /api/articles/:id/test-stage answers with. The call is synchronous
+ * and can take minutes; nothing it produces is written to the article.
+ */
+export interface TestStageResult {
+  stage: string;
+  agent?: string;
+  model?: string | null;
+  summary?: string | null;
+  output?: unknown;
+  tokens_input?: number;
+  tokens_output?: number;
+  cost_usd?: string | number;
+  session_id?: string;
+  started_at?: string;
+  ended_at?: string | null;
 }
 
 export interface PublishedPost {
@@ -382,6 +452,8 @@ export const fmtTime = (iso: string | null): string =>
   iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 export const duration = (start: string, end: string | null): string => {
   const ms = (end ? new Date(end).getTime() : Date.now()) - new Date(start).getTime();
-  const s = Math.max(0, Math.round(ms / 1000));
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+  return fmtSeconds(ms / 1000);
 };
+/** Elapsed seconds of a session, for the threshold scale. */
+export const elapsedSeconds = (start: string, end: string | null): number =>
+  Math.max(0, ((end ? new Date(end).getTime() : Date.now()) - new Date(start).getTime()) / 1000);

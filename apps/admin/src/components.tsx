@@ -1,4 +1,11 @@
 import { describeApiError, type ApiError } from './api-error';
+import {
+  budgetMinutes,
+  elapsedBand,
+  fmtSeconds,
+  OUT_OF_DATE_LABEL,
+  type ElapsedBand,
+} from './stages';
 
 const STATUS_COLOR: Record<string, string> = {
   done: 'green',
@@ -12,10 +19,84 @@ const STATUS_COLOR: Record<string, string> = {
   failed: 'red',
   rejected: 'red',
   cancelled: 'red',
+  // A run the budget stopped is not a run that failed: it has partial output
+  // saved and a retry that is expected to work, so it never wears the filled
+  // red of a failure. Dashed outline plus the clock glyph below.
+  timed_out: 'timeout',
+};
+
+/**
+ * Glyphs for the statuses whose colour is load-bearing, so the difference
+ * survives a monochrome screen or a red/green colour deficiency.
+ */
+const STATUS_GLYPH: Record<string, string> = {
+  timed_out: '⏱',
+  failed: '✕',
+  cancelled: '⊘',
 };
 
 export function Badge({ value }: { value: string }) {
-  return <span className={`badge ${STATUS_COLOR[value] ?? ''}`}>{value.replace(/_/g, ' ')}</span>;
+  const glyph = STATUS_GLYPH[value];
+  return (
+    <span className={`badge ${STATUS_COLOR[value] ?? ''}`}>
+      {glyph && <span aria-hidden="true">{glyph}</span>}
+      {value.replace(/_/g, ' ')}
+    </span>
+  );
+}
+
+/** A stage whose stored output a retry has superseded. */
+export function OutOfDateBadge() {
+  return (
+    <span className="badge outline-amber" title="Regenerated when the retry reaches this stage">
+      {OUT_OF_DATE_LABEL}
+    </span>
+  );
+}
+
+const BAND_MARK: Record<ElapsedBand, string> = { normal: '·', warn: '▲', over: '⏱' };
+const BAND_WORD: Record<ElapsedBand, string> = {
+  normal: 'within the stage budget',
+  warn: 'past half the stage budget',
+  over: 'past the stage budget',
+};
+
+/**
+ * An elapsed time against the budget its stage runs under. The band carries a
+ * glyph and prints the budget next to the figure, so the warning never rests
+ * on the colour alone - and a run that has been going for 2702 minutes cannot
+ * render as an ordinary duration.
+ */
+export function Elapsed({
+  seconds,
+  budgetSeconds,
+  status,
+  meter = false,
+}: {
+  seconds: number;
+  budgetSeconds: number;
+  status?: string | null;
+  meter?: boolean;
+}) {
+  const band = elapsedBand(seconds, budgetSeconds, status);
+  const minutes = budgetMinutes(budgetSeconds);
+  const filled = Math.min(100, Math.round((seconds / Math.max(budgetSeconds, 1)) * 100));
+  return (
+    <>
+      <span className={`elapsed ${band}`} title={`${fmtSeconds(seconds)} - ${BAND_WORD[band]}`}>
+        <span className="mark" aria-hidden="true">
+          {BAND_MARK[band]}
+        </span>
+        <span className="t">{fmtSeconds(seconds)}</span>
+        <span className="cap">/ {minutes}m</span>
+      </span>
+      {meter && (
+        <span className={`meter ${band}`} aria-hidden="true">
+          <i style={{ width: `${filled}%` }} />
+        </span>
+      )}
+    </>
+  );
 }
 
 export function Stat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {

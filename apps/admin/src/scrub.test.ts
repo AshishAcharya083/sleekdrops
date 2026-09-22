@@ -47,6 +47,9 @@ test('keeps allowlisted structural dimensions', () => {
     category: 'Home',
     post_type: 'guide',
     article_id: '0d1c8f5a-3c2b-4a5e-9f10-2b3c4d5e6f70',
+    stage: 'seo_review',
+    status: 'timed_out',
+    attempt: 2,
     http_status: 409,
     worker_enabled: false,
   });
@@ -60,6 +63,9 @@ test('keeps allowlisted structural dimensions', () => {
     category: 'Home',
     post_type: 'guide',
     article_id: '0d1c8f5a-3c2b-4a5e-9f10-2b3c4d5e6f70',
+    stage: 'seo_review',
+    status: 'timed_out',
+    attempt: 2,
     http_status: 409,
     worker_enabled: false,
   });

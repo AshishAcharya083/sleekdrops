@@ -110,13 +110,30 @@ A pipeline-board action on one article: one name, with the action in a property.
 
 | Property | Type | Notes |
 |---|---|---|
-| `action` | string | `retry`, `approve_publish`, `cancel`, `republish`, `hero_image_attached`, `hero_alt_saved` or `hero_image_removed`. |
+| `action` | string | `retry_stage`, `test_stage`, `rerun_all`, `approve_publish`, `cancel`, `republish`, `hero_image_attached`, `hero_alt_saved` or `hero_image_removed`. |
 | `article_id` | string | The article acted on. |
-| `stage` | string | The stage it was in. |
+| `stage` | string | The stage it was in - for `retry_stage` and `test_stage`, the stage the operator picked. |
 | `status` | string | The status it was in. |
+| `attempt` | number | The article's run attempt when the action was taken. |
+| `surface` | string | `overview-stuck` when the action came from the Overview's stuck surface; absent on the run detail. |
 
-Owning screen: `pages/Pipeline.tsx` (article detail panel).
+Owning screens: `pages/Pipeline.tsx` (article detail panel), `pages/Overview.tsx` (the stuck surface's `Cancel run`).
+The recovery actions are reported by what they do, never by what the stage returned: no agent output, error text or prose leaves the panel.
 The hero-image actions report only that an image was attached, re-labelled or removed - never the file, its name or its URL.
+
+### Stuck Run Opened
+
+The operator opened a wedged run from the Overview's **Stuck / timed out** surface.
+Named separately from `Article Actioned` because it is triage navigation rather than an action on the article: it is what says whether the surface is doing its job.
+
+| Property | Type | Notes |
+|---|---|---|
+| `article_id` | string | The run that was opened. |
+| `stage` | string | The stage it is stuck in. |
+| `status` | string | `running` (past the soft bound) or `timed_out`. |
+| `surface` | string | `overview-stuck`. |
+
+Owning screen: `pages/Overview.tsx`.
 
 ### Article Feedback Submitted
 
