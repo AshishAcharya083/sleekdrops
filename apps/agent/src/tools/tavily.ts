@@ -1,6 +1,41 @@
 // Tavily web search — live evidence for the topic scout + researcher agents.
 import { config } from '../config.js';
 
+/**
+ * Matches webpage.ts. Both of these are one HTTP call to a third party inside
+ * a stage that is otherwise waiting on a model, and this one had no timeout at
+ * all: a search that hung took the whole stage with it, which is the asymmetry
+ * that made a search-enabled review the likeliest thing to wedge.
+ */
+const FETCH_TIMEOUT_MS = 15_000;
+
+/** One bounded call to Tavily's search endpoint, shared by both searches. */
+async function searchApi<T>(body: Record<string, unknown>): Promise<T> {
+  if (!config.tavilyApiKey) {
+    throw new Error('TAVILY_API_KEY is not set — add it to apps/agent/.env');
+  }
+  try {
+    const res = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: config.tavilyApiKey, ...body }),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      throw new Error(`Tavily HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    }
+    // Inside the try as well: the signal covers reading the body, and a
+    // response whose body stalls aborts here rather than at the fetch.
+    return (await res.json()) as T;
+  } catch (err) {
+    // The abort arrives as a DOMException nobody can act on; say what happened.
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new Error(`Tavily did not answer within ${FETCH_TIMEOUT_MS / 1000}s`);
+    }
+    throw err;
+  }
+}
+
 export interface SearchHit {
   title: string;
   url: string;
@@ -33,27 +68,12 @@ export async function tavilySerp(
   maxResults = 6,
   withAnswer = false,
 ): Promise<SerpRead> {
-  if (!config.tavilyApiKey) {
-    throw new Error('TAVILY_API_KEY is not set — add it to apps/agent/.env');
-  }
-  const res = await fetch('https://api.tavily.com/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      api_key: config.tavilyApiKey,
-      query,
-      max_results: maxResults,
-      search_depth: 'advanced',
-      ...(withAnswer ? { include_answer: true } : {}),
-    }),
+  const json = await searchApi<{ results?: Array<Record<string, string>>; answer?: string }>({
+    query,
+    max_results: maxResults,
+    search_depth: 'advanced',
+    ...(withAnswer ? { include_answer: true } : {}),
   });
-  if (!res.ok) {
-    throw new Error(`Tavily HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  }
-  const json = (await res.json()) as {
-    results?: Array<Record<string, string>>;
-    answer?: string;
-  };
   return {
     query,
     results: (json.results ?? []).map((r) => ({
@@ -113,24 +133,14 @@ export interface ImageHit {
 
 /** Image results for a query — candidate hero images for the image agent. */
 export async function tavilyImageSearch(query: string, maxResults = 8): Promise<ImageHit[]> {
-  if (!config.tavilyApiKey) {
-    throw new Error('TAVILY_API_KEY is not set — add it to apps/agent/.env');
-  }
-  const res = await fetch('https://api.tavily.com/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      api_key: config.tavilyApiKey,
-      query,
-      max_results: maxResults,
-      include_images: true,
-      include_image_descriptions: true,
-    }),
+  const json = await searchApi<{
+    images?: Array<string | { url: string; description?: string }>;
+  }>({
+    query,
+    max_results: maxResults,
+    include_images: true,
+    include_image_descriptions: true,
   });
-  if (!res.ok) {
-    throw new Error(`Tavily HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  }
-  const json = (await res.json()) as { images?: Array<string | { url: string; description?: string }> };
   return (json.images ?? []).map((img) =>
     typeof img === 'string' ? { url: img, description: '' } : { url: img.url, description: img.description ?? '' },
   );
