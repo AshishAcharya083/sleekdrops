@@ -13,9 +13,23 @@ import { getSetting, q, setSetting } from '../db/pool.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
 import {
+  cancelArticle,
+  groupAttempts,
+  outOfDateStages,
+  parseStageParam,
+  rerunAll,
+  retryFromStage,
+  reviewStaleSql,
+  REVIEW_STALE_PUBLISH_ERROR,
+  REVIEW_STALE_REASON,
+  type RetryArticleRow,
+  type SessionAttemptRow,
+} from '../pipeline/retry.js';
+import {
   enqueueScoutRun,
   scoutQueueStatus,
 } from '../pipeline/scout.js';
+import { isTestableStage, runTestStage, UNTESTABLE_STAGE_ERROR } from '../pipeline/testStage.js';
 import type { ReferenceMaterial } from '../pipeline/types.js';
 import { deleteD1Post, getD1PostHero, listD1Posts, setD1PostHero } from '../tools/d1.js';
 import { gcsConfigured } from '../tools/gcs.js';
@@ -528,30 +542,56 @@ export function createApp(): Hono<TraceEnv> {
   });
 
   // ── Articles (the pipeline board) ────────────────────────────────────────
+  // attempt / stale_from_stage / review_stale ride along on the list because
+  // the panel renders "attempt 2", "out of date" and a disabled publish
+  // control straight off a row - none of that is re-derived client-side.
+  //
+  // Two more fields belong on both article responses and are not here yet:
+  // `stageBudgets` (from pipeline/budgets.ts) and `articles.heartbeat_at`.
+  // Both are SLE-103's - the budget module and the column do not exist until
+  // its migration 012 lands - so they are wired in when this branch rebases
+  // onto it, not invented here against a schema that would then diverge.
   app.get('/api/articles', async (c) => {
     const rows = await q(
-      `SELECT id, topic_id, title, slug, category, post_type, stage, status,
-              revision_round, error, published_at, created_at, updated_at,
-              hero_image_url, (seo_review ->> 'score') seo_score
-       FROM articles ORDER BY updated_at DESC LIMIT 200`,
+      `SELECT a.id, a.topic_id, a.title, a.slug, a.category, a.post_type, a.stage, a.status,
+              a.revision_round, a.error, a.published_at, a.created_at, a.updated_at,
+              a.hero_image_url, (a.seo_review ->> 'score') seo_score,
+              a.attempt, a.stale_from_stage, a.claimed_at, a.lease_expires_at,
+              ${reviewStaleSql('a')} AS review_stale
+       FROM articles a ORDER BY a.updated_at DESC LIMIT 200`,
     );
     return c.json({ articles: rows });
   });
 
   app.get('/api/articles/:id', async (c) => {
-    const [article] = await q('SELECT * FROM articles WHERE id = $1', [c.req.param('id')]);
+    const [article] = await q<RetryArticleRow & { review_stale: boolean }>(
+      `SELECT a.*, ${reviewStaleSql('a')} AS review_stale FROM articles a WHERE a.id = $1`,
+      [c.req.param('id')],
+    );
     if (!article) return c.json({ error: 'not found' }, 404);
-    const sessions = await q(
+    const sessions = await q<SessionAttemptRow>(
       'SELECT * FROM agent_sessions WHERE article_id = $1 ORDER BY started_at ASC',
       [article.id],
     );
-    return c.json({ article, sessions });
+    const reviewStale = article.review_stale === true;
+    return c.json({
+      article,
+      sessions,
+      // One article, one history: every attempt at every stage, grouped the
+      // way the pipeline ran them rather than as a flat session log.
+      attempts: groupAttempts(sessions),
+      outOfDateStages: outOfDateStages(article.stale_from_stage, article.stage),
+      reviewStale,
+      reviewStaleReason: reviewStale ? REVIEW_STALE_REASON : null,
+    });
   });
 
+  // Re-queue where it stands. The retry-forward action below is the one that
+  // picks a stage; this stays the cheap "run that again" lever.
   app.post('/api/articles/:id/retry', async (c) => {
     const rows = await q(
       `UPDATE articles SET status = 'queued', error = NULL, updated_at = now()
-       WHERE id = $1 AND status IN ('failed', 'cancelled') RETURNING id`,
+       WHERE id = $1 AND status IN ('failed', 'timed_out', 'cancelled') RETURNING id`,
       [c.req.param('id')],
     );
     if (rows.length === 0) return c.json({ error: 'not retryable' }, 409);
@@ -559,24 +599,102 @@ export function createApp(): Hono<TraceEnv> {
     return c.json({ ok: true });
   });
 
+  // Retry forward: re-run one stage against the article's stored upstream
+  // columns and carry on through the rest of the run. Everything after the
+  // retried stage is marked out of date and regenerated as the run passes
+  // through it again.
+  app.post('/api/articles/:id/retry-stage', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { stage?: unknown } | null;
+    const parsed = parseStageParam(body?.stage);
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+
+    const id = c.req.param('id');
+    const result = await retryFromStage(id, parsed.stage);
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    log.info('article retried from a stage', {
+      article_id: id,
+      stage: parsed.stage,
+      attempt: result.article.attempt,
+    });
+    return c.json({ ok: true, article: result.article });
+  });
+
+  // Run one stage in isolation: same agent, same stored input, no writes to
+  // the article and never the publisher. The session is recorded as a test so
+  // the tokens it spends still show up in /api/usage.
+  app.post('/api/articles/:id/test-stage', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { stage?: unknown } | null;
+    const parsed = parseStageParam(body?.stage);
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    if (!isTestableStage(parsed.stage)) return c.json({ error: UNTESTABLE_STAGE_ERROR }, 400);
+
+    const id = c.req.param('id');
+    const [article] = await q<RetryArticleRow>('SELECT * FROM articles WHERE id = $1', [id]);
+    if (!article) return c.json({ error: 'not found' }, 404);
+    if (article.status === 'running') {
+      return c.json({ error: 'the article is mid-stage - try again when it finishes' }, 409);
+    }
+
+    try {
+      const result = await runTestStage(article, parsed.stage);
+      log.info('stage tested in isolation', {
+        article_id: id,
+        stage: parsed.stage,
+        session_id: result.sessionId,
+        cost_usd: result.costUsd,
+      });
+      return c.json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error('stage test failed', { article_id: id, stage: parsed.stage, error: message });
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  // Back to research — for when the source inputs themselves were wrong and
+  // even the stored research has to be paid for again.
+  app.post('/api/articles/:id/rerun-all', async (c) => {
+    const id = c.req.param('id');
+    const result = await rerunAll(id);
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    log.info('article re-queued from research', { article_id: id, attempt: result.article.attempt });
+    return c.json({ ok: true });
+  });
+
   app.post('/api/articles/:id/approve-publish', async (c) => {
-    const rows = await q(
-      `UPDATE articles SET status = 'queued', updated_at = now()
-       WHERE id = $1 AND stage = 'publish' AND status = 'waiting_approval' RETURNING id`,
-      [c.req.param('id')],
+    const id = c.req.param('id');
+    // The staleness guard is part of the same statement: a draft regenerated
+    // after the review that approved it must not become a published,
+    // review-branded piece, and the panel's disabled button is only the first
+    // line of that.
+    const rows = await q<{ id: string }>(
+      `UPDATE articles a SET status = 'queued', updated_at = now()
+       WHERE a.id = $1 AND a.stage = 'publish' AND a.status = 'waiting_approval'
+         AND NOT ${reviewStaleSql('a')}
+       RETURNING a.id`,
+      [id],
     );
-    if (rows.length === 0) return c.json({ error: 'not awaiting approval' }, 409);
+    if (rows.length === 0) {
+      const [article] = await q<{ review_stale: boolean }>(
+        `SELECT ${reviewStaleSql('a')} AS review_stale FROM articles a WHERE a.id = $1`,
+        [id],
+      );
+      if (article?.review_stale) return c.json({ error: REVIEW_STALE_PUBLISH_ERROR }, 409);
+      return c.json({ error: 'not awaiting approval' }, 409);
+    }
     log.info('article publish approved', { article_id: rows[0].id });
     return c.json({ ok: true });
   });
 
+  // Cancel, including a running article: the lease is expired in the same
+  // statement, so the worker running the stage unwinds at its next heartbeat
+  // instead of the row staying wedged in 'running' with no operator lever.
   app.post('/api/articles/:id/cancel', async (c) => {
-    const rows = await q(
-      `UPDATE articles SET status = 'cancelled', updated_at = now()
-       WHERE id = $1 AND status IN ('queued', 'failed', 'waiting_approval') RETURNING id`,
-      [c.req.param('id')],
-    );
-    return rows.length > 0 ? c.json({ ok: true }) : c.json({ error: 'not cancellable' }, 409);
+    const id = c.req.param('id');
+    const result = await cancelArticle(id);
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    log.info('article cancelled', { article_id: id, pending: result.pending });
+    return c.json({ ok: true, pending: result.pending });
   });
 
   // Admin feedback → one editor pass. Requires a draft to edit; works on done
