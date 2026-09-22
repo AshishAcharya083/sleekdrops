@@ -21,6 +21,7 @@ const styles = read('./styles.css');
 const overview = read('./pages/Overview.tsx');
 const pipeline = read('./pages/Pipeline.tsx');
 const components = read('./components.tsx');
+const sessions = read('./pages/Sessions.tsx');
 const app = read('./App.tsx');
 const events = read('./analytics.ts');
 const eventDocs = read('../docs/analytics-events.md');
@@ -68,7 +69,7 @@ test('a stuck row links at its run and can stop it', () => {
   assert.match(overview, /Open run/);
   assert.match(overview, /onOpenRun\?\.\(run\.article_id\)/, 'the link opens that article');
   assert.match(overview, /`\/api\/articles\/\$\{run\.article_id\}\/cancel`/);
-  assert.match(overview, /method: 'POST',/, 'through the same api\\(\\) chokepoint');
+  assert.match(overview, /method: 'POST'/, 'through the same api\\(\\) chokepoint');
   assert.match(app, /const \[runToOpen, setRunToOpen\]/, 'the shell carries the request to the Pipeline tab');
   assert.match(app, /<Pipeline openArticleId=\{runToOpen\} onOpened=\{\(\) => setRunToOpen\(null\)\} \/>/);
   assert.match(pipeline, /setOpenId\(openArticleId\)/, 'and the board opens that run');
@@ -90,7 +91,11 @@ test('the row-level stop is state-gated, and names what it does', () => {
 
 test('a single-row stop asks no dialog, and reports what it hit', () => {
   assert.doesNotMatch(overview, /confirm-overlay/, 'a per-row dialog would only teach dismissal');
-  assert.match(overview, /stoppedNotice\(run\.title, Boolean\(res\?\.cancelling\)\)/, 'named run, honest tense');
+  assert.match(
+    overview,
+    /stoppedNotice\(run\.title, Boolean\(res\?\.cancelling \?\? res\?\.pending\)\)/,
+    'named run, honest tense, under either name the agent answers with',
+  );
   assert.match(overview, /className="attn-toast notice-banner" role="status"/);
   assert.match(overview, /Open run to re-run/, 'recovery is one click from the report');
   assert.match(overview, /aria-label="Dismiss"/);
@@ -117,10 +122,19 @@ test('elapsed time is rendered against a budget, never as a bare duration', () =
     ['Pipeline.tsx', pipeline],
   ] as const) {
     assert.match(source, /<Elapsed\b/, `${name}: elapsed cells carry the threshold styling`);
-    assert.match(source, /budgetSeconds=\{stageBudgetSeconds\(/, `${name}: the budget comes from the agent`);
+    assert.match(
+      source,
+      /budgetSeconds=\{(stageBudgetSeconds|sessionBudgetSeconds)\(/,
+      `${name}: the budget comes from the agent, never from a literal`,
+    );
   }
   assert.match(components, /elapsedBand\(seconds, budgetSeconds, status\)/);
   assert.match(components, /BAND_MARK/, 'the band carries a glyph, not colour alone');
+  assert.match(
+    components,
+    /if \(budgetSeconds === null\)/,
+    'a session on no stage prints a plain duration rather than borrowing a budget',
+  );
   assert.match(rule('.elapsed.warn'), /color:\s*var\(--amber\)/);
   assert.match(rule('.elapsed.over'), /color:\s*var\(--red\)/);
   assert.match(rule('.elapsed.normal'), /color:\s*var\(--text\)/);
@@ -164,6 +178,11 @@ test('every recovery the API supports is one click from the run', () => {
   assert.match(pipeline, /api\(`\/api\/articles\/\$\{id\}\/\$\{path\}`/, 'through the one api() chokepoint');
   assert.match(pipeline, /Retry from this stage/);
   assert.match(pipeline, /Test this step only/);
+  assert.match(
+    pipeline,
+    /disabled=\{running \|\| testing !== null \|\| !testable\}/,
+    'and never offers to "test" the one stage whose whole job is writing to the live site',
+  );
   assert.match(pipeline, /Run whole pipeline again/);
   assert.match(pipeline, /Cancel run/);
 });
@@ -188,7 +207,7 @@ test('a test run is labelled as writing nothing, and shows its output', () => {
   assert.match(pipeline, /The article, its stages and its stored output are\s*\n?\s*untouched/);
   assert.match(pipeline, /formatOutput\(result\.output\)/);
   assert.match(pipeline, /JSON\.stringify\(output, null, 2\)/, 'raw agent output is pretty-printed');
-  assert.match(pipeline, /disabled=\{running \|\| testing !== null\}/, 'the control is held while it is out');
+  assert.match(pipeline, /disabled=\{running \|\| testing !== null \|\|/, 'the control is held while it is out');
   assert.match(pipeline, /Testing \$\{testing\}…/, 'and says what it is doing');
 });
 
@@ -211,9 +230,19 @@ test('a run committed to spend is never the one thing nothing can stop', () => {
 test('a stale review blocks approval, with the reason stated', () => {
   assert.match(pipeline, /REVIEW_STALE_BANNER/, 'the article carries the banner');
   const approve = pipeline.slice(pipeline.indexOf("article.status === 'waiting_approval'"));
-  assert.match(approve, /disabled=\{Boolean\(article\.review_stale\)/, 'the control is disabled, not just warned about');
-  assert.match(approve, /aria-disabled=\{article\.review_stale \? 'true' : undefined\}/);
-  assert.match(approve, /REVIEW_STALE_REASON/, 'and states the sentence the API 409 carries');
+  assert.match(approve, /disabled=\{reviewStale \|\|/, 'the control is disabled, not just warned about');
+  assert.match(approve, /aria-disabled=\{reviewStale \? 'true' : undefined\}/);
+  assert.match(approve, /\$\{reviewStaleReason\}/, 'and states the reason');
+  assert.match(
+    pipeline,
+    /detail\?\.reviewStaleReason \?\? REVIEW_STALE_REASON/,
+    "the agent's own sentence when it sends one, else the one its 409 carries",
+  );
+  assert.match(
+    pipeline,
+    /Boolean\(article\?\.review_stale \?\? detail\?\.reviewStale\)/,
+    'and the flag is read wherever the agent puts it',
+  );
 });
 
 test('attempts are grouped per stage, and downstream stages are labelled', () => {
@@ -225,6 +254,26 @@ test('attempts are grouped per stage, and downstream stages are labelled', () =>
   assert.match(pipeline, /<details className="attempt"/);
   assert.match(pipeline, /aria-label=\{`Attempt history table for \$\{group\.stage\}`\}/);
   assert.match(rule('.stage-row.stale'), /inset 3px 0 0 var\(--amber\)/, 'and marked on the timeline');
+});
+
+test('the triage rows keep one set of columns, whatever controls a row carries', () => {
+  // A row whose work can still be stopped carries two controls and one that
+  // cannot carries one; a content-sized action column moved the elapsed and
+  // status cells to a different x on each row of the same list.
+  assert.match(
+    rule('.attn-row'),
+    /grid-template-columns:\s*minmax\(0,\s*1\.5fr\)\s+118px\s+132px\s+216px/,
+    'the action column is sized, not auto',
+  );
+  assert.match(rule('.attn-row .acts'), /justify-content:\s*flex-end/, 'so the controls hold the edge');
+});
+
+test('the wide session tables say they scroll, below the width they stop fitting', () => {
+  assert.match(rule('.scroll-hint'), /display:\s*none/, 'silent where everything fits');
+  assert.match(mediaBlock(1040, '.scroll-hint'), /display:\s*block/);
+  assert.match(overview, /className="scroll-hint"/, 'the recent-sessions card carries it');
+  assert.match(sessions, /className="scroll-hint"/, 'and so does the sessions tab');
+  assert.match(rule('.card.table-scroll'), /overflow-x:\s*auto/);
 });
 
 test('row controls are touch targets from tablet width down', () => {

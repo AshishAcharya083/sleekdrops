@@ -11,6 +11,7 @@ import {
   fmtTime,
   fmtTokens,
   isStoppable,
+  sessionBudgetSeconds,
   stageBudgetSeconds,
   stopControlHint,
   stopControlLabel,
@@ -147,7 +148,7 @@ export function Overview({ onOpenRun }: { onOpenRun?: (articleId: string) => voi
                         went 2702 minutes cannot read as an ordinary duration. */}
                     <Elapsed
                       seconds={elapsedSeconds(s.started_at, s.ended_at)}
-                      budgetSeconds={stageBudgetSeconds(s.stage)}
+                      budgetSeconds={sessionBudgetSeconds(s)}
                       status={s.status}
                     />
                   </td>
@@ -166,6 +167,10 @@ export function Overview({ onOpenRun }: { onOpenRun?: (articleId: string) => voi
             </tbody>
           </table>
         </div>
+        <p className="scroll-hint">
+          The table scrolls sideways for model, cost, elapsed and started - drag it, or focus it and
+          use the arrow keys.
+        </p>
       </div>
     </>
   );
@@ -235,15 +240,18 @@ function NeedsAttention({
     // whatever this click turns out to be - another stop, or its failure.
     setNotice(null);
     try {
-      const res = await api<{ cancelling?: boolean }>(`/api/articles/${run.article_id}/cancel`, {
-        method: 'POST',
-      });
+      // The agent's own answer for "the stage has been asked to stop but has
+      // not let go yet", under either of the names it has carried.
+      const res = await api<{ cancelling?: boolean; pending?: boolean }>(
+        `/api/articles/${run.article_id}/cancel`,
+        { method: 'POST' },
+      );
       // The hold is per run, not one slot: triaging three wedged runs in a row
       // must not put the first one's control back as if it had never been hit.
       setStoppedIds((ids) => (ids.includes(run.article_id) ? ids : [...ids, run.article_id]));
       setNotice({
         articleId: run.article_id,
-        text: stoppedNotice(run.title, Boolean(res?.cancelling)),
+        text: stoppedNotice(run.title, Boolean(res?.cancelling ?? res?.pending)),
       });
       track(EVENTS.articleActioned, {
         action: 'cancel',

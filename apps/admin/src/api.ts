@@ -286,24 +286,13 @@ export interface ArticleDetail {
   sessions: Session[];
   /** Stage budgets as the agent has them configured. Read-only, never posted. */
   budgets?: StageBudgets;
-}
-
-/**
- * What POST /api/articles/:id/test-stage answers with. The call is synchronous
- * and can take minutes; nothing it produces is written to the article.
- */
-export interface TestStageResult {
-  stage: string;
-  agent?: string;
-  model?: string | null;
-  summary?: string | null;
-  output?: unknown;
-  tokens_input?: number;
-  tokens_output?: number;
-  cost_usd?: string | number;
-  session_id?: string;
-  started_at?: string;
-  ended_at?: string | null;
+  /**
+   * The staleness verdict alongside `article.review_stale`, and the agent's
+   * own wording for it - the sentence its 409 would carry, so the disabled
+   * control and the refusal cannot say two different things.
+   */
+  reviewStale?: boolean;
+  reviewStaleReason?: string | null;
 }
 
 export interface PublishedPost {

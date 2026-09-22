@@ -16,12 +16,17 @@ import {
   duration,
   elapsedSeconds,
   fmtCost,
+  fmtSeconds,
   fmtTime,
   groupAttempts,
+  isTestableStage,
   outOfDateStages,
   OUT_OF_DATE_LABEL,
+  readTestStageResult,
   REVIEW_STALE_BANNER,
   REVIEW_STALE_REASON,
+  sessionBudgetSeconds,
+  sessionStage,
   stageBudgetLine,
   stageBudgetSeconds,
   STAGE_LABELS,
@@ -29,6 +34,7 @@ import {
   stagesKeptBy,
   stagesRegeneratedBy,
   timedOutSentence,
+  UNTESTABLE_STAGE_HINT,
 } from '../api';
 import { toApiError, type ApiError } from '../api-error';
 import { ApiErrorBanner, Badge, Elapsed, OutOfDateBadge } from '../components';
@@ -498,11 +504,13 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
     setErr(null);
     setTestResult(null);
     try {
-      const res = await api<{ result: TestStageResult }>(`/api/articles/${id}/test-stage`, {
+      const res = await api<unknown>(`/api/articles/${id}/test-stage`, {
         method: 'POST',
         body: JSON.stringify({ stage }),
       });
-      setTestResult(res.result ?? null);
+      // A body this panel cannot read is still the output of a call that was
+      // billed, so it is shown raw rather than swallowed.
+      setTestResult(readTestStageResult(res) ?? { stage, output: res });
       track(EVENTS.articleActioned, {
         action: 'test_stage',
         article_id: id,
@@ -544,8 +552,11 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
   const outOfDate = article ? outOfDateStages(article, sessions) : new Set<string>();
   /** The session the budget stopped, which is what the detail block quotes. */
   const timedOutSession = [...sessions].reverse().find((s) => s.status === 'timed_out') ?? null;
-  const stoppedStage = timedOutSession?.stage ?? article?.stage ?? null;
+  const stoppedStage = (timedOutSession && sessionStage(timedOutSession)) ?? article?.stage ?? null;
   const budgetSeconds = stageBudgetSeconds(stoppedStage, detail?.budgets);
+  /** Blocked publishing, and the agent's own sentence for it when it sends one. */
+  const reviewStale = Boolean(article?.review_stale ?? detail?.reviewStale);
+  const reviewStaleReason = detail?.reviewStaleReason ?? REVIEW_STALE_REASON;
 
   return (
     <div className="detail-overlay" onClick={onClose}>
@@ -569,7 +580,7 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
               )}
             </div>
 
-            {article.review_stale && (
+            {reviewStale && (
               <div className="warn-banner" role="status" style={{ marginTop: 12 }}>
                 {REVIEW_STALE_BANNER}
               </div>
@@ -607,6 +618,8 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
 
             <RunActions
               article={article}
+              reviewStale={reviewStale}
+              reviewStaleReason={reviewStaleReason}
               busy={busy}
               testing={testing}
               onRetry={(stage) => setConfirming({ kind: 'retry', stage })}
@@ -827,6 +840,8 @@ function BudgetLine({ budgetSeconds }: { budgetSeconds: number }) {
  */
 function RunActions({
   article,
+  reviewStale,
+  reviewStaleReason,
   busy,
   testing,
   onRetry,
@@ -837,6 +852,8 @@ function RunActions({
   onRepublish,
 }: {
   article: ArticleDetail['article'];
+  reviewStale: boolean;
+  reviewStaleReason: string;
   busy: string | null;
   testing: string | null;
   onRetry: (stage: string) => void;
@@ -849,6 +866,7 @@ function RunActions({
   const stage = article.stage === 'done' ? 'publish' : article.stage;
   const label = STAGE_LABELS[stage] ?? stage;
   const running = article.status === 'running';
+  const testable = isTestableStage(stage);
   const cancelling = running && Boolean(article.cancel_requested);
   const queueingRetry = busy === 'retry_stage';
   const cancellable = ['running', 'queued', 'failed', 'timed_out', 'waiting_approval'].includes(
@@ -877,14 +895,15 @@ function RunActions({
         <span className="alabel">Check without changing anything</span>
         <button
           className="btn secondary"
-          disabled={running || testing !== null}
+          disabled={running || testing !== null || !testable}
           onClick={() => onTest(stage)}
         >
           {testing ? `Testing ${testing}…` : 'Test this step only'}
         </button>
         <span className="ahint">
-          Runs {label} on its own and shows you what came back. Writes nothing to the article - the
-          model call is still billed, and shows up in the attempt history as a test run.
+          {testable
+            ? `Runs ${label} on its own and shows you what came back. Writes nothing to the article - the model call is still billed, and shows up in the attempt history as a test run.`
+            : `${UNTESTABLE_STAGE_HINT} Test an earlier stage from the attempt history below.`}
         </span>
       </div>
 
@@ -893,16 +912,18 @@ function RunActions({
           <span className="alabel">Publish</span>
           <button
             className="btn"
-            disabled={Boolean(article.review_stale) || busy === 'approve_publish'}
-            aria-disabled={article.review_stale ? 'true' : undefined}
-            aria-describedby={article.review_stale ? 'approve-blocked-reason' : undefined}
+            disabled={reviewStale || busy === 'approve_publish'}
+            aria-disabled={reviewStale ? 'true' : undefined}
+            aria-describedby={reviewStale ? 'approve-blocked-reason' : undefined}
             onClick={onApprove}
           >
             ✅ Approve &amp; publish
           </button>
-          <span className="ahint" id={article.review_stale ? 'approve-blocked-reason' : undefined}>
-            {article.review_stale
-              ? `${REVIEW_STALE_REASON}. Retry from ${STAGE_LABELS.seo_review} above, and this unlocks once the review passes on the current draft.`
+          <span className="ahint" id={reviewStale ? 'approve-blocked-reason' : undefined}>
+            {reviewStale
+              ? // Led in rather than opened with: the reason is the agent's own
+                // sentence and starts on a stage name, not a capital.
+                `Publishing is blocked: ${reviewStaleReason}. Retry from ${STAGE_LABELS.seo_review} above, and this unlocks once the review passes on the current draft.`
               : 'Pushes the assembled article to the live site.'}
           </span>
         </div>
@@ -950,9 +971,11 @@ function TestResultPanel({ result, onClose }: { result: TestStageResult; onClose
           {result.cost_usd !== undefined && (
             <span className="mono">{fmtCost(result.cost_usd)}</span>
           )}
-          {result.started_at && (
+          {result.started_at ? (
             <span className="mono muted">{duration(result.started_at, result.ended_at ?? null)}</span>
-          )}
+          ) : result.duration_ms !== undefined ? (
+            <span className="mono muted">{fmtSeconds(result.duration_ms / 1000)}</span>
+          ) : null}
           <span className="spacer" />
           <button className="btn ghost small" onClick={onClose}>
             Dismiss
@@ -1167,14 +1190,15 @@ function AttemptHistory({
               </button>
               <button
                 className="btn secondary small"
-                disabled={running || testing !== null}
+                disabled={running || testing !== null || !isTestableStage(group.stage)}
                 onClick={() => onTest(group.stage)}
               >
                 {testing === group.stage ? 'Testing…' : 'Test this step only'}
               </button>
               <span className="ahint">
-                Retry re-runs {group.stage} and everything after it. Test runs it on its own and
-                writes nothing.
+                {isTestableStage(group.stage)
+                  ? `Retry re-runs ${group.stage} and everything after it. Test runs it on its own and writes nothing.`
+                  : `Retry re-runs ${group.stage} and everything after it. ${UNTESTABLE_STAGE_HINT}`}
               </span>
             </div>
           </details>
@@ -1216,7 +1240,7 @@ function AttemptHistory({
                     <td>
                       <Elapsed
                         seconds={elapsedSeconds(s.started_at, s.ended_at)}
-                        budgetSeconds={stageBudgetSeconds(s.stage, budgets)}
+                        budgetSeconds={sessionBudgetSeconds(s, budgets)}
                         status={s.status}
                       />
                     </td>

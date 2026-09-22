@@ -1,5 +1,5 @@
 import type { Session } from '../api';
-import { elapsedSeconds, fmtCost, fmtTime, fmtTokens, stageBudgetSeconds } from '../api';
+import { elapsedSeconds, fmtCost, fmtTime, fmtTokens, sessionBudgetSeconds } from '../api';
 import { ApiErrorBanner, Badge, Elapsed } from '../components';
 import { usePoll } from '../hooks';
 
@@ -46,7 +46,7 @@ export function Sessions() {
                       minutes reads as stopped rather than as a long one. */}
                   <Elapsed
                     seconds={elapsedSeconds(s.started_at, s.ended_at)}
-                    budgetSeconds={stageBudgetSeconds(s.stage)}
+                    budgetSeconds={sessionBudgetSeconds(s)}
                     status={s.status}
                   />
                 </td>
@@ -63,6 +63,10 @@ export function Sessions() {
           </tbody>
         </table>
       </div>
+      <p className="scroll-hint">
+        The table scrolls sideways for tokens, cost, elapsed and started - drag it, or focus it and
+        use the arrow keys.
+      </p>
     </>
   );
 }

@@ -66,6 +66,11 @@ const BAND_WORD: Record<ElapsedBand, string> = {
  * glyph and prints the budget next to the figure, so the warning never rests
  * on the colour alone - and a run that has been going for 2702 minutes cannot
  * render as an ordinary duration.
+ *
+ * A null budget is a run this panel cannot place on a stage - a topic search,
+ * or an agent it does not know. That one prints as a plain duration: there is
+ * no threshold it is measured against, and printing one would be a claim the
+ * panel cannot make.
  */
 export function Elapsed({
   seconds,
@@ -74,10 +79,17 @@ export function Elapsed({
   meter = false,
 }: {
   seconds: number;
-  budgetSeconds: number;
+  budgetSeconds: number | null;
   status?: string | null;
   meter?: boolean;
 }) {
+  if (budgetSeconds === null) {
+    return (
+      <span className="elapsed unbudgeted" title={`${fmtSeconds(seconds)} - no stage budget applies`}>
+        <span className="t">{fmtSeconds(seconds)}</span>
+      </span>
+    );
+  }
   const band = elapsedBand(seconds, budgetSeconds, status);
   const minutes = budgetMinutes(budgetSeconds);
   const filled = Math.min(100, Math.round((seconds / Math.max(budgetSeconds, 1)) * 100));

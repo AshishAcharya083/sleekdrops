@@ -2,8 +2,8 @@
  * Stages, budgets and the elapsed-time threshold scale - the panel's share of
  * the contract it has with the agent: the fixed stage order, the two
  * boundaries that decide whether a run is slow or stuck, the fixed operator
- * copy, and the bookkeeping that turns a flat session list into per-stage
- * attempt history.
+ * copy, the bookkeeping that turns a flat session list into per-stage attempt
+ * history, and the reader for what an isolated test run comes back as.
  *
  * Pure and dependency-free on purpose, so it is unit-tested in isolation the
  * way scrub.ts is (see stage-thresholds.test.ts). api.ts re-exports all of it.
@@ -13,6 +13,8 @@
 export interface StageSession {
   /** Null on scout runs and on rows written before attempts were tracked. */
   stage?: string | null;
+  /** Always present: the only column that has named the work since 001_init. */
+  agent?: string;
   attempt?: number;
   kind?: string;
   status: string;
@@ -47,6 +49,37 @@ export const STAGE_ORDER = [
 
 export type Stage = (typeof STAGE_ORDER)[number];
 
+/**
+ * Which agent runs which stage, mirroring STAGE_AGENT in the agent's runner
+ * the same way STAGE_ORDER above mirrors its stage list.
+ *
+ * `agent_sessions` has carried an `agent` column since the first migration and
+ * carries no `stage` column, so this is how a session is placed on the board -
+ * the agent derives its own attempt grouping from exactly this map. It is a
+ * lookup of a fixed name, not a guess: an agent that is not in it (topic_scout,
+ * or anything added later) stays unplaced rather than landing on a stage.
+ */
+export const AGENT_STAGE: Record<string, Stage> = {
+  researcher: 'research',
+  keyword_strategist: 'keyword',
+  angle_editor: 'angle',
+  outliner: 'outline',
+  writer: 'write',
+  seo_reviewer: 'seo_review',
+  editor: 'edit',
+  assembler: 'assemble',
+  image_agent: 'image',
+  publisher: 'publish',
+};
+
+/**
+ * The stage one session ran: the reported field when the agent sends one, else
+ * the stage that session's agent owns. Null means genuinely unplaceable - a
+ * topic search, or an agent this panel does not know.
+ */
+export const sessionStage = (session: StageSession): string | null =>
+  session.stage ?? (session.agent ? (AGENT_STAGE[session.agent] ?? null) : null);
+
 /** Human labels for the stages, for prose that has to name them. */
 export const STAGE_LABELS: Record<string, string> = {
   research: 'research',
@@ -80,6 +113,19 @@ export function stageBudgetSeconds(
   const override = stage ? positive(budgets?.per_stage?.[stage]) : null;
   return override ?? positive(budgets?.default_seconds) ?? DEFAULT_STAGE_BUDGET_SECONDS;
 }
+
+/**
+ * The budget one session ran under, or null when it sits on no stage at all -
+ * a topic search has its own lease, not a stage budget, and borrowing the
+ * stage default for it would print a limit that run was never under.
+ */
+export const sessionBudgetSeconds = (
+  session: StageSession,
+  budgets?: StageBudgets | null,
+): number | null => {
+  const stage = sessionStage(session);
+  return stage ? stageBudgetSeconds(stage, budgets) : null;
+};
 
 /** Seconds as the panel prints an elapsed time: `42s`, or `2702m 12s`. */
 export const fmtSeconds = (seconds: number): string => {
@@ -127,6 +173,19 @@ export const REVIEW_STALE_BANNER =
 /** Why the approve control is disabled - the sentence the API's 409 carries. */
 export const REVIEW_STALE_REASON =
   'seo_review must re-run before publish - the draft changed after the last review';
+
+/**
+ * Stages an isolated test run can cover. The one thing `publish` does is write
+ * to the live site, so the "writes nothing" this control promises cannot hold
+ * for it, and `done` runs no agent at all.
+ */
+export const UNTESTABLE_STAGES: readonly string[] = ['publish', 'done'];
+
+export const isTestableStage = (stage: string): boolean => !UNTESTABLE_STAGES.includes(stage);
+
+/** Why the test control is off on those stages. */
+export const UNTESTABLE_STAGE_HINT =
+  'Publishing is the one stage that cannot be tested on its own - writing to the live site is all it does.';
 
 /** Marker on a stage whose stored output a retry has superseded. */
 export const OUT_OF_DATE_LABEL = 'Out of date';
@@ -179,7 +238,7 @@ export function outOfDateStages(
   const regenerated = (stage: string): boolean =>
     sessions.some(
       (s) =>
-        s.stage === stage &&
+        sessionStage(s) === stage &&
         s.kind !== 'test' &&
         s.status === 'done' &&
         (s.attempt ?? 1) >= currentAttempt,
@@ -201,6 +260,71 @@ export const stagesKeptBy = (stage: string): Stage[] => {
   return at <= 0 ? [] : STAGE_ORDER.slice(0, at);
 };
 
+/**
+ * What POST /api/articles/:id/test-stage answers with. The call is synchronous
+ * and can take minutes; nothing it produces is written to the article.
+ */
+export interface TestStageResult {
+  stage: string;
+  agent?: string;
+  model?: string | null;
+  summary?: string | null;
+  output?: unknown;
+  tokens_input?: number;
+  tokens_output?: number;
+  cost_usd?: string | number;
+  session_id?: string;
+  started_at?: string;
+  ended_at?: string | null;
+  /** Wall-clock of the isolated run, when the agent reports it directly. */
+  duration_ms?: number;
+}
+
+/**
+ * Read a test run out of whatever the agent answered with. The call is one
+ * synchronous model call the operator has already paid for, so the result is
+ * the one thing this panel must not drop on a shape it did not expect: the
+ * body is taken either wrapped in `result` or on its own, and the figures are
+ * read under either the column names or the camel-cased ones. An answer with
+ * no stage at all is not a result and is reported as none.
+ */
+export function readTestStageResult(body: unknown): TestStageResult | null {
+  if (!body || typeof body !== 'object') return null;
+  const envelope = body as Record<string, unknown>;
+  const raw = (
+    envelope.result && typeof envelope.result === 'object' ? envelope.result : envelope
+  ) as Record<string, unknown>;
+  if (typeof raw.stage !== 'string') return null;
+  const str = (...keys: string[]): string | undefined => {
+    for (const key of keys) if (typeof raw[key] === 'string') return raw[key] as string;
+    return undefined;
+  };
+  const num = (...keys: string[]): number | undefined => {
+    for (const key of keys) {
+      const value = raw[key];
+      if (typeof value === 'number' || (typeof value === 'string' && value !== '')) {
+        const n = Number(value);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+    return undefined;
+  };
+  return {
+    stage: raw.stage,
+    agent: str('agent'),
+    model: str('model') ?? null,
+    summary: str('summary') ?? null,
+    output: raw.output,
+    tokens_input: num('tokens_input', 'tokensInput'),
+    tokens_output: num('tokens_output', 'tokensOutput'),
+    cost_usd: num('cost_usd', 'costUsd'),
+    session_id: str('session_id', 'sessionId'),
+    started_at: str('started_at', 'startedAt'),
+    ended_at: str('ended_at', 'endedAt') ?? null,
+    duration_ms: num('duration_ms', 'durationMs'),
+  };
+}
+
 /** One stage's attempts, newest attempt last, as the history renders them. */
 export interface AttemptGroup<T extends StageSession = StageSession> {
   stage: string;
@@ -209,9 +333,9 @@ export interface AttemptGroup<T extends StageSession = StageSession> {
 
 /**
  * Attempt history for one article: its sessions grouped per stage in pipeline
- * order, ordered by attempt. A session with no stage is a scout run or a row
- * written before the retry engine - it is never guessed into a group, it stays
- * in `ungrouped` and is listed flat.
+ * order, ordered by attempt. A session this panel cannot place - a topic
+ * search, or an agent it does not know - is never guessed into a group: it
+ * stays in `ungrouped` and is listed flat.
  */
 export function groupAttempts<T extends StageSession>(
   sessions: T[],
@@ -219,13 +343,14 @@ export function groupAttempts<T extends StageSession>(
   const byStage = new Map<string, T[]>();
   const ungrouped: T[] = [];
   for (const session of sessions) {
-    if (!session.stage) {
+    const stage = sessionStage(session);
+    if (!stage) {
       ungrouped.push(session);
       continue;
     }
-    const bucket = byStage.get(session.stage) ?? [];
+    const bucket = byStage.get(stage) ?? [];
     bucket.push(session);
-    byStage.set(session.stage, bucket);
+    byStage.set(stage, bucket);
   }
   const rank = (stage: string): number => {
     const at = STAGE_ORDER.indexOf(stage as Stage);
