@@ -84,14 +84,14 @@ export function stageTimeoutMessage(
   const limit = formatBudget(detail.budgetSeconds);
   const elapsed = formatDuration(detail.elapsedSeconds);
   const nothingNoted =
-    detail.cause === 'lease'
+    detail.timeoutCause === 'lease'
       ? 'The worker holding it did not report what it was waiting on.'
       : 'No LLM call had started, so the stage stopped somewhere other than a model call.';
   const lastCall = detail.lastCall
     ? `Last LLM call attempted: ${detail.lastCall}.`
     : nothingNoted;
   const what =
-    detail.cause === 'budget'
+    detail.timeoutCause === 'budget'
       ? `Stopped after ${limit} (the limit for the ${detail.agent} agent) at the ${detail.stage} stage, having run for ${elapsed}.`
       : `Stopped at the ${detail.stage} stage: the ${detail.agent} agent stopped reporting progress and its claim was reaped after ${elapsed} (the limit for this agent is ${limit}).`;
   return scrubSecrets(

@@ -16,18 +16,11 @@ function positiveNumber(key: string, fallback: number): number {
 }
 
 /**
- * Wall-clock budget for one pipeline stage, as a deployment asks for it.
- *
- * Deliberately not an operator setting. Comparable tooling treats an execution
- * timeout as a build/config-time value with a fixed platform ceiling (Zapier's
- * 30s is unchangeable, Make's 40min is a guardrail, GitHub Actions caps at
- * 360min, n8n's author-facing field is bounded by an admin-set maximum) - a
- * free-form number in the admin panel turns a guard into a support surface
- * ("someone set it to 5 seconds and everything fails") for no operator
- * benefit. What the operator sees is the outcome: a 'timed_out' run whose
- * error names the limit. A stage that genuinely needs longer gets a per-stage
- * override in the stage definition map; the ceiling this cannot raise lives
- * with it, in pipeline/budgets.ts.
+ * Wall-clock budget for one pipeline stage, as a deployment asks for it
+ * (AGENT_RUN_TIMEOUT_SECONDS). Deliberately a deployment value rather than an
+ * operator setting, and never the last word: the ceiling it cannot raise, the
+ * per-stage overrides and the reasoning behind all three live together in
+ * pipeline/budgets.ts.
  */
 export const DEFAULT_STAGE_TIMEOUT_SECONDS = 3600;
 

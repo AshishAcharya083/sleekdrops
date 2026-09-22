@@ -22,7 +22,7 @@ const PLANTED_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
 const { config } = await import('../config.js');
-const { runStage } = await import('./runner.js');
+const { runStage, updateArticle } = await import('./runner.js');
 const { LEASE_LOST_MESSAGE, renewLease, startHeartbeat, STAGE_LEASE_SECONDS } = await import(
   './lease.js'
 );
@@ -322,6 +322,39 @@ test('a run whose claim was reaped stops, writes nothing and says the lease is g
   const lost = sessions.at(-1)!;
   assert.equal(lost.status, 'failed');
   assert.equal(lost.error, LEASE_LOST_MESSAGE);
+});
+
+test('a stage abandoned at its budget cannot write its output afterwards', { skip }, async () => {
+  const article = await claimedArticle();
+  const LIVE_HALF = '## Written while the claim was live';
+  // The body outlives the run waiting on it - nothing can cancel a promise -
+  // so it comes back with an answer for an article that has since been timed
+  // out and released. The write it makes then is the one that must not land.
+  let late: Promise<void> = Promise.resolve();
+
+  await runStage(article, async () => {
+    await updateArticle(article, { draft_md: LIVE_HALF });
+    late = (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await assert.rejects(
+        updateArticle(article, { draft_md: '## The half nobody is waiting for' }),
+        /lease lost/,
+        'and the stage is stopped rather than left to carry on writing',
+      );
+    })();
+    return neverSettles();
+  });
+
+  const stopped = await reload(article.id);
+  assert.equal(stopped.status, 'timed_out');
+  assert.equal(stopped.draft_md, LIVE_HALF, 'what it wrote under a live claim is kept');
+
+  await late;
+  assert.equal(
+    (await reload(article.id)).draft_md,
+    LIVE_HALF,
+    'and what it wrote after the claim was released is not',
+  );
 });
 
 test('a run reaped mid-stage cannot overwrite the reap when it finishes', { skip }, async () => {

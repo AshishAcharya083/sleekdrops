@@ -7,11 +7,16 @@
 // budget must not drag the agent graph (every prompt, every SDK client) into
 // whichever process asked.
 //
-// None of it is operator-settable. Comparable tooling treats an execution
-// timeout as a config-time value under a fixed platform ceiling rather than a
-// number on a settings page, because a guard an operator can set to five
-// seconds is a support surface, not a safety feature. What the operator sees
-// is the outcome: a 'timed_out' run whose message names the limit it hit.
+// None of it is operator-settable, and this is the one place that argument is
+// written down. Comparable tooling treats an execution timeout as a
+// config-time value under a fixed platform ceiling rather than a number on a
+// settings page (Zapier's 30s is unchangeable, Make's 40min is a guardrail,
+// GitHub Actions caps at 360min, n8n's author-facing field is bounded by an
+// admin-set maximum), because a guard an operator can set to five seconds is a
+// support surface - "someone set it to 5 seconds and everything fails" - not a
+// safety feature. What the operator sees is the outcome: a 'timed_out' run
+// whose message names the limit it hit. A stage that genuinely needs longer
+// gets a per-stage override below, decided in code with its prompt.
 import { config } from '../config.js';
 import type { Stage } from './types.js';
 

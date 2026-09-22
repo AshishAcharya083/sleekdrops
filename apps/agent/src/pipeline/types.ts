@@ -74,12 +74,16 @@ export interface StageTimeoutDetail {
   elapsedSeconds: number;
   /**
    * The last LLM call the stage started, rendered for a human ("claude-opus-5
-   * with web search, retry 2 of 3, in flight for 41m"). Empty when the stage
-   * had not reached a model yet, or when the run was reaped by another process
-   * that cannot see what it was doing.
+   * with web search, retry 2 of 3, in flight for 41m"). Null or empty when the
+   * stage had not reached a model yet, or when the run was reaped by another
+   * process that cannot see what it was doing.
    */
-  lastCall: string;
-  cause: StageTimeoutCause;
+  lastCall: string | null;
+  /**
+   * Named apart from the standard `Error.cause` on the class below, which by
+   * convention carries the underlying error rather than a discriminator.
+   */
+  timeoutCause: StageTimeoutCause;
 }
 
 /**
@@ -93,8 +97,8 @@ export class StageTimeoutError extends Error {
   readonly stage: Stage;
   readonly budgetSeconds: number;
   readonly elapsedSeconds: number;
-  readonly lastCall: string;
-  readonly cause: StageTimeoutCause;
+  readonly lastCall: string | null;
+  readonly timeoutCause: StageTimeoutCause;
 
   constructor(message: string, detail: StageTimeoutDetail) {
     super(message);
@@ -103,8 +107,8 @@ export class StageTimeoutError extends Error {
     this.stage = detail.stage;
     this.budgetSeconds = detail.budgetSeconds;
     this.elapsedSeconds = detail.elapsedSeconds;
-    this.lastCall = detail.lastCall;
-    this.cause = detail.cause;
+    this.lastCall = detail.lastCall || null;
+    this.timeoutCause = detail.timeoutCause;
   }
 }
 

@@ -24,7 +24,7 @@ const detail = (overrides: Partial<StageTimeoutDetail> = {}): StageTimeoutDetail
   budgetSeconds: 3600,
   elapsedSeconds: 3601,
   lastCall: 'claude-opus-5 with web search, retry 1 of 2, in flight for 41m 12s',
-  cause: 'budget',
+  timeoutCause: 'budget',
   ...overrides,
 });
 
@@ -78,7 +78,7 @@ test('the message names the agent, stage, limit, elapsed time and last call', ()
 });
 
 test('a reaped run says it stopped reporting, not that it spent its budget', () => {
-  const message = stageTimeoutMessage(detail({ cause: 'lease', lastCall: '' }), {});
+  const message = stageTimeoutMessage(detail({ timeoutCause: 'lease', lastCall: null }), {});
   assert.match(message, /stopped reporting progress/);
   assert.match(message, /reaped/);
   assert.match(
@@ -105,7 +105,7 @@ test('a Claude OAuth token planted in an SDK error never reaches the message', (
   assert.equal(error.agent, 'seo_reviewer');
   assert.equal(error.stage, 'seo_review');
   assert.equal(error.budgetSeconds, 3600);
-  assert.equal(error.cause, 'budget');
+  assert.equal(error.timeoutCause, 'budget');
 });
 
 test('a credential shape is redacted even when this process never held it', () => {

@@ -98,8 +98,8 @@ export async function reapExpiredLeases(): Promise<number> {
       elapsedSeconds,
       // The worker that was running this is not this one, so what it was
       // waiting on died with it. Saying so beats naming nothing.
-      lastCall: '',
-      cause: 'lease',
+      lastCall: null,
+      timeoutCause: 'lease',
     });
     const claimed = await q(
       `UPDATE articles

@@ -165,24 +165,21 @@ export function summariseReview(review: SeoReview): string {
   }`;
 }
 
-async function updateArticle(id: string, fields: Record<string, unknown>): Promise<void> {
-  const keys = Object.keys(fields);
-  const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
-  await q(`UPDATE articles SET ${sets}, updated_at = now() WHERE id = $1`, [
-    id,
-    ...keys.map((k) => fields[k]),
-  ]);
-}
-
 /**
- * The write that ends this run, applied only while the run still owns the
- * article. A run that was reaped, cancelled or claimed again can still be in
- * flight - a promise has no cancel - and the routing decision of a run nobody
- * is waiting for must not land on top of the state that replaced it. The claim
- * it started under is that identity: same holder, same status, or the write is
- * dropped and said so in the log.
+ * Write to the article this run is working, and only while the claim it
+ * started under still holds. A run that was reaped, cancelled or claimed again
+ * can still be in flight - a promise has no cancel - and nothing it produces
+ * after that describes the article any more. The claim is the identity: same
+ * holder, same status, or the write does not happen.
+ *
+ * Every write a stage makes goes through here, not just the one that ends it:
+ * `withDeadline` settles the promise runStage is waiting on, it does not stop
+ * the work behind it, so an abandoned stage runs on with more writes in it.
  */
-async function finishArticle(article: ArticleRow, fields: Record<string, unknown>): Promise<void> {
+async function writeClaimed(
+  article: ArticleRow,
+  fields: Record<string, unknown>,
+): Promise<boolean> {
   const keys = Object.keys(fields);
   const sets = keys.map((k, i) => `${k} = $${i + 4}`).join(', ');
   const applied = await q(
@@ -191,13 +188,49 @@ async function finishArticle(article: ArticleRow, fields: Record<string, unknown
      RETURNING id`,
     [article.id, article.status, article.claimed_by ?? null, ...keys.map((k) => fields[k])],
   );
-  if (applied.length === 0) {
-    log.warn('stage result dropped: the article moved on while the stage ran', {
-      article_id: article.id,
-      stage: article.stage,
-      claimed_by: article.claimed_by,
-    });
-  }
+  return applied.length > 0;
+}
+
+/**
+ * A stage body's own output - a dossier, a draft, an assembled frontmatter.
+ * Lands while the run still owns the article, which is what keeps the partial
+ * output of a stage that is later stopped: everything written before the
+ * budget expired was written under a live claim.
+ *
+ * A write that finds the claim gone is dropped, and ends the stage the way
+ * losing the lease does. Dropping it alone would not be enough - the body
+ * would carry on to its next write, and to the model calls between them - and
+ * the run that took the article over has already recorded what became of it.
+ *
+ * Exported only so a test can drive the guard against a real row: every stage
+ * body that uses it is in this file.
+ */
+export async function updateArticle(
+  article: ArticleRow,
+  fields: Record<string, unknown>,
+): Promise<void> {
+  if (await writeClaimed(article, fields)) return;
+  log.warn('stage output dropped: the article moved on while the stage ran', {
+    article_id: article.id,
+    stage: article.stage,
+    claimed_by: article.claimed_by,
+    columns: Object.keys(fields),
+  });
+  throw new LeaseLostError();
+}
+
+/**
+ * The write that ends this run. Same guard, but a drop is only logged: the
+ * routing decision of a run nobody is waiting for must not land on top of the
+ * state that replaced it, and by this point there is no stage left to stop.
+ */
+async function finishArticle(article: ArticleRow, fields: Record<string, unknown>): Promise<void> {
+  if (await writeClaimed(article, fields)) return;
+  log.warn('stage result dropped: the article moved on while the stage ran', {
+    article_id: article.id,
+    stage: article.stage,
+    claimed_by: article.claimed_by,
+  });
 }
 
 /** Ensure the brief's slug doesn't collide with another article. */
@@ -243,7 +276,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
         ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
         : null;
       const dossier = await runResearcher(article, topic, model!, tracker);
-      await updateArticle(article.id, { research: JSON.stringify(dossier) });
+      await updateArticle(article, { research: JSON.stringify(dossier) });
       summary = `${dossier.facts?.length ?? 0} facts, ${dossier.products?.length ?? 0} products, primary keyword "${dossier.keywords?.primary}"`;
       next = { stage: 'keyword', status: 'queued' };
       break;
@@ -253,7 +286,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
         ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
         : null;
       const plan = await runKeywordStrategist(article, topic, model!, tracker);
-      await updateArticle(article.id, { keyword_plan: JSON.stringify(plan) });
+      await updateArticle(article, { keyword_plan: JSON.stringify(plan) });
       // Earliest point at which "this piece has nothing to link" is knowable:
       // the dossier is built, and the SERP read has just named the intent.
       // Deal with it here rather than at assemble - outline, write, review
@@ -280,7 +313,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
               `is not required to find products, so it did not) or add them to the topic brief by hand.`,
           );
         }
-        await updateArticle(article.id, {
+        await updateArticle(article, {
           research: JSON.stringify(withDiscoveredProducts(article.research, products)),
         });
         discoveryNote = `, ${products.length} product(s) recovered by a discovery pass`;
@@ -294,7 +327,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
         ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
         : null;
       const angle = await runAngleEditor(article, topic, model!, tracker);
-      await updateArticle(article.id, { editorial_angle: JSON.stringify(angle) });
+      await updateArticle(article, { editorial_angle: JSON.stringify(angle) });
       summary = angle.defensible
         ? `"${angle.thesis}" - ${angle.shape} shape, ${angle.informationGain.length} claim(s) the top results miss, ${angle.byline} beat`
         : `no defensible take recorded (${angle.weakness}) - ${angle.shape} shape, ${angle.byline} beat`;
@@ -309,7 +342,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       // column is the record of the decision an operator can see and query.
       // Both are written here so they can never disagree.
       const shape = brief.structureShape ?? null;
-      await updateArticle(article.id, {
+      await updateArticle(article, {
         outline: JSON.stringify(brief),
         structure_shape: shape ? JSON.stringify(shape) : null,
         slug: brief.slug,
@@ -324,7 +357,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
         ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
         : null;
       const draft = await runWriter(article, topic, model!, tracker);
-      await updateArticle(article.id, { draft_md: draft });
+      await updateArticle(article, { draft_md: draft });
       summary = `draft written (${draft.split(/\s+/).length} words)`;
       next = { stage: 'seo_review', status: 'queued' };
       break;
@@ -335,7 +368,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       if (!review.pass && article.revision_round >= maxRounds) {
         review.forcedThrough = true;
       }
-      await updateArticle(article.id, { seo_review: JSON.stringify(review) });
+      await updateArticle(article, { seo_review: JSON.stringify(review) });
       summary = summariseReview(review);
       next =
         review.pass || review.forcedThrough
@@ -345,7 +378,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
     }
     case 'edit': {
       const revised = await runEditor(article, model!, tracker);
-      await updateArticle(article.id, {
+      await updateArticle(article, {
         draft_md: revised,
         revision_round: article.revision_round + 1,
         // Admin feedback is consumed by exactly one edit pass.
@@ -357,7 +390,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
     }
     case 'assemble': {
       const assembled = await runAssembler(article);
-      await updateArticle(article.id, {
+      await updateArticle(article, {
         draft_md: assembled.body,
         frontmatter: JSON.stringify(assembled.frontmatter),
         affiliate_links: JSON.stringify(assembled.affiliateLinks),
@@ -385,7 +418,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       } else {
         const image = await runImageAgent(article, model!);
         if (image.heroImage) {
-          await updateArticle(article.id, {
+          await updateArticle(article, {
             frontmatter: JSON.stringify({
               ...existing,
               heroImage: image.heroImage,
@@ -404,7 +437,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
     }
     case 'publish': {
       const result = await runPublisher(article);
-      await updateArticle(article.id, { published_at: new Date().toISOString() });
+      await updateArticle(article, { published_at: new Date().toISOString() });
       if (article.topic_id) {
         await q("UPDATE topics SET status = 'approved', updated_at = now() WHERE id = $1", [
           article.topic_id,
@@ -496,8 +529,9 @@ export async function runStage(
   // Losing the lease ends the stage the same way its budget running out does:
   // by settling the promise runStage is waiting on. Nothing can cancel the
   // work itself - a JavaScript promise has no cancel - so what matters is that
-  // this run stops writing, which the catch below and finishArticle's claim
-  // guard between them guarantee.
+  // this run stops writing, and that is the claim guard on every article write
+  // rather than this race: the body abandoned here runs on, and its next
+  // updateArticle is where it finds out the article is no longer its own.
   let abandon: (reason: Error) => void = () => {};
   const leaseLost = new Promise<never>((_, reject) => {
     abandon = reject;
@@ -533,7 +567,7 @@ export async function runStage(
           budgetSeconds,
           elapsedSeconds: (Date.now() - startedAt) / 1000,
           lastCall: describeLlmCall(trace.last),
-          cause: 'budget',
+          timeoutCause: 'budget',
         }),
     );
     await finishSession('done', summary);
@@ -574,10 +608,10 @@ export async function runStage(
         article_id: article.id,
         stage,
         agent,
-        cause: err.cause,
+        cause: err.timeoutCause,
         budget_seconds: err.budgetSeconds,
         elapsed_seconds: Math.round(err.elapsedSeconds),
-        last_llm_call: err.lastCall || null,
+        last_llm_call: err.lastCall,
       });
       return;
     }
