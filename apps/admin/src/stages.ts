@@ -131,6 +131,38 @@ export const REVIEW_STALE_REASON =
 /** Marker on a stage whose stored output a retry has superseded. */
 export const OUT_OF_DATE_LABEL = 'Out of date';
 
+/** Statuses whose work the triage row can still stop. Everything else is over. */
+export const isStoppable = (status: string): boolean => status === 'running' || status === 'queued';
+
+/**
+ * The row-level stop on the triage surface. Work that has started is *stopped*;
+ * work that is only queued is *cancelled* - the graceful/forceful split is the
+ * mental model operators bring from comparable run dashboards, and a row that
+ * says "cancel" over a stage mid-call reads as if nothing had begun.
+ */
+export const stopControlLabel = (status: string): string =>
+  status === 'running' ? 'Stop run' : 'Cancel run';
+
+/** What that control promises, so the destructive click is never a dead end. */
+export const stopControlHint = (status: string): string =>
+  status === 'running'
+    ? 'Stop this run - you can re-run it from the run page'
+    : 'Cancel this queued run - you can re-run it from the run page';
+
+/**
+ * What the surface says once the stop is accepted. A single row is stopped
+ * without a confirmation dialog - the cheap-recovery path, not a habit-forming
+ * prompt - so this line has to name the run that was hit, state what survived,
+ * and sit next to the way back into it.
+ *
+ * `cancelling` is the agent's own answer: a running stage is asked to stop and
+ * lets go later, a queued one is off the queue immediately.
+ */
+export const stoppedNotice = (title: string, cancelling: boolean): string =>
+  cancelling
+    ? `Stopping “${title}” - it stops where it is, and any partial output is kept as a draft.`
+    : `“${title}” stopped - any partial output is kept as a draft.`;
+
 /**
  * The stages a retry left behind: the one it restarted from and everything
  * after it, until a pipeline session for that stage completes on the current

@@ -10,7 +10,11 @@ import {
   fmtSeconds,
   fmtTime,
   fmtTokens,
+  isStoppable,
   stageBudgetSeconds,
+  stopControlHint,
+  stopControlLabel,
+  stoppedNotice,
   timedOutSentence,
 } from '../api';
 import { toApiError, type ApiError } from '../api-error';
@@ -182,6 +186,15 @@ const STUCK_GROUPS: Array<{ key: string; title: string; match: (run: StuckRun) =
 ];
 
 /**
+ * Worst first, and stable: the surface polls every few seconds, and a row that
+ * re-sorts between aiming and clicking is how an operator stops the wrong run.
+ * Elapsed time only grows, so this order does not churn; the article id breaks
+ * the ties the agent's own ordering would otherwise leave free.
+ */
+const byLongestRunning = (a: StuckRun, b: StuckRun): number =>
+  b.elapsed_seconds - a.elapsed_seconds || a.article_id.localeCompare(b.article_id);
+
+/**
  * Stuck / timed out, above the stat row. A run that has wedged is the only
  * thing on this tab that will not resolve itself, and the panel's whole
  * failure mode was that it read the same as a healthy one: a 2702-minute
@@ -204,13 +217,34 @@ function NeedsAttention({
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+  /** Every run this surface has stopped, and the line reporting the last one. */
+  const [stoppedIds, setStoppedIds] = useState<string[]>([]);
+  const [notice, setNotice] = useState<{ articleId: string; text: string } | null>(null);
 
-
-  const cancel = async (run: StuckRun) => {
+  /**
+   * A single row is stopped on the click, with no confirmation in front of it:
+   * a dialog on every row teaches the operator to dismiss dialogs, where a
+   * line that names what was hit and links back into it makes a mis-click both
+   * obvious and cheap to undo. Multi-row stops would be the case for a prompt;
+   * this surface has none.
+   */
+  const stop = async (run: StuckRun) => {
     setBusy(run.article_id);
     setError(null);
+    // The notice reports the last thing that happened, so it gives way to
+    // whatever this click turns out to be - another stop, or its failure.
+    setNotice(null);
     try {
-      await api(`/api/articles/${run.article_id}/cancel`, { method: 'POST' });
+      const res = await api<{ cancelling?: boolean }>(`/api/articles/${run.article_id}/cancel`, {
+        method: 'POST',
+      });
+      // The hold is per run, not one slot: triaging three wedged runs in a row
+      // must not put the first one's control back as if it had never been hit.
+      setStoppedIds((ids) => (ids.includes(run.article_id) ? ids : [...ids, run.article_id]));
+      setNotice({
+        articleId: run.article_id,
+        text: stoppedNotice(run.title, Boolean(res?.cancelling)),
+      });
       track(EVENTS.articleActioned, {
         action: 'cancel',
         article_id: run.article_id,
@@ -235,6 +269,18 @@ function NeedsAttention({
       surface: 'overview-stuck',
     });
     onOpenRun?.(run.article_id);
+  };
+
+  /**
+   * The way back in from the stop notice. The run has usually left the surface
+   * by then - the stop is what took it off - so it is opened by id, and the
+   * triage event still reports it rather than going unrecorded.
+   */
+  const openStopped = (articleId: string) => {
+    const run = runs?.find((r) => r.article_id === articleId);
+    if (run) return open(run);
+    track(EVENTS.stuckRunOpened, { article_id: articleId, surface: 'overview-stuck' });
+    onOpenRun?.(articleId);
   };
 
   // A section the agent could not read is unknown, not clear - and an agent
@@ -284,8 +330,19 @@ function NeedsAttention({
           <ApiErrorBanner error={error} />
         </div>
       )}
+      {notice && (
+        <div className="attn-toast notice-banner" role="status">
+          <span className="line">{notice.text}</span>
+          <button className="btn ghost small" onClick={() => openStopped(notice.articleId)}>
+            Open run to re-run
+          </button>
+          <button className="btn ghost small" onClick={() => setNotice(null)} aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      )}
       {STUCK_GROUPS.map((group) => {
-        const rows = runs.filter(group.match);
+        const rows = runs.filter(group.match).sort(byLongestRunning);
         if (rows.length === 0) return null;
         return (
           <div className="attn-group" key={group.key}>
@@ -295,8 +352,9 @@ function NeedsAttention({
                 key={run.session_id ?? run.article_id}
                 run={run}
                 busy={busy === run.article_id}
+                stopping={stoppedIds.includes(run.article_id)}
                 onOpen={() => open(run)}
-                onCancel={() => void cancel(run)}
+                onStop={() => void stop(run)}
               />
             ))}
           </div>
@@ -309,22 +367,31 @@ function NeedsAttention({
 function StuckRow({
   run,
   busy,
+  stopping,
   onOpen,
-  onCancel,
+  onStop,
 }: {
   run: StuckRun;
   busy: boolean;
+  /** This row is the one the surface just stopped, and is waiting to let go. */
+  stopping: boolean;
   onOpen: () => void;
-  onCancel: () => void;
+  onStop: () => void;
 }) {
   const budget = run.budget_seconds ?? stageBudgetSeconds(run.stage);
   const band = elapsedBand(run.elapsed_seconds, budget, run.status);
-  const running = run.status !== 'timed_out';
-  const why = running
-    ? band === 'over'
-      ? `Still running ${fmtSeconds(run.elapsed_seconds)} into a ${budgetMinutes(budget)} minute budget - nothing has stopped it.`
-      : `Past half of its ${budgetMinutes(budget)} minute budget and still running.`
-    : timedOutSentence(budget);
+  const running = run.status === 'running';
+  // State-gated: a run the budget already stopped has nothing left to stop, so
+  // most rows carry no destructive target at all.
+  const stoppable = isStoppable(run.status);
+  const why =
+    run.status === 'timed_out'
+      ? timedOutSentence(budget)
+      : run.status === 'queued'
+        ? `Waiting ${fmtSeconds(run.elapsed_seconds)} to start, against a ${budgetMinutes(budget)} minute budget it has not spent yet.`
+        : band === 'over'
+          ? `Still running ${fmtSeconds(run.elapsed_seconds)} into a ${budgetMinutes(budget)} minute budget - nothing has stopped it.`
+          : `Past half of its ${budgetMinutes(budget)} minute budget and still running.`;
 
   return (
     <div className="attn-row">
@@ -351,9 +418,21 @@ function StuckRow({
         <button className="btn small" onClick={onOpen}>
           Open run
         </button>
-        {running && (
-          <button className="btn danger small" disabled={busy} onClick={onCancel}>
-            {busy ? 'Cancelling…' : 'Cancel run'}
+        {stoppable && (
+          // Persistent, never hover-revealed, and held off the benign link by
+          // its own margin: a destructive control that materialises under the
+          // pointer, or sits a thumb's width from "Open run", is the mis-click.
+          <button
+            className="btn danger small"
+            // A stage that has been asked to stop lets go asynchronously, and
+            // the stuck payload cannot say so: the surface holds its own
+            // control rather than inviting the same stop a second time.
+            disabled={busy || stopping}
+            title={stopControlHint(run.status)}
+            onClick={onStop}
+          >
+            <span aria-hidden="true">⊘</span>
+            {busy || stopping ? 'Stopping…' : stopControlLabel(run.status)}
           </button>
         )}
       </div>

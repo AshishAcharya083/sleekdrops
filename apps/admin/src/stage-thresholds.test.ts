@@ -13,6 +13,7 @@ import {
   DEFAULT_STAGE_BUDGET_SECONDS,
   elapsedBand,
   groupAttempts,
+  isStoppable,
   outOfDateStages,
   REVIEW_STALE_BANNER,
   REVIEW_STALE_REASON,
@@ -21,6 +22,9 @@ import {
   stagesKeptBy,
   stagesRegeneratedBy,
   STAGE_ORDER,
+  stopControlHint,
+  stopControlLabel,
+  stoppedNotice,
   timedOutSentence,
   type StageSession,
 } from './stages.ts';
@@ -168,4 +172,26 @@ test('a session with no stage is never guessed into a group', () => {
   const { groups, ungrouped } = groupAttempts([scout, legacy]);
   assert.deepEqual(groups, []);
   assert.equal(ungrouped.length, 2, 'both stay in the flat list');
+});
+
+test('only in-flight work carries a stop, and it is named for its state', () => {
+  assert.ok(isStoppable('running'));
+  assert.ok(isStoppable('queued'));
+  for (const over of ['timed_out', 'failed', 'cancelled', 'done', 'waiting_approval']) {
+    assert.equal(isStoppable(over), false, `${over} has nothing left to stop`);
+  }
+  assert.equal(stopControlLabel('running'), 'Stop run', 'work that started is stopped');
+  assert.equal(stopControlLabel('queued'), 'Cancel run', 'work that has not is cancelled');
+  assert.equal(stopControlLabel('waiting_approval'), 'Cancel run', 'nothing is in flight to stop');
+  assert.match(stopControlHint('running'), /re-run it from the run page/);
+  assert.match(stopControlHint('queued'), /^Cancel this queued run/);
+});
+
+test('the stop is reported in the tense the agent answered in', () => {
+  const asked = stoppedNotice('Best cordless stick vacuums', true);
+  assert.match(asked, /^Stopping “Best cordless stick vacuums”/, 'a running stage lets go later');
+  assert.match(asked, /kept as a draft/, 'and says what survived it');
+  const done = stoppedNotice('Best cordless stick vacuums', false);
+  assert.match(done, /^“Best cordless stick vacuums” stopped/, 'a queued run is off the queue now');
+  assert.doesNotMatch(done, /Stopping/);
 });

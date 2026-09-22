@@ -489,7 +489,21 @@ button.btn.danger[aria-disabled='true'] {
 .attn-row .title { font-size: 13.5px; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
 .attn-row .why { color: var(--muted); font-size: 12.5px; margin-top: 4px; line-height: 1.5; overflow-wrap: anywhere; }
 .attn-row .acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+/* The stop sits apart from the row's benign link rather than beside it: the
+   danger styling and the glyph are the redundant signals, the gap is what
+   stops a thumb landing on it by aim alone. */
+.attn-row .acts .btn.danger { margin-left: 12px; }
 .attn-empty { padding: 14px 16px; color: var(--muted); font-size: 13px; }
+/* What the surface says after a row-level stop - named run, what survived, and
+   the way back in - standing in for a confirmation dialog the row does not ask
+   for. */
+.attn-toast {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 16px 0;
+}
+.attn-toast .line { flex: 1 1 260px; }
+/* The actions hold the right edge whether or not the line wraps, so the way
+   back in sits in the same place at every width. */
+.attn-toast .btn:first-of-type { margin-left: auto; }
 @media (max-width: 900px) {
   .attn-row { grid-template-columns: auto auto 1fr; }
   .attn-row .who { grid-column: 1 / -1; }

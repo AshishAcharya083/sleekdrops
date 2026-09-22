@@ -117,7 +117,7 @@ A pipeline-board action on one article: one name, with the action in a property.
 | `attempt` | number | The article's run attempt when the action was taken. |
 | `surface` | string | `overview-stuck` when the action came from the Overview's stuck surface; absent on the run detail. |
 
-Owning screens: `pages/Pipeline.tsx` (article detail panel), `pages/Overview.tsx` (the stuck surface's `Cancel run`).
+Owning screens: `pages/Pipeline.tsx` (article detail panel), `pages/Overview.tsx` (the stuck surface's row-level `Stop run` / `Cancel run`).
 The recovery actions are reported by what they do, never by what the stage returned: no agent output, error text or prose leaves the panel.
 The hero-image actions report only that an image was attached, re-labelled or removed - never the file, its name or its URL.
 
@@ -129,8 +129,8 @@ Named separately from `Article Actioned` because it is triage navigation rather 
 | Property | Type | Notes |
 |---|---|---|
 | `article_id` | string | The run that was opened. |
-| `stage` | string | The stage it is stuck in. |
-| `status` | string | `running` (past the soft bound) or `timed_out`. |
+| `stage` | string | The stage it is stuck in. Absent when the run was opened from the stop notice after leaving the surface. |
+| `status` | string | `running` (past the soft bound) or `timed_out`. Absent when the run was opened from the stop notice after leaving the surface. |
 | `surface` | string | `overview-stuck`. |
 
 Owning screen: `pages/Overview.tsx`.

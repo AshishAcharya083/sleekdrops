@@ -67,10 +67,48 @@ test('the Overview surfaces stuck runs above the stat row', () => {
 test('a stuck row links at its run and can stop it', () => {
   assert.match(overview, /Open run/);
   assert.match(overview, /onOpenRun\?\.\(run\.article_id\)/, 'the link opens that article');
-  assert.match(overview, /api\(`\/api\/articles\/\$\{run\.article_id\}\/cancel`, \{ method: 'POST' \}\)/);
+  assert.match(overview, /`\/api\/articles\/\$\{run\.article_id\}\/cancel`/);
+  assert.match(overview, /method: 'POST',/, 'through the same api\\(\\) chokepoint');
   assert.match(app, /const \[runToOpen, setRunToOpen\]/, 'the shell carries the request to the Pipeline tab');
   assert.match(app, /<Pipeline openArticleId=\{runToOpen\} onOpened=\{\(\) => setRunToOpen\(null\)\} \/>/);
   assert.match(pipeline, /setOpenId\(openArticleId\)/, 'and the board opens that run');
+});
+
+test('the row-level stop is state-gated, and names what it does', () => {
+  assert.match(overview, /const stoppable = isStoppable\(run\.status\)/, 'only in-flight work gets a target');
+  assert.match(overview, /\{stoppable && \(/);
+  assert.match(overview, /stopControlLabel\(run\.status\)/, 'in-flight work is stopped, queued work cancelled');
+  assert.match(overview, /title=\{stopControlHint\(run\.status\)\}/, 'and the control says where the way back is');
+  assert.match(overview, /className="btn danger small"/, 'the destructive styling is the redundant signal');
+  assert.match(overview, /<span aria-hidden="true">⊘<\/span>/, 'as is the glyph, for a monochrome screen');
+  assert.match(
+    rule('.attn-row .acts .btn.danger'),
+    /margin-left:\s*12px/,
+    'held off the row link rather than sitting flush against it',
+  );
+});
+
+test('a single-row stop asks no dialog, and reports what it hit', () => {
+  assert.doesNotMatch(overview, /confirm-overlay/, 'a per-row dialog would only teach dismissal');
+  assert.match(overview, /stoppedNotice\(run\.title, Boolean\(res\?\.cancelling\)\)/, 'named run, honest tense');
+  assert.match(overview, /className="attn-toast notice-banner" role="status"/);
+  assert.match(overview, /Open run to re-run/, 'recovery is one click from the report');
+  assert.match(overview, /aria-label="Dismiss"/);
+  assert.match(
+    overview,
+    /disabled=\{busy \|\| stopping\}/,
+    'the same run is never offered the same stop twice while the stage lets go',
+  );
+  assert.match(
+    overview,
+    /stopping=\{stoppedIds\.includes\(run\.article_id\)\}/,
+    'and the hold is per run, so triaging the next one does not release the last',
+  );
+  assert.match(
+    overview,
+    /runs\.filter\(group\.match\)\.sort\(byLongestRunning\)/,
+    'and the rows hold still under a poll, so the click lands on the row it was aimed at',
+  );
 });
 
 test('elapsed time is rendered against a budget, never as a bare duration', () => {
