@@ -184,17 +184,30 @@ export const REVIEW_STALE_REASON =
   'seo_review must re-run before publish - the draft changed after the last review';
 
 /**
- * Stages an isolated test run can cover. The one thing `publish` does is write
- * to the live site, so the "writes nothing" this control promises cannot hold
- * for it, and `done` runs no agent at all.
+ * Stages an isolated test run cannot cover, each with the sentence the control
+ * is held back under. The test control promises the article's stored output is
+ * untouched, so a stage that would break that promise must not be offered:
+ * `publish` writes to the live site, `image` uploads its result over the
+ * article's own fixed hero object key and so replaces the picture the article
+ * is already serving, and `done` runs no agent at all.
  */
-export const UNTESTABLE_STAGES: readonly string[] = ['publish', 'done'];
+export const UNTESTABLE_STAGE_REASONS: Readonly<Record<string, string>> = {
+  image:
+    'The hero image stage cannot be tested on its own - it uploads over the hero image this ' +
+    'article already serves, so the run would change published content rather than write nothing.',
+  publish:
+    'Publishing is the one stage that cannot be tested on its own - writing to the live site is ' +
+    'all it does.',
+  done: 'There is nothing to test here - done is the end of the pipeline and runs no agent.',
+};
+
+export const UNTESTABLE_STAGES: readonly string[] = Object.keys(UNTESTABLE_STAGE_REASONS);
 
 export const isTestableStage = (stage: string): boolean => !UNTESTABLE_STAGES.includes(stage);
 
-/** Why the test control is off on those stages. */
-export const UNTESTABLE_STAGE_HINT =
-  'Publishing is the one stage that cannot be tested on its own - writing to the live site is all it does.';
+/** Why the test control is off on this stage. */
+export const untestableStageHint = (stage: string): string =>
+  UNTESTABLE_STAGE_REASONS[stage] ?? 'This stage cannot be tested on its own.';
 
 /**
  * The statuses the agent's retry engine will re-queue an article from. A retry

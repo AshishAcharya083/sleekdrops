@@ -38,7 +38,7 @@ import {
   stagesRegeneratedBy,
   stoppedSession,
   timedOutSentence,
-  UNTESTABLE_STAGE_HINT,
+  untestableStageHint,
 } from '../api';
 import { toApiError, type ApiError } from '../api-error';
 import { ApiErrorBanner, Badge, Elapsed, OutOfDateBadge } from '../components';
@@ -993,7 +993,7 @@ function RunActions({
         <span className="ahint">
           {testable
             ? `Runs ${label} on its own and shows you what came back. Writes nothing to the article - the model call is still billed, and shows up in the attempt history as a test run.`
-            : `${UNTESTABLE_STAGE_HINT} Test an earlier stage from the attempt history below.`}
+            : `${untestableStageHint(stage)} Test an earlier stage from the attempt history below.`}
         </span>
       </div>
 
@@ -1292,7 +1292,7 @@ function AttemptHistory({
               <span className="ahint">
                 {isTestableStage(group.stage)
                   ? `Retry re-runs ${group.stage} and everything after it. Test runs it on its own and writes nothing.`
-                  : `Retry re-runs ${group.stage} and everything after it. ${UNTESTABLE_STAGE_HINT}`}
+                  : `Retry re-runs ${group.stage} and everything after it. ${untestableStageHint(group.stage)}`}
               </span>
             </div>
           </details>

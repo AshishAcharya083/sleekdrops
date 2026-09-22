@@ -37,7 +37,7 @@ import {
   STAGE_AGENT,
   stuckRuns,
   timedOutSentence,
-  UNTESTABLE_STAGE_HINT,
+  untestableStageHint,
   type StageSession,
   type StuckArticle,
 } from './stages.ts';
@@ -303,13 +303,25 @@ test('a session on no stage is measured against no budget at all', () => {
   );
 });
 
-test('publish is the one stage an isolated test never offers to run', () => {
-  for (const stage of STAGE_ORDER.filter((s) => s !== 'publish' && s !== 'done')) {
+/**
+ * The control is badged "wrote nothing" and says the article's stored output is
+ * untouched, so the set it is offered on has to be exactly the stages that
+ * honour it. `image` is the trap: it runs an agent like any other stage, but it
+ * uploads over the article's own fixed hero object key, so a test of it
+ * replaces the picture a published article is already serving.
+ */
+test('a stage a test run would write over is never offered as a test', () => {
+  const untestable = ['image', 'publish', 'done'];
+  for (const stage of STAGE_ORDER.filter((s) => !untestable.includes(s))) {
     assert.ok(isTestableStage(stage), `${stage} runs an agent and writes nothing on its own`);
   }
+  assert.equal(isTestableStage('image'), false, 'it overwrites the hero the article already serves');
   assert.equal(isTestableStage('publish'), false, 'writing to the live site is all it does');
   assert.equal(isTestableStage('done'), false, 'and done runs no agent at all');
-  assert.match(UNTESTABLE_STAGE_HINT, /cannot be tested on its own/);
+  for (const stage of untestable) {
+    assert.match(untestableStageHint(stage), /cannot be tested on its own|nothing to test/i);
+  }
+  assert.match(untestableStageHint('image'), /hero image/i, 'and it says which write it would make');
 });
 
 /**
