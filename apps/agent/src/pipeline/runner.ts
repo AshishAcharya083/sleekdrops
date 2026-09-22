@@ -35,6 +35,7 @@ import {
   LeaseLostError,
   renewLease,
   startHeartbeat,
+  updateClaimed,
 } from './lease.js';
 import { scrubSecrets, stageTimeoutError } from './stageTimeout.js';
 import { StageTimeoutError } from './types.js';
@@ -166,36 +167,13 @@ export function summariseReview(review: SeoReview): string {
 }
 
 /**
- * Write to the article this run is working, and only while the claim it
- * started under still holds. A run that was reaped, cancelled or claimed again
- * can still be in flight - a promise has no cancel - and nothing it produces
- * after that describes the article any more. The claim is the identity: same
- * holder, same status, or the write does not happen.
- *
- * Every write a stage makes goes through here, not just the one that ends it:
- * `withDeadline` settles the promise runStage is waiting on, it does not stop
- * the work behind it, so an abandoned stage runs on with more writes in it.
- */
-async function writeClaimed(
-  article: ArticleRow,
-  fields: Record<string, unknown>,
-): Promise<boolean> {
-  const keys = Object.keys(fields);
-  const sets = keys.map((k, i) => `${k} = $${i + 4}`).join(', ');
-  const applied = await q(
-    `UPDATE articles SET ${sets}, updated_at = now()
-     WHERE id = $1 AND status = $2 AND claimed_by IS NOT DISTINCT FROM $3
-     RETURNING id`,
-    [article.id, article.status, article.claimed_by ?? null, ...keys.map((k) => fields[k])],
-  );
-  return applied.length > 0;
-}
-
-/**
  * A stage body's own output - a dossier, a draft, an assembled frontmatter.
  * Lands while the run still owns the article, which is what keeps the partial
  * output of a stage that is later stopped: everything written before the
- * budget expired was written under a live claim.
+ * budget expired was written under a live claim. Every write a stage makes
+ * goes through the claim guard, not just the one that ends it - `withDeadline`
+ * settles the promise runStage is waiting on, it does not stop the work behind
+ * it, so an abandoned stage runs on with more writes in it.
  *
  * A write that finds the claim gone is dropped, and ends the stage the way
  * losing the lease does. Dropping it alone would not be enough - the body
@@ -209,7 +187,7 @@ export async function updateArticle(
   article: ArticleRow,
   fields: Record<string, unknown>,
 ): Promise<void> {
-  if (await writeClaimed(article, fields)) return;
+  if (await updateClaimed(article, fields)) return;
   log.warn('stage output dropped: the article moved on while the stage ran', {
     article_id: article.id,
     stage: article.stage,
@@ -225,7 +203,7 @@ export async function updateArticle(
  * state that replaced it, and by this point there is no stage left to stop.
  */
 async function finishArticle(article: ArticleRow, fields: Record<string, unknown>): Promise<void> {
-  if (await writeClaimed(article, fields)) return;
+  if (await updateClaimed(article, fields)) return;
   log.warn('stage result dropped: the article moved on while the stage ran', {
     article_id: article.id,
     stage: article.stage,
