@@ -12,10 +12,11 @@ import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
-import { stageBudgetSeconds } from '../pipeline/budgets.js';
+import { MAX_STAGE_TIMEOUT_SECONDS, stageBudgetSeconds } from '../pipeline/budgets.js';
 import {
   cancelArticle,
   groupAttempts,
+  isReviewStale,
   outOfDateStages,
   parseStageParam,
   rerunAll,
@@ -200,6 +201,21 @@ function stageBudgets(): Record<Stage, number> {
   ) as Record<Stage, number>;
 }
 
+/**
+ * The same numbers in the shape the panel reads them in - a default plus the
+ * per-stage values - so a client that asks "what is this stage allowed?" gets
+ * the answer whichever of the two field names it was written against. Both are
+ * served because both were pinned: the flat map is what this card's contract
+ * names, `budgets` is what apps/admin reads, and a panel that finds neither
+ * falls back to a hardcoded hour and prints a limit no stage is running under.
+ */
+function budgets(): { default_seconds: number; per_stage: Record<Stage, number> } {
+  return {
+    default_seconds: Math.min(config.agentRunTimeoutSeconds, MAX_STAGE_TIMEOUT_SECONDS),
+    per_stage: stageBudgets(),
+  };
+}
+
 const ADMIN_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../../admin/dist');
 
 export function createApp(): Hono<TraceEnv> {
@@ -332,7 +348,7 @@ export function createApp(): Hono<TraceEnv> {
           q(
             `SELECT s.id, s.agent, s.model, s.status, s.summary, s.error, s.cost_usd,
                     s.tokens_input, s.tokens_output, s.started_at, s.ended_at,
-                    s.article_id, s.scout_run_id, a.title article_title
+                    s.article_id, s.scout_run_id, s.attempt, s.kind, a.title article_title
              FROM agent_sessions s LEFT JOIN articles a ON a.id = s.article_id
              ORDER BY s.started_at DESC LIMIT 12`,
           ),
@@ -571,7 +587,7 @@ export function createApp(): Hono<TraceEnv> {
               ${reviewStaleSql('a')} AS review_stale
        FROM articles a ORDER BY a.updated_at DESC LIMIT 200`,
     );
-    return c.json({ articles: rows, stageBudgets: stageBudgets() });
+    return c.json({ articles: rows, stageBudgets: stageBudgets(), budgets: budgets() });
   });
 
   app.get('/api/articles/:id', async (c) => {
@@ -593,6 +609,7 @@ export function createApp(): Hono<TraceEnv> {
       attempts: groupAttempts(sessions),
       outOfDateStages: outOfDateStages(article.stale_from_stage, article.stage),
       stageBudgets: stageBudgets(),
+      budgets: budgets(),
       reviewStale,
       reviewStaleReason: reviewStale ? REVIEW_STALE_REASON : null,
     });
@@ -810,14 +827,22 @@ export function createApp(): Hono<TraceEnv> {
   // dropped after publication out to the live site (unlike the feedback loop,
   // which pays for an editor pass).
   app.post('/api/articles/:id/republish', async (c) => {
+    const id = c.req.param('id');
+    // The staleness guard rides in the statement the same way it does on the
+    // approval path: this queues a publish, and a draft the reviewer has never
+    // seen must not reach the live site through the cheap door either. The
+    // publisher refuses it too, but a 409 here tells the operator at the click
+    // rather than through a failed run.
     const rows = await q<{ id: string }>(
-      `UPDATE articles SET stage = 'publish', status = 'queued', error = NULL, updated_at = now()
-       WHERE id = $1 AND stage = 'done' AND status = 'done'
-         AND slug IS NOT NULL AND draft_md IS NOT NULL AND frontmatter IS NOT NULL
-       RETURNING id`,
-      [c.req.param('id')],
+      `UPDATE articles a SET stage = 'publish', status = 'queued', error = NULL, updated_at = now()
+       WHERE a.id = $1 AND a.stage = 'done' AND a.status = 'done'
+         AND a.slug IS NOT NULL AND a.draft_md IS NOT NULL AND a.frontmatter IS NOT NULL
+         AND NOT ${reviewStaleSql('a')}
+       RETURNING a.id`,
+      [id],
     );
     if (rows.length === 0) {
+      if (await isReviewStale(id)) return c.json({ error: REVIEW_STALE_PUBLISH_ERROR }, 409);
       return c.json({ error: 'only a finished, published article can be republished' }, 409);
     }
     log.info('article re-queued for publish', { article_id: rows[0].id });

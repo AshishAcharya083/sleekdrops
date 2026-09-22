@@ -140,6 +140,8 @@ interface RetryTargetRow {
    * and exactly the case that must not be sent straight to the publisher.
    */
   publish_review_stale: boolean;
+  /** Whether the columns the publisher reads are all there. */
+  publishable: boolean;
 }
 
 export interface RequeuedArticle {
@@ -159,6 +161,14 @@ const MID_STAGE_RETRY_ERROR =
 const MID_STAGE_RERUN_ERROR = 'the article is mid-stage - cancel it first';
 const NOT_RETRYABLE_ERROR =
   'only a failed, timed out, cancelled or awaiting-approval article can be retried';
+/**
+ * Publish is the one stage whose input is not a column the operator can see
+ * missing from the panel, and the one stage that pushes to the live site, so
+ * asking for it on an article that never got through assemble is refused by
+ * name rather than left to fail inside the publisher on a null frontmatter.
+ */
+const NOTHING_TO_PUBLISH_ERROR =
+  'this article has no assembled draft to publish - retry from an earlier stage';
 
 /**
  * A running article whose lease is still live is executing inside a worker
@@ -170,6 +180,8 @@ async function loadTarget(id: string): Promise<RetryTargetRow | null> {
   const [row] = await q<RetryTargetRow>(
     `SELECT a.id, a.stage, a.status,
             COALESCE(a.status = 'running' AND a.lease_expires_at > now(), false) AS lease_held,
+            (a.slug IS NOT NULL AND a.draft_md IS NOT NULL AND a.frontmatter IS NOT NULL)
+              AS publishable,
             ${draftNewerThanReviewSql('a')} AS publish_review_stale
        FROM articles a WHERE a.id = $1`,
     [id],
@@ -180,7 +192,16 @@ async function loadTarget(id: string): Promise<RetryTargetRow | null> {
 /** Statuses a retry-forward may start from. 'running' is allowed only once the
  *  cancel path has released the lease (checked separately). */
 const RETRYABLE_STATUSES = "('failed', 'timed_out', 'cancelled', 'waiting_approval')";
-const LEASE_RELEASED = "(status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at <= now()))";
+/** Still marked running, but holding no live lease: the worker that had it has
+ *  been cancelled or reaped, so re-queueing cannot land under a live stage.
+ *  Named apart from lease.ts's `LEASE_RELEASED`, which is the column set a
+ *  finished run clears rather than a condition. */
+const LEASE_LAPSED = "(status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at <= now()))";
+/** The claim and its lease, cleared: a re-queued article is nobody's, and a
+ *  lease left behind from the run that stopped would describe a claim that no
+ *  longer exists on a row the panel reads those columns off. */
+const CLAIM_CLEARED =
+  'claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL, lease_expires_at = NULL';
 
 /**
  * Re-run `stage` against the article's stored upstream columns and continue
@@ -192,15 +213,20 @@ export async function retryFromStage(id: string, stage: Stage): Promise<RetryOut
   const target = await loadTarget(id);
   if (!target) return { ok: false, status: 404, error: 'not found' };
   if (target.lease_held) return { ok: false, status: 409, error: MID_STAGE_RETRY_ERROR };
-  if (stage === 'publish' && target.publish_review_stale) {
-    return { ok: false, status: 409, error: REVIEW_STALE_RETRY_ERROR };
+  if (stage === 'publish') {
+    if (target.publish_review_stale) {
+      return { ok: false, status: 409, error: REVIEW_STALE_RETRY_ERROR };
+    }
+    if (!target.publishable) {
+      return { ok: false, status: 409, error: NOTHING_TO_PUBLISH_ERROR };
+    }
   }
 
   const [article] = await q<RequeuedArticle>(
     `UPDATE articles
         SET attempt = attempt + 1, stage = $2, status = 'queued', error = NULL,
-            stale_from_stage = $2, claimed_by = NULL, claimed_at = NULL, updated_at = now()
-      WHERE id = $1 AND (status IN ${RETRYABLE_STATUSES} OR ${LEASE_RELEASED})
+            stale_from_stage = $2, ${CLAIM_CLEARED}, updated_at = now()
+      WHERE id = $1 AND (status IN ${RETRYABLE_STATUSES} OR ${LEASE_LAPSED})
       RETURNING id, stage, status, attempt, stale_from_stage`,
     [id, stage],
   );
@@ -222,9 +248,8 @@ export async function rerunAll(id: string): Promise<RetryOutcome> {
   const [article] = await q<RequeuedArticle>(
     `UPDATE articles
         SET attempt = attempt + 1, stage = 'research', status = 'queued', error = NULL,
-            stale_from_stage = 'research', claimed_by = NULL, claimed_at = NULL,
-            updated_at = now()
-      WHERE id = $1 AND (status <> 'running' OR ${LEASE_RELEASED})
+            stale_from_stage = 'research', ${CLAIM_CLEARED}, updated_at = now()
+      WHERE id = $1 AND (status <> 'running' OR ${LEASE_LAPSED})
       RETURNING id, stage, status, attempt, stale_from_stage`,
     [id],
   );

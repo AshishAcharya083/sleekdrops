@@ -21,8 +21,10 @@ const { migrate } = await import('../db/migrate.js');
 const { createApp } = await import('../api/server.js');
 const { stageBudgetSeconds } = await import('./budgets.js');
 const { STAGE_ORDER } = await import('./types.js');
+const { runStage } = await import('./runner.js');
+const { STAGE_LEASE_SECONDS } = await import('./lease.js');
 
-import type { ContentBrief, Stage } from './types.js';
+import type { ArticleRow, ContentBrief, Stage } from './types.js';
 
 const reachable = await pool
   .query('SELECT 1')
@@ -283,6 +285,70 @@ test('an article that was never retried has nothing out of date', { skip }, asyn
   assert.deepEqual((await detail(id)).outOfDateStages, []);
 });
 
+/**
+ * Take the claim a worker would take, for this article only. `claimNext()`
+ * picks the longest-waiting queued row in the whole table and these suites
+ * share one database, so scoping the claim is what keeps the run deterministic
+ * without reaching into another file's article.
+ */
+async function claimForWorker(id: string): Promise<ArticleRow> {
+  const [claimed] = await q<ArticleRow>(
+    `UPDATE articles
+        SET status = 'running', claimed_by = 'retry-test-worker', claimed_at = now(),
+            heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => $2),
+            updated_at = now()
+      WHERE id = $1 AND status = 'queued'
+      RETURNING *`,
+    [id, STAGE_LEASE_SECONDS],
+  );
+  assert.ok(claimed, 'the retry left a queued article for the worker to claim');
+  return claimed;
+}
+
+test('the run picked up after a retry regenerates the downstream output under the new attempt', { skip }, async () => {
+  // assemble and image are the two stages that need no model, so the real
+  // runner can carry this one forward here: the retry re-queues at assemble,
+  // the runner overwrites the frontmatter the last pass left, routes on to
+  // image, and the out-of-date list shrinks behind it.
+  const id = await seed({
+    stage: 'image',
+    status: 'failed',
+    seo_review: JSON.stringify(seoReview),
+    frontmatter: JSON.stringify({ title: 'left by the pass that failed' }),
+    hero_image_url: 'https://example.com/hero.jpg',
+  });
+
+  assert.equal((await post(`/api/articles/${id}/retry-stage`, { stage: 'assemble' })).status, 200);
+  assert.deepEqual((await detail(id)).outOfDateStages, ['image', 'publish']);
+
+  await runStage(await claimForWorker(id));
+
+  const assembled = await row(id);
+  assert.equal(assembled.stage, 'image', 'the run continues forward rather than stopping');
+  assert.equal(assembled.frontmatter.title, brief.seoTitle, 'the stale frontmatter was replaced');
+  assert.equal(assembled.claimed_by, null, 'and the claim is released between stages');
+
+  await runStage(await claimForWorker(id));
+
+  const imaged = await row(id);
+  assert.equal(imaged.stage, 'publish');
+  assert.equal(imaged.status, 'waiting_approval');
+  assert.equal(imaged.attempt, 2, 'one article, one row - the retry did not fork it');
+  assert.deepEqual((await detail(id)).outOfDateStages, ['publish'], 'image is no longer out of date');
+
+  // Both stages ran under the retry's attempt: that tagging is what turns a
+  // flat session log into the per-stage history the panel renders.
+  const attempts = (await detail(id)).attempts as Array<{
+    stage: string;
+    runs: Array<{ attempt: number; status: string; kind: string }>;
+  }>;
+  assert.deepEqual(
+    attempts.map((group) => [group.stage, group.runs.map((run) => run.attempt)]),
+    [['assemble', [2]], ['image', [2]]],
+  );
+  assert.ok(attempts.every((group) => group.runs.every((run) => run.status === 'done')));
+});
+
 // ── One article, one history ───────────────────────────────────────────────
 
 test('retries accumulate on one article as attempt history, not as new rows', { skip }, async () => {
@@ -347,6 +413,14 @@ test('a mid-stage article must be cancelled before it can be retried', { skip },
 
   const afterCancel = await post(`/api/articles/${id}/retry-stage`, { stage: 'write' });
   assert.equal(afterCancel.status, 200);
+  const requeued = await row(id);
+  assert.equal(requeued.claimed_by, null);
+  assert.equal(requeued.claimed_at, null);
+  // The lease of the run that was cancelled goes with the claim: a queued
+  // article holding an expiry describes a claim nobody holds, and the panel
+  // reads those columns straight off the row.
+  assert.equal(requeued.heartbeat_at, null);
+  assert.equal(requeued.lease_expires_at, null);
 });
 
 test('a running article whose lease has already expired is retryable', { skip }, async () => {
@@ -394,6 +468,19 @@ test('the stage body param is validated before anything is re-queued', { skip },
     status: 400,
     body: { error: 'done is not a runnable stage' },
   });
+  assert.equal((await row(id)).attempt, 1);
+});
+
+test('retrying to publish an article that was never assembled is refused by name', { skip }, async () => {
+  // No frontmatter: the publisher would read one off a null column and fail
+  // with a message about a property, which tells an operator nothing about
+  // which stage they actually have to re-run.
+  const id = await seed({ stage: 'assemble', status: 'failed' });
+
+  const { status, body } = await post(`/api/articles/${id}/retry-stage`, { stage: 'publish' });
+
+  assert.equal(status, 409);
+  assert.equal(body.error, 'this article has no assembled draft to publish - retry from an earlier stage');
   assert.equal((await row(id)).attempt, 1);
 });
 
@@ -673,4 +760,33 @@ test('both article payloads carry the stage budgets the panel measures against',
   // the detail view cannot be left to guess it either.
   assert.deepEqual((await detail(id)).stageBudgets, expected);
   assert.equal(typeof list.stageBudgets.write, 'number');
+  assert.equal(typeof (await detail(id)).stageBudgets.seo_review, 'number');
+
+  // The same numbers under the name the panel reads them by, so it prints the
+  // limit a stage is actually running under instead of its built-in fallback.
+  const { budgets } = (await detail(id)) as {
+    budgets: { default_seconds: number; per_stage: Record<string, number> };
+  };
+  assert.equal(budgets.per_stage.seo_review, stageBudgetSeconds('seo_review'));
+  assert.equal(typeof budgets.default_seconds, 'number');
+});
+
+// ── Republish ──────────────────────────────────────────────────────────────
+
+test('the cheap republish door is closed while the review is stale too', { skip }, async () => {
+  const id = await seedStaleReview('done', 'done');
+  await q(`UPDATE articles SET frontmatter = '{"title": "t"}'::jsonb WHERE id = $1`, [id]);
+
+  const refused = await post(`/api/articles/${id}/republish`);
+  assert.equal(refused.status, 409);
+  assert.equal(
+    refused.body.error,
+    'seo_review must re-run before this article can publish - the draft changed after the last review',
+  );
+  assert.equal((await row(id)).stage, 'done', 'nothing was queued for the publisher');
+
+  // Re-run the reviewer and the same call goes through.
+  await session(id, 'seo_reviewer', 1);
+  assert.equal((await post(`/api/articles/${id}/republish`)).status, 200);
+  assert.equal((await row(id)).stage, 'publish');
 });
