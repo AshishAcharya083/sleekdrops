@@ -196,6 +196,52 @@ export const isTestableStage = (stage: string): boolean => !UNTESTABLE_STAGES.in
 export const UNTESTABLE_STAGE_HINT =
   'Publishing is the one stage that cannot be tested on its own - writing to the live site is all it does.';
 
+/**
+ * The statuses the agent's retry engine will re-queue an article from. A retry
+ * against anything else is refused with a 409, so the panel holds the control
+ * rather than offering a click whose only outcome is a banner.
+ */
+export const RETRYABLE_STATUSES: readonly string[] = [
+  'failed',
+  'timed_out',
+  'cancelled',
+  'waiting_approval',
+];
+
+/**
+ * Whether a run's claim has run out. `null` is the agent's own answer for "no
+ * lease is held" and reads as lapsed, exactly as its retry guard reads it;
+ * `undefined` is an agent that does not report leases at all, where the panel
+ * assumes the claim is live rather than offer a retry that would be refused.
+ */
+export const isLeaseLapsed = (
+  leaseExpiresAt: string | null | undefined,
+  now: number = Date.now(),
+): boolean => {
+  if (leaseExpiresAt === undefined) return false;
+  if (leaseExpiresAt === null) return true;
+  const at = new Date(leaseExpiresAt).getTime();
+  return Number.isFinite(at) ? at <= now : false;
+};
+
+/**
+ * Whether this run can be retried at all. A running article is the one
+ * conditional case: the agent refuses a retry under a live claim, and accepts
+ * one whose claim has lapsed - which is exactly the stalled run this surface
+ * exists to recover.
+ */
+export const isRetryableRun = (status: string, leaseLapsed = false): boolean =>
+  RETRYABLE_STATUSES.includes(status) || (status === 'running' && leaseLapsed);
+
+/** Why the retry control is off, in the terms the operator can act on. */
+export const retryBlockedReason = (status: string): string => {
+  if (status === 'running') {
+    return 'Stop the run first - a stage that is still executing cannot be retried under itself.';
+  }
+  if (status === 'queued') return 'This run is queued and has not started yet - nothing to re-run.';
+  return 'This run has finished. Run the whole pipeline again to rebuild it from research.';
+};
+
 /** Marker on a stage whose stored output a retry has superseded. */
 export const OUT_OF_DATE_LABEL = 'Out of date';
 

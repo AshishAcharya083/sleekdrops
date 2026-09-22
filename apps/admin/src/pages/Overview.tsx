@@ -455,7 +455,10 @@ function StuckRow({
         <Badge value={run.status} />
       </div>
       <div className="acts">
-        <button className="btn small" onClick={onOpen}>
+        {/* The visible label is the same on every row, so the accessible name
+            carries the run - a list of identical "Open run" buttons is
+            unusable read out on its own. */}
+        <button className="btn small" aria-label={`Open run: ${run.title}`} onClick={onOpen}>
           Open run
         </button>
         {stoppable && (
@@ -468,6 +471,7 @@ function StuckRow({
             // the stuck payload cannot say so: the surface holds its own
             // control rather than inviting the same stop a second time.
             disabled={busy || stopping}
+            aria-label={`${stopControlLabel(run.status)}: ${run.title}`}
             title={stopControlHint(run.status)}
             onClick={onStop}
           >

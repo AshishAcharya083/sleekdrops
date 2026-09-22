@@ -75,6 +75,13 @@ test('the Overview surfaces stuck runs above the stat row', () => {
   assert.match(overview, /function NeedsAttentionSkeleton/, 'and so is the first load');
 });
 
+test('the row controls carry the run they act on into their accessible name', () => {
+  // Every row shows the same two labels; read out on their own they would be
+  // an undifferentiated list of "Open run" / "Stop run".
+  assert.match(overview, /aria-label=\{`Open run: \$\{run\.title\}`\}/);
+  assert.match(overview, /aria-label=\{`\$\{stopControlLabel\(run\.status\)\}: \$\{run\.title\}`\}/);
+});
+
 test('a stuck row links at its run and can stop it', () => {
   assert.match(overview, /Open run/);
   assert.match(overview, /onOpenRun\?\.\(run\.article_id\)/, 'the link opens that article');
@@ -197,6 +204,15 @@ test('every recovery the API supports is one click from the run', () => {
   assert.match(pipeline, /Cancel run/);
 });
 
+test('the actions are gated exactly where the agent refuses them', () => {
+  const actions = pipeline.slice(pipeline.indexOf('function RunActions'));
+  // rerunAll() refuses only a live claim; test-stage refuses any running row;
+  // cancelArticle() takes everything but a finished one.
+  assert.match(actions, /disabled=\{running && !leaseLapsed\} onClick=\{onRerunAll\}/);
+  assert.match(actions, /disabled=\{running \|\| testing !== null \|\| !testable\}/);
+  assert.match(actions, /'running', 'queued', 'failed', 'timed_out', 'waiting_approval'/);
+});
+
 test('the two expensive actions are confirmed, and say what is regenerated', () => {
   assert.match(pipeline, /setConfirming\(\{ kind: 'retry', stage \}\)/);
   assert.match(pipeline, /setConfirming\(\{ kind: 'rerun' \}\)/);
@@ -223,9 +239,45 @@ test('a test run is labelled as writing nothing, and shows its output', () => {
 
 test('a running article can be cancelled, and says so while it lets go', () => {
   assert.match(pipeline, /'running', 'queued', 'failed', 'timed_out', 'waiting_approval'/);
-  assert.match(pipeline, /running && Boolean\(article\.cancel_requested\)/);
+  // Held on the request itself: the agent flips the row in the same statement,
+  // so a second click on an accepted cancel is the 409 this prevents.
+  assert.match(pipeline, /const cancelling = busy === 'cancel';/);
   assert.match(pipeline, /\{cancelling \? 'Cancelling…' : 'Cancel run'\}/);
   assert.match(pipeline, /setInterval\(load, 4000\)/, 'the panel keeps polling so the row moves on its own');
+});
+
+test('the retry control is held on a run the agent would refuse to re-queue', () => {
+  // retryFromStage() answers 'queued' and 'done' with a 409; a control whose
+  // only outcome is a banner is not a recovery action.
+  assert.match(pipeline, /const leaseLapsed = isLeaseLapsed\(article\?\.lease_expires_at\);/);
+  assert.match(pipeline, /const retryable = article \? isRetryableRun\(article\.status, leaseLapsed\) : false;/);
+  assert.match(pipeline, /disabled=\{!retryable \|\| queueingRetry\}/, 'the run-level control');
+  assert.match(
+    pipeline,
+    /disabled=\{!retryable \|\| busy === 'retry_stage'\}/,
+    'and the per-stage one in the attempt history',
+  );
+  assert.match(pipeline, /retryBlockedReason\(article\.status\)/, 'the hint says why instead');
+});
+
+test('a stale review never offers a retry the agent is bound to refuse', () => {
+  // retryFromStage() answers a publish target on a stale review with a 409, so
+  // the primary control names the stage that actually unblocks the article.
+  assert.match(pipeline, /reviewStale && stage === 'publish' \? 'seo_review' : stage/);
+  assert.match(pipeline, /onClick=\{\(\) => onRetry\(retryStage\)\}/);
+  assert.match(pipeline, /`Retry from \$\{retryStage\}`/, 'and says which stage it re-runs');
+  assert.match(pipeline, /cannot re-run while its review is out of date/);
+});
+
+test('the run detail holds its shape while it loads', () => {
+  assert.match(pipeline, /<RunDetailSkeleton \/>/);
+  const skeleton = pipeline.slice(pipeline.indexOf('function RunDetailSkeleton'));
+  assert.match(skeleton, /height: 44/, 'the action placeholders are the real button height');
+  assert.match(skeleton, /height: 20/, 'and the badge placeholders the real badge height');
+  assert.match(pipeline, /err \? null : <RunDetailSkeleton \/>/, 'a failure is never dressed as a load');
+  // Every placeholder is a <span>; an inline one ignores the size that is the
+  // whole point of it.
+  assert.match(rule('.skel'), /display:\s*block/);
 });
 
 test('a run committed to spend is never the one thing nothing can stop', () => {

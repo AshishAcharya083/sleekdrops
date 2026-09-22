@@ -522,7 +522,11 @@ button.btn.danger[aria-disabled='true'] {
   .attn-row { grid-template-columns: 1fr 1fr; }
   .attn-row .acts { grid-column: 1 / -1; justify-content: flex-start; }
 }
+/* `display: block` is load-bearing: every placeholder is a <span>, and an
+   inline one ignores the width and height that size it to the content it
+   stands in for - which is the whole point of the skeleton. */
 .skel {
+  display: block;
   background: linear-gradient(90deg, var(--panel-2), var(--panel-3), var(--panel-2));
   background-size: 200% 100%; animation: sweep 1.4s linear infinite; border-radius: 6px; height: 11px;
 }

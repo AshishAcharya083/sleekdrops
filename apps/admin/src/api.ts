@@ -92,8 +92,6 @@ export interface ArticleSummary {
   stale_from_stage?: string | null;
   /** The draft changed after its last SEO review - publishing is blocked. */
   review_stale?: boolean;
-  /** A cancel is in flight against a stage that is still running. */
-  cancel_requested?: boolean;
   /** When the worker running this article's stage claimed it. */
   claimed_at?: string | null;
   heartbeat_at?: string | null;

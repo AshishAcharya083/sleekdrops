@@ -14,10 +14,13 @@ import {
   DEFAULT_STAGE_BUDGET_SECONDS,
   elapsedBand,
   groupAttempts,
+  isLeaseLapsed,
+  isRetryableRun,
   isStoppable,
   isTestableStage,
   outOfDateStages,
   readTestStageResult,
+  retryBlockedReason,
   REVIEW_STALE_BANNER,
   REVIEW_STALE_REASON,
   stageBudgetLine,
@@ -447,4 +450,34 @@ test('the marker still holds on everything the run has not reached again', () =>
   for (const stage of ['assemble', 'image', 'publish']) {
     assert.ok(stale.has(stage), `${stage} has not been regenerated yet`);
   }
+});
+
+test('a retry is only offered where the agent would accept one', () => {
+  // Exactly the statuses pipeline/retry.ts re-queues from, plus the running
+  // article whose claim has lapsed - which it also takes, and which is the
+  // stalled run this whole surface exists to recover.
+  for (const status of ['failed', 'timed_out', 'cancelled', 'waiting_approval']) {
+    assert.equal(isRetryableRun(status), true, `${status} is retryable`);
+  }
+  assert.equal(isRetryableRun('running'), false, 'a live claim is refused mid-stage');
+  assert.equal(isRetryableRun('running', true), true, 'a lapsed claim is not');
+  assert.equal(isRetryableRun('queued'), false, 'a run that has not started has nothing to re-run');
+  assert.equal(isRetryableRun('done'), false, 'and a published one is not retried, it is re-run');
+});
+
+test('a run that cannot be retried says why, in something the operator can do', () => {
+  assert.match(retryBlockedReason('running'), /Stop the run first/);
+  assert.match(retryBlockedReason('queued'), /queued and has not started/);
+  assert.match(retryBlockedReason('done'), /Run the whole pipeline again/);
+});
+
+test('a claim with no lease reported is treated as live, not as lapsed', () => {
+  const now = Date.parse('2026-09-22T12:00:00Z');
+  // The agent's own guard reads a null lease as "nobody holds this".
+  assert.equal(isLeaseLapsed(null, now), true);
+  assert.equal(isLeaseLapsed('2026-09-22T11:59:00Z', now), true);
+  assert.equal(isLeaseLapsed('2026-09-22T12:01:00Z', now), false);
+  // An agent that reports no lease column at all says nothing about the claim,
+  // and the panel must not read silence as permission to re-queue it.
+  assert.equal(isLeaseLapsed(undefined, now), false);
 });

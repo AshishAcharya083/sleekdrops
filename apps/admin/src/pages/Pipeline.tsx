@@ -19,10 +19,13 @@ import {
   fmtSeconds,
   fmtTime,
   groupAttempts,
+  isLeaseLapsed,
+  isRetryableRun,
   isTestableStage,
   outOfDateStages,
   OUT_OF_DATE_LABEL,
   readTestStageResult,
+  retryBlockedReason,
   REVIEW_STALE_BANNER,
   REVIEW_STALE_REASON,
   sessionBudgetSeconds,
@@ -564,6 +567,13 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
   const timedOutSession = [...sessions].reverse().find((s) => s.status === 'timed_out') ?? null;
   const stoppedStage = (timedOutSession && sessionStage(timedOutSession)) ?? article?.stage ?? null;
   const budgetSeconds = stageBudgetSeconds(stoppedStage, detail?.budgets);
+  /**
+   * Whether the retry engine would take this run at all. A live claim is the
+   * one thing it refuses outright; a claim nothing is renewing is the stalled
+   * run this panel exists to recover, and it is accepted.
+   */
+  const leaseLapsed = isLeaseLapsed(article?.lease_expires_at);
+  const retryable = article ? isRetryableRun(article.status, leaseLapsed) : false;
   /** Blocked publishing, and the agent's own sentence for it when it sends one. */
   const reviewStale = Boolean(article?.review_stale ?? detail?.reviewStale);
   const reviewStaleReason = detail?.reviewStaleReason ?? REVIEW_STALE_REASON;
@@ -576,7 +586,9 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
         </button>
         <ApiErrorBanner error={err} />
         {!detail || !article ? (
-          <p className="muted">Loading…</p>
+          // An error has already said what went wrong above; a skeleton under
+          // it would claim the run is still arriving.
+          err ? null : <RunDetailSkeleton />
         ) : (
           <>
             <h2>{article.title}</h2>
@@ -628,6 +640,8 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
 
             <RunActions
               article={article}
+              retryable={retryable}
+              leaseLapsed={leaseLapsed}
               reviewStale={reviewStale}
               reviewStaleReason={reviewStaleReason}
               busy={busy}
@@ -658,6 +672,7 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
               testing={testing}
               busy={busy}
               running={article.status === 'running'}
+              retryable={retryable}
               onRetry={(stage) => setConfirming({ kind: 'retry', stage })}
               onTest={(stage) => void testStage(stage)}
             />
@@ -801,7 +816,6 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
               <RetryConfirm
                 title={article.title}
                 stage={confirming.stage}
-                pending={busy === 'retry_stage'}
                 onCancel={() => setConfirming(null)}
                 onConfirm={() => {
                   setConfirming(null);
@@ -821,6 +835,38 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
             )}
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * First load of one run. Sized to the real panel - 44px action buttons, ~20px
+ * badges - so the status card and the action bar do not shove the stage
+ * timeline down the page as they arrive.
+ */
+function RunDetailSkeleton() {
+  return (
+    <div aria-busy="true" aria-label="Loading the run">
+      <span className="skel" style={{ width: '70%', height: 20 }} />
+      <div className="row" style={{ marginTop: 12 }}>
+        <span className="skel" style={{ width: 84, height: 20 }} />
+        <span className="skel" style={{ width: 84, height: 20 }} />
+        <span className="skel" style={{ width: 160, height: 20 }} />
+      </div>
+      <div className="stop-card" style={{ borderStyle: 'dashed' }}>
+        <span className="skel" style={{ width: 150, height: 18 }} />
+        <span className="skel" style={{ width: '90%', height: 14, marginTop: 12 }} />
+        <span className="skel" style={{ width: '60%', height: 14, marginTop: 8 }} />
+      </div>
+      <div className="actions">
+        {[0, 1].map((i) => (
+          <div className="agroup" key={i}>
+            <span className="skel" style={{ width: 120, height: 11 }} />
+            <span className="skel" style={{ width: 200, height: 44 }} />
+            <span className="skel" style={{ width: 160, height: 44 }} />
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -850,6 +896,8 @@ function BudgetLine({ budgetSeconds }: { budgetSeconds: number }) {
  */
 function RunActions({
   article,
+  retryable,
+  leaseLapsed,
   reviewStale,
   reviewStaleReason,
   busy,
@@ -862,6 +910,10 @@ function RunActions({
   onRepublish,
 }: {
   article: ArticleDetail['article'];
+  /** Whether the agent's retry engine would accept this run at all. */
+  retryable: boolean;
+  /** Nothing is renewing the claim, so no worker is writing to this run. */
+  leaseLapsed: boolean;
   reviewStale: boolean;
   reviewStaleReason: string;
   busy: string | null;
@@ -874,10 +926,20 @@ function RunActions({
   onRepublish: () => void;
 }) {
   const stage = article.stage === 'done' ? 'publish' : article.stage;
+  /**
+   * The stage the primary retry actually re-runs. It is the run's own stage,
+   * except on an article held at publish by a stale review: the agent refuses
+   * a retry of `publish` for exactly that reason, so offering it would be a
+   * button whose only outcome is a 409. The review is what has to run again,
+   * and re-running it carries the article forward through publish anyway.
+   */
+  const retryStage = reviewStale && stage === 'publish' ? 'seo_review' : stage;
   const label = STAGE_LABELS[stage] ?? stage;
+  const retryLabel = STAGE_LABELS[retryStage] ?? retryStage;
   const running = article.status === 'running';
   const testable = isTestableStage(stage);
-  const cancelling = running && Boolean(article.cancel_requested);
+  /** A cancel that has been accepted but whose row has not moved yet. */
+  const cancelling = busy === 'cancel';
   const queueingRetry = busy === 'retry_stage';
   const cancellable = ['running', 'queued', 'failed', 'timed_out', 'waiting_approval'].includes(
     article.status,
@@ -889,15 +951,27 @@ function RunActions({
         <span className="alabel">Recover this run</span>
         <button
           className="btn"
-          disabled={running || queueingRetry}
-          onClick={() => onRetry(stage)}
+          disabled={!retryable || queueingRetry}
+          onClick={() => onRetry(retryStage)}
         >
-          {queueingRetry ? 'Queuing retry…' : `Retry from this stage (${stage})`}
+          {queueingRetry
+            ? 'Queuing retry…'
+            : retryStage === stage
+              ? `Retry from this stage (${stage})`
+              : `Retry from ${retryStage}`}
         </button>
         <span className="ahint">
-          Re-runs {label} against the output already stored for the stage before it, then carries
-          on forward. {running && 'Cancel the run first - a running stage cannot be retried. '}
-          Everything after {label} is regenerated.
+          {retryable ? (
+            <>
+              Re-runs {retryLabel} against the output already stored for the stage before it, then
+              carries on forward.{' '}
+              {retryStage !== stage &&
+                `${label} itself cannot re-run while its review is out of date. `}
+              Everything after {retryLabel} is regenerated.
+            </>
+          ) : (
+            retryBlockedReason(article.status)
+          )}
         </span>
       </div>
 
@@ -941,7 +1015,9 @@ function RunActions({
 
       <div className="agroup">
         <span className="alabel">Start over, or stop</span>
-        <button className="btn secondary" disabled={running} onClick={onRerunAll}>
+        {/* Refused only under a live claim - a stalled run is rebuilt from the
+            top the same as a stopped one. */}
+        <button className="btn secondary" disabled={running && !leaseLapsed} onClick={onRerunAll}>
           Run whole pipeline again
         </button>
         {article.stage === 'done' && article.status === 'done' && (
@@ -1111,6 +1187,7 @@ function AttemptHistory({
   testing,
   busy,
   running,
+  retryable,
   onRetry,
   onTest,
 }: {
@@ -1120,6 +1197,7 @@ function AttemptHistory({
   testing: string | null;
   busy: string | null;
   running: boolean;
+  retryable: boolean;
   onRetry: (stage: string) => void;
   onTest: (stage: string) => void;
 }) {
@@ -1193,7 +1271,7 @@ function AttemptHistory({
             <div className="attempt-actions">
               <button
                 className="btn small"
-                disabled={running || busy === 'retry_stage'}
+                disabled={!retryable || busy === 'retry_stage'}
                 onClick={() => onRetry(group.stage)}
               >
                 Retry from this stage
@@ -1279,13 +1357,11 @@ function AttemptHistory({
 function RetryConfirm({
   title,
   stage,
-  pending,
   onCancel,
   onConfirm,
 }: {
   title: string;
   stage: string;
-  pending: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -1326,7 +1402,7 @@ function RetryConfirm({
           <button className="btn secondary" onClick={onCancel}>
             Keep it as it is
           </button>
-          <button className="btn" disabled={pending} onClick={onConfirm}>
+          <button className="btn" onClick={onConfirm}>
             Retry from {stage}
           </button>
         </div>
