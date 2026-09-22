@@ -21,13 +21,96 @@ export type Stage =
   | 'publish'
   | 'done';
 
+/**
+ * The pipeline in order. 'edit' loops back to 'seo_review' at runtime, so the
+ * order a run actually takes is not linear - this list is: it is the canonical
+ * answer to "is stage X downstream of stage Y", which is what decides whether
+ * a stored output was superseded by a re-run of something before it.
+ */
+export const STAGE_ORDER: readonly Stage[] = [
+  'research',
+  'keyword',
+  'angle',
+  'outline',
+  'write',
+  'seo_review',
+  'edit',
+  'assemble',
+  'image',
+  'publish',
+  'done',
+];
+
 export type ArticleStatus =
   | 'queued'
   | 'running'
   | 'failed'
+  /**
+   * The stage ran out of wall-clock time, or the worker holding it stopped
+   * reporting. Terminal and deliberately distinct from 'failed': nothing
+   * reported an error, so "failed" would send an operator looking for one -
+   * what actually happened is that the run was stopped, and whatever it had
+   * already written is still on the article as a draft.
+   */
+  | 'timed_out'
   | 'waiting_approval'
   | 'cancelled'
   | 'done';
+
+/** Status of one agent_sessions row. Mirrors ArticleStatus's timeout state. */
+export type SessionStatus = 'running' | 'done' | 'failed' | 'timed_out';
+
+/** Why a stage stopped: it spent its budget, or its lease went unrenewed. */
+export type StageTimeoutCause = 'budget' | 'lease';
+
+/**
+ * What an operator needs to know about a stopped stage, and the payload the
+ * error message is built from.
+ */
+export interface StageTimeoutDetail {
+  agent: string;
+  stage: Stage;
+  budgetSeconds: number;
+  elapsedSeconds: number;
+  /**
+   * The last LLM call the stage started, rendered for a human ("claude-opus-5
+   * with web search, retry 2 of 3, in flight for 41m"). Null or empty when the
+   * stage had not reached a model yet, or when the run was reaped by another
+   * process that cannot see what it was doing.
+   */
+  lastCall: string | null;
+  /**
+   * Named apart from the standard `Error.cause` on the class below, which by
+   * convention carries the underlying error rather than a discriminator.
+   */
+  timeoutCause: StageTimeoutCause;
+}
+
+/**
+ * A stage stopped by its wall-clock budget. Carries the detail rather than
+ * only a message so callers route on the type (a timeout is not a failure)
+ * without parsing text. The message is built - and scrubbed - by
+ * pipeline/stageTimeout.ts, which is the only thing that should construct one.
+ */
+export class StageTimeoutError extends Error {
+  readonly agent: string;
+  readonly stage: Stage;
+  readonly budgetSeconds: number;
+  readonly elapsedSeconds: number;
+  readonly lastCall: string | null;
+  readonly timeoutCause: StageTimeoutCause;
+
+  constructor(message: string, detail: StageTimeoutDetail) {
+    super(message);
+    this.name = 'StageTimeoutError';
+    this.agent = detail.agent;
+    this.stage = detail.stage;
+    this.budgetSeconds = detail.budgetSeconds;
+    this.elapsedSeconds = detail.elapsedSeconds;
+    this.lastCall = detail.lastCall || null;
+    this.timeoutCause = detail.timeoutCause;
+  }
+}
 
 export interface ArticleRow {
   id: string;
@@ -67,6 +150,35 @@ export interface ArticleRow {
   /** Admin feedback awaiting application — consumed (cleared) by the editor stage. */
   feedback: string | null;
   error: string | null;
+  /**
+   * The claim on this article: which worker is running its current stage and
+   * when it took it. NULL while the article is not claimed.
+   */
+  claimed_by: string | null;
+  claimed_at: string | null;
+  /**
+   * Lease bookkeeping for the stage this article is currently claimed for, all
+   * NULL while it is not claimed. The worker renews both while it works; a
+   * claim whose `lease_expires_at` has passed is reaped to 'timed_out'.
+   */
+  heartbeat_at: string | null;
+  lease_expires_at: string | null;
+  /**
+   * Which pass over this article is current: the first pipeline run is 1, and
+   * a retry increments it. A claim does not - two claims of the same queued
+   * article are one attempt that was interrupted, not two.
+   */
+  attempt: number;
+  /**
+   * The earliest stage whose stored output has been superseded by a retry, so
+   * everything after it in STAGE_ORDER reads as out of date until the run
+   * passes it again. Written by the retry endpoints, never by the runner.
+   */
+  stale_from_stage: Stage | null;
+  /** Publication date, stamped on the first publish and reused on every later pass. */
+  pub_date: string | null;
+  /** Digest of what was last published, so a repeat publish can skip the rebuild dispatch. */
+  published_digest: string | null;
   published_at: string | null;
   created_at: string;
   updated_at: string;
