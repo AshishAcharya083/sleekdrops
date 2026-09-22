@@ -7,10 +7,18 @@
 // to keep pushing forward: while the worker is alive it renews, and the moment
 // it is not, the lease runs out on its own and the reaper can act on it.
 //
+// The renewal is conditional on the claim it was taken under, and that is the
+// load-bearing part. A renewal that updates no row means the article is no
+// longer this run's: it was reaped, cancelled, or claimed by someone else. The
+// run that discovers this has to stop and write nothing, because whatever it
+// is holding describes an article that has moved on - a late answer landing on
+// top of the claim that replaced it is how a timed-out run resurrects itself.
+//
 // Shared by the worker (which takes the lease as it claims) and the runner
 // (which renews it while the stage runs), so the two can never disagree about
 // how long a claim is good for.
 import { q } from '../db/pool.js';
+import { STAGE_HEARTBEAT_SECONDS } from './budgets.js';
 
 /**
  * How long a claim stays valid without a renewal. Long enough to survive a
@@ -20,8 +28,23 @@ import { q } from '../db/pool.js';
  */
 export const STAGE_LEASE_SECONDS = 300;
 
-/** Renewal interval. Five chances to renew before the lease lapses. */
-export const HEARTBEAT_MS = 60_000;
+/** Renewal interval. Ten chances to renew before the lease lapses. */
+export const HEARTBEAT_MS = STAGE_HEARTBEAT_SECONDS * 1000;
+
+/** What a run is told when the article it was working is no longer its own. */
+export const LEASE_LOST_MESSAGE = 'lease lost - the run was cancelled or reaped';
+
+/**
+ * The claim this run was holding is gone. Routed like a timeout - the stage is
+ * abandoned where it stands - but recorded as a failed session, because
+ * something else has already written the outcome this article actually has.
+ */
+export class LeaseLostError extends Error {
+  constructor() {
+    super(LEASE_LOST_MESSAGE);
+    this.name = 'LeaseLostError';
+  }
+}
 
 /** The lease columns, cleared. Spread into the update that ends a stage run. */
 export const LEASE_RELEASED = {
@@ -32,29 +55,48 @@ export const LEASE_RELEASED = {
 } as const;
 
 /**
- * Push this article's lease forward. Returns false when the row is no longer
- * running - cancelled from the panel, or already reaped - which is the
- * heartbeat's signal that its claim is gone.
+ * Push this article's lease forward, but only for the claim that took it.
+ * Returns false when the row is no longer running under `claimedBy` -
+ * cancelled from the panel, reaped, or claimed again by another worker - which
+ * is the heartbeat's signal that this run's claim is gone.
  */
-export async function renewLease(articleId: string): Promise<boolean> {
+export async function renewLease(articleId: string, claimedBy: string): Promise<boolean> {
   const renewed = await q(
     `UPDATE articles
-     SET heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => $2)
-     WHERE id = $1 AND status = 'running'
+     SET heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => $3)
+     WHERE id = $1 AND status = 'running' AND claimed_by = $2
      RETURNING id`,
-    [articleId, STAGE_LEASE_SECONDS],
+    [articleId, claimedBy, STAGE_LEASE_SECONDS],
   );
   return renewed.length > 0;
 }
 
 /**
  * Renew this article's lease every HEARTBEAT_MS until the returned function is
- * called. Unref'd: a heartbeat is not a reason for the process to stay alive.
+ * called, and say so the first time a renewal finds the claim gone. Unref'd: a
+ * heartbeat is not a reason for the process to stay alive. The interval is a
+ * parameter only so a test can watch a claim being lost without waiting out a
+ * real one.
+ *
+ * A renewal that throws is reported and retried - a database blip is not proof
+ * the claim is gone, and the lease has several renewals' worth of slack for
+ * exactly that. Only a renewal that succeeds in updating nothing is proof.
  */
-export function startHeartbeat(articleId: string, onError: (err: unknown) => void): () => void {
+export function startHeartbeat(
+  articleId: string,
+  claimedBy: string,
+  handlers: { onLost: () => void; onError: (err: unknown) => void },
+  intervalMs: number = HEARTBEAT_MS,
+): () => void {
   const timer = setInterval(() => {
-    void renewLease(articleId).catch(onError);
-  }, HEARTBEAT_MS);
+    void renewLease(articleId, claimedBy)
+      .then((held) => {
+        if (held) return;
+        clearInterval(timer);
+        handlers.onLost();
+      })
+      .catch(handlers.onError);
+  }, intervalMs);
   timer.unref();
   return () => clearInterval(timer);
 }

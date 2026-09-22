@@ -1,30 +1,22 @@
-// The budget a stage runs under, and the error an operator reads when it runs
-// out.
+// The error an operator reads when a stage runs out of time, and the scrubber
+// every persisted message goes through.
 //
-// Two things happen here and both are deliberate. The budget is resolved
-// against a ceiling that lives in code, so no environment can hand a stage an
-// unbounded run - configuration says what it wants, this says what it gets.
-// And every message is built through the scrubber below, because the strings
+// Every message is built through that scrubber, because the strings
 // that land in agent_sessions.error are the ones an SDK wrote about the child
 // process it just ran, and that child's environment is where the Claude
 // subscription token lives.
-import { config, MAX_STAGE_TIMEOUT_SECONDS } from '../config.js';
 import { formatDuration } from '../llm/callTrace.js';
 import { StageTimeoutError, type StageTimeoutDetail } from './types.js';
 
-/**
- * The budget for one stage: the per-stage override if the stage definition map
- * carries one, otherwise AGENT_RUN_TIMEOUT_SECONDS, never above the ceiling.
- * A nonsensical override (zero, negative, NaN) falls back to the configured
- * value the same way the configured value falls back to the default.
- */
-export function stageBudgetSeconds(override?: number): number {
-  const wanted =
-    override !== undefined && Number.isFinite(override) && override > 0
-      ? override
-      : config.agentRunTimeoutSeconds;
-  return Math.min(wanted, MAX_STAGE_TIMEOUT_SECONDS);
-}
+// The budget itself is resolved in budgets.ts, which has no dependencies
+// beyond configuration so the API can ask for one without importing the
+// pipeline. Re-exported here because this module is what the timeout path
+// reads: the limit and the sentence about hitting it belong together.
+export {
+  MAX_STAGE_TIMEOUT_SECONDS,
+  STAGE_HEARTBEAT_SECONDS,
+  stageBudgetSeconds,
+} from './budgets.js';
 
 /** A limit as an operator states it: "60 minutes", "90 seconds". */
 export function formatBudget(seconds: number): string {

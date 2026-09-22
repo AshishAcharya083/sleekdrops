@@ -24,16 +24,15 @@ export function Overview() {
 
   const topicCount = (status: string) =>
     Number(data.topics.find((t) => t.status === status)?.n ?? 0);
-  const countWhere = (match: (status: string) => boolean) =>
-    data.articles.filter((a) => match(a.status)).reduce((sum, a) => sum + Number(a.n), 0);
-  // 'timed_out' is terminal like 'cancelled': the run was stopped, so it is
-  // waiting on the operator, not on the pipeline.
   const activeArticles = data.articles
-    .filter((a) => a.stage !== 'done' && !['done', 'cancelled', 'timed_out'].includes(a.status))
+    .filter((a) => a.stage !== 'done' && !['done', 'cancelled'].includes(a.status))
     .reduce((sum, a) => sum + Number(a.n), 0);
-  const waiting = countWhere((status) => status === 'waiting_approval');
-  const failed = countWhere((status) => status === 'failed');
-  const timedOut = countWhere((status) => status === 'timed_out');
+  const waiting = data.articles
+    .filter((a) => a.status === 'waiting_approval')
+    .reduce((sum, a) => sum + Number(a.n), 0);
+  const failed = data.articles
+    .filter((a) => a.status === 'failed')
+    .reduce((sum, a) => sum + Number(a.n), 0);
   const failedSections = data.failedSections ?? [];
   const stale = (section: string) => failedSections.includes(section);
   /** A figure the agent could not load is shown as unknown, never as a zero. */
@@ -61,9 +60,7 @@ export function Overview() {
           sub={
             stale('articles')
               ? 'not loaded'
-              : `${waiting} awaiting publish approval · ${failed} failed${
-                  timedOut > 0 ? ` · ${timedOut} timed out` : ''
-                }`
+              : `${waiting} awaiting publish approval · ${failed} failed`
           }
         />
         <Stat

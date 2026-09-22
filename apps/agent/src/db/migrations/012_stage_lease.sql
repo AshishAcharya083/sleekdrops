@@ -10,14 +10,16 @@
 -- same shape for articles, plus the lease's own expiry so the reaper does not
 -- have to recompute a staleness window it could get wrong.
 --
--- `attempt` counts claims of the same article: retry-forward re-runs a stage
+-- `attempt` counts passes over the same article: retry-forward re-runs a stage
 -- against stored upstream output, so the attempts of one stage are rows of the
 -- same article rather than a duplicated card, and the session that ran under
--- each one records which attempt it was.
+-- each one records which attempt it was. The first pipeline pass is attempt 1
+-- and a retry makes it 2, which is why the default is 1 and not 0 - only a
+-- retry increments it, never the claim.
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
-ALTER TABLE articles ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
-ALTER TABLE articles ADD COLUMN IF NOT EXISTS attempt INT NOT NULL DEFAULT 0;
-ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS attempt INT NOT NULL DEFAULT 0;
+ALTER TABLE articles       ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
+ALTER TABLE articles       ADD COLUMN IF NOT EXISTS attempt INT NOT NULL DEFAULT 1;
+ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS attempt INT NOT NULL DEFAULT 1;
 
 -- Anything already claimed when this ships gets a lease read off the claim's
 -- own clock rather than the migration's, so it is already expired: a row
@@ -38,7 +40,7 @@ COMMENT ON COLUMN articles.heartbeat_at IS
 COMMENT ON COLUMN articles.lease_expires_at IS
   'When this claim stops being valid unless the worker renews it. A ''running'' article past this is reaped to ''timed_out''; NULL when the article is not claimed.';
 COMMENT ON COLUMN articles.attempt IS
-  'How many times this article has been claimed for a stage run. Incremented by the claim, never reset.';
+  'Which pass over this article is current. The first pipeline pass is 1; a retry increments it, a claim does not.';
 COMMENT ON COLUMN agent_sessions.attempt IS
   'The article attempt this session ran under, so repeated runs of one stage stay distinguishable.';
 

@@ -35,9 +35,10 @@ With `publish_mode = approval` (default) the article parks at
 
 Every stage runs under a wall-clock budget - `AGENT_RUN_TIMEOUT_SECONDS`
 (default 3600s), capped by a hard ceiling in code that no configuration can
-raise, with an optional per-stage override in `STAGE_TIMEOUT_SECONDS` next to
-the stage map in `pipeline/runner.ts`. It is deliberately not an admin setting:
-a timeout is a safety guard, and what an operator acts on is the outcome. A
+raise, with an optional per-stage override in `STAGE_TIMEOUT_SECONDS`
+(`pipeline/budgets.ts`, read beside the stage map in `pipeline/runner.ts`). It
+is deliberately not an admin setting: a timeout is a safety guard, and what an
+operator acts on is the outcome. A
 stage that outlives its budget stops at `status = 'timed_out'` - a distinct
 terminal state from `failed`, because nothing reported an error - keeping
 whatever it had already written as a draft, with a message naming the agent,
@@ -45,8 +46,9 @@ the stage, the limit, how long it ran and the last LLM call it was waiting on
 (scrubbed of any credential the process holds). A claim also carries a lease
 the worker renews while it works, and the worker reaps lapsed leases on its own
 poll (`REAPER_EVERY_TICKS`), so a run whose process died is stopped while the
-platform is up rather than at the next restart. **Retry** in the article panel
-re-queues it at the stage that stopped.
+platform is up rather than at the next restart. A run that discovers its lease
+is gone - reaped, or cancelled from the panel - abandons the stage and writes
+nothing, leaving the outcome whoever took the article away recorded.
 Every agent prompt is grounded with today's date (Australia/Sydney) so years
 in titles/copy come from the calendar, not stale training data.
 

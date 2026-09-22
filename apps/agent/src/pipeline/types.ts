@@ -21,6 +21,26 @@ export type Stage =
   | 'publish'
   | 'done';
 
+/**
+ * The pipeline in order. 'edit' loops back to 'seo_review' at runtime, so the
+ * order a run actually takes is not linear - this list is: it is the canonical
+ * answer to "is stage X downstream of stage Y", which is what decides whether
+ * a stored output was superseded by a re-run of something before it.
+ */
+export const STAGE_ORDER: readonly Stage[] = [
+  'research',
+  'keyword',
+  'angle',
+  'outline',
+  'write',
+  'seo_review',
+  'edit',
+  'assemble',
+  'image',
+  'publish',
+  'done',
+];
+
 export type ArticleStatus =
   | 'queued'
   | 'running'
@@ -127,14 +147,34 @@ export interface ArticleRow {
   feedback: string | null;
   error: string | null;
   /**
+   * The claim on this article: which worker is running its current stage and
+   * when it took it. NULL while the article is not claimed.
+   */
+  claimed_by: string | null;
+  claimed_at: string | null;
+  /**
    * Lease bookkeeping for the stage this article is currently claimed for, all
    * NULL while it is not claimed. The worker renews both while it works; a
    * claim whose `lease_expires_at` has passed is reaped to 'timed_out'.
    */
   heartbeat_at: string | null;
   lease_expires_at: string | null;
-  /** How many times this article has been claimed for a stage run. */
+  /**
+   * Which pass over this article is current: the first pipeline run is 1, and
+   * a retry increments it. A claim does not - two claims of the same queued
+   * article are one attempt that was interrupted, not two.
+   */
   attempt: number;
+  /**
+   * The earliest stage whose stored output has been superseded by a retry, so
+   * everything after it in STAGE_ORDER reads as out of date until the run
+   * passes it again. Written by the retry endpoints, never by the runner.
+   */
+  stale_from_stage: Stage | null;
+  /** Publication date, stamped on the first publish and reused on every later pass. */
+  pub_date: string | null;
+  /** Digest of what was last published, so a repeat publish can skip the rebuild dispatch. */
+  published_digest: string | null;
   published_at: string | null;
   created_at: string;
   updated_at: string;

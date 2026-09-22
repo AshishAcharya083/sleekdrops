@@ -12,10 +12,11 @@ import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { createLogger } from '../lib/log.js';
 import { getSetting, q } from '../db/pool.js';
-import { STAGE_AGENT, STAGE_TIMEOUT_SECONDS, runStage } from './runner.js';
+import { stageBudgetSeconds } from './budgets.js';
 import { STAGE_LEASE_SECONDS } from './lease.js';
+import { STAGE_AGENT, runStage } from './runner.js';
 import { recoverStaleScoutRuns } from './scout.js';
-import { stageBudgetSeconds, stageTimeoutMessage } from './stageTimeout.js';
+import { stageTimeoutMessage } from './stageTimeout.js';
 import type { ArticleRow, Stage } from './types.js';
 
 const log = createLogger('worker');
@@ -29,13 +30,16 @@ let ticks = 0;
  * Claim the longest-waiting queued article, taking the lease with it. The
  * claim and the lease are one statement on purpose: a worker that died between
  * the two would hold a claim nothing could ever reap.
+ *
+ * `attempt` is not touched. It counts passes an operator asked for, not claims
+ * the pipeline took: a stage re-queued after a crash is the same attempt
+ * resumed, and only a retry makes it the next one.
  */
 export async function claimNext(): Promise<ArticleRow | null> {
   const rows = await q<ArticleRow>(
     `UPDATE articles
      SET status = 'running', claimed_by = $1, claimed_at = now(), heartbeat_at = now(),
-         lease_expires_at = now() + make_interval(secs => $2), attempt = attempt + 1,
-         updated_at = now()
+         lease_expires_at = now() + make_interval(secs => $2), updated_at = now()
      WHERE id = (
        SELECT id FROM articles
        WHERE status = 'queued' AND stage <> 'done'
@@ -85,7 +89,7 @@ export async function reapExpiredLeases(): Promise<number> {
   let reaped = 0;
   for (const row of expired) {
     const agent = STAGE_AGENT[row.stage];
-    const budgetSeconds = stageBudgetSeconds(STAGE_TIMEOUT_SECONDS[row.stage]);
+    const budgetSeconds = stageBudgetSeconds(row.stage);
     const elapsedSeconds = Number(row.elapsed_seconds);
     const message = stageTimeoutMessage({
       agent,

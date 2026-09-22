@@ -28,8 +28,15 @@ import { runPublisher } from '../agents/publisher.js';
 import { runProductDiscovery, runResearcher } from '../agents/researcher.js';
 import { runSeoReviewer } from '../agents/seoReviewer.js';
 import { runWriter } from '../agents/writer.js';
-import { LEASE_RELEASED, renewLease, startHeartbeat } from './lease.js';
-import { scrubSecrets, stageBudgetSeconds, stageTimeoutError } from './stageTimeout.js';
+import { stageBudgetSeconds } from './budgets.js';
+import {
+  LEASE_LOST_MESSAGE,
+  LEASE_RELEASED,
+  LeaseLostError,
+  renewLease,
+  startHeartbeat,
+} from './lease.js';
+import { scrubSecrets, stageTimeoutError } from './stageTimeout.js';
 import { StageTimeoutError } from './types.js';
 import type { ArticleRow, SeoReview, SessionStatus, Stage, TopicRow } from './types.js';
 
@@ -50,18 +57,13 @@ export const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
 };
 
 /**
- * Per-stage wall-clock budget, in seconds, for the stages that genuinely
- * differ from AGENT_RUN_TIMEOUT_SECONDS. Deliberately part of the stage
- * definition - next to the agent that runs it - and deliberately not a
- * database row or a Settings field: it is a property of the stage, decided
- * with its prompt and its model, not a knob an operator tunes per run. Every
- * value here is still capped by MAX_STAGE_TIMEOUT_SECONDS.
- *
- * Empty means every stage runs on the configured budget, which is the state
- * today: the longest legitimate run measured is an seo_review at roughly 90
- * minutes, and that is a stage to make faster, not one to give more time.
+ * The other half of a stage's definition: how long it may run. It belongs
+ * beside STAGE_AGENT and is re-exported here to be read beside it, but the
+ * literal lives in budgets.ts so that resolving a budget - which the admin API
+ * does on every article request - costs an import of configuration rather than
+ * an import of every agent in this file.
  */
-export const STAGE_TIMEOUT_SECONDS: Partial<Record<Exclude<Stage, 'done'>, number>> = {};
+export { STAGE_TIMEOUT_SECONDS } from './budgets.js';
 
 /** Stages that run deterministic code — no LLM chat, no model to pick. */
 export const NO_LLM_AGENTS = new Set(['assembler', 'publisher']);
@@ -174,24 +176,26 @@ async function updateArticle(id: string, fields: Record<string, unknown>): Promi
 
 /**
  * The write that ends this run, applied only while the run still owns the
- * article. A stage cannot be cancelled once it is running, so a run that was
- * reaped and then retried can still be in flight when the retry's own claim
- * starts - and the routing decision of a run nobody is waiting for must not
- * land on top of the one that replaced it. `attempt` is bumped by the claim,
- * so it is exactly the identity of the run that took it.
+ * article. A run that was reaped, cancelled or claimed again can still be in
+ * flight - a promise has no cancel - and the routing decision of a run nobody
+ * is waiting for must not land on top of the state that replaced it. The claim
+ * it started under is that identity: same holder, same status, or the write is
+ * dropped and said so in the log.
  */
 async function finishArticle(article: ArticleRow, fields: Record<string, unknown>): Promise<void> {
   const keys = Object.keys(fields);
-  const sets = keys.map((k, i) => `${k} = $${i + 3}`).join(', ');
+  const sets = keys.map((k, i) => `${k} = $${i + 4}`).join(', ');
   const applied = await q(
-    `UPDATE articles SET ${sets}, updated_at = now() WHERE id = $1 AND attempt = $2 RETURNING id`,
-    [article.id, article.attempt ?? 0, ...keys.map((k) => fields[k])],
+    `UPDATE articles SET ${sets}, updated_at = now()
+     WHERE id = $1 AND status = $2 AND claimed_by IS NOT DISTINCT FROM $3
+     RETURNING id`,
+    [article.id, article.status, article.claimed_by ?? null, ...keys.map((k) => fields[k])],
   );
   if (applied.length === 0) {
-    log.warn('stage result dropped: the article was claimed again while it ran', {
+    log.warn('stage result dropped: the article moved on while the stage ran', {
       article_id: article.id,
       stage: article.stage,
-      attempt: article.attempt ?? 0,
+      claimed_by: article.claimed_by,
     });
   }
 }
@@ -422,7 +426,7 @@ export async function runStage(
   const stage = article.stage;
   if (stage === 'done') return;
   const agent = STAGE_AGENT[stage];
-  const budgetSeconds = stageBudgetSeconds(STAGE_TIMEOUT_SECONDS[stage]);
+  const budgetSeconds = stageBudgetSeconds(stage);
 
   // Picking the model can fail now (a Claude stage with no credential), and it
   // happens before there is a session row to fail. Record one anyway: an
@@ -436,7 +440,7 @@ export async function runStage(
     await q(
       `INSERT INTO agent_sessions (article_id, agent, status, summary, error, attempt, ended_at)
        VALUES ($1, $2, 'failed', $3, $4, $5, now())`,
-      [article.id, agent, `${stage} could not start`, message, article.attempt ?? 0],
+      [article.id, agent, `${stage} could not start`, message, article.attempt ?? 1],
     );
     await finishArticle(article, {
       status: 'failed',
@@ -452,15 +456,19 @@ export async function runStage(
   const [session] = await q<{ id: string }>(
     `INSERT INTO agent_sessions (article_id, agent, model, attempt) VALUES ($1, $2, $3, $4)
      RETURNING id`,
-    [article.id, agent, model, article.attempt ?? 0],
+    [article.id, agent, model, article.attempt ?? 1],
   );
 
+  // Only while this run's session is still open. A reaper or a boot recovery
+  // that already closed it has written what actually became of the run, and
+  // this process - which by then is the one that was reaped - is in no
+  // position to correct them.
   const finishSession = async (status: SessionStatus, summary: string, error?: string) => {
     await q(
       `UPDATE agent_sessions SET status = $2, summary = $3, error = $4,
          tokens_input = $5, tokens_output = $6, cost_usd = $7, llm_calls = $8,
          model = COALESCE($9, model), ended_at = now()
-       WHERE id = $1`,
+       WHERE id = $1 AND status = 'running'`,
       [
         session.id,
         status,
@@ -480,18 +488,44 @@ export async function runStage(
   // the lease is what lets another process see that this one stopped too.
   const startedAt = Date.now();
   const trace = newLlmCallTrace();
-  // Take the lease before the first await of the stage itself, so a run that
-  // reached here by any route - a worker claim, a retry running it inline - is
-  // covered by the reaper rather than only from the first heartbeat onwards.
-  await renewLease(article.id);
-  const stopHeartbeat = startHeartbeat(article.id, (err) =>
-    log.warn('lease renewal failed', { article_id: article.id, stage, error: err }),
-  );
+  // A run that reaches here without a claim (an inline invocation, a test
+  // harness) holds no lease and therefore has none to lose; everything the
+  // worker starts is claimed, which is the path this guards.
+  const holder = article.claimed_by;
+  let stopHeartbeat = () => {};
+  // Losing the lease ends the stage the same way its budget running out does:
+  // by settling the promise runStage is waiting on. Nothing can cancel the
+  // work itself - a JavaScript promise has no cancel - so what matters is that
+  // this run stops writing, which the catch below and finishArticle's claim
+  // guard between them guarantee.
+  let abandon: (reason: Error) => void = () => {};
+  const leaseLost = new Promise<never>((_, reject) => {
+    abandon = reject;
+  });
+  leaseLost.catch(() => {
+    /* rejected after the race has been decided is nobody's failure to handle */
+  });
 
   try {
+    // Take the lease before the first await of the stage itself, so the run is
+    // covered by the reaper rather than only from the first heartbeat onwards
+    // - and so a claim that is already gone stops here rather than at the end.
+    if (holder) {
+      if (!(await renewLease(article.id, holder))) throw new LeaseLostError();
+      stopHeartbeat = startHeartbeat(article.id, holder, {
+        onLost: () => abandon(new LeaseLostError()),
+        onError: (err) =>
+          log.warn('lease renewal failed', { article_id: article.id, stage, error: err }),
+      });
+    }
+
     const { next, summary } = await withDeadline(
       budgetSeconds * 1000,
-      () => withLlmCallTrace(trace, () => execute(article, stage, model, tracker)),
+      () =>
+        Promise.race([
+          leaseLost,
+          withLlmCallTrace(trace, () => execute(article, stage, model, tracker)),
+        ]),
       () =>
         stageTimeoutError({
           agent,
@@ -511,6 +545,21 @@ export async function runStage(
     });
     console.log(`[pipeline] ${article.id} ${stage} done → ${next.stage}/${next.status}: ${summary}`);
   } catch (err) {
+    if (err instanceof LeaseLostError) {
+      // Whoever took the article away from this run has already written what
+      // happened to it - reaped to 'timed_out', cancelled from the panel, or
+      // claimed again. Touching an article column here is how that outcome
+      // gets overwritten, so this run records only its own session.
+      await finishSession('failed', `${stage} stopped`, LEASE_LOST_MESSAGE);
+      log.warn('stage stopped: lease lost', {
+        article_id: article.id,
+        stage,
+        agent,
+        claimed_by: holder,
+        elapsed_seconds: Math.round((Date.now() - startedAt) / 1000),
+      });
+      return;
+    }
     if (err instanceof StageTimeoutError) {
       await finishSession('timed_out', `${stage} timed out`, err.message);
       // The article keeps its stage and everything the run had written: a

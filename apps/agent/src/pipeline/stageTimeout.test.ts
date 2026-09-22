@@ -11,7 +11,8 @@ import assert from 'node:assert/strict';
 // Before config.js reads it: this file asserts the default budget.
 delete process.env.AGENT_RUN_TIMEOUT_SECONDS;
 
-const { MAX_STAGE_TIMEOUT_SECONDS, DEFAULT_STAGE_TIMEOUT_SECONDS } = await import('../config.js');
+const { DEFAULT_STAGE_TIMEOUT_SECONDS } = await import('../config.js');
+const { MAX_STAGE_TIMEOUT_SECONDS, STAGE_TIMEOUT_SECONDS } = await import('./budgets.js');
 const { formatBudget, scrubSecrets, stageBudgetSeconds, stageTimeoutError, stageTimeoutMessage } =
   await import('./stageTimeout.js');
 
@@ -27,19 +28,36 @@ const detail = (overrides: Partial<StageTimeoutDetail> = {}): StageTimeoutDetail
   ...overrides,
 });
 
+/** Run `body` with a per-stage override in place, however it ends. */
+function withOverride(seconds: number, body: () => void): void {
+  STAGE_TIMEOUT_SECONDS.seo_review = seconds;
+  try {
+    body();
+  } finally {
+    delete STAGE_TIMEOUT_SECONDS.seo_review;
+  }
+}
+
 test('a stage with no override runs on the configured budget', () => {
-  assert.equal(stageBudgetSeconds(), DEFAULT_STAGE_TIMEOUT_SECONDS);
-  assert.equal(stageBudgetSeconds(undefined), DEFAULT_STAGE_TIMEOUT_SECONDS);
+  assert.equal(stageBudgetSeconds('seo_review'), DEFAULT_STAGE_TIMEOUT_SECONDS);
+  assert.equal(stageBudgetSeconds('done'), DEFAULT_STAGE_TIMEOUT_SECONDS);
 });
 
 test('a per-stage override wins, but never past the ceiling', () => {
-  assert.equal(stageBudgetSeconds(900), 900);
-  assert.equal(stageBudgetSeconds(MAX_STAGE_TIMEOUT_SECONDS * 10), MAX_STAGE_TIMEOUT_SECONDS);
+  withOverride(900, () => {
+    assert.equal(stageBudgetSeconds('seo_review'), 900);
+    assert.equal(stageBudgetSeconds('write'), DEFAULT_STAGE_TIMEOUT_SECONDS, 'and only for it');
+  });
+  withOverride(MAX_STAGE_TIMEOUT_SECONDS * 10, () => {
+    assert.equal(stageBudgetSeconds('seo_review'), MAX_STAGE_TIMEOUT_SECONDS);
+  });
 });
 
 test('a nonsense override falls back rather than disabling the guard', () => {
   for (const override of [0, -60, Number.NaN, Number.POSITIVE_INFINITY]) {
-    assert.equal(stageBudgetSeconds(override), DEFAULT_STAGE_TIMEOUT_SECONDS);
+    withOverride(override, () => {
+      assert.equal(stageBudgetSeconds('seo_review'), DEFAULT_STAGE_TIMEOUT_SECONDS);
+    });
   }
 });
 

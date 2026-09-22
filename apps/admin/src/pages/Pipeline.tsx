@@ -470,7 +470,7 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                   ✅ Approve & publish
                 </button>
               )}
-              {['failed', 'cancelled', 'timed_out'].includes(detail.article.status) && (
+              {['failed', 'cancelled'].includes(detail.article.status) && (
                 <button className="btn" onClick={() => action('retry')}>
                   Retry stage
                 </button>
@@ -480,7 +480,7 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                   ♻️ Publish again
                 </button>
               )}
-              {['queued', 'failed', 'timed_out', 'waiting_approval'].includes(detail.article.status) && (
+              {['queued', 'failed', 'waiting_approval'].includes(detail.article.status) && (
                 <button className="btn danger" onClick={() => action('cancel')}>
                   Cancel
                 </button>

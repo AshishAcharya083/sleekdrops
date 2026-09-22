@@ -16,8 +16,7 @@ function positiveNumber(key: string, fallback: number): number {
 }
 
 /**
- * Wall-clock budget for one pipeline stage, and the ceiling no configuration
- * can raise.
+ * Wall-clock budget for one pipeline stage, as a deployment asks for it.
  *
  * Deliberately not an operator setting. Comparable tooling treats an execution
  * timeout as a build/config-time value with a fixed platform ceiling (Zapier's
@@ -27,17 +26,10 @@ function positiveNumber(key: string, fallback: number): number {
  * ("someone set it to 5 seconds and everything fails") for no operator
  * benefit. What the operator sees is the outcome: a 'timed_out' run whose
  * error names the limit. A stage that genuinely needs longer gets a per-stage
- * override in the stage definition map in pipeline/runner.ts.
+ * override in the stage definition map; the ceiling this cannot raise lives
+ * with it, in pipeline/budgets.ts.
  */
 export const DEFAULT_STAGE_TIMEOUT_SECONDS = 3600;
-
-/**
- * The hard ceiling, in code so no environment can raise it. Four hours is
- * already far past any healthy stage - the longest legitimate run measured
- * here is an seo_review at roughly 90 minutes - so a budget above this is a
- * misconfiguration, not a long job.
- */
-export const MAX_STAGE_TIMEOUT_SECONDS = 4 * 60 * 60;
 
 export const config = {
   // No fallback on purpose: the docker-compose URL (port 5544 is a host-side
@@ -96,8 +88,8 @@ export const config = {
 
   /**
    * Wall-clock budget for one stage run. Clamped to MAX_STAGE_TIMEOUT_SECONDS
-   * where it is read (pipeline/stageTimeout.ts) - this value is what the
-   * deployment asked for, not necessarily what it gets.
+   * where it is read (pipeline/budgets.ts) - this value is what the deployment
+   * asked for, not necessarily what it gets.
    */
   agentRunTimeoutSeconds: positiveNumber(
     'AGENT_RUN_TIMEOUT_SECONDS',
