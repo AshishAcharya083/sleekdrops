@@ -370,6 +370,26 @@ export async function markPosted(id: string, remotePostId: string, note?: string
   );
 }
 
+/**
+ * Park an item a provider's ladder cannot post as it stands.
+ *
+ * Not a failure: nothing is broken that time or an operator will not fix - a
+ * link budget that refills next month, a hero image dropped in the panel - so
+ * the row keeps its remote-post-free state and waits in the panel instead of
+ * spending its remaining attempts proving the same thing. The attempt this
+ * pass already spent stays spent; a held item is moved by a person, not by a
+ * backoff.
+ */
+export async function holdItem(id: string, reason: string): Promise<void> {
+  await q(
+    `UPDATE distribution_queue
+     SET status = 'held', last_error = $2, claimed_by = NULL, claimed_at = NULL,
+         updated_at = now()
+     WHERE id = $1`,
+    [id, reason],
+  );
+}
+
 /** Terminal. Nothing re-queues an item from here except an operator. */
 export async function markFailed(id: string, error: string): Promise<void> {
   await q(

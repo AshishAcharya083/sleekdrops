@@ -20,6 +20,7 @@ import { getProvider, registeredProviders } from './providers.js';
 import {
   articleUrl,
   claimNextItem,
+  holdItem,
   markFailed,
   markPosted,
   recoverStrandedItems,
@@ -37,7 +38,12 @@ import {
   READINESS_WINDOW_SECONDS,
   type PageFetcher,
 } from './readiness.js';
-import { PermanentProviderError, type DistributionItem, type SocialProvider } from './types.js';
+import {
+  PermanentProviderError,
+  ProviderHoldError,
+  type DistributionItem,
+  type SocialProvider,
+} from './types.js';
 
 const log = createLogger('distribution');
 
@@ -49,10 +55,10 @@ const MAX_ITEMS_PER_TICK = 5;
  *
  * 'waiting' is the readiness gate still closed, 'retry' a spent attempt that
  * has more, 'blocked' a connection that cannot post at all until an operator
- * acts. Returned rather than only logged so the loop is testable without
- * reading the database back.
+ * acts, 'held' an item a provider's ladder parked for one. Returned rather
+ * than only logged so the loop is testable without reading the database back.
  */
-export type ItemOutcome = 'posted' | 'waiting' | 'retry' | 'failed' | 'blocked';
+export type ItemOutcome = 'posted' | 'waiting' | 'retry' | 'failed' | 'blocked' | 'held';
 
 /** Everything the loop touches that a test needs to stand in for. */
 export interface DistributionDeps {
@@ -155,6 +161,18 @@ export async function processItem(
     return 'posted';
   } catch (err) {
     const message = redactToken(err instanceof Error ? err.message : String(err), accessToken);
+    if (err instanceof ProviderHoldError) {
+      // Not a failure: the provider is telling us this item must not go out as
+      // it stands and that no retry changes that. It waits in the panel.
+      await holdItem(item.id, message);
+      log.warn('distribution item held', {
+        queue_item_id: item.id,
+        slug: item.slug,
+        provider: item.provider,
+        reason: message,
+      });
+      return 'held';
+    }
     const permanent = err instanceof PermanentProviderError;
     if (permanent || retriesExhausted(attempts)) {
       await markFailed(

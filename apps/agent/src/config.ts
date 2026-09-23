@@ -16,6 +16,15 @@ function positiveNumber(key: string, fallback: number): number {
 }
 
 /**
+ * A non-negative whole number from the environment, or the fallback. Unlike
+ * `positiveNumber`, zero is a value a deployment may legitimately mean.
+ */
+function wholeNumber(key: string, fallback: number): number {
+  const value = Number(env(key, String(fallback)));
+  return Number.isInteger(value) && value >= 0 ? value : fallback;
+}
+
+/**
  * Wall-clock budget for one pipeline stage, as a deployment asks for it
  * (AGENT_RUN_TIMEOUT_SECONDS). Deliberately a deployment value rather than an
  * operator setting, and never the last word: the ceiling it cannot raise, the
@@ -83,6 +92,31 @@ export const config = {
   distribution: {
     siteUrl: env('SITE_URL', 'https://sleekdrops.com').replace(/\/+$/, ''),
     pollMs: positiveNumber('DISTRIBUTION_POLL_MS', 15_000),
+  },
+
+  /**
+   * The Facebook Page adapter. No token here on purpose: the Page access token
+   * is resolved by reference at post time (channel_connections.token_ref), so
+   * it is a Secret Manager secret or a value pasted in admin Settings, never an
+   * env var this file names.
+   *
+   * App credentials are optional and only sharpen two things: with them a
+   * token's real expiry can be read (debug_token wants an app access token) and
+   * a short-lived token can be exchanged for a long-lived one. Without them the
+   * adapter posts identically - a Business Manager System User Page token, the
+   * credential this is designed around, does not expire at all.
+   */
+  facebook: {
+    graphVersion: env('FACEBOOK_GRAPH_VERSION', 'v21.0'),
+    appId: env('FACEBOOK_APP_ID'),
+    appSecret: env('FACEBOOK_APP_SECRET'),
+    /**
+     * Organic link posts Meta allows a non-subscribing Page per calendar month.
+     * Roughly two at the time of writing, and a live test rather than a settled
+     * policy - hence a knob. Zero is meaningful (never place a link in the
+     * body), which is why this is not `positiveNumber`.
+     */
+    bodyLinkCap: wholeNumber('FACEBOOK_BODY_LINK_CAP', 2),
   },
 
   adminToken: env('ADMIN_TOKEN'),

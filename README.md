@@ -118,6 +118,40 @@ service account, min-instances, and the Secret Manager wiring for
 `GITHUB_TOKEN`. Change those with `gcloud run services update`, never with
 `--set-env-vars` in the workflow (that flag replaces the whole set).
 
+### Connecting the Facebook Page
+
+The Page adapter runs on **Standard Access**: a token for a Page the operator
+already administers, so no App Review and no Business Verification. Mint it in
+Graph API Explorer (or, better, for a Business Manager System User, whose Page
+token does not expire) with all three of:
+
+| Permission                 | What it is for                                   |
+| -------------------------- | ------------------------------------------------ |
+| `pages_manage_posts`       | creating the photo post and the link post         |
+| `pages_read_engagement`    | reading the Page and its post insights            |
+| `pages_manage_engagement`  | writing the first comment that carries the link   |
+
+The token is never an env var this repo names. Store it as the Secret Manager
+secret `facebook-page-token` and point the channel's `token_ref` at that name.
+The adapter resolves the name at post time, from the `channel_credentials`
+settings row first and then from the `FACEBOOK_PAGE_TOKEN` env var that name
+maps to. Adding the secret to the service is a `gcloud run services update
+--update-secrets` call, for the same reason as above: `--set-env-vars` in the
+workflow would replace the whole set.
+
+Two optional deployment knobs, both with working defaults:
+`FACEBOOK_BODY_LINK_CAP` (organic link posts Meta allows the Page per calendar
+month, default 2) and `FACEBOOK_APP_ID`/`FACEBOOK_APP_SECRET`, which only let
+the adapter read a token's real expiry and exchange a short-lived token for a
+long-lived one. Posting is identical without them.
+
+**Two things to check with the first real posts**, neither of which changes the
+design and both of which only move the default: whether the monthly link cap is
+live for Australian Pages at all, and whether a deals/reviews Page counts as an
+exempt publisher Page. Until they are answered the default placement is
+`first_comment` (admin Settings → `distribution_link_placement`), which never
+depends on the cap.
+
 The hosted admin panel is pre-pointed at the Cloud Run URL (baked in at build
 time via `VITE_API_BASE`); paste the admin token (Secret Manager `admin-token`)
 into its header field once. The **API base** field still accepts

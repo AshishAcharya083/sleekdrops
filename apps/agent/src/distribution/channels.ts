@@ -115,6 +115,24 @@ export async function getConnection(id: string): Promise<ChannelConnectionRow | 
 }
 
 /**
+ * The connection for one account on one network, however its status stands.
+ *
+ * Keyed the way `channel_connections_account_idx` is, because a provider call
+ * that carries no queue item - reading a post's insights back, say - knows the
+ * account it ran as and nothing else.
+ */
+export async function findConnection(
+  provider: string,
+  externalAccountId: string,
+): Promise<ChannelConnectionRow | null> {
+  const [row] = await q<ChannelConnectionRow>(
+    'SELECT * FROM channel_connections WHERE provider = $1 AND external_account_id = $2',
+    [provider, externalAccountId],
+  );
+  return row ?? null;
+}
+
+/**
  * Move a connection out of 'active' - a token the network rejected, an account
  * an operator disconnected. Logged by reference, never by value.
  */

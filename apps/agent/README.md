@@ -271,10 +271,12 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
   immediately before the call, so a worker that dies mid-post cannot spend the
   same one twice. A provider may throw `PermanentProviderError` to fail now.
 - **Providers.** A network is one file implementing `SocialProvider`
-  (`authenticate`, `refreshToken`, `post`, `fetchInsights`) that registers
-  itself in `distribution/providers.ts`. Nothing in the queue, the worker or
-  the schema names a network, and the worker only claims work for a provider
-  that is actually registered.
+  (`authenticate`, `refreshToken`, `post`, `fetchInsights`), bound to its name
+  in the registry (`distribution/providers.ts`) at boot in `index.ts` - out
+  loud rather than by an import side effect, because the registry is what the
+  worker's claim filter reads. Nothing in the queue, the worker or the schema
+  names a network, and the worker only claims work for a provider that is
+  actually registered.
 - **Credentials.** A connection stores a `token_ref` - the *name* of a secret -
   resolved at post time from the `channel_credentials` settings row, else from
   the environment variable that name maps to (`facebook-page-token` →
@@ -304,6 +306,41 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
   and the placement resolves to `in_body`, where the link preview carries the
   post instead. The destination URL is UTM-tagged with the placement that was
   actually used.
+- **The Facebook Page adapter.** `distribution/providers/facebook.ts` is the
+  only Facebook-aware module in the platform; everything else addresses the
+  Page through `SocialProvider`. It posts on Standard Access with a Page token
+  the operator mints, scoped for `pages_manage_posts`, `pages_read_engagement`
+  and `pages_manage_engagement` (the third is the first comment - see the root
+  README for the setup). `first_comment` uploads the payload's image to
+  `/{page}/photos` and then posts the URL on the post's `comments` edge;
+  `in_body` posts to `/{page}/feed` with `link` set so Meta scrapes the card off
+  our own page. Every call reads the token back through `debug_token` and writes
+  the expiry onto the connection; a token Meta has stopped honouring sets
+  `needs_reauth` instead of failing silently, and no error message or log line
+  carries a token - calls are authorised with a bearer header rather than a
+  query parameter, and everything the adapter writes down is scrubbed of it.
+- **The body-link budget.** Meta caps a non-subscribing Page at roughly two
+  organic link posts a month (`FACEBOOK_BODY_LINK_CAP`, default 2), so a body
+  link is a counted resource. The count is derived from the posted `in_body`
+  rows for that Page this month rather than kept in a counter, so it cannot
+  drift from what actually went out; when it is spent the item is re-composed
+  with the link in the first comment rather than spent on a rejection. A genuine
+  quota error from the API beats the local count and is remembered for the rest
+  of the month (`facebook_body_link_budget`), because the cap's rollout is a
+  test and the rows can be behind it.
+- **The ladder, and what a hold is.** A hero we generated is uploaded natively;
+  a `found` or `operator` hero is replaced by the payload's generated social
+  card; no image we may upload falls back to `in_body`, which still earns the
+  card; and no image *plus* a spent budget parks the item in `held`, where the
+  panel shows it, rather than posting a caption with no link anywhere. A
+  provider asks for that by throwing `ProviderHoldError`, which the worker
+  treats as neither a success nor a failure.
+- **A degraded post.** The first comment is a second write that can fail on its
+  own, and a post that is live with no link is worse than either placement. A
+  comment that will not go up after its retries is answered by appending the URL
+  to the caption through the post edit endpoint, and the row is marked
+  `degraded` with what happened. Nothing after the post is created ever throws:
+  a retry there would put the same article on the Page twice.
 - **Rendered once, then kept.** An adapter renders at post time through
   `renderForItem`, which writes the result back onto the queue row (payload and
   placement together) and reads it back on every later attempt. Rendering is
