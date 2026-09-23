@@ -34,6 +34,25 @@ export function isLinkPlacement(value: unknown): value is LinkPlacement {
 }
 
 /**
+ * What `distribution_queue.insights_flag` carries when the numbers reached a
+ * conclusion on their own.
+ *
+ * One value today: a first-comment post that accumulated impressions against
+ * almost no clicks, which is the signature of a comment link the network
+ * rendered as unclickable plain text. Declared here as a closed set rather
+ * than as free text so a second conclusion has to be named before anything can
+ * write it, and so the admin API says what a client may expect. The rule that
+ * raises it - and the thresholds it is judged on - is distribution/insights.ts.
+ */
+export const UNCLICKABLE_COMMENT_LINK = 'first_comment_link_may_not_be_clickable';
+
+export type InsightsFlag = typeof UNCLICKABLE_COMMENT_LINK;
+
+export function isInsightsFlag(value: unknown): value is InsightsFlag {
+  return value === UNCLICKABLE_COMMENT_LINK;
+}
+
+/**
  * Queue item state.
  *
  * 'pending' covers both "waiting for the site rebuild" and "waiting out a
@@ -131,6 +150,13 @@ export interface DistributionItem {
   remotePostId: string | null;
   readinessStartedAt: string | null;
   postedAt: string | null;
+  /**
+   * What the latest insights reading concluded about this post, or null for
+   * nothing to report. The one conclusion that exists today is a first-comment
+   * link that is accumulating impressions and almost no clicks - the signature
+   * of a comment link the network rendered as unclickable plain text.
+   */
+  insightsFlag: InsightsFlag | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -153,6 +179,9 @@ export interface DistributionQueueRow {
   claimed_by: string | null;
   claimed_at: string | null;
   posted_at: string | null;
+  insights_next_at: string | null;
+  insights_done: boolean;
+  insights_flag: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -175,6 +204,9 @@ export function toDistributionItem(row: DistributionQueueRow): DistributionItem 
     remotePostId: row.remote_post_id,
     readinessStartedAt: row.readiness_started_at,
     postedAt: row.posted_at,
+    // Like the placement above: a conclusion this version does not know reads
+    // as nothing to report rather than as a value with no meaning attached.
+    insightsFlag: isInsightsFlag(row.insights_flag) ? row.insights_flag : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

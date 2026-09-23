@@ -13,6 +13,7 @@ import { offerCoverage, validateOfferInput } from '../content/offers.js';
 import { deleteOffer, offerRevisionsForArticle, offersForArticle, saveOffer } from '../db/offers.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
 import { listConnections, tokenStaleness } from '../distribution/channels.js';
+import { placementPerformance } from '../distribution/insights.js';
 import { registeredProviders } from '../distribution/providers.js';
 import { itemsForArticle, queueCounts, recentItems } from '../distribution/queue.js';
 import { isLinkPlacement } from '../distribution/types.js';
@@ -1137,10 +1138,11 @@ export function createApp(): Hono<TraceEnv> {
   // connection reports the *name* of the secret it reads, never the secret.
   app.get('/api/distribution', async (c) => {
     const limit = Number(c.req.query('limit'));
-    const [connections, counts, items] = await Promise.all([
+    const [connections, counts, items, placements] = await Promise.all([
       listConnections(),
       queueCounts(),
       recentItems(Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50),
+      placementPerformance(),
     ]);
     return c.json({
       channels: connections.map((connection) => ({
@@ -1156,6 +1158,9 @@ export function createApp(): Hono<TraceEnv> {
       providers: registeredProviders(),
       counts,
       items,
+      // What each placement actually earned, from this site's own posts -
+      // the evidence the first_comment default is meant to be revisited on.
+      placements,
     });
   });
 
