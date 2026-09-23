@@ -5,6 +5,7 @@
 // angle stage picks from and the library's record is the body behind one of
 // those ids.
 import type { ArticleShape as StructureShape } from '../content/shapes.js';
+import type { HeroImageSource } from '../distribution/types.js';
 
 export type { StructureShape };
 
@@ -147,6 +148,17 @@ export interface ArticleRow {
    */
   hero_image_url: string | null;
   hero_alt: string | null;
+  /**
+   * Where the hero image came from: 'operator' (dropped in the admin panel),
+   * 'found' (a third party's photograph the image agent vetted) or 'generated'
+   * (ours). Null on articles that ran before the column existed, and on any
+   * article with no hero at all.
+   *
+   * A value rather than a sentence in the image stage's summary because it is
+   * read as a rights decision: only a hero we generated may be uploaded
+   * natively to a social network.
+   */
+  hero_image_source: HeroImageSource | null;
   /** Admin feedback awaiting application — consumed (cleared) by the editor stage. */
   feedback: string | null;
   error: string | null;

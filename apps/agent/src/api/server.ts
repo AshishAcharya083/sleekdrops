@@ -10,6 +10,10 @@ import { cors } from 'hono/cors';
 import { config } from '../config.js';
 import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
+import { listConnections, tokenStaleness } from '../distribution/channels.js';
+import { registeredProviders } from '../distribution/providers.js';
+import { itemsForArticle, queueCounts, recentItems } from '../distribution/queue.js';
+import { isLinkPlacement } from '../distribution/types.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
 import { MAX_STAGE_TIMEOUT_SECONDS, stageBudgetSeconds } from '../pipeline/budgets.js';
@@ -53,6 +57,23 @@ const MAX_REFERENCES = 5;
 const MAX_REFERENCE_BYTES = 2 * 1024 * 1024;
 
 type Validated<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/**
+ * Settings rows that hold a credential rather than a preference, and are
+ * therefore never returned by /api/settings - which the panel polls, so
+ * everything in it reaches a browser. `channel_credentials` maps a secret
+ * reference to a secret value; the panel gets the references it needs from
+ * /api/distribution, which reports names only. Nothing writes this row through
+ * the API either: it is absent from the PUT allowlist below.
+ */
+const CREDENTIAL_SETTINGS = new Set(['channel_credentials']);
+
+/** The settings map the panel sees. */
+function settingsPayload(rows: Array<{ key: string; value: unknown }>): Record<string, unknown> {
+  return Object.fromEntries(
+    rows.filter((row) => !CREDENTIAL_SETTINGS.has(row.key)).map((row) => [row.key, row.value]),
+  );
+}
 
 /** What an approval reads off the topic to seed the article it creates. */
 interface ApprovedTopic {
@@ -145,6 +166,10 @@ async function readHeroImageBody(c: Context<TraceEnv>): Promise<HeroImageParse> 
  * Mirror a live post's new hero onto the pipeline article that wrote it, when
  * there is one. Without this, re-publishing that article (or one more editor
  * pass) would quietly restore the image the operator just replaced.
+ *
+ * The provenance moves with it: an image swapped in on a live post is the
+ * operator's, and a row still saying 'generated' would offer someone else's
+ * file to a social network for native upload.
  */
 async function syncArticleHero(
   slug: string,
@@ -156,14 +181,15 @@ async function syncArticleHero(
     : null;
   await q(
     `UPDATE articles
-        SET hero_image_url = $2,
-            hero_alt       = $3,
-            frontmatter    = CASE
-                               WHEN frontmatter IS NULL THEN NULL
-                               WHEN $4::jsonb IS NULL THEN frontmatter - 'heroImage' - 'heroAlt'
-                               ELSE (frontmatter - 'heroAlt') || $4::jsonb
-                             END,
-            updated_at     = now()
+        SET hero_image_url    = $2,
+            hero_alt          = $3,
+            hero_image_source = CASE WHEN $2::text IS NULL THEN NULL ELSE 'operator' END,
+            frontmatter       = CASE
+                                  WHEN frontmatter IS NULL THEN NULL
+                                  WHEN $4::jsonb IS NULL THEN frontmatter - 'heroImage' - 'heroAlt'
+                                  ELSE (frontmatter - 'heroAlt') || $4::jsonb
+                                END,
+            updated_at        = now()
       WHERE slug = $1`,
     [slug, heroImage, heroAlt, patch],
   );
@@ -613,6 +639,8 @@ export function createApp(): Hono<TraceEnv> {
       budgets: budgets(),
       reviewStale,
       reviewStaleReason: reviewStale ? REVIEW_STALE_REASON : null,
+      // What publishing this piece queued for social, and what became of it.
+      distribution: await itemsForArticle(article.id),
     });
   });
 
@@ -782,13 +810,20 @@ export function createApp(): Hono<TraceEnv> {
     // frontmatter write clobbered by a stale read-modify-write here. heroAlt is
     // dropped before the merge because a JSON null would fail the site's
     // frontmatter schema, where the key is optional-but-string.
+    //
+    // `hero_image_source` moves with the image. The image stage may already
+    // have recorded a hero it generated, and leaving that behind would leave
+    // the row claiming an operator's file as ours - which is the one thing
+    // that column is read for, since only an image we made may be uploaded
+    // natively to a social network.
     const [updated] = await q(
       `UPDATE articles
-          SET hero_image_url = $2,
-              hero_alt       = $3,
-              frontmatter    = CASE WHEN frontmatter IS NULL THEN NULL
-                                    ELSE (frontmatter - 'heroAlt') || $4::jsonb END,
-              updated_at     = now()
+          SET hero_image_url    = $2,
+              hero_alt          = $3,
+              hero_image_source = 'operator',
+              frontmatter       = CASE WHEN frontmatter IS NULL THEN NULL
+                                       ELSE (frontmatter - 'heroAlt') || $4::jsonb END,
+              updated_at        = now()
         WHERE id = $1 AND status <> 'running'
         RETURNING id, hero_image_url, hero_alt, stage, status, published_at`,
       [id, url, alt, JSON.stringify({ heroImage: url, ...(alt ? { heroAlt: alt } : {}) })],
@@ -808,11 +843,12 @@ export function createApp(): Hono<TraceEnv> {
   app.delete('/api/articles/:id/hero-image', async (c) => {
     const [updated] = await q<{ id: string }>(
       `UPDATE articles
-          SET hero_image_url = NULL,
-              hero_alt       = NULL,
-              frontmatter    = CASE WHEN frontmatter IS NULL THEN NULL
-                                    ELSE frontmatter - 'heroImage' - 'heroAlt' END,
-              updated_at     = now()
+          SET hero_image_url    = NULL,
+              hero_alt          = NULL,
+              hero_image_source = NULL,
+              frontmatter       = CASE WHEN frontmatter IS NULL THEN NULL
+                                       ELSE frontmatter - 'heroImage' - 'heroAlt' END,
+              updated_at        = now()
         WHERE id = $1 AND status <> 'running'
         RETURNING id`,
       [c.req.param('id')],
@@ -927,6 +963,36 @@ export function createApp(): Hono<TraceEnv> {
     return c.json({ ok: true, removedLinks: result.removedLinks, dispatched, dispatchError });
   });
 
+  // ── Distribution (social channels + the post queue) ──────────────────────
+  // Read-only, and deliberately shaped around the two questions an operator
+  // has: can each channel still post (token staleness, computed in
+  // distribution/channels.ts so the worker and this panel cannot disagree),
+  // and what is the queue doing. No token value is reachable from here - a
+  // connection reports the *name* of the secret it reads, never the secret.
+  app.get('/api/distribution', async (c) => {
+    const limit = Number(c.req.query('limit'));
+    const [connections, counts, items] = await Promise.all([
+      listConnections(),
+      queueCounts(),
+      recentItems(Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50),
+    ]);
+    return c.json({
+      channels: connections.map((connection) => ({
+        id: connection.id,
+        provider: connection.provider,
+        externalAccountId: connection.external_account_id,
+        displayName: connection.display_name,
+        tokenRef: connection.token_ref,
+        status: connection.status,
+        token: tokenStaleness(connection.expires_at),
+        adapterInstalled: registeredProviders().includes(connection.provider),
+      })),
+      providers: registeredProviders(),
+      counts,
+      items,
+    });
+  });
+
   // ── Sessions & usage ─────────────────────────────────────────────────────
   app.get('/api/sessions', async (c) => {
     const limit = Math.min(Number(c.req.query('limit') ?? 50), 200);
@@ -972,7 +1038,7 @@ export function createApp(): Hono<TraceEnv> {
       q<{ key: string; value: unknown }>('SELECT key, value FROM settings'),
       engineStatus(),
     ]);
-    return c.json({ ...Object.fromEntries(rows.map((r) => [r.key, r.value])), engines });
+    return c.json({ ...settingsPayload(rows), engines });
   });
 
   app.put('/api/settings', async (c) => {
@@ -984,11 +1050,16 @@ export function createApp(): Hono<TraceEnv> {
       'worker_enabled',
       'llm',
       'scout_interval_hours',
+      'distribution_enabled',
+      'distribution_link_placement',
     ];
     for (const key of allowed) {
       if (!(key in body)) continue;
       if (key === 'publish_mode' && !['approval', 'auto', 'draft'].includes(String(body[key]))) {
         return c.json({ error: 'publish_mode must be approval | auto | draft' }, 400);
+      }
+      if (key === 'distribution_link_placement' && !isLinkPlacement(body[key])) {
+        return c.json({ error: 'distribution_link_placement must be first_comment | in_body' }, 400);
       }
       await setSetting(key, body[key]);
     }
@@ -999,7 +1070,7 @@ export function createApp(): Hono<TraceEnv> {
       q<{ key: string; value: unknown }>('SELECT key, value FROM settings'),
       engineStatus(),
     ]);
-    return c.json({ ...Object.fromEntries(rows.map((r) => [r.key, r.value])), engines });
+    return c.json({ ...settingsPayload(rows), engines });
   });
 
   // ── Admin SPA (built apps/admin) ─────────────────────────────────────────
