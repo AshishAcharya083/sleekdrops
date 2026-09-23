@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runAssembler } from './assembler.js';
 import { citedSourceIndexes } from '../content/sources.js';
+import { todayInSydney } from '../content/contract.js';
 import type { ArticleRow, ContentBrief } from '../pipeline/types.js';
 
 const brief: ContentBrief = {
@@ -545,7 +546,7 @@ test('the sources shown are the ones the body cites, and a marker past the end g
 });
 
 test('every assembly stamps the date a human last reviewed the piece', async () => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInSydney();
 
   const fresh = await runAssembler(article());
   assert.equal(fresh.frontmatter.lastReviewed, today);

@@ -44,6 +44,7 @@ import { toApiError, type ApiError } from '../api-error';
 import { ApiErrorBanner, Badge, Elapsed, OutOfDateBadge } from '../components';
 import { HeroImageField } from '../HeroImageField';
 import { usePoll } from '../hooks';
+import { Offers } from './Offers';
 
 const LANES: Array<{ title: string; stages: string[] }> = [
   { title: 'Research & Brief', stages: ['research', 'keyword', 'angle', 'outline'] },
@@ -62,6 +63,10 @@ export function Pipeline({
 } = {}) {
   const { data, error, refresh } = usePoll<ArticleList>('/api/articles');
   const [openId, setOpenId] = useState<string | null>(openArticleId ?? null);
+  // The offer screens take over the tab rather than stacking a second overlay
+  // on the article panel: the coverage table needs the width, and the card it
+  // belongs to is the context column beside it.
+  const [offersFor, setOffersFor] = useState<string | null>(null);
   const articles = data?.articles ?? [];
 
   useEffect(() => {
@@ -70,6 +75,14 @@ export function Pipeline({
     onOpened?.();
     // Consumed once: the request is a navigation, not a piece of panel state.
   }, [openArticleId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // No board-level error banner over the offer screens: they poll their own
+  // endpoint and say so in the panel, with the Retry that actually retries it.
+  // Two copies of the same failure sentence is noise, and only one of them is
+  // actionable.
+  if (offersFor) {
+    return <Offers articleId={offersFor} onClose={() => setOffersFor(null)} onChanged={refresh} />;
+  }
 
   return (
     <>
@@ -103,7 +116,14 @@ export function Pipeline({
           );
         })}
       </div>
-      {openId && <ArticlePanel id={openId} onClose={() => setOpenId(null)} onChanged={refresh} />}
+      {openId && (
+        <ArticlePanel
+          id={openId}
+          onClose={() => setOpenId(null)}
+          onChanged={refresh}
+          onOpenOffers={() => setOffersFor(openId)}
+        />
+      )}
     </>
   );
 }
@@ -434,7 +454,17 @@ function PlanList({ label, items }: { label: string; items: string[] }) {
   );
 }
 
-function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
+function ArticlePanel({
+  id,
+  onClose,
+  onChanged,
+  onOpenOffers,
+}: {
+  id: string;
+  onClose: () => void;
+  onChanged: () => void;
+  onOpenOffers: () => void;
+}) {
   const [detail, setDetail] = useState<ArticleDetail | null>(null);
   // Classified, so a refused action names its own cause: the agent's sentence
   // on a 409, the token field on a 401, the server logs on a 5xx.
@@ -785,6 +815,22 @@ function ArticlePanel({ id, onClose, onChanged }: { id: string; onClose: () => v
                 </div>
               </div>
             )}
+
+            <div className="section">
+              <h2>
+                Offer coverage{' '}
+                <button className="btn secondary small" onClick={onOpenOffers}>
+                  review offers
+                </button>
+              </h2>
+              <div className="card">
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  Which products in this card carry a commissionable link and a dated price, and
+                  which fall back to a search. A launch-window SKU is in no feed and cannot be
+                  polled, so an offer only gets there by hand.
+                </p>
+              </div>
+            </div>
 
             {article.affiliate_links && article.affiliate_links.length > 0 && (
               <div className="section">

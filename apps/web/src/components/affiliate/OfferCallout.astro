@@ -1,0 +1,266 @@
+---
+import Button from '@components/ui/Button.astro';
+import Eyebrow from '@components/ui/Eyebrow.astro';
+import { EVENTS } from '@lib/analytics';
+import { offerPresentation } from '@lib/offers';
+import type { PickData } from '../../content/frontmatter';
+
+/**
+ * OfferCallout — what a product's offer actually says to a reader when nobody
+ * can poll its price.
+ *
+ * Three treatments, one component, because they are one decision:
+ *  - a pre-order gets the dark card, with the release date and the plain
+ *    statement that the charge happens on dispatch rather than today;
+ *  - a price that has to be quoted as an RRP (a hand-entered one, or a fed one
+ *    that has gone stale) gets the light strip, dated, with a link to check
+ *    what it costs right now;
+ *  - a price still inside its refresh window is shown as the price.
+ *
+ * The figure is never presented as live unless it is. That is the whole point:
+ * the alternative - printing an unpolled number as a current price - is the
+ * impression standard the ACCC's reviews sweep and the Trivago penalty both
+ * turn on, and it is trivially avoidable by saying the date out loud.
+ *
+ * The destination is always the /go/ hop, never the merchant URL: the site
+ * never carries a raw merchant link, and the hop is what carries the click id
+ * the network reports a sale against.
+ */
+export interface Props {
+  pick: PickData;
+  /** Where in the page this rendered — carried into the click event. */
+  placement?: string;
+}
+
+const { pick, placement = 'offer-callout' } = Astro.props;
+const offer = pick.offer!;
+const view = offerPresentation(offer);
+const href = `/go/${pick.goSlug}`;
+const trackProps = JSON.stringify({
+  slug: pick.goSlug,
+  ...(pick.brand ? { brand: pick.brand } : {}),
+  ...(offer.merchant ? { retailer: offer.merchant } : {}),
+  placement,
+  offer_source: offer.source,
+  preorder: view.preorder,
+});
+const eyebrow = view.preorder ? 'Pre-order' : view.dated ? 'Price check' : 'Where to buy';
+const ctaLabel = offer.merchant ? `View at ${offer.merchant}` : 'View offer';
+---
+{view.preorder ? (
+  <aside class="offer-callout">
+    <div class="head">
+      <Eyebrow dot accent>{eyebrow}</Eyebrow>
+      <h4>{pick.name}</h4>
+    </div>
+    <div class="cta">
+      <div class="price">{view.priceLabel}</div>
+      <Button
+        href={href}
+        variant="accent"
+        arrow
+        rel="sponsored nofollow"
+        data={{ track: EVENTS.affiliateClick, 'track-props': trackProps }}
+      >
+        {ctaLabel}
+      </Button>
+      {/* Grouped with the price and the button, not stranded in a row of its
+          own below the release line: it qualifies the figure directly above
+          it, and reads as one statement with it. */}
+      <p class="price-stamp">
+        {view.stamp && <time datetime={view.stampDate!}>{view.stamp}</time>}
+        <a class="check" href={href} rel="sponsored nofollow" target="_blank"
+           data-track={EVENTS.affiliateClick} data-track-props={trackProps}>
+          <span class="lbl">{view.checkLabel}</span>
+        </a>
+      </p>
+    </div>
+    <p class="preorder-line">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      {view.releaseDate
+        ? <><span>{view.releaseNote}</span><time class="visually-hidden" datetime={view.releaseDate}>{view.releaseDate}</time></>
+        : <span>{view.releaseNote}</span>}
+    </p>
+  </aside>
+) : (
+  <aside class="offer-strip">
+    <div class="strip-text">
+      <span class="name">{pick.name}</span>
+      <span class="price">{view.priceLabel}</span>
+      {view.stamp && (
+        <span class="price-stamp">
+          <time datetime={view.stampDate!}>{view.stamp}</time>
+          {offer.source === 'editor'
+            ? <span class="why">manufacturer's RRP, not a live price</span>
+            : <span class="why">last fed price, not refreshed since</span>}
+        </span>
+      )}
+    </div>
+    <a class="check" href={href} rel="sponsored nofollow" target="_blank"
+       data-track={EVENTS.affiliateClick} data-track-props={trackProps}>
+      <span class="lbl">{view.checkLabel}</span>
+    </a>
+  </aside>
+)}
+
+<style>
+  .offer-callout {
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 20px;
+    padding: 32px;
+    margin: 32px 0;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 20px 24px;
+    align-items: start;
+    position: relative;
+    overflow: hidden;
+  }
+  .offer-callout::after {
+    content: "";
+    position: absolute;
+    right: -50px; bottom: -50px;
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(228, 119, 87, 0.2), transparent 70%);
+  }
+  .head { min-width: 0; }
+  .offer-callout h4 {
+    font-family: var(--font-display);
+    font-size: 28px;
+    margin: 6px 0 0;
+    letter-spacing: -0.015em;
+    color: var(--paper);
+    font-weight: 400;
+  }
+  .cta {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-end;
+    position: relative;
+    z-index: 1;
+  }
+  .cta .price {
+    font-family: var(--font-display);
+    font-size: 32px;
+    letter-spacing: -0.02em;
+    color: var(--paper);
+  }
+  /* No separator between the date and the link: the pair wraps onto two lines
+     on a phone, and a middot left behind on the end of the first line reads as
+     a typo. The gap carries the separation at every width instead. */
+  .cta .price-stamp {
+    margin: 0;
+    font-size: 13px;
+    color: rgba(250, 250, 247, 0.72);
+    display: flex;
+    align-items: center;
+    gap: 0 14px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    text-align: right;
+  }
+
+  /* The tap target is the padded link; the ember rule belongs under the words,
+     so it sits on the inner span rather than on the 44px box around them. */
+  .check {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 11px 0;
+    color: inherit;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  /* `clone` so a label that wraps keeps its rule under both lines rather than
+     under the last one only; `anywhere` so even a merchant name with no space
+     in it breaks rather than pushing the card past the viewport. */
+  .check .lbl {
+    box-shadow: inset 0 -1px 0 var(--accent);
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+    overflow-wrap: anywhere;
+  }
+  .check:hover .lbl { box-shadow: inset 0 -2px 0 var(--accent); }
+  .offer-callout .check { color: var(--paper); }
+
+  /* The closing full-width row: the release promise, and nothing below it but
+     the card's own padding. */
+  .preorder-line {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding-top: 16px;
+    border-top: 1px solid rgba(250, 250, 247, 0.16);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    color: rgba(250, 250, 247, 0.82);
+    position: relative;
+    z-index: 1;
+  }
+  .preorder-line svg {
+    width: 16px; height: 16px; flex: none;
+    fill: none; stroke: var(--accent); stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    margin: -1px; padding: 0; border: 0;
+    clip-path: inset(50%);
+    overflow: hidden; white-space: nowrap;
+  }
+
+  .offer-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px 24px;
+    flex-wrap: wrap;
+    margin: 24px 0;
+    padding: 4px 20px;
+    background: var(--surface-2);
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--r-md);
+  }
+  .strip-text {
+    display: flex;
+    align-items: baseline;
+    gap: 6px 12px;
+    flex-wrap: wrap;
+    min-width: 0;
+    padding: 12px 0;
+  }
+  .strip-text .name { font-weight: 700; font-size: 15px; color: var(--ink); }
+  .strip-text .price {
+    font-family: var(--font-display);
+    font-size: 20px;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+  }
+  .strip-text .price-stamp {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .strip-text .why::before { content: "· "; }
+  /* The label wraps. "Check current price at Samsung AU" is wider than the
+     strip's content box on a phone, and an unbreakable one ran off the card
+     and took the whole document into horizontal scroll with it. */
+  .offer-strip .check { color: var(--accent-hover); }
+
+  @media (max-width: 700px) {
+    .offer-callout {
+      grid-template-columns: 1fr;
+      padding: 24px;
+    }
+    .cta { align-items: flex-start; }
+    .cta .price-stamp { justify-content: flex-start; text-align: left; }
+  }
+</style>

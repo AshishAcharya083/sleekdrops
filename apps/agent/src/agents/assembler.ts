@@ -9,6 +9,12 @@
 // deleted: the words the writer put on the link - or the slug itself, which is
 // a product name kebab-cased - are that product's name, and a name is the
 // whole input a search destination needs.
+//
+// Ahead of both sits an offer record an editor attached (content/offers.ts).
+// On announcement day the SKU is in no feed and cannot be polled through the
+// Product Advertising API, so a hand-attached destination is the only one that
+// exists - and its price is the only one the page can quote, which it does as
+// a dated RRP rather than as a live figure.
 import {
   amazonSearchUrl,
   estimateReadTime,
@@ -17,17 +23,21 @@ import {
   HOME_CURRENCY,
   MONETISED_INTENTS,
   pickCover,
+  todayInSydney,
   validateArticle,
 } from '../content/contract.js';
+import { offerLinkRow, pickOfferFrom } from '../content/offers.js';
 import { articleSources, stripUnresolvedCitations } from '../content/sources.js';
 import { productSearchTerm, verifyAmazonProductUrl } from '../tools/amazon.js';
-import type { AffiliateLinkRow, ArticleRow } from '../pipeline/types.js';
+import type { AffiliateLinkRow, ArticleRow, ProductOffer } from '../pipeline/types.js';
 
 export interface AssembledArticle {
   frontmatter: Record<string, unknown>;
   affiliateLinks: AffiliateLinkRow[];
   /** Body after stripping the /go/ links that could not be healed either. */
   body: string;
+  /** Slugs whose destination came from an attached offer record. */
+  offerSlugs: string[];
   /** Slugs linked to an Amazon search built from the draft's own words. */
   healedSlugs: string[];
   droppedSlugs: string[];
@@ -42,12 +52,19 @@ function uniqueEntities(entities: string[]): string[] {
   return [...seen];
 }
 
-export async function runAssembler(article: ArticleRow): Promise<AssembledArticle> {
+export async function runAssembler(
+  article: ArticleRow,
+  offers: ProductOffer[] = [],
+): Promise<AssembledArticle> {
   const brief = article.outline!;
   let body = article.draft_md!;
   const slugsInBody = goSlugsIn(body);
   const products = article.research?.products ?? [];
-  const today = new Date().toISOString().slice(0, 10);
+  // The audience's day, not the server's: every date stamped below is a
+  // calendar day this publication states - the pubDate, the review stamp, and
+  // the day an offer's price is judged current against.
+  const today = todayInSydney();
+  const offerBySlug = new Map(offers.map((offer) => [offer.go_slug, offer]));
 
   // The deterministic parts never go through the LLM. A re-assembly (e.g. the
   // admin-feedback loop) keeps the original pubDate and any hero image already
@@ -91,9 +108,23 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
     if (heroAlt) frontmatter.heroAlt = heroAlt;
   }
 
-  // One affiliate row per /go/ slug in the body, straight from the dossier.
+  // The resolution order, in the order it resolves. An offer an editor
+  // attached outranks everything the pipeline can build for itself: it is the
+  // only destination that can exist on announcement day, when the SKU is in no
+  // feed and cannot be polled through the Product Advertising API. Then a
+  // liveness-verified ASIN, then the search link healed out of the draft.
   const bySlug = new Map<string, AffiliateLinkRow>();
+  const offerSlugs: string[] = [];
   for (const slug of slugsInBody) {
+    const offer = offerBySlug.get(slug);
+    if (!offer) continue;
+    bySlug.set(slug, offerLinkRow(offer, brief.slug));
+    offerSlugs.push(slug);
+  }
+
+  // One affiliate row per remaining /go/ slug in the body, from the dossier.
+  for (const slug of slugsInBody) {
+    if (bySlug.has(slug)) continue;
     const product = products.find((p) => p.goSlug === slug);
     if (!product) continue; // no dossier product behind this slug → stripped below
 
@@ -169,19 +200,27 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
   const entities = uniqueEntities(article.keyword_plan?.entities ?? []);
   const picks = [...bySlug.keys()].flatMap((slug) => {
     const product = products.find((p) => p.goSlug === slug);
-    if (!product) return [];
+    const offer = offerBySlug.get(slug);
+    // An attached offer names its own product, so a launch-window SKU the
+    // dossier never carried is still a pick - which is the point: it is the
+    // one the reader most needs the release date and the price stamp for.
+    const name = (product?.name ?? offer?.product_name ?? '').trim();
     // A nameless product is a broken dossier row, not a pick. Skipping it keeps
     // the article publishable — the affiliate link behind it still works.
-    const name = product.name.trim();
     if (!name) return [];
-    const brand = product.brand?.trim();
-    const price = product.approxPrice?.trim();
+    const brand = product?.brand?.trim();
+    // The offer's figure is a price somebody actually saw on a stated day; the
+    // dossier's is an approximation from the research. The dated one wins, and
+    // rides with the stamp that says what it is.
+    const pickOffer = offer ? pickOfferFrom(offer, today) : null;
+    const price = pickOffer?.price ?? product?.approxPrice?.trim();
     return [
       {
         name,
         ...(brand ? { brand } : {}),
         ...(price ? { price } : {}),
         goSlug: slug,
+        ...(pickOffer ? { offer: pickOffer } : {}),
       },
     ];
   });
@@ -213,5 +252,5 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
     );
   }
 
-  return { frontmatter, affiliateLinks: finalLinks, body, healedSlugs, droppedSlugs };
+  return { frontmatter, affiliateLinks: finalLinks, body, offerSlugs, healedSlugs, droppedSlugs };
 }

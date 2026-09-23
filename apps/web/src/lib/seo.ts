@@ -396,11 +396,21 @@ function pickAnchors(body: string, headings: PostHeading[]): Map<string, string>
 function offerNode(pick: PickData, currency: string): Offer | null {
   const price = parsePrice(pick.price);
   if (price === null) return null;
+  const offer = pick.offer;
   return {
     '@type': 'Offer',
-    priceCurrency: currency,
+    // An attached offer states its own currency; the post's is the fallback
+    // for every pick the pipeline priced from the research alone.
+    priceCurrency: offer?.currency ?? currency,
     price,
-    availability: 'https://schema.org/InStock',
+    // A pre-order is not in stock, and saying it is would be the same
+    // misstatement in markup that the visible callout is careful to avoid.
+    availability: offer?.preorder
+      ? 'https://schema.org/PreOrder'
+      : 'https://schema.org/InStock',
+    ...(offer?.preorder && offer.releaseDate
+      ? { availabilityStarts: offer.releaseDate }
+      : {}),
     url: absoluteUrl(`/go/${pick.goSlug}`),
   };
 }

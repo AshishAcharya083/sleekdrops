@@ -18,6 +18,7 @@ const { migrate } = await import('../db/migrate.js');
 const { createApp } = await import('../api/server.js');
 const { runAssembler } = await import('./assembler.js');
 const { citedSourceIndexes } = await import('../content/sources.js');
+const { todayInSydney } = await import('../content/contract.js');
 
 import type { ArticleRow, ContentBrief } from '../pipeline/types.js';
 
@@ -136,7 +137,7 @@ test('the researcher\'s tiers and dates reach the page, through both JSONB colum
     },
     { url: 'https://forum.example/thread/12', publisher: 'forum.example', tier: 'unknown' },
   ]);
-  assert.equal(stored.frontmatter?.lastReviewed, new Date().toISOString().slice(0, 10));
+  assert.equal(stored.frontmatter?.lastReviewed, todayInSydney());
 
   // Every marker left in the stored body has a source behind it, and the one
   // that pointed past the end of the list is gone.

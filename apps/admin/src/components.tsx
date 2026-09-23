@@ -140,12 +140,27 @@ export function Stat({ label, value, sub }: { label: string; value: string | num
  * data the tab is already holding rather than replacing it, and the sentence
  * comes from the failure's kind, so a rejected admin token, a stopped agent and
  * a 5xx never read as the same problem.
+ *
+ * `onRetry` puts the retry beside the sentence that explains what failed,
+ * rather than leaving the operator to wait out the 4s poll. Tabs that pass none
+ * render exactly as before.
  */
-export function ApiErrorBanner({ error }: { error: ApiError | null }) {
+export function ApiErrorBanner({
+  error,
+  onRetry,
+}: {
+  error: ApiError | null;
+  onRetry?: () => void;
+}) {
   if (!error) return null;
   return (
     <div className="error-banner" role="alert">
-      {describeApiError(error)}
+      <span className="banner-text">{describeApiError(error)}</span>
+      {onRetry && (
+        <button className="btn secondary" onClick={onRetry}>
+          Retry
+        </button>
+      )}
     </div>
   );
 }

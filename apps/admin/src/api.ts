@@ -291,6 +291,80 @@ export interface ArticleDetail {
   reviewStaleReason?: string | null;
 }
 
+/**
+ * One product's attached offer. A launch-window SKU is in no affiliate feed
+ * and cannot be read through Amazon's Product Advertising API, so this record
+ * is where its destination and its price come from until one appears. Mirrors
+ * ProductOffer in the agent app.
+ */
+export interface ProductOffer {
+  id: string;
+  go_slug: string;
+  product_name: string;
+  url: string;
+  price: string | null;
+  currency: string;
+  price_observed_on: string | null;
+  preorder: boolean;
+  release_date: string | null;
+  merchant: string | null;
+  source: 'editor' | 'feed' | 'api';
+  entered_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One version of an offer as it was saved — the history a feed cannot erase. */
+export interface ProductOfferRevision {
+  id: string;
+  go_slug: string;
+  url: string;
+  price: string | null;
+  currency: string;
+  price_observed_on: string | null;
+  preorder: boolean;
+  release_date: string | null;
+  merchant: string | null;
+  source: 'editor' | 'feed' | 'api';
+  entered_by: string | null;
+  saved_at: string;
+}
+
+/** The four-colour provenance vocabulary: violet, indigo, amber, red. */
+export type OfferProvenance = 'editor' | 'resolved' | 'healed' | 'none';
+
+export interface OfferCoverageRow {
+  goSlug: string;
+  productName: string;
+  provenance: OfferProvenance;
+  label: string;
+  destination: string | null;
+  destinationNote: string | null;
+  price: string | null;
+  asAt: string | null;
+  stale: boolean;
+  preorder: boolean;
+  releaseDate: string | null;
+  inBody: boolean;
+  /** Saved, but the assembled page still carries the old destination or stamp. */
+  pending: boolean;
+  offer: ProductOffer | null;
+}
+
+/** GET /api/articles/:id/offers — what all three offer screens render. */
+export interface OfferCoverageResponse {
+  article: { id: string; title: string; slug: string | null; stage: string; status: string };
+  coverage: {
+    rows: OfferCoverageRow[];
+    counts: Record<OfferProvenance, number>;
+    covered: number;
+    total: number;
+  };
+  /** Every saved version, keyed by /go/ slug, newest first. */
+  history: Record<string, ProductOfferRevision[]>;
+  today: string;
+}
+
 export interface PublishedPost {
   slug: string;
   status: string;

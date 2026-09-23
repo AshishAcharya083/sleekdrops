@@ -52,6 +52,15 @@ The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archive
   dossiers, usage aggregation) — Cloud SQL in the cloud, Docker locally.
 - **Cloudflare D1** stays the publish target — the website's build reads it,
   so the existing deploy flow is untouched (~90s from publish to live).
+- **Launch-window offers are attached by hand.** A SKU announced today is in no
+  affiliate feed and cannot be read through Amazon's Product Advertising API, so
+  the admin panel's offer screens let an editor attach the commissionable link
+  and the price they can see, with the day they saw it. The assembler resolves
+  that record ahead of a verified ASIN and ahead of the healed search link, the
+  page quotes the figure as a dated RRP with a "check current price" link rather
+  than as a live price, and a pre-order says when it ships and that the reader is
+  charged on dispatch. A feed overwrites the record once the SKU appears; every
+  version is kept.
 
 ## Quickstart (local)
 

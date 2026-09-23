@@ -42,6 +42,7 @@ export const EVENTS = {
   articleActioned: 'Article Actioned',
   stuckRunOpened: 'Stuck Run Opened',
   articleFeedbackSubmitted: 'Article Feedback Submitted',
+  offerSaved: 'Offer Saved',
   publishedPostDeleted: 'Published Post Deleted',
   publishedHeroUpdated: 'Published Post Hero Updated',
   settingsSaved: 'Settings Saved',
