@@ -54,12 +54,16 @@ test('the Overview renders its content alongside the banner, never instead of it
 });
 
 test('only a first load that never succeeded shows the loading placeholder', () => {
-  const placeholder = /if \(!data\) \{\s*return error \? <ApiErrorBanner error=\{error\} \/> : <p className="muted">Loading…<\/p>;/;
+  // The placeholder is now the needs-attention skeleton, sized to the surface
+  // it stands in for; the branch itself is unchanged - a failure is named, and
+  // anything else is a first load in progress.
+  const placeholder = /if \(!data\) \{\s*return error \? <ApiErrorBanner error=\{error\} \/> : <NeedsAttentionSkeleton \/>;/;
   assert.match(
     overview,
     placeholder,
     'with no data the tab shows the failure if there is one, and the placeholder otherwise',
   );
+  assert.match(overview, /function NeedsAttentionSkeleton\(\)/, 'the placeholder is a real surface');
 });
 
 test('the Overview marks the sections the agent could not load', () => {

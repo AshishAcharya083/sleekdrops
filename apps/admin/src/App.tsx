@@ -18,10 +18,18 @@ export function App() {
   const [tab, setTab] = useState<Tab>(INITIAL_TAB);
   const [token, setTokenState] = useState(getToken());
   const [apiBase, setApiBaseState] = useState(getApiBase());
+  /** A run the Overview's stuck surface asked the Pipeline tab to open. */
+  const [runToOpen, setRunToOpen] = useState<string | null>(null);
 
   const openTab = (next: Tab) => {
     setTab(next);
     viewTab(next);
+  };
+
+  /** The stuck surface links straight at the run: one click, no hunting. */
+  const openRun = (articleId: string) => {
+    setRunToOpen(articleId);
+    openTab('Pipeline');
   };
 
   // The panel is token-gated but has no accounts: gaining a token is the closest
@@ -78,9 +86,11 @@ export function App() {
         </div>
       </div>
 
-      {tab === 'Overview' && <Overview />}
+      {tab === 'Overview' && <Overview onOpenRun={openRun} />}
       {tab === 'Topics' && <Topics />}
-      {tab === 'Pipeline' && <Pipeline />}
+      {tab === 'Pipeline' && (
+        <Pipeline openArticleId={runToOpen} onOpened={() => setRunToOpen(null)} />
+      )}
       {tab === 'Published' && <Published />}
       {tab === 'Sessions' && <Sessions />}
       {tab === 'Settings' && <SettingsPage />}

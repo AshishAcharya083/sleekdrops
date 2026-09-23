@@ -83,6 +83,17 @@ export function toApiError(error: unknown): ApiError {
   return new ApiError(message, { kind: 'unreachable' });
 }
 
+/** What the agent's catch-all error handler answers with: deliberately opaque. */
+const GENERIC_SERVER_ERROR = 'internal server error';
+
+/** The sentence the agent sent with a 5xx, when it sent one worth reading. */
+function serverDetail(error: ApiError): string | null {
+  const message = error.message.trim();
+  if (!message || message === GENERIC_SERVER_ERROR) return null;
+  // api.ts falls back to `HTTP <status>` when the body carried no `error`.
+  return /^HTTP \d+$/.test(message) ? null : message;
+}
+
 /**
  * The banner sentence for a failure. Each kind names the thing the operator can
  * act on: the token field in the header bar, the agent process, or the trace id
@@ -94,10 +105,16 @@ export function describeApiError(error: ApiError): string {
       return 'Not authorized - check the admin token in the header bar above.';
     case 'unreachable':
       return `API unreachable - the agent server is not responding (${error.message}).`;
-    case 'server':
-      return error.traceId
-        ? `The agent server errored - trace id ${error.traceId}.`
-        : 'The agent server errored - check the agent logs.';
+    case 'server': {
+      // A route that can explain its own 5xx sends a scrubbed sentence (the
+      // isolated stage test is the one that does); the catch-all handler sends
+      // GENERIC_SERVER_ERROR, which says nothing the banner does not already.
+      const said = serverDetail(error);
+      const trace = error.traceId ? `trace id ${error.traceId}` : 'check the agent logs';
+      return said
+        ? `The agent server errored: ${said} (${trace}).`
+        : `The agent server errored - ${trace}.`;
+    }
     default:
       return `Request failed: ${error.message}`;
   }

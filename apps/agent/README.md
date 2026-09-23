@@ -32,6 +32,23 @@ Widen the topic brief or re-run research; there is nothing to fix in the draft,
 because there is no draft.
 With `publish_mode = approval` (default) the article parks at
 `waiting_approval` until you hit **Approve & publish** in the admin panel.
+
+Every stage runs under a wall-clock budget - `AGENT_RUN_TIMEOUT_SECONDS`
+(default 3600s), capped by a hard ceiling in code that no configuration can
+raise, with an optional per-stage override in `STAGE_TIMEOUT_SECONDS`
+(`pipeline/budgets.ts`, read beside the stage map in `pipeline/runner.ts`). It
+is deliberately not an admin setting: a timeout is a safety guard, and what an
+operator acts on is the outcome. A
+stage that outlives its budget stops at `status = 'timed_out'` - a distinct
+terminal state from `failed`, because nothing reported an error - keeping
+whatever it had already written as a draft, with a message naming the agent,
+the stage, the limit, how long it ran and the last LLM call it was waiting on
+(scrubbed of any credential the process holds). A claim also carries a lease
+the worker renews while it works, and the worker reaps lapsed leases on its own
+poll (`REAPER_EVERY_TICKS`), so a run whose process died is stopped while the
+platform is up rather than at the next restart. A run that discovers its lease
+is gone - reaped, or cancelled from the panel - abandons the stage and writes
+nothing, leaving the outcome whoever took the article away recorded.
 Every agent prompt is grounded with today's date (Australia/Sydney) so years
 in titles/copy come from the calendar, not stale training data.
 
@@ -262,6 +279,14 @@ Required env: `GEMINI_API_KEY` (or Vertex on GCP) and `TAVILY_API_KEY`; add
 `GITHUB_TOKEN` (repo dispatch). Optional: `ADMIN_TOKEN` to protect the API —
 required in practice when the API is deployed on Cloud Run.
 
+`DATABASE_URL` has no built-in default. Left unset, the `pg` driver resolves
+the connection from `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` and
+falls back to `localhost:5432` - the standard port a sidecar or service-container
+Postgres listens on. Port 5544 is only the host-side mapping `pnpm db:up`
+publishes on a laptop, so it is never right inside a container. Boot - and
+`pnpm db:migrate` - waits up to 30s for the database to answer before giving up,
+so the agent may start before Postgres does.
+
 ## Tests
 
 ```bash
@@ -276,7 +301,20 @@ working query), while `usage.db.test.ts` and `overview.db.test.ts` need a live
 one - SQL that reads fine in review still only fails on a server, and a
 partially failing overview only exists there - and skip themselves when no
 `DATABASE_URL` answers.
-Give it one with `pnpm db:up` (then
+The boot suites are the slow ones - about a minute of wall clock, most of it
+one deliberate 30s wait - and the only ones that start real processes:
+`index.db.test.ts` spawns the agent entrypoint and the `pnpm migrate` CLI the
+way the container does, and `db/boot.db.test.ts` puts a TCP proxy in front of
+Postgres to make it arrive late.
+The cases that only need an unreachable database run anywhere; the ones that
+have to reach a real one - late-arriving database, booting on `PG*` with no
+`DATABASE_URL`, a rejected connection - skip themselves when no `DATABASE_URL`
+answers, and each gives its spawned agent a throwaway database of its own,
+because that child boots the whole pipeline and would otherwise recover and
+claim the rows other suites are asserting on.
+`db/pool.noDatabaseUrl.test.ts` covers what an unset `DATABASE_URL` resolves to
+without connecting at all, so it runs everywhere.
+Give it a live database with `pnpm db:up` (then
 `DATABASE_URL=postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent`);
 CI runs it against a Postgres service container.
 

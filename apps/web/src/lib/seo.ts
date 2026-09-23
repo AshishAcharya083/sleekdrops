@@ -57,10 +57,10 @@ const WEBSITE_ID = `${siteUrl}/#website`;
 
 /**
  * External profiles the publisher actually controls. `sameAs` is an identity
- * claim, so it stays empty until there is a real profile to point at rather
+ * claim, so only a profile the desk genuinely operates belongs here rather
  * than naming something we do not own.
  */
-const PUBLISHER_PROFILES: string[] = [];
+const PUBLISHER_PROFILES: string[] = ['https://www.facebook.com/sleekdrops'];
 
 const PUBLISHER: Organization = {
   '@type': 'Organization',
