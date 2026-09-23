@@ -277,6 +277,13 @@ export function mergeDossier(
  * construction rather than by a counter: the second verdict is asserted, so a
  * piece that is still short after a targeted re-sweep genuinely has nothing to
  * be written from and stops here.
+ *
+ * A fault inside the re-sweep is not caught. `EvidenceGateError` has to keep
+ * meaning one thing - the second sweep ran and the counts were still short -
+ * because that is what makes it terminal. A timeout, a 429 or a truncated JSON
+ * reply is none of those: nothing was counted a second time, and converting it
+ * into a gate error would report a verdict the gate never reached and burn the
+ * stage retry that fault was owed.
  */
 export async function sweepUntilSufficient(
   dossier: ResearchDossier,
@@ -288,19 +295,7 @@ export async function sweepUntilSufficient(
     dossier.sufficiency = first;
     return dossier;
   }
-  // Best-effort: a re-sweep that falls over (a timeout, a model error) must not
-  // replace "the evidence was too thin, here is which stratum" with "fetch
-  // failed". The remediation is what is optional here, not the verdict.
-  let addition: Partial<ResearchDossier> = {};
-  try {
-    addition = await resweep(first.shortfalls);
-  } catch (err) {
-    console.warn(
-      `[research] targeted re-sweep failed, falling back to the first verdict: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
+  const addition = await resweep(first.shortfalls);
   const widened = mergeDossier(dossier, normaliseDossier(addition), first.shortfalls);
   return assertEvidenceSufficient(widened, article.post_type, article.category);
 }

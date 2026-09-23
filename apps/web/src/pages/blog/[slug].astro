@@ -52,6 +52,9 @@ const stampYear = new Date(post.data.pubDate).getFullYear();
 const labelledPicks = (post.data.picks ?? []).filter(
   (pick) => pick.evidence !== undefined || pick.badge !== undefined,
 );
+// Read by the provenance block, which otherwise states what follows from
+// having had no unit - and would contradict a figure labelled as ours.
+const measuredOurselves = (post.data.claims ?? []).some((claim) => claim.tier === 'measured');
 // The disclosure has to be visible alongside the links it disclosed, so it goes
 // under the byline on any page that carries one - which is every pipeline post,
 // and any hand-written one with a /go/ link in the body.
@@ -150,6 +153,7 @@ const asideSummary = [
         category={post.data.category}
         reviewedBy={author.name}
         reviewUnit={post.data.reviewUnit}
+        measuredOurselves={measuredOurselves}
       />
 
       {/* Above the fold on a launch piece, because the fact it states - that

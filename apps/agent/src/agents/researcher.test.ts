@@ -274,17 +274,19 @@ test('a release date the first pass missed is carried through - it decides the w
   assert.equal(merged.launch?.releaseDate, '2026-09-01');
 });
 
-test('a re-sweep that falls over still fails with the gate’s own diagnostic', async () => {
-  // "fetch failed" on an operator card says nothing about which stratum was
-  // thin, which is the only thing that makes the failure actionable.
+test('a re-sweep that falls over propagates its own fault, never the gate’s verdict', async () => {
+  // A timeout is not a verdict on the evidence: nothing was counted a second
+  // time. EvidenceGateError means "the re-sweep ran and the counts were still
+  // short", and it is terminal on that basis - so a transient fault dressed up
+  // as one would fail the card for a reason that was never checked, and spend
+  // the stage retry it was owed.
   const thin = sufficient();
   thin.facts = thin.facts.filter((f) => f.tier !== 'expert');
+  const upstream = new Error('upstream timed out');
   await assert.rejects(
     sweepUntilSufficient(thin, guideArticle, async () => {
-      throw new Error('upstream timed out');
+      throw upstream;
     }),
-    (err: unknown) =>
-      err instanceof EvidenceGateError &&
-      /facts from independent expert reviews/.test(String(err.message)),
+    (err: unknown) => err === upstream && !(err instanceof EvidenceGateError),
   );
 });

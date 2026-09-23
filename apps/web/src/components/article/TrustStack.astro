@@ -42,9 +42,19 @@ export interface Props {
    * this carry none, and render exactly as they did.
    */
   reviewUnit?: ReviewUnitData;
+  /** Whether the page carries a figure we measured - the provenance block reads it. */
+  measuredOurselves?: boolean;
 }
 
-const { pubDate, updatedDate, lastReviewed, category, reviewedBy, reviewUnit } = Astro.props;
+const {
+  pubDate,
+  updatedDate,
+  lastReviewed,
+  category,
+  reviewedBy,
+  reviewUnit,
+  measuredOurselves = false,
+} = Astro.props;
 const review = reviewStatus({ pubDate, updatedDate, lastReviewed, category });
 // Who signed it off, or why there is no sign-off to name. Composed here rather
 // than as conditional fragments in the markup, where the whitespace between
@@ -94,7 +104,7 @@ const updated =
     </p>
   )}
 
-  {reviewUnit && <ReviewProvenance unit={reviewUnit} />}
+  {reviewUnit && <ReviewProvenance unit={reviewUnit} measuredOurselves={measuredOurselves} />}
 
   {reviewUnit ? (
     <p class="independence">

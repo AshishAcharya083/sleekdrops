@@ -133,6 +133,20 @@ test('the notice stops waiting the moment a protocol-publishing outlet reports',
   const status = launchStatus(launch, [makerOnly, measuredByGsm], day(6));
   assert.equal(status.state, 'first-result');
   assert.deepEqual(status.measuredBy, ['GSMArena']);
+  assert.deepEqual(status.independentBy, ['GSMArena']);
+});
+
+test('our own run does not make us the independent result the notice waits for', () => {
+  const ourOwn: ClaimData = {
+    ...measuredByGsm,
+    tier: 'measured',
+    attribution: 'SleekDrops',
+    value: '9 h 41 min',
+  };
+  const status = launchStatus(launch, [makerOnly, ourOwn], day(6));
+  assert.equal(status.state, 'awaiting', 'a page carrying only our own test is still waiting');
+  assert.deepEqual(status.measuredBy, ['SleekDrops']);
+  assert.deepEqual(status.independentBy, []);
 });
 
 test('past the window the notice stops blaming the calendar', () => {
@@ -168,6 +182,16 @@ test('a bought unit says what we paid, and a missing unit says there was none', 
   assert.equal(desk.variant, 'desk');
   assert.match(desk.lead, /not sent a unit and did not buy one/);
   assert.match(desk.detail, /labelled with who did measure it/);
+});
+
+test('the no-unit block does not contradict a figure the page labels as ours', () => {
+  // "Nothing on this page is measured by us" printed above a card reading "We
+  // measured it" is the page arguing with itself.
+  const ours = provenanceCopy({ acquisition: 'none' }, true);
+  assert.equal(ours.variant, 'desk');
+  assert.match(ours.lead, /not sent a unit and did not buy one/);
+  assert.doesNotMatch(ours.detail, /nothing on this page is measured by us/i);
+  assert.match(ours.detail, /Where a figure below is ours it says so/);
 });
 
 test('a post carrying none of this renders as it always did', () => {

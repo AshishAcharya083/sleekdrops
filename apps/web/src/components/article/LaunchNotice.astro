@@ -36,7 +36,10 @@ const dayLabel =
     : status.daysSinceRelease === 0
       ? 'Day one'
       : `Day ${status.daysSinceRelease}`;
-const testers = nameList(status.measuredBy);
+// Only the outlets outside this masthead. Our own run is labelled as ours
+// everywhere else on the page; naming it here would make us the independent
+// result the notice says is still missing.
+const testers = nameList(status.independentBy);
 const statusLabel =
   status.state === 'closed'
     ? 'Window closed'
@@ -72,7 +75,8 @@ const statusLabel =
         <p>
           So every figure on this page is labelled with who produced it. Where
           the only number is the maker's, it says so and it is not written in our
-          voice. <strong>We will update this page when protocol-publishing
+          voice.{status.measuredBy.length > 0 && ' What we have run ourselves is labelled as ours, which is not the same thing as an independent result.'}
+          {' '}<strong>We will update this page when protocol-publishing
           testers report</strong> - the first measured result replaces the claim
           it disputes, and the change is dated at the foot of the page.
         </p>
@@ -86,7 +90,7 @@ const statusLabel =
           measurements are in.
         </h2>
         <p>
-          {testers} {status.measuredBy.length === 1 ? 'has' : 'have'} published
+          {testers} {status.independentBy.length === 1 ? 'has' : 'have'} published
           measured figures with the protocol behind them, and those are marked on
           this page as independently measured. The rest of the numbers are still
           the maker's own, labelled as such until someone measures them.
@@ -105,7 +109,7 @@ const statusLabel =
           closed.
         </h2>
         <p>
-          {status.measuredBy.length > 0
+          {status.independentBy.length > 0
             ? `Independent results are now in, from ${testers}, and the figures they measured are marked on this page.`
             : 'No protocol-publishing tester has measured one yet, which is now worth saying plainly rather than putting down to the calendar. Nothing here rests on a figure we have not attributed.'}
         </p>

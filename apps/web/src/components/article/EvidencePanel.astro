@@ -40,18 +40,29 @@ const TIER_MEANING: Record<SourceTier, string> = {
 };
 
 const measuredByUs = entries.filter((entry) => entry.tier === 'measured');
-const groups = TIER_ORDER.map((tier) => ({
-  tier,
-  label: TIER_LABELS[tier],
-  meaning: TIER_MEANING[tier],
-  rows: sources.filter((source) => source.tier === tier),
-})).filter((group) => group.rows.length > 0);
+const groups = TIER_ORDER.map((tier) => {
+  const rows = sources.filter((source) => source.tier === tier);
+  const corrected = rows.filter((source) => source.withdrawn).length;
+  return {
+    tier,
+    label: TIER_LABELS[tier],
+    meaning: TIER_MEANING[tier],
+    rows,
+    corrected,
+    // What the note under a corrected group can honestly say stands: the rows
+    // beside the corrected ones, counted rather than inferred from the group.
+    unaffected: rows.length - corrected,
+  };
+}).filter((group) => group.rows.length > 0);
 // Untiered rows are still rows a reader can open. They are listed under their
 // own heading rather than dropped, because a source list that hides its weak
 // entries has stopped being one.
 const untiered = sources.filter((source) => !source.tier);
 const shown = groups.reduce((total, group) => total + group.rows.length, 0) + untiered.length;
 const measuredRows = sources.filter((source) => source.measured).length;
+// Counted, not assumed to be one: a header that says "one correction" over two
+// struck figures is the same small lie as a count that does not match the rows.
+const correctedRows = sources.filter((source) => source.withdrawn).length;
 // Never blank: a row with no attribution is not evidence, so the address
 // stands in the way it does in the sources block at the foot of the page.
 const publisherOf = (source: SourceData): string => source.publisher?.trim() || displayUrl(source.url).split('/')[0];
@@ -65,7 +76,8 @@ const publisherOf = (source: SourceData): string => source.publisher?.trim() || 
         <p class="ep-sub">
           {shownOfLabel(shown, sources.length)}
           {measuredRows > 0 && ` · ${measuredRows} carrying a measured figure`}
-          {state === 'corrected' && ' · one correction shown in full'}
+          {correctedRows > 0 &&
+            ` · ${correctedRows === 1 ? 'one correction' : `${correctedRows} corrections`} shown in full`}
         </p>
       </div>
       <ul class="tier-legend">
@@ -151,12 +163,14 @@ const publisherOf = (source: SourceData): string => source.publisher?.trim() || 
             </li>
           ))}
         </ul>
-        {group.rows.some((source) => source.withdrawn) && group.rows.length > 1 && (
+        {group.corrected > 0 && group.unaffected > 0 && (
           <p class="ep-note">
-            The other {group.rows.length - 1}
-            {group.rows.length === 2 ? ' row' : ' rows'} in this group
-            {group.rows.length === 2 ? ' is' : ' are'} unaffected by that
-            correction - it was one tester revising one figure.
+            The other {group.unaffected}
+            {group.unaffected === 1 ? ' row' : ' rows'} in this group
+            {group.unaffected === 1 ? ' is' : ' are'} unaffected -
+            {group.corrected === 1
+              ? ' one tester revised one figure, and the rest stand as published.'
+              : ' each correction is one tester revising one of its own figures.'}
           </p>
         )}
       </div>
@@ -223,16 +237,19 @@ const publisherOf = (source: SourceData): string => source.publisher?.trim() || 
 
   .tier-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
   .tier-legend-row { display: flex; align-items: center; gap: 10px; }
-  .tier-legend-row .legend-rule {
+  /* Flat, not `.tier-legend-row .legend-rule`. Astro scopes a style block by
+     appending its `[data-astro-cid-…]` attribute to every compound selector,
+     so a descendant base rule collects two of them and out-specifies its own
+     single-element modifiers - which is what left every swatch drawn in the
+     same grey however the modifiers were written. */
+  .legend-rule {
     width: 28px;
     height: 0;
     border-top: 3px solid var(--hairline-strong);
     flex-shrink: 0;
   }
   /* Two classes on the same element, so each modifier out-specifies the base
-     rule above it. Written as a single compound selector rather than as
-     `.legend-rule--expert` alone, which loses to the descendant selector and
-     left every swatch drawn in the same grey. */
+     rule above it whatever order the bundler emits them in. */
   .legend-rule.legend-rule--measured { border-top: 3px solid var(--success); }
   .legend-rule.legend-rule--expert { border-top: 3px solid var(--ink); }
   .legend-rule.legend-rule--primary { border-top: 3px dashed var(--warning); }

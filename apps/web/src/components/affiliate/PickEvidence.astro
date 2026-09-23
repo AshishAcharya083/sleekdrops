@@ -1,6 +1,7 @@
 ---
 import Button from '@components/ui/Button.astro';
 import { toClaimEntries } from '@lib/evidence';
+import type { ClaimEntry } from '@lib/evidence';
 import { EVENTS } from '@lib/analytics';
 import type { ClaimData, PickData } from '../../content/config';
 
@@ -34,6 +35,18 @@ const entries = toClaimEntries(claims);
 // evidence chip existed carries none, and gets the page it has always had
 // rather than a new section full of blanks.
 const labelled = picks.filter((pick) => pick.evidence !== undefined || pick.badge !== undefined);
+
+/**
+ * Who the figure belongs to, in the two words a stats row has for it. The
+ * weaker tiers say what kind of statement it is as well as who made it: a
+ * brand rating or a maker's number sitting bare under a measured one would
+ * read as a third measurement.
+ */
+const statBy = (entry: ClaimEntry): string => {
+  if (entry.tier === 'manufacturer') return `${entry.attribution} claim`;
+  if (entry.tier === 'context') return `${entry.attribution} rating`;
+  return entry.attribution;
+};
 
 const cards = labelled.map((pick) => {
   const mine = entries.filter(
@@ -87,7 +100,7 @@ const cards = labelled.map((pick) => {
                   <dt>{entry.metric}</dt>
                   <dd>
                     {entry.value}
-                    <span class="stat-by">{entry.tier === 'manufacturer' ? `${entry.attribution} claim` : entry.attribution}</span>
+                    <span class="stat-by">{statBy(entry)}</span>
                   </dd>
                 </div>
               ))}
@@ -155,15 +168,13 @@ const cards = labelled.map((pick) => {
     font-weight: 400;
     margin: 0 0 20px;
   }
-  /* Each card sizes to its own content. Stretching them to a common height
-     bottom-pins every CTA at the same line, which is tidy when the cards carry
-     comparable content and leaves a card's worth of void under the shorter one
-     when they do not - and a pick with nothing measured has genuinely less to
-     say, which is the point of the chip above it. */
+  /* Cards share a row height and every CTA sits on the same line. What used to
+     make that arrangement leave a void under the shorter card was the card
+     itself being thin - the stats row below fills it, so the alignment reads
+     as deliberate rather than as a gap. */
   .pick-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    align-items: start;
     gap: 20px;
   }
   .pick-card {
@@ -265,6 +276,7 @@ const cards = labelled.map((pick) => {
     align-items: center;
     gap: 14px;
     flex-wrap: wrap;
+    margin-top: auto;
     padding-top: 18px;
   }
   /* Plain text at full strength, not a disabled pill. A greyed-out

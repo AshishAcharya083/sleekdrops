@@ -186,8 +186,10 @@ export interface LaunchStatus {
   windowEnds: Date;
   /** True while the product is inside its launch window. */
   open: boolean;
-  /** Outlets that have measured something, named in the notice. */
+  /** Everyone who has measured something, us included. */
   measuredBy: string[];
+  /** The outlets other than us who have measured something - who the notice names. */
+  independentBy: string[];
 }
 
 /**
@@ -197,6 +199,11 @@ export interface LaunchStatus {
  * "no independent test exists yet" is true on the day it is written and a lie
  * three months later - and the page is the thing a reader checks, not the
  * frontmatter.
+ *
+ * Our own test does not close the wait. The notice's subject is whether anyone
+ * outside this masthead has published a measured figure, so a page carrying
+ * only our own run is still awaiting one - saying otherwise would name us as
+ * the independent result, which is the one thing we cannot be.
  */
 export function launchStatus(
   launch: LaunchData,
@@ -207,20 +214,21 @@ export function launchStatus(
   const daysSinceRelease = Math.floor((now.getTime() - releaseDate.getTime()) / DAY_MS);
   const windowEnds = new Date(releaseDate.getTime() + LAUNCH_WINDOW_DAYS * DAY_MS);
   const open = daysSinceRelease <= LAUNCH_WINDOW_DAYS;
-  const measuredBy = [
+  const namesOf = (tiers: readonly ClaimTier[]): string[] => [
     ...new Set(
-      claims
-        .filter((claim) => claim.tier === 'measured' || claim.tier === 'independent')
-        .map((claim) => claim.attribution),
+      claims.filter((claim) => tiers.includes(claim.tier)).map((claim) => claim.attribution),
     ),
   ];
+  const measuredBy = namesOf(['measured', 'independent']);
+  const independentBy = namesOf(['independent']);
   return {
-    state: !open ? 'closed' : measuredBy.length > 0 ? 'first-result' : 'awaiting',
+    state: !open ? 'closed' : independentBy.length > 0 ? 'first-result' : 'awaiting',
     releaseDate,
     daysSinceRelease,
     windowEnds,
     open,
     measuredBy,
+    independentBy,
   };
 }
 
@@ -245,8 +253,16 @@ export interface ProvenanceCopy {
  * "Supplied for review" is deliberately not one of the outputs. It names
  * nobody and leaves the reader guessing whether the unit was kept, which is
  * the family of vague labels the ACCC's influencer sweep singled out.
+ *
+ * `measuredOurselves` is what the page's own claims say, because the block may
+ * not contradict them. "Nothing on this page is measured by us" printed above
+ * a figure labelled "We measured it" is the page arguing with itself, and the
+ * reader has no way to tell which half to believe.
  */
-export function provenanceCopy(unit: ReviewUnitData): ProvenanceCopy {
+export function provenanceCopy(
+  unit: ReviewUnitData,
+  measuredOurselves = false,
+): ProvenanceCopy {
   const independence =
     'No brand pays for a place here, no brand sees a piece before it runs, and nobody outside this masthead had any input into what it says.';
   if (unit.acquisition === 'retail') {
@@ -273,8 +289,9 @@ export function provenanceCopy(unit: ReviewUnitData): ProvenanceCopy {
   return {
     label: 'How we got this unit',
     lead: 'We were not sent a unit and did not buy one.',
-    detail:
-      'Nothing on this page is measured by us. Every figure below is labelled with who did measure it, or with the maker who claims it.',
+    detail: measuredOurselves
+      ? 'Where a figure below is ours it says so, and every other one is labelled with the tester who measured it, or with the maker who claims it.'
+      : 'Nothing on this page is measured by us. Every figure below is labelled with who did measure it, or with the maker who claims it.',
     independence,
     variant: 'desk',
   };

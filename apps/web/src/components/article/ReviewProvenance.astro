@@ -20,10 +20,16 @@ import type { ReviewUnitData } from '../../content/config';
  */
 export interface Props {
   unit: ReviewUnitData;
+  /**
+   * Whether the page carries a figure of our own. The block says what follows
+   * from having had no unit, and what follows is different when we measured
+   * something anyway - a page may not contradict its own claim labels.
+   */
+  measuredOurselves?: boolean;
 }
 
-const { unit } = Astro.props;
-const copy = provenanceCopy(unit);
+const { unit, measuredOurselves = false } = Astro.props;
+const copy = provenanceCopy(unit, measuredOurselves);
 ---
 
 <p class:list={['provenance', `provenance--${copy.variant}`]}>
