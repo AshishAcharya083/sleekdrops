@@ -63,9 +63,19 @@ export interface ChannelConnectionRow {
 }
 
 /**
- * The post, rendered. Written once, at enqueue, so that re-entering the
- * publish stage cannot quietly change what an item that is already waiting
- * will say.
+ * The post, as it will be sent.
+ *
+ * Enqueue writes a baseline (`renderPayload`) so that a row is never without
+ * one and the readiness gate has an `expected` to check; the per-channel
+ * renderer replaces it at post time with the copy and the image that channel
+ * actually gets, and stamps `renderedAt` on what it produced.
+ *
+ * Whichever wrote it, a payload is written once and then kept. Rendering is
+ * not idempotent - the copy call runs warm and a rights-unsafe hero buys a
+ * fresh social card every time - so an item re-rendered on a retry would say
+ * something different from the item an operator looked at, and would pay for
+ * a second image to say it with. `renderedAt` is what makes "already
+ * rendered" a question the next attempt can answer.
  */
 export interface RenderedPayload {
   /** The post body exactly as it should be sent. */
@@ -92,6 +102,12 @@ export interface RenderedPayload {
   imageUrl: string | null;
   /** Provenance of the article's hero, whether or not it may be uploaded. */
   imageSource: HeroImageSource | null;
+  /**
+   * When the per-channel renderer composed this, or absent on the baseline the
+   * publish stage enqueued. Present means "this is what we post" - nothing
+   * renders over it.
+   */
+  renderedAt?: string;
   /** What the live page must serve before this item may be handed to a provider. */
   expected: {
     ogTitle: string;

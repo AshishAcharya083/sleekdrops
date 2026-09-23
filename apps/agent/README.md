@@ -304,6 +304,12 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
   and the placement resolves to `in_body`, where the link preview carries the
   post instead. The destination URL is UTM-tagged with the placement that was
   actually used.
+- **Rendered once, then kept.** An adapter renders at post time through
+  `renderForItem`, which writes the result back onto the queue row (payload and
+  placement together) and reads it back on every later attempt. Rendering is
+  deliberately not idempotent - the copy call runs warm and a rights-unsafe
+  hero buys a fresh card - so a retry that re-rendered would say something
+  other than what an operator saw, and would buy a second image to say it with.
 
 ## State model (PostgreSQL)
 

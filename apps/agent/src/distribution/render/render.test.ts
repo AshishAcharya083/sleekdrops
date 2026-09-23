@@ -342,3 +342,52 @@ test('the fallback is the dek down to one sentence, then the title', () => {
     'The headphones for a quiet commute',
   );
 });
+
+test('a decimal inside a sentence is not read as the end of it', () => {
+  // The rung nothing downstream checks, so a price cut at its decimal point
+  // would be posted understating what the thing costs - the misreading the
+  // price-currency house block exists to keep the site out of.
+  assert.equal(
+    fallbackHeadline(
+      { title: 'unused', dek: 'The XM6 is $1,299.99 at 2.4 GHz today. Buy it now.' },
+      HEADLINE_MAX_CHARS,
+    ),
+    'The XM6 is $1,299.99 at 2.4 GHz today.',
+  );
+  assert.equal(
+    fallbackHeadline({ title: 'unused', dek: 'A dek with no terminator at all' }, HEADLINE_MAX_CHARS),
+    'A dek with no terminator at all',
+  );
+});
+
+test('a title that claims someone here used the product is no fallback either', () => {
+  // A title is guarded by prompt instruction only, and this rung posts without
+  // a further check, so it is measured like everything else on the way out.
+  assert.equal(
+    fallbackHeadline(
+      { title: 'We tested every pair on the 7:12', dek: `${HANDS_ON} ${CLEAN}` },
+      HEADLINE_MAX_CHARS,
+    ),
+    CLEAN,
+    'the next clean dek sentence carried it',
+  );
+  assert.equal(
+    fallbackHeadline({ title: 'Our testers on the 7:12', dek: HANDS_ON }, HEADLINE_MAX_CHARS),
+    '',
+    'nothing clean to say is better than a claim nobody here can make',
+  );
+});
+
+test('a caption with no clean headline still carries its fixtures', async () => {
+  const payload = await render(
+    article({
+      title: 'We tested every pair on the 7:12',
+      frontmatter: { title: 'We tested every pair on the 7:12', dek: HANDS_ON, heroImage: HERO },
+    }),
+    'facebook',
+    'first_comment',
+    deps({ writeCopy: writer(HANDS_ON) }),
+  );
+
+  assert.equal(payload.caption, `${FIRST_COMMENT_CUE}\n\n${AFFILIATE_DISCLOSURE}`);
+});

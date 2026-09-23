@@ -19,7 +19,8 @@ const { pool, q } = await import('../../db/pool.js');
 const { migrate } = await import('../../db/migrate.js');
 const { enqueuePublishedArticle } = await import('../queue.js');
 const { toDistributionItem } = await import('../types.js');
-const { render, AFFILIATE_DISCLOSURE, FIRST_COMMENT_CUE } = await import('./index.js');
+const { render, renderForItem, AFFILIATE_DISCLOSURE, FIRST_COMMENT_CUE } =
+  await import('./index.js');
 
 import type { CopyWriter } from './copy.js';
 import type { DistributableArticle, DistributionItem, DistributionQueueRow } from '../types.js';
@@ -119,11 +120,7 @@ test('a queued item renders from its own article row', { skip }, async () => {
   assert.equal(item.provider, PROVIDER);
   assert.equal(item.placement, 'first_comment', 'the configured default');
 
-  const payload = await render(article, item.provider, item.placement, {
-    writeCopy,
-    renderCard,
-    uploadCard,
-  });
+  const payload = await renderForItem(item, article, { writeCopy, renderCard, uploadCard });
 
   assert.ok(payload.caption.includes(FIRST_COMMENT_CUE), 'the row is placed in a first comment');
   assert.ok(payload.caption.includes(AFFILIATE_DISCLOSURE), 'the stored intent is a monetised one');
@@ -134,17 +131,65 @@ test('a queued item renders from its own article row', { skip }, async () => {
   );
   assert.equal(payload.placement, 'first_comment');
 
-  // What the adapter does with it: write the rendered post back onto the row.
-  await q('UPDATE distribution_queue SET payload = $2::jsonb WHERE id = $1', [
-    item.id,
-    JSON.stringify(payload),
-  ]);
   const [stored] = await q<DistributionQueueRow>(
     'SELECT * FROM distribution_queue WHERE id = $1',
     [item.id],
   );
   assert.deepEqual(stored.payload, payload, 'the payload survives the JSONB round trip');
   assert.equal(stored.payload.placement, 'first_comment');
+});
+
+test('what the first attempt composed is what every later one posts', { skip }, async () => {
+  const connection = await connect(PROVIDER);
+  const article = await publishedArticle({ heroSource: 'found', intent: 'Transactional' });
+
+  await enqueuePublishedArticle(article, { d1Status: 'published' });
+  const item = await queuedItem(article.slug!, connection);
+
+  // Both calls a render pays for, counted: the copy completion runs warm and
+  // the card branch buys an image, so a second render would be different words
+  // on a second invoice.
+  const paid = { copy: 0, cards: 0 };
+  const counted = {
+    writeCopy: (async (request, complaint) => {
+      paid.copy += 1;
+      return writeCopy(request, complaint);
+    }) as CopyWriter,
+    renderCard: async () => {
+      paid.cards += 1;
+      return renderCard();
+    },
+    uploadCard,
+  };
+
+  const first = await renderForItem(item, article, counted);
+  const retry = await renderForItem(await queuedItem(article.slug!, connection), article, counted);
+
+  assert.ok(first.renderedAt, 'the renderer stamps what it produced');
+  assert.deepEqual(retry, first, 'the retry sends the post an operator already saw');
+  assert.deepEqual(paid, { copy: 1, cards: 1 }, 'and pays for neither of them twice');
+});
+
+test('a placement the renderer had to move moves on the row too', { skip }, async () => {
+  const connection = await connect(PROVIDER);
+  const article = await publishedArticle({ heroSource: 'found', intent: 'Informational' });
+
+  await enqueuePublishedArticle(article, { d1Status: 'published' });
+  const item = await queuedItem(article.slug!, connection);
+  assert.equal(item.placement, 'first_comment');
+
+  const payload = await renderForItem(item, article, {
+    writeCopy,
+    renderCard: async () => {
+      throw new Error('image model returned no image data');
+    },
+    uploadCard,
+  });
+
+  assert.equal(payload.placement, 'in_body', 'no image it may upload, so the preview carries it');
+  const stored = await queuedItem(article.slug!, connection);
+  assert.equal(stored.placement, 'in_body', 'the column the panel and the worker log read');
+  assert.equal(stored.payload.caption, payload.caption);
 });
 
 test('an unmonetised article on a found hero renders neither', { skip }, async () => {

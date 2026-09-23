@@ -151,22 +151,42 @@ export function clamp(text: string, limit: number): string {
 }
 
 /**
+ * `text` cut into sentences at a terminator the text really ends a sentence
+ * with: one followed by whitespace or by the end of the line.
+ *
+ * A bare '.' is not enough. A price ("$1,299.99"), a spec ("2.4 GHz") or an
+ * abbreviation would end the sentence inside the number, and on this rung the
+ * result is posted with nothing downstream to catch it - a headline cut to
+ * "$1,299" understates the price, which is the misrepresentation the
+ * price-currency house block exists to keep the site out of. Text with no
+ * terminator of that kind is one sentence: the whole of it.
+ */
+function sentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])(?=\s)/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence !== '');
+}
+
+/**
  * The headline when the model cannot produce one the scan will pass.
  *
  * Derived from the dek rather than written, and derived the same way every
  * time: the dek is the one line of the article already written to be read on
  * its own, and it has been through the editor and the same scan. Falling back
  * to the title is the second choice because a title is built for the SERP.
+ *
+ * Every candidate is measured, the title included. The rule that nothing we
+ * post claims a person used the product is absolute, this rung is the one
+ * nothing downstream checks, and a title is guarded by prompt instruction
+ * alone - so a title that claims it loses to the dek's next clean sentence,
+ * and a source with no clean sentence in it contributes no headline at all.
  */
 export function fallbackHeadline(source: { title: string; dek: string }, budget: number): string {
-  const dek = normaliseCopy(source.dek);
-  const sentence = /^[^.!?]+[.!?]?/.exec(dek)?.[0]?.trim() ?? '';
-  const title = normaliseCopy(source.title);
-  // The dek has been through the editor, but the rule that nothing we post
-  // claims a person used the product is absolute, and this rung is the one
-  // nothing downstream checks. A dek that breaks it loses to the title.
-  const chosen = sentence !== '' && !authorshipClaim(sentence) ? sentence : title;
-  return clamp(chosen, budget);
+  const dek = sentences(normaliseCopy(source.dek));
+  const candidates = [dek[0] ?? '', normaliseCopy(source.title), ...dek.slice(1)];
+  const chosen = candidates.find((candidate) => candidate !== '' && !authorshipClaim(candidate));
+  return clamp(chosen ?? '', budget);
 }
 
 export interface HeadlineResult {

@@ -12,7 +12,7 @@
 // A provider therefore reads the payload and sends it. It never writes copy.
 import { createLogger } from '../../lib/log.js';
 import { MONETISED_INTENTS } from '../../content/contract.js';
-import { expectedOpenGraph, taggedUrl } from '../queue.js';
+import { expectedOpenGraph, storeRenderedPayload, taggedUrl } from '../queue.js';
 import { channelSpec, placementFor, type ChannelSpec } from './channels.js';
 import {
   AFFILIATE_DISCLOSURE,
@@ -24,7 +24,12 @@ import {
   type CopyWriter,
 } from './copy.js';
 import { resolveImage, type ImageDeps } from './image.js';
-import type { DistributableArticle, LinkPlacement, RenderedPayload } from '../types.js';
+import type {
+  DistributableArticle,
+  DistributionItem,
+  LinkPlacement,
+  RenderedPayload,
+} from '../types.js';
 
 export { channelSpec, CHANNEL_SPECS, type ChannelSpec } from './channels.js';
 export {
@@ -63,6 +68,10 @@ export function needsDisclosure(article: DistributableArticle): boolean {
  * The order of work matters: the image is resolved first because it can take
  * the first-comment placement away, the placement then decides the cue and the
  * UTM tag, and only then is there a budget to write a headline against.
+ *
+ * One call is one model completion and, where the hero is not ours, one image.
+ * An adapter posting a queued item calls `renderForItem` instead, which pays
+ * for this once and keeps the result.
  */
 export async function render(
   article: DistributableArticle,
@@ -110,6 +119,30 @@ export async function render(
     commentText: url,
     imageUrl: image.imageUrl,
     imageSource: image.imageSource,
+    renderedAt: new Date().toISOString(),
     expected: expectedOpenGraph(article),
   };
+}
+
+/**
+ * The payload for one queued item: rendered on the first attempt, read back on
+ * every one after it.
+ *
+ * `render` is deliberately not idempotent - the copy call runs warm so a
+ * regeneration is a different sentence rather than the same dice, and a hero
+ * we may not upload buys a fresh social card - so an adapter that called it
+ * per attempt would change what a waiting item says between a failure and its
+ * retry, and pay for another image each time round. The first result is
+ * written back onto the row (payload and placement together), and that is what
+ * ships.
+ */
+export async function renderForItem(
+  item: DistributionItem,
+  article: DistributableArticle,
+  deps: RenderDeps = {},
+): Promise<RenderedPayload> {
+  if (item.payload?.renderedAt) return item.payload;
+  const payload = await render(article, item.provider, item.placement, deps);
+  await storeRenderedPayload(item.id, payload);
+  return payload;
 }
