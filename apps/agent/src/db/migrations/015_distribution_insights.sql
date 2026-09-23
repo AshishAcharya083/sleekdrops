@@ -34,4 +34,4 @@ COMMENT ON COLUMN distribution_queue.insights_next_at IS
 COMMENT ON COLUMN distribution_queue.insights_done IS
   'The collection schedule for this post is spent - the last checkpoint has been read, or the window closed with the network still refusing. Nothing polls it again.';
 COMMENT ON COLUMN distribution_queue.insights_flag IS
-  'What the latest reading concluded about this post, or NULL for nothing to report. Recomputed from each reading rather than latched, so a first-comment link that starts earning clicks clears its own flag.';
+  'What this post''s counters concluded, or NULL for nothing to report. Recomputed from every counter the network has reported (they are lifetime totals) rather than latched, so a first-comment link that starts earning clicks clears its own flag - and a reading that reported nothing leaves the flag as it stands, because NULL is not zero.';

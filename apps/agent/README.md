@@ -362,12 +362,17 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
   clicks sets `distribution_queue.insights_flag`. That is the signature of the
   one failure the API cannot report - a comment link the network rendered as
   unclickable plain text, where the comment posts fine and returns an id and the
-  only symptom is referrals that never arrive. The flag is recomputed from every
-  reading rather than latched, so a post whose clicks arrive late clears it. Only
-  `first_comment` can carry it, and a counter the network did not report is not
-  evidence of anything. Note the click side of the corroborating first-party
-  analytics is consent-gated (`apps/web/src/lib/analytics.ts`), so referral
-  counts are a floor, not a total.
+  only symptom is referrals that never arrive. The flag is recomputed rather
+  than latched, so a post whose clicks arrive late clears it - but from every
+  counter the network has reported, not from the last reading alone. The
+  counters are lifetime totals, so each is read at the highest it has reached,
+  and a reading the network answered with nothing (stored as NULL, which is not
+  zero) neither raises a flag nor withdraws one. That is also how the placement
+  comparison adds a post up, so one empty response cannot drop a post's real
+  impressions and clicks out of its placement. Only `first_comment` can carry
+  the flag. Note the click side of the corroborating first-party analytics is
+  consent-gated (`apps/web/src/lib/analytics.ts`), so referral counts are a
+  floor, not a total.
 
 ## State model (PostgreSQL)
 

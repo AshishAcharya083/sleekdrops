@@ -10,7 +10,7 @@
 // accumulating against clicks that never arrive - which is a thing this job
 // can see and the posting worker cannot.
 //
-// Three properties it is shaped by:
+// Four properties it is shaped by:
 //
 //   * A post's counters move fastest in the hours after it lands and barely at
 //     all after a week, so the cadence widens (INSIGHT_CHECKPOINT_SECONDS) and
@@ -18,6 +18,11 @@
 //   * Placement is read off the queue row, never copied onto the reading. The
 //     row is where a placement resolved at render time is recorded, so the
 //     join is the only version of the truth that stays correct.
+//   * The counters are lifetime totals, and a reading the network answered
+//     with nothing is stored as the NULLs it came back as. So both the flag
+//     and the placement comparison are judged on the highest each counter has
+//     reached rather than on the latest row: one empty or partial /insights
+//     response cannot erase a post's numbers or withdraw a conclusion.
 //   * It must not be able to block posting. It is its own interval with its
 //     own tick, and a fetch that throws is logged, left off the queue row's
 //     `last_error` (that column is the panel's account of the *post*), and
@@ -34,9 +39,11 @@ import { getProvider, registeredProviders } from './providers.js';
 import { recordMetrics } from './queue.js';
 import {
   toDistributionItem,
+  UNCLICKABLE_COMMENT_LINK,
   type DistributionItem,
   type DistributionQueueRow,
   type InsightSnapshot,
+  type InsightsFlag,
   type LinkPlacement,
   type SocialProvider,
 } from './types.js';
@@ -95,10 +102,7 @@ export const UNCLICKABLE_MIN_IMPRESSIONS = 200;
  */
 export const UNCLICKABLE_CLICK_RATE = 0.002;
 
-/** What `insights_flag` carries when that is what the numbers show. */
-export const UNCLICKABLE_COMMENT_LINK = 'first_comment_link_may_not_be_clickable';
-
-/** The two columns the flag is decided from, joined from the queue row. */
+/** What the flag is decided from: the counters, and the placement they belong to. */
 export interface PlacementReading {
   placement: LinkPlacement;
   impressions: number | null;
@@ -106,19 +110,27 @@ export interface PlacementReading {
 }
 
 /**
- * What the latest reading concludes, or null for nothing to report.
+ * What this post's counters conclude, or null for nothing to report.
  *
- * Pure, and recomputed from every reading rather than latched: a post whose
- * clicks arrive late clears its own flag on the next checkpoint. Only
- * first_comment can be flagged - an in_body post carries its link in the
- * caption, where there is no rendering failure of this kind to detect - and a
- * counter the network did not report (null) is not evidence of anything.
+ * Pure, and judged on everything the network has reported so far rather than
+ * on one reading in isolation (see `reportedCounters`): a post whose clicks
+ * arrive late clears its own flag at the next checkpoint. Only first_comment
+ * can be flagged - an in_body post carries its link in the caption, where
+ * there is no rendering failure of this kind to detect.
+ *
+ * A counter the network did not report (null) is not evidence of anything, and
+ * neither is a post too quiet to judge, so both leave `current` - what an
+ * earlier reading concluded - standing. Nothing but evidence clears a flag;
+ * silence from the network is not "clicks are arriving".
  */
-export function insightsFlag(reading: PlacementReading): string | null {
+export function insightsFlag(
+  reading: PlacementReading,
+  current: InsightsFlag | null = null,
+): InsightsFlag | null {
   if (reading.placement !== 'first_comment') return null;
   const { impressions, clicks } = reading;
-  if (impressions === null || clicks === null) return null;
-  if (impressions < UNCLICKABLE_MIN_IMPRESSIONS) return null;
+  if (impressions === null || clicks === null) return current;
+  if (impressions < UNCLICKABLE_MIN_IMPRESSIONS) return current;
   return clicks / impressions < UNCLICKABLE_CLICK_RATE ? UNCLICKABLE_COMMENT_LINK : null;
 }
 
@@ -194,13 +206,38 @@ export async function claimDueInsights(
  * is what stops the claim, because a null clock on its own reads as "never
  * scheduled" and would put the post straight back in the queue.
  */
-async function scheduleNextPoll(id: string, at: Date | null, flag: string | null): Promise<void> {
+async function scheduleNextPoll(
+  id: string,
+  at: Date | null,
+  flag: InsightsFlag | null,
+): Promise<void> {
   await q(
     `UPDATE distribution_queue
      SET insights_next_at = $2, insights_done = ($2::timestamptz IS NULL), insights_flag = $3
      WHERE id = $1`,
     [id, at, flag],
   );
+}
+
+/**
+ * Everything the network has reported for this post, as one set of counters.
+ *
+ * The counters are lifetime totals, so the highest value each has reached is
+ * the current one - and taking that per counter rather than per reading is
+ * what keeps a response that reported nothing (an empty or partial /insights
+ * answer, stored as the NULLs it was) from losing what an earlier reading
+ * reported. NULL here means no reading has ever carried that counter.
+ */
+async function reportedCounters(
+  queueItemId: string,
+): Promise<{ impressions: number | null; clicks: number | null }> {
+  const [row] = await q<{ impressions: number | null; clicks: number | null }>(
+    `SELECT max(impressions) AS impressions, max(clicks) AS clicks
+     FROM distribution_metrics
+     WHERE queue_item_id = $1`,
+    [queueItemId],
+  );
+  return row ?? { impressions: null, clicks: null };
 }
 
 /** What one item's reading did. */
@@ -275,11 +312,11 @@ export async function collectItemInsights(
   }
 
   await recordMetrics(item.id, snapshot);
-  const flag = insightsFlag({
-    placement: item.placement,
-    impressions: snapshot.impressions,
-    clicks: snapshot.clicks,
-  });
+  // Judged on every counter the network has ever reported for this post, not
+  // on the snapshot alone: a /insights response that came back empty or partial
+  // must not read as "this post has no clicks".
+  const counters = await reportedCounters(item.id);
+  const flag = insightsFlag({ placement: item.placement, ...counters }, item.insightsFlag);
   await scheduleNextPoll(item.id, nextInsightsPollAt(postedAt, now()), flag);
 
   log.info('post insights recorded', {
@@ -356,12 +393,17 @@ export function startInsightsCollector(): void {
 
 /** How one placement is doing, across every post that used it. */
 export interface PlacementPerformance {
-  placement: string;
+  placement: LinkPlacement;
+  /**
+   * Posts this placement has numbers for. One the network has never reported a
+   * counter for is not among them: it is not evidence either way, and counting
+   * it would drag the placement's apparent click rate towards zero.
+   */
   posts: number;
   impressions: number;
   clicks: number;
   reactions: number;
-  /** Posts whose latest reading looks like a link nobody could click. */
+  /** Posts whose counters look like a link nobody could click. */
   flagged: number;
 }
 
@@ -369,27 +411,34 @@ export interface PlacementPerformance {
  * The comparison this whole job exists to make possible: what each placement
  * actually earned.
  *
- * The latest reading per item, not the sum of its readings - a network reports
+ * One contribution per post, not the sum of its readings - a network reports
  * lifetime counters, so adding two checkpoints of the same post would count it
- * twice. Placement is joined from the queue row, which is where a placement
+ * twice. That contribution is the highest each counter has reached, taken per
+ * counter rather than per reading, because a response that reported nothing is
+ * stored as the NULLs it was: reading the latest row alone would let one empty
+ * answer erase a post's real impressions and clicks while still counting the
+ * post. Placement is joined from the queue row, which is where a placement
  * resolved at render time was recorded.
  */
 export async function placementPerformance(): Promise<PlacementPerformance[]> {
   return q<PlacementPerformance>(
     `SELECT item.placement,
             count(*)::int AS posts,
-            COALESCE(sum(latest.impressions), 0)::int AS impressions,
-            COALESCE(sum(latest.clicks), 0)::int AS clicks,
-            COALESCE(sum(latest.reactions), 0)::int AS reactions,
+            COALESCE(sum(reported.impressions), 0)::int AS impressions,
+            COALESCE(sum(reported.clicks), 0)::int AS clicks,
+            COALESCE(sum(reported.reactions), 0)::int AS reactions,
             count(*) FILTER (WHERE item.insights_flag IS NOT NULL)::int AS flagged
      FROM distribution_queue item
      JOIN LATERAL (
-       SELECT m.impressions, m.clicks, m.reactions
+       SELECT max(m.impressions) AS impressions,
+              max(m.clicks) AS clicks,
+              max(m.reactions) AS reactions
        FROM distribution_metrics m
        WHERE m.queue_item_id = item.id
-       ORDER BY m.fetched_at DESC
-       LIMIT 1
-     ) latest ON true
+     ) reported
+       ON reported.impressions IS NOT NULL
+       OR reported.clicks IS NOT NULL
+       OR reported.reactions IS NOT NULL
      GROUP BY item.placement
      ORDER BY item.placement`,
   );

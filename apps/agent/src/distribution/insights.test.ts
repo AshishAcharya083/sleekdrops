@@ -12,12 +12,12 @@ const {
   INSIGHT_RETRY_SECONDS,
   INSIGHT_WINDOW_SECONDS,
   UNCLICKABLE_CLICK_RATE,
-  UNCLICKABLE_COMMENT_LINK,
   UNCLICKABLE_MIN_IMPRESSIONS,
   insightsFlag,
   nextInsightsPollAt,
   retryInsightsPollAt,
 } = await import('./insights.js');
+const { UNCLICKABLE_COMMENT_LINK } = await import('./types.js');
 
 const POSTED_AT = new Date('2026-09-01T12:00:00.000Z');
 
@@ -125,4 +125,27 @@ test('only a first-comment placement can carry this flag', () => {
 test('a counter the network did not report proves nothing either way', () => {
   assert.equal(insightsFlag({ placement: 'first_comment', impressions: 4_000, clicks: null }), null);
   assert.equal(insightsFlag({ placement: 'first_comment', impressions: null, clicks: 0 }), null);
+});
+
+test('a reading with no evidence in it leaves an earlier conclusion standing', () => {
+  // An empty or partial /insights response stores NULLs, which say nothing
+  // about clicks. Reading that as "clicks are arriving" would clear a flag the
+  // numbers never withdrew.
+  const partial = { placement: 'first_comment', impressions: 4_000, clicks: null } as const;
+  assert.equal(insightsFlag(partial, UNCLICKABLE_COMMENT_LINK), UNCLICKABLE_COMMENT_LINK);
+  const blank = { placement: 'first_comment', impressions: null, clicks: null } as const;
+  assert.equal(insightsFlag(blank, UNCLICKABLE_COMMENT_LINK), UNCLICKABLE_COMMENT_LINK);
+  // And a post too quiet to judge is not a withdrawal either.
+  assert.equal(
+    insightsFlag(
+      { placement: 'first_comment', impressions: UNCLICKABLE_MIN_IMPRESSIONS - 1, clicks: 0 },
+      UNCLICKABLE_COMMENT_LINK,
+    ),
+    UNCLICKABLE_COMMENT_LINK,
+  );
+});
+
+test('clicks that arrive clear a flag an earlier reading raised', () => {
+  const earning = { placement: 'first_comment', impressions: 4_000, clicks: 140 } as const;
+  assert.equal(insightsFlag(earning, UNCLICKABLE_COMMENT_LINK), null);
 });

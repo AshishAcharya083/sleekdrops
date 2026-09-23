@@ -18,7 +18,6 @@ const {
   INSIGHT_CHECKPOINT_SECONDS,
   INSIGHT_RETRY_SECONDS,
   INSIGHT_WINDOW_SECONDS,
-  UNCLICKABLE_COMMENT_LINK,
   claimDueInsights,
   collectItemInsights,
   insightsTick,
@@ -26,7 +25,13 @@ const {
 } = await import('./insights.js');
 const { createApp } = await import('../api/server.js');
 
-import type { InsightSnapshot, LinkPlacement, SocialProvider } from './types.js';
+import type { PlacementPerformance } from './insights.js';
+import {
+  UNCLICKABLE_COMMENT_LINK,
+  type InsightSnapshot,
+  type LinkPlacement,
+  type SocialProvider,
+} from './types.js';
 
 const reachable = await pool
   .query('SELECT 1')
@@ -150,7 +155,44 @@ async function state(id: string): Promise<QueueState> {
 async function metrics(
   id: string,
 ): Promise<Array<{ impressions: number | null; clicks: number | null; reactions: number | null }>> {
-  return q('SELECT impressions, clicks, reactions FROM distribution_metrics WHERE queue_item_id = $1 ORDER BY fetched_at', [id]);
+  return q(
+    `SELECT impressions, clicks, reactions
+     FROM distribution_metrics
+     WHERE queue_item_id = $1
+     ORDER BY fetched_at`,
+    [id],
+  );
+}
+
+/** The placement comparison keyed by placement, which is how it is asserted on. */
+function placementsByName(rows: PlacementPerformance[]): Map<LinkPlacement, PlacementPerformance> {
+  return new Map(rows.map((row) => [row.placement, row]));
+}
+
+interface PlacementCounts {
+  posts: number;
+  impressions: number;
+  clicks: number;
+  reactions: number;
+}
+
+/**
+ * What one placement gained between two reads of the comparison. Deltas rather
+ * than totals: the table holds every post the rest of this file made too.
+ */
+function delta(
+  before: Map<LinkPlacement, PlacementPerformance>,
+  after: Map<LinkPlacement, PlacementPerformance>,
+  placement: LinkPlacement,
+): PlacementCounts {
+  const gained = (counter: keyof PlacementCounts): number =>
+    (after.get(placement)?.[counter] ?? 0) - (before.get(placement)?.[counter] ?? 0);
+  return {
+    posts: gained('posts'),
+    impressions: gained('impressions'),
+    clicks: gained('clicks'),
+    reactions: gained('reactions'),
+  };
 }
 
 /** Seconds from now until `at`, which is how every schedule assertion reads. */
@@ -335,9 +377,35 @@ test('a later reading that shows clicks clears the flag', { skip }, async () => 
   assert.equal((await state(id)).insights_flag, null, 'the flag is a reading, not a verdict');
 });
 
+test('a reading the network answered with nothing leaves the flag standing', { skip }, async () => {
+  // Graph answers a post it has no data for with an empty `data` array, which
+  // the adapter reports as NULL counters - not as zero. Reading that as
+  // "clicks are arriving" would withdraw a conclusion the numbers never did.
+  let snapshot = reading(4_000, 0, 31);
+  const provider = stub(async () => snapshot);
+  const id = await posted({
+    provider,
+    placement: 'first_comment',
+    postedSecondsAgo: INSIGHT_CHECKPOINT_SECONDS[0] + 60,
+  });
+
+  assert.deepEqual(await insightsTick({ availableProviders: () => [provider] }), ['flagged']);
+
+  snapshot = reading(null, null, null);
+  await q('UPDATE distribution_queue SET insights_next_at = now() WHERE id = $1', [id]);
+
+  assert.deepEqual(await insightsTick({ availableProviders: () => [provider] }), ['flagged']);
+  assert.equal((await state(id)).insights_flag, UNCLICKABLE_COMMENT_LINK);
+  assert.deepEqual(await metrics(id), [
+    { impressions: 4_000, clicks: 0, reactions: 31 },
+    // Stored as it came back: the provider reported nothing, which is not zero.
+    { impressions: null, clicks: null, reactions: null },
+  ]);
+});
+
 // ── The join ───────────────────────────────────────────────────────────────
 
-test('placement is joined from the queue row, on the latest reading only', { skip }, async () => {
+test('placement is joined from the queue row, and a post counts once', { skip }, async () => {
   const provider = stub(async () => reading(1_000, 50, 10));
   const comment = await posted({
     provider,
@@ -350,7 +418,7 @@ test('placement is joined from the queue row, on the latest reading only', { ski
     postedSecondsAgo: INSIGHT_CHECKPOINT_SECONDS[0] + 60,
   });
 
-  const before = new Map((await placementPerformance()).map((row) => [row.placement, row]));
+  const before = placementsByName(await placementPerformance());
   await insightsTick({ availableProviders: () => [provider] });
   // A second reading of the same two posts: lifetime counters, so the totals
   // must not double.
@@ -358,23 +426,59 @@ test('placement is joined from the queue row, on the latest reading only', { ski
     [comment, body],
   ]);
   await insightsTick({ availableProviders: () => [provider] });
-  const now = new Map((await placementPerformance()).map((row) => [row.placement, row]));
+  const now = placementsByName(await placementPerformance());
 
   assert.equal((await metrics(comment)).length, 2, 'both readings are kept');
-  for (const placement of ['first_comment', 'in_body']) {
-    const delta = {
-      posts: (now.get(placement)?.posts ?? 0) - (before.get(placement)?.posts ?? 0),
-      impressions:
-        (now.get(placement)?.impressions ?? 0) - (before.get(placement)?.impressions ?? 0),
-      clicks: (now.get(placement)?.clicks ?? 0) - (before.get(placement)?.clicks ?? 0),
-      reactions: (now.get(placement)?.reactions ?? 0) - (before.get(placement)?.reactions ?? 0),
-    };
+  for (const placement of ['first_comment', 'in_body'] as const) {
     assert.deepEqual(
-      delta,
+      delta(before, now, placement),
       { posts: 1, impressions: 1_000, clicks: 50, reactions: 10 },
       `${placement} counts its one post once`,
     );
   }
+});
+
+test('a reading that reports nothing does not lose what a post earned', { skip }, async () => {
+  let snapshot = reading(1_000, 50, 10);
+  const provider = stub(async () => snapshot);
+  const id = await posted({
+    provider,
+    placement: 'in_body',
+    postedSecondsAgo: INSIGHT_CHECKPOINT_SECONDS[0] + 60,
+  });
+
+  const before = placementsByName(await placementPerformance());
+  await insightsTick({ availableProviders: () => [provider] });
+
+  snapshot = reading(null, null, null);
+  await q('UPDATE distribution_queue SET insights_next_at = now() WHERE id = $1', [id]);
+  await insightsTick({ availableProviders: () => [provider] });
+
+  assert.equal((await metrics(id)).length, 2);
+  assert.deepEqual(
+    delta(before, placementsByName(await placementPerformance()), 'in_body'),
+    { posts: 1, impressions: 1_000, clicks: 50, reactions: 10 },
+    'a later empty reading does not take the post out of its placement total',
+  );
+});
+
+test('a post with no reported numbers is not counted in the comparison', { skip }, async () => {
+  const provider = stub(async () => reading(null, null, null));
+  const id = await posted({
+    provider,
+    placement: 'in_body',
+    postedSecondsAgo: INSIGHT_CHECKPOINT_SECONDS[0] + 60,
+  });
+
+  const before = placementsByName(await placementPerformance());
+  await insightsTick({ availableProviders: () => [provider] });
+
+  assert.deepEqual(await metrics(id), [{ impressions: null, clicks: null, reactions: null }]);
+  assert.deepEqual(
+    delta(before, placementsByName(await placementPerformance()), 'in_body'),
+    { posts: 0, impressions: 0, clicks: 0, reactions: 0 },
+    'a post with no numbers is no evidence either way, so it is not in the comparison',
+  );
 });
 
 // ── What the admin panel actually reads ────────────────────────────────────
