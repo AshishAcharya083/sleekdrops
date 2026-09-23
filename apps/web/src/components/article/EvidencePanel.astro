@@ -1,0 +1,379 @@
+---
+import {
+  claimRowId,
+  EVIDENCE_PANEL_ID,
+  evidenceState,
+  shownOfLabel,
+  sourceRowId,
+  toClaimEntries,
+} from '@lib/evidence';
+import { citationRel, displayUrl, formatSourceDate, TIER_LABELS, TIER_ORDER } from '@lib/sources';
+import type { ClaimData, SourceData, SourceTier } from '../../content/config';
+
+/**
+ * EvidencePanel - the full trail behind a page's numbers, grouped by what kind
+ * of evidence each source is.
+ *
+ * The Sources block at the foot lists what we read. This says what was
+ * measured: which source produced which figure, under what protocol, on what
+ * date - and, where a tester has corrected itself, both the withdrawn figure
+ * and the one that replaced it. A correction the reader cannot see is
+ * indistinguishable from a number we quietly changed.
+ *
+ * The counts in the headers are the counts on screen. A header reading "9
+ * sources" over one visible row is a small lie that costs the whole surface
+ * its point, so every count here is derived from the rows actually rendered.
+ *
+ * A post carrying no measurements renders nothing at all: that is not weak
+ * evidence, it is a post written before any of this was recorded, and an empty
+ * panel would imply something is missing.
+ *
+ * Every row carries a stable id, so one figure's evidence can be linked to and
+ * shared on its own rather than only as "somewhere in this panel", and repeats
+ * the outbound link beside the protocol and the date - the panel is where a
+ * reader arrives from a figure's "How we checked", and arriving at a row with
+ * no way out to the source would strand them.
+ */
+export interface Props {
+  sources?: SourceData[];
+  claims?: ClaimData[];
+}
+
+const { sources = [], claims = [] } = Astro.props;
+const entries = toClaimEntries(claims);
+const state = evidenceState(entries, sources);
+
+/** How each source tier is drawn, and what it means to a reader. */
+const TIER_MEANING: Record<SourceTier, string> = {
+  expert: 'Published a protocol beside the number, so the figure can be checked.',
+  primary: 'The maker or the retailer. Specifications, not measurements.',
+  owner: 'People who bought one and said what happened.',
+  aggregator: 'Restates or averages other people’s numbers. Context, not a measurement.',
+  unknown: 'We could not confirm who publishes this page.',
+};
+
+// Each row keeps the position its figure has in the article's own list, so a
+// row's id is the id the figure above links to and stays put when the panel
+// regroups the rows by tier.
+const numbered = sources.map((source, position) => ({ source, id: sourceRowId(position) }));
+const measuredByUs = entries
+  .map((entry, position) => ({ entry, id: claimRowId(position) }))
+  .filter(({ entry }) => entry.tier === 'measured');
+const groups = TIER_ORDER.map((tier) => {
+  const rows = numbered.filter(({ source }) => source.tier === tier);
+  const corrected = rows.filter(({ source }) => source.withdrawn).length;
+  return {
+    tier,
+    label: TIER_LABELS[tier],
+    meaning: TIER_MEANING[tier],
+    rows,
+    corrected,
+    // What the note under a corrected group can honestly say stands: the rows
+    // beside the corrected ones, counted rather than inferred from the group.
+    unaffected: rows.length - corrected,
+  };
+}).filter((group) => group.rows.length > 0);
+// Untiered rows are still rows a reader can open. They are listed under their
+// own heading rather than dropped, because a source list that hides its weak
+// entries has stopped being one.
+const untiered = numbered.filter(({ source }) => !source.tier);
+const shown = groups.reduce((total, group) => total + group.rows.length, 0) + untiered.length;
+const measuredRows = sources.filter((source) => source.measured).length;
+// Counted, not assumed to be one: a header that says "one correction" over two
+// struck figures is the same small lie as a count that does not match the rows.
+const correctedRows = sources.filter((source) => source.withdrawn).length;
+// Never blank: a row with no attribution is not evidence, so the address
+// stands in the way it does in the sources block at the foot of the page.
+const publisherOf = (source: SourceData): string => source.publisher?.trim() || displayUrl(source.url).split('/')[0];
+---
+
+{state !== 'legacy' && (
+  <section class="evidence-panel" aria-labelledby={EVIDENCE_PANEL_ID}>
+    <div class="ep-head">
+      <div>
+        <h2 id={EVIDENCE_PANEL_ID}>The evidence trail</h2>
+        <p class="ep-sub">
+          {shownOfLabel(shown, sources.length)}
+          {measuredRows > 0 && ` · ${measuredRows} carrying a measured figure`}
+          {correctedRows > 0 &&
+            ` · ${correctedRows === 1 ? 'one correction' : `${correctedRows} corrections`} shown in full`}
+        </p>
+      </div>
+      <ul class="tier-legend">
+        {measuredByUs.length > 0 && (
+          <li class="tier-legend-row">
+            <span class="legend-rule legend-rule--measured" aria-hidden="true"></span>
+            <span class="legend-name">We measured it</span>
+          </li>
+        )}
+        {groups.map((group) => (
+          <li class="tier-legend-row">
+            <span class:list={['legend-rule', `legend-rule--${group.tier}`]} aria-hidden="true"></span>
+            <span class="legend-name">{group.label}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+
+    {state === 'no-independent-test' && (
+      <p class="ep-state">
+        Nobody independent has measured this yet. Every figure on this page is
+        either the maker's, and labelled as the maker's, or context about a
+        brand rather than a measurement of this model.
+      </p>
+    )}
+
+    {measuredByUs.length > 0 && (
+      <div class="ep-group ep-group--measured">
+        <div class="ep-group-head">
+          <h3>We measured it</h3>
+          <span class="ep-count">{measuredByUs.length} shown here</span>
+        </div>
+        <ul class="ep-rows">
+          {measuredByUs.map(({ entry, id }) => (
+            <li class="ep-row" id={id}>
+              <div class="ep-row-top">
+                <span class="ep-publisher">SleekDrops</span>
+                {entry.dateLabel && <span class="ep-date">{entry.dateLabel}</span>}
+              </div>
+              <p class="ep-measure ep-measure--current">
+                <span class="ep-metric">{entry.metric}</span>
+                <span class="ep-value">{entry.value}</span>
+              </p>
+              {entry.conditions && <p class="ep-protocol">{entry.conditions}</p>}
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
+
+    {groups.map((group) => (
+      <div class:list={['ep-group', `ep-group--${group.tier}`]}>
+        <div class="ep-group-head">
+          <h3>{group.label}</h3>
+          <span class="ep-count">{group.rows.length} shown here</span>
+        </div>
+        <p class="ep-meaning">{group.meaning}</p>
+        <ul class="ep-rows">
+          {group.rows.map(({ source, id }) => (
+            <li class="ep-row" id={id}>
+              <div class="ep-row-top">
+                <span class="ep-publisher">{publisherOf(source)}</span>
+                <span class="ep-date">{formatSourceDate(source.date) ?? 'No date shown'}</span>
+              </div>
+              {source.withdrawn && (
+                <p class="ep-measure ep-measure--withdrawn">
+                  <span class="ep-metric">{source.metric ?? 'Earlier figure'}</span>
+                  <s class="ep-value">{source.withdrawn}</s>
+                  <span class="ep-withdrawn-tag">withdrawn</span>
+                </p>
+              )}
+              {source.measured && (
+                <p class="ep-measure ep-measure--current">
+                  <span class="ep-metric">{source.metric ?? 'Measured'}</span>
+                  <span class="ep-value">{source.measured}</span>
+                  {source.withdrawn && <span class="ep-current-tag">corrected</span>}
+                </p>
+              )}
+              {source.conditions && <p class="ep-protocol">{source.conditions}</p>}
+              <a class="ep-link" href={source.url} target="_blank" rel={citationRel(source.url)}>
+                {displayUrl(source.url)}
+              </a>
+            </li>
+          ))}
+        </ul>
+        {group.corrected > 0 && group.unaffected > 0 && (
+          <p class="ep-note">
+            The other {group.unaffected}
+            {group.unaffected === 1 ? ' row' : ' rows'} in this group
+            {group.unaffected === 1 ? ' is' : ' are'} unaffected -
+            {group.corrected === 1
+              ? ' one tester revised one figure, and the rest stand as published.'
+              : ' each correction is one tester revising one of its own figures.'}
+          </p>
+        )}
+      </div>
+    ))}
+
+    {untiered.length > 0 && (
+      <div class="ep-group ep-group--unknown">
+        <div class="ep-group-head">
+          <h3>Not placed</h3>
+          <span class="ep-count">{untiered.length} shown here</span>
+        </div>
+        <p class="ep-meaning">
+          Read and listed, but we could not place what kind of source it is.
+          Nothing on this page rests on one of these alone.
+        </p>
+        <ul class="ep-rows">
+          {untiered.map(({ source, id }) => (
+            <li class="ep-row" id={id}>
+              <div class="ep-row-top">
+                <span class="ep-publisher">{publisherOf(source)}</span>
+                <span class="ep-date">{formatSourceDate(source.date) ?? 'No date shown'}</span>
+              </div>
+              <a class="ep-link" href={source.url} target="_blank" rel={citationRel(source.url)}>
+                {displayUrl(source.url)}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
+  </section>
+)}
+
+<style>
+  .evidence-panel {
+    margin-top: 48px;
+    padding: 24px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-xl);
+    background: var(--surface);
+  }
+  .ep-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .ep-head h2 {
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 1.2;
+    font-weight: 400;
+    margin: 0;
+    scroll-margin-top: 100px;
+  }
+  .ep-sub {
+    margin: 6px 0 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .tier-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .tier-legend-row { display: flex; align-items: center; gap: 10px; }
+  /* Flat, not `.tier-legend-row .legend-rule`. Astro scopes a style block by
+     appending its `[data-astro-cid-…]` attribute to every compound selector,
+     so a descendant base rule collects two of them and out-specifies its own
+     single-element modifiers - which is what left every swatch drawn in the
+     same grey however the modifiers were written. */
+  .legend-rule {
+    width: 28px;
+    height: 0;
+    border-top: 3px solid var(--hairline-strong);
+    flex-shrink: 0;
+  }
+  /* Two classes on the same element, so each modifier out-specifies the base
+     rule above it whatever order the bundler emits them in. */
+  .legend-rule.legend-rule--measured { border-top: 3px solid var(--success); }
+  .legend-rule.legend-rule--expert { border-top: 3px solid var(--ink); }
+  .legend-rule.legend-rule--primary { border-top: 3px dashed var(--warning); }
+  .legend-rule.legend-rule--owner { border-top: 3px solid var(--muted); }
+  .legend-rule.legend-rule--aggregator { border-top: 3px dotted var(--muted-2); }
+  .legend-rule.legend-rule--unknown { border-top: 3px dotted var(--warning); }
+  .legend-name { font-size: 12px; color: var(--muted); }
+
+  .ep-state {
+    margin: 16px 0 0;
+    padding: 12px 16px;
+    border-left: 3px solid var(--info);
+    border-radius: 0 var(--r-md) var(--r-md) 0;
+    background: var(--info-soft);
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--ink-2);
+    max-width: 68ch;
+  }
+
+  .ep-group { padding: 20px 0 0; }
+  .ep-group + .ep-group { border-top: 1px solid var(--hairline); margin-top: 20px; }
+  .ep-group-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .ep-group-head h3 {
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 0;
+  }
+  .ep-count { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .ep-meaning { margin: 4px 0 0; font-size: 13px; line-height: 1.55; color: var(--muted); max-width: 68ch; }
+
+  .ep-rows { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; }
+  .ep-row {
+    padding: 12px 14px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    /* A row linked to from a figure above has to land below the fixed header,
+       the same clearance the numbered sources block uses. The chrome script
+       scrolls with the offset too; this is what holds without it. */
+    scroll-margin-top: 100px;
+  }
+  .ep-group--measured .ep-row { border-left: 3px solid var(--success); }
+  .ep-group--expert .ep-row { border-left: 3px solid var(--ink); }
+  .ep-group--primary .ep-row { border-left: 3px dashed var(--warning); }
+  .ep-group--owner .ep-row { border-left: 3px solid var(--muted); }
+  .ep-group--aggregator .ep-row { border-left: 3px dotted var(--muted-2); }
+  .ep-group--unknown .ep-row { border-left: 3px dotted var(--warning); }
+
+  .ep-row-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .ep-publisher { font-size: 14px; font-weight: 700; color: var(--ink); }
+  .ep-date { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+
+  .ep-measure {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 8px 0 0;
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+  .ep-metric { color: var(--muted); }
+  .ep-value { color: var(--ink); font-weight: 500; }
+  /* Both halves of a correction stay on the page: the figure that was
+     withdrawn, struck and muted, and the one that replaced it, current and
+     unstruck. Showing only the withdrawal leaves the reader without the
+     number that is actually true now. */
+  .ep-measure--withdrawn .ep-value { color: var(--muted-2); font-weight: 400; }
+  .ep-measure--current .ep-value { color: var(--success); font-weight: 700; }
+  .ep-withdrawn-tag,
+  .ep-current-tag {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: var(--r-full);
+  }
+  .ep-withdrawn-tag { background: var(--surface); border: 1px solid var(--hairline); color: var(--muted); }
+  .ep-current-tag { background: var(--success-soft); color: var(--success); }
+
+  .ep-protocol {
+    margin: 6px 0 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: 68ch;
+  }
+  .ep-link {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--ink-2);
+    word-break: break-word;
+    text-underline-offset: 3px;
+  }
+  .ep-note { margin: 12px 0 0; font-size: 13px; line-height: 1.55; color: var(--muted); max-width: 68ch; }
+</style>

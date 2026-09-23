@@ -5,7 +5,10 @@ import Breadcrumbs from '@components/seo/Breadcrumbs.astro';
 import Badge from '@components/ui/Badge.astro';
 import IconButton from '@components/ui/IconButton.astro';
 import ArticleBody from '@components/article/ArticleBody.astro';
+import ClaimTrail from '@components/article/ClaimTrail.astro';
+import EvidencePanel from '@components/article/EvidencePanel.astro';
 import EvidenceRail from '@components/article/EvidenceRail.astro';
+import LaunchNotice from '@components/article/LaunchNotice.astro';
 import Sources from '@components/article/Sources.astro';
 import TrustStack from '@components/article/TrustStack.astro';
 import Verdict from '@components/article/Verdict.astro';
@@ -13,6 +16,7 @@ import TableOfContents from '@components/article/TableOfContents.astro';
 import AdUnit from '@components/ads/AdUnit.astro';
 import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro';
 import ProsConsList from '@components/affiliate/ProsConsList.astro';
+import PickEvidence from '@components/affiliate/PickEvidence.astro';
 import ProductCallout from '@components/affiliate/ProductCallout.astro';
 import OfferCallout from '@components/affiliate/OfferCallout.astro';
 import AuthorCard from '@components/blog/AuthorCard.astro';
@@ -42,6 +46,16 @@ const product = post.data.product;
 const related = await getRelatedPosts(post, 3);
 const headlineHtml = emphasiseLastWord(post.data.title);
 const stampYear = new Date(post.data.pubDate).getFullYear();
+// The picks block renders its own /go/ CTAs, so it counts toward the
+// disclosure the same way a body link does - a page with a clickable affiliate
+// destination and no visible disclosure beside it is the exact gap the ACCC's
+// sweep faulted.
+const labelledPicks = (post.data.picks ?? []).filter(
+  (pick) => pick.evidence !== undefined || pick.badge !== undefined,
+);
+// Read by the provenance block, which otherwise states what follows from
+// having had no unit - and would contradict a figure labelled as ours.
+const measuredOurselves = (post.data.claims ?? []).some((claim) => claim.tier === 'measured');
 // The disclosure has to be visible alongside the links it disclosed, so it goes
 // under the byline on any page that carries one - which is every pipeline post,
 // and any hand-written one with a /go/ link in the body.
@@ -50,7 +64,10 @@ const stampYear = new Date(post.data.pubDate).getFullYear();
 // (for a pre-order) when the reader is actually charged.
 const offerPicks = (post.data.picks ?? []).filter((pick) => pick.offer !== undefined);
 const hasAffiliateLinks =
-  product !== undefined || offerPicks.length > 0 || /\/go\//.test(post.body);
+  product !== undefined ||
+  offerPicks.length > 0 ||
+  /\/go\//.test(post.body) ||
+  labelledPicks.length > 0;
 const highStakes = post.data.category === 'Health' || post.data.category === 'Finance';
 
 const meta = buildMeta({
@@ -143,7 +160,16 @@ const asideSummary = [
         lastReviewed={post.data.lastReviewed}
         category={post.data.category}
         reviewedBy={author.name}
+        reviewUnit={post.data.reviewUnit}
+        measuredOurselves={measuredOurselves}
       />
+
+      {/* Above the fold on a launch piece, because the fact it states - that
+          nobody has measured one yet - is what a reader needs before the first
+          number, not after the last one. */}
+      {post.data.launch && (
+        <LaunchNotice launch={post.data.launch} claims={post.data.claims} />
+      )}
 
       {hasAffiliateLinks && <AffiliateDisclosure variant="inline" />}
 
@@ -171,6 +197,9 @@ const asideSummary = [
           {product && <ProsConsList pros={product.pros} cons={product.cons} />}
           {hasAffiliateLinks && <AffiliateDisclosure />}
         </ArticleBody>
+        <PickEvidence picks={labelledPicks} claims={post.data.claims} />
+        <ClaimTrail claims={post.data.claims} sources={post.data.sources} />
+        <EvidencePanel sources={post.data.sources} claims={post.data.claims} />
         <Sources
           sources={post.data.sources}
           highStakes={highStakes}

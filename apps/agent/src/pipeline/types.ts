@@ -328,6 +328,86 @@ export interface TestedClaim {
   sourceUrl: string;
 }
 
+/**
+ * A headline figure, and where the number came from - the record behind the
+ * three tier labels a page prints beside every claim it makes.
+ *
+ * One row holds both halves of a disputed spec deliberately. A maker's figure
+ * and an independent measurement of the same metric are one fact about the
+ * product, not two, and the pattern the category leaders use is to show them
+ * side by side with each side's conditions named. Dropping the maker's number
+ * is not an option either: the reader arrived having already seen it, and the
+ * gap is the most useful thing on the page.
+ */
+export interface MeasuredClaim {
+  /** The product this figure describes, named the way the page names it. */
+  subject: string;
+  /** What was measured: "Battery life, screen-on", "Peak brightness". */
+  metric: string;
+  /** The maker's own figure, as published; null when the maker publishes none. */
+  claimedValue: string | null;
+  /** Who published the claim - the brand. Null when there is no claim. */
+  claimedBy: string | null;
+  claimedSourceUrl: string | null;
+  /** The conditions the maker states for its own figure, where it states any. */
+  claimedConditions: string | null;
+  /** The independently measured figure; null when nobody has measured it yet. */
+  measuredValue: string | null;
+  /** Who measured it, named ("GSMArena", "Notebookcheck", "SleekDrops"). */
+  measuredBy: string | null;
+  /** The protocol the measurement was taken under, in the tester's words. */
+  conditions: string | null;
+  /** YYYY, YYYY-MM or YYYY-MM-DD the measurement published; null when undated. */
+  measuredOn: string | null;
+  measuredSourceUrl: string | null;
+  /**
+   * A figure this tester has since withdrawn, kept beside the corrected one.
+   * A correction the reader cannot see is indistinguishable from a number we
+   * quietly changed.
+   */
+  withdrawnValue: string | null;
+  /** True only when we ran the test ourselves - the one route to tier 1. */
+  ownTest: boolean;
+  /**
+   * What the source's result actually covers, in the source's own terms - "the
+   * Smart Home Appliances brand survey, 2026", "the 12 models CHOICE tested in
+   * March". Load-bearing for brand-level and cohort raters, whose rating is
+   * evidence about a survey or a cohort and not about every model in it.
+   */
+  covers: string | null;
+}
+
+/**
+ * When the product a piece is about actually went on sale, and therefore
+ * whether the piece is being written inside the launch window.
+ *
+ * Inside it, no Australian lab result exists by design: CHOICE runs phone
+ * tests through ICRT labs in Europe and publishes weeks to months after
+ * launch, Canstar Blue is a brand-level satisfaction survey, and
+ * ProductReview is owner reviews. Holding a launch piece to a local lab test
+ * does not produce one, it produces a piece that never ships.
+ */
+export interface LaunchRelease {
+  /** The product whose release date sets the window. */
+  product: string;
+  /** YYYY-MM-DD it went on sale in Australia; null when we could not date it. */
+  releaseDate: string | null;
+  /** Where the date came from. */
+  sourceUrl: string;
+}
+
+/** How a review unit was obtained - the disclosure the ACCC sweep found missing most often. */
+export interface ReviewUnit {
+  /** 'retail' bought, 'loan' supplied by the brand, 'none' no unit at all. */
+  acquisition: 'retail' | 'loan' | 'none';
+  /** The brand or PR agency that lent the unit; null on a bought or absent unit. */
+  supplier: string | null;
+  /** What we paid, as a reader reads it ("A$1,699"); null when we paid nothing. */
+  paid: string | null;
+  /** Month and year the loan unit went back ("2026-09"); null when it has not. */
+  returned: string | null;
+}
+
 /** One stratum that came up short, and what to do about it. */
 export interface EvidenceShortfall {
   stratum: string;
@@ -370,6 +450,16 @@ export interface ResearchDossier {
   ownerComplaints: OwnerComplaint[];
   priceObservations: PriceObservation[];
   testedClaims: TestedClaim[];
+  /**
+   * The headline figures, each with the number and where it came from. The
+   * page's tier labels and its claimed-vs-measured cards are rendered from
+   * these and from nothing else.
+   */
+  claims?: MeasuredClaim[];
+  /** Set only when the piece is about a product released recently. */
+  launch?: LaunchRelease | null;
+  /** How the unit under review was obtained, when there was a unit at all. */
+  reviewUnit?: ReviewUnit | null;
   keywords: { primary: string; secondary: string[] };
   competitorNotes: string;
   faqIdeas: Array<{ question: string; answerHint: string }>;

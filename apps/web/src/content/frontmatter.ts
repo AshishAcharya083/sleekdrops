@@ -74,14 +74,142 @@ export type SourceTier = (typeof sourceTiers)[number];
  * `publisher` is optional only so posts already in D1 keep validating; the
  * assembler always writes one, falling back to the source's hostname.
  */
+const SOURCE_DATE = /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/;
+
+/**
+ * Whether a string is a URL a reader could safely be linked to.
+ *
+ * `z.string().url()` is not this check: it accepts `javascript:` and `data:`,
+ * so a schema that only calls it hands a click-to-execute href to whatever
+ * renders the field. Every source, claim and launch URL below is rendered as
+ * an `href` by an article component, and all of them originate in
+ * search-result text nobody controls - so the scheme is checked here rather
+ * than assumed. Mirrors `isWebUrl` in the agent's content/contract.ts.
+ */
+function isWebUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value.trim());
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+const webUrl = () => z.string().url().refine(isWebUrl, { message: 'must be an http(s) URL' });
+
 export const sourceSchema = z.object({
-  url: z.string().url(),
+  url: webUrl(),
   publisher: z.string().min(1).optional(),
-  date: z.string().regex(/^\d{4}(?:-\d{2}(?:-\d{2})?)?$/).optional(),
+  date: z.string().regex(SOURCE_DATE).optional(),
   tier: z.enum(sourceTiers).optional(),
+  // What this source measured, when it measured something. A protocol is what
+  // makes a figure checkable, so it travels with the figure. All optional and
+  // purely additive: a post assembled before the researcher recorded
+  // measurements carries none of them and renders exactly as it did.
+  /** What was measured: "Peak brightness", "Battery life, screen-on". */
+  metric: z.string().min(1).optional(),
+  /** The figure, as this source published it. */
+  measured: z.string().min(1).optional(),
+  /** The conditions behind the figure, in the tester's words. */
+  conditions: z.string().min(1).optional(),
+  /** A figure this source has since corrected away from, shown struck beside the current one. */
+  withdrawn: z.string().min(1).optional(),
 });
 
 export type SourceData = z.infer<typeof sourceSchema>;
+
+/**
+ * What a figure on the page is, by where its number came from.
+ *
+ * Mirrors `CLAIM_TIERS` in the agent's content/claims.ts, where the tier is
+ * derived from who produced the number rather than declared by whoever wrote
+ * the sentence. 'context' is not a claim about the product at all: a brand
+ * satisfaction survey says something about a brand, and is shown beside the
+ * measurements rather than as one of them.
+ */
+export const claimTiers = ['measured', 'independent', 'manufacturer', 'context'] as const;
+
+export type ClaimTier = (typeof claimTiers)[number];
+
+/**
+ * One headline figure and its provenance - the record behind the label the
+ * page prints beside every number it states.
+ *
+ * `claimed` is the maker's figure for the same metric, kept beside a measured
+ * one rather than replaced by it. Readers arrive having already seen the box
+ * claim; dropping it reads as a page that missed the spec, and the gap between
+ * the two is usually the most useful thing on it. What is never allowed is the
+ * other direction - a maker's number restated in our own voice as though we
+ * had checked it.
+ */
+export const claimSchema = z.object({
+  /** The product this figure describes, named as the page names it. */
+  subject: z.string().min(1),
+  /** The /go/ slug of the pick it is about, when it is about a pick. */
+  goSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
+  /** What was measured: "Battery life, screen-on". */
+  metric: z.string().min(1),
+  tier: z.enum(claimTiers),
+  /** The figure this tier leads with, as its source published it. */
+  value: z.string().min(1),
+  /** Who produced the figure. Never optional - an unattributed number is the fault. */
+  attribution: z.string().min(1),
+  /** The protocol or conditions the figure was produced under. */
+  conditions: z.string().min(1).optional(),
+  date: z.string().regex(SOURCE_DATE).optional(),
+  sourceUrl: webUrl().optional(),
+  /** What the source's result actually covers - load-bearing for brand-level raters. */
+  covers: z.string().min(1).optional(),
+  /** A figure this source has since corrected away from. */
+  withdrawn: z.string().min(1).optional(),
+  claimed: z
+    .object({
+      value: z.string().min(1),
+      by: z.string().min(1),
+      conditions: z.string().min(1).optional(),
+      sourceUrl: webUrl().optional(),
+    })
+    .optional(),
+});
+
+export type ClaimData = z.infer<typeof claimSchema>;
+
+/**
+ * The release a piece was written against, set only when it was written inside
+ * a product's launch window.
+ *
+ * The page works out from this date whether the window is still open rather
+ * than being told: a stored "no lab has tested this yet" would still say so
+ * six months later, which is the stale disclosure this replaces.
+ */
+export const launchSchema = z.object({
+  product: z.string().min(1),
+  releaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  sourceUrl: webUrl().optional(),
+});
+
+export type LaunchData = z.infer<typeof launchSchema>;
+
+/**
+ * How the unit under review was obtained.
+ *
+ * The ACCC's reviews sweep found this disclosure missing more often than any
+ * other, and its standard is about placement as much as wording: a benefit
+ * received in connection with a review has to be disclosed with the content
+ * itself, not on a policy page. 'none' is a real state and the site's usual
+ * one - "we were not sent a unit" is the thing a reader of a
+ * no-sponsored-posts site is owed, and silence is what reads as concealment.
+ */
+export const reviewUnitSchema = z.object({
+  acquisition: z.enum(['retail', 'loan', 'none']),
+  /** The brand or agency that lent it - named, because "supplied for review" names nobody. */
+  supplier: z.string().min(1).optional(),
+  paid: z.string().min(1).optional(),
+  /** Month and year it went back. Month precision: verifiable, and cheap to keep true. */
+  returned: z.string().regex(SOURCE_DATE).optional(),
+});
+
+export type ReviewUnitData = z.infer<typeof reviewUnitSchema>;
 
 /**
  * The offer behind a pick: a price somebody saw on a stated day, not a price
@@ -126,6 +254,15 @@ export const pickSchema = z.object({
    */
   price: z.string().min(1).optional(),
   goSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  /** "Best overall", "Best value" - an editorial award, never resting on a maker's figure alone. */
+  badge: z.string().min(1).optional(),
+  /**
+   * The standing evidence chip. Always filled where the pipeline wrote it, so
+   * the pick without an award differs from the others in what its chip says
+   * rather than in having none - an empty slot beside a filled one reads as a
+   * defect in the product instead of a fact about our evidence.
+   */
+  evidence: z.enum(['tested', 'researched']).optional(),
   /** The attached offer, when the product carries one. */
   offer: pickOfferSchema.optional(),
 });
@@ -187,6 +324,12 @@ export const blogFrontmatterSchema = z
     entities: z.array(z.string().min(1)).optional(),
     /** Recommended products — the ItemList on guides and roundups. */
     picks: z.array(pickSchema).optional(),
+    /** The tier-labelled figures the page prints beside its numbers. */
+    claims: z.array(claimSchema).optional(),
+    /** Set only on a piece written inside a product's launch window. */
+    launch: launchSchema.optional(),
+    /** How we got the unit under review, including when there was none. */
+    reviewUnit: reviewUnitSchema.optional(),
     /** ISO 4217 code every price this post quotes is in. */
     currency: z.string().min(1).default('AUD'),
     featured: z.boolean().default(false),

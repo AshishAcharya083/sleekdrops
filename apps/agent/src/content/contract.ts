@@ -4,6 +4,8 @@
 // change this too, or published rows will fail the site build.
 import { z } from 'zod';
 
+import { CLAIM_TIERS, claimProblems } from './claims.js';
+
 import { SOURCE_TIERS } from './sources.js';
 
 export const CATEGORIES = ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel'] as const;
@@ -201,11 +203,92 @@ export function defaultAuthorFor(category: string): AuthorProfile {
  * `publisher` stays optional so the posts already in D1 keep validating; the
  * assembler always writes one (sources.ts falls back to the hostname).
  */
+export const SOURCE_DATE_RE = /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/;
+
+/**
+ * Whether a string is a URL a reader could safely be linked to.
+ *
+ * `z.string().url()` is not this check: it accepts `javascript:` and `data:`,
+ * so a schema that only calls it hands a click-to-execute href to whatever
+ * renders the field. Every source, claim and launch URL below is rendered as
+ * an `href` on the published page, and all of them originate in search-result
+ * text nobody controls - so the scheme is checked here rather than assumed.
+ */
+export function isWebUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value.trim());
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+const webUrl = () => z.string().url().refine(isWebUrl, { message: 'must be an http(s) URL' });
+
 export const sourceSchema = z.object({
-  url: z.string().url(),
+  url: webUrl(),
   publisher: z.string().min(1).optional(),
-  date: z.string().regex(/^\d{4}(?:-\d{2}(?:-\d{2})?)?$/).optional(),
+  date: z.string().regex(SOURCE_DATE_RE).optional(),
   tier: z.enum(SOURCE_TIERS).optional(),
+  // What this source measured, when it measured something. Additive: a post
+  // assembled before the researcher recorded measurements carries none of
+  // these and renders exactly as it did.
+  /** What was measured: "Peak brightness", "Battery life, screen-on". */
+  metric: z.string().min(1).optional(),
+  /** The figure, as the source published it. */
+  measured: z.string().min(1).optional(),
+  /** The protocol behind the figure - what makes it checkable. */
+  conditions: z.string().min(1).optional(),
+  /** A figure this source has since corrected away from, shown beside the current one. */
+  withdrawn: z.string().min(1).optional(),
+});
+
+/**
+ * One headline figure, and where its number came from.
+ *
+ * The tier is what the page prints beside the figure: we measured it,
+ * somebody independent measured it, the maker claims it and nobody has
+ * checked, or it is context about a brand rather than about this model.
+ */
+export const claimSchema = z.object({
+  subject: z.string().min(1),
+  goSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
+  metric: z.string().min(1),
+  tier: z.enum(CLAIM_TIERS),
+  value: z.string().min(1),
+  /** Who produced the figure. Never optional: an unattributed number is the fault. */
+  attribution: z.string().min(1),
+  conditions: z.string().min(1).optional(),
+  date: z.string().regex(SOURCE_DATE_RE).optional(),
+  sourceUrl: webUrl().optional(),
+  /** What the source's result actually covers - load-bearing for cohort raters. */
+  covers: z.string().min(1).optional(),
+  withdrawn: z.string().min(1).optional(),
+  /** The maker's figure for the same metric, kept beside the measured one. */
+  claimed: z
+    .object({
+      value: z.string().min(1),
+      by: z.string().min(1),
+      conditions: z.string().min(1).optional(),
+      sourceUrl: webUrl().optional(),
+    })
+    .optional(),
+});
+
+/** The release this piece was written against, when it was written at launch. */
+export const launchSchema = z.object({
+  product: z.string().min(1),
+  releaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  sourceUrl: webUrl().optional(),
+});
+
+/** How the unit under review was obtained - the ACCC's most-missed disclosure. */
+export const reviewUnitSchema = z.object({
+  acquisition: z.enum(['retail', 'loan', 'none']),
+  supplier: z.string().min(1).optional(),
+  paid: z.string().min(1).optional(),
+  /** Month and year the loan unit went back - exact enough to check, cheap to keep true. */
+  returned: z.string().regex(SOURCE_DATE_RE).optional(),
 });
 
 /**
@@ -247,6 +330,15 @@ export const pickSchema = z.object({
    */
   price: z.string().min(1).optional(),
   goSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  /** "Best overall", "Best value" - an editorial award, refused on tier 3 alone. */
+  badge: z.string().min(1).optional(),
+  /**
+   * The standing evidence chip every pick carries, so no slot is ever empty.
+   * An empty badge position beside a filled one reads as a defect in the
+   * product; a filled one that says "researched, not tested" reads as a fact
+   * about our evidence, which is what it is.
+   */
+  evidence: z.enum(['tested', 'researched']).optional(),
   /** The attached offer, when the product carries one. */
   offer: pickOfferSchema.optional(),
 });
@@ -276,6 +368,12 @@ export const frontmatterSchema = z.object({
   sources: z.array(sourceSchema).optional(),
   entities: z.array(z.string().min(1)).optional(),
   picks: z.array(pickSchema).optional(),
+  /** The tier-labelled figures the page prints. */
+  claims: z.array(claimSchema).optional(),
+  /** Set only on a piece written inside a product's launch window. */
+  launch: launchSchema.optional(),
+  /** How we got the unit, including when there was none. */
+  reviewUnit: reviewUnitSchema.optional(),
   currency: z.string().min(1).default(HOME_CURRENCY),
   featured: z.boolean().default(false),
   draft: z.boolean().default(false),
@@ -585,6 +683,12 @@ export function validateArticle(
     if (!linkSlugs.has(slug)) {
       problems.push(`/go/${slug} has no matching affiliate link row`);
     }
+  }
+  // The two evidence rules that are not allowed to be advice to a model. They
+  // run on the parsed frontmatter, so a claim or a badge that reached here by
+  // any route - a fresh assembly, a re-assembly, an operator edit - meets them.
+  if (fm.success) {
+    problems.push(...claimProblems(fm.data.claims ?? [], fm.data.picks ?? []));
   }
   return problems;
 }
