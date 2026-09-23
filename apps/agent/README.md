@@ -287,6 +287,29 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
   or `generated` at all three hero paths. Only a hero we generated is offered
   to a provider for native upload: uploading grants the network a sublicensable
   licence, which is not ours to grant in a photograph the image agent found.
+- **Per-channel rendering.** `distribution/render` composes the post a
+  provider sends - it never writes copy of its own. The caption is headline,
+  then the first-comment cue when that is the placement, then the affiliate
+  disclosure when the keyword plan's intent is a monetised one; the cue and the
+  disclosure are registered house text (`SOCIAL_HOUSE_BLOCKS`), so the
+  repetition metrics skip them and they are never what a caption limit cuts.
+  The generated headline is scored by `detectSlop()` - a trip buys the model
+  one regeneration with the hits handed back, and a second trip falls back to
+  the dek deterministically. Copy is rendered per channel against that
+  channel's caption limit (`render/channels.ts`), so a 300-character network is
+  one more entry rather than a rewrite.
+- **Image ladder.** A hero we generated is uploaded as it is; a `found` or
+  `operator` hero is replaced by a fresh 1200x630 social card through the same
+  `generateImage` path the image agent uses; if that fails there is no image
+  and the placement resolves to `in_body`, where the link preview carries the
+  post instead. The destination URL is UTM-tagged with the placement that was
+  actually used.
+- **Rendered once, then kept.** An adapter renders at post time through
+  `renderForItem`, which writes the result back onto the queue row (payload and
+  placement together) and reads it back on every later attempt. Rendering is
+  deliberately not idempotent - the copy call runs warm and a rights-unsafe
+  hero buys a fresh card - so a retry that re-rendered would say something
+  other than what an operator saw, and would buy a second image to say it with.
 
 ## State model (PostgreSQL)
 

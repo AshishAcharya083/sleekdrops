@@ -84,7 +84,10 @@ export function taggedUrl(slug: string, provider: string, placement: LinkPlaceme
  * it. The og:title the site renders carries the site name; the gate compares
  * on the article's own title, which is the part a rebuild changes.
  */
-function expectedOpenGraph(article: DistributableArticle): { ogTitle: string; ogImage: string | null } {
+export function expectedOpenGraph(article: DistributableArticle): {
+  ogTitle: string;
+  ogImage: string | null;
+} {
   const frontmatter = article.frontmatter ?? {};
   const title = typeof frontmatter.title === 'string' ? frontmatter.title : article.title;
   const heroImage = typeof frontmatter.heroImage === 'string' ? frontmatter.heroImage : null;
@@ -137,10 +140,30 @@ export function renderPayload(
   return {
     caption,
     url,
+    placement,
     commentText: url,
     ...uploadableImage(article),
     expected: expectedOpenGraph(article),
   };
+}
+
+/**
+ * Keep what the per-channel renderer produced, so every later attempt at this
+ * item posts the words an operator already saw rather than a fresh roll of the
+ * copy call and a second image bought to go with it.
+ *
+ * The placement column moves with the payload because the renderer is allowed
+ * to resolve one: an item queued for a first comment whose card could not be
+ * rendered is posted in the body, and the column is what the panel and the
+ * worker's log read.
+ */
+export async function storeRenderedPayload(id: string, payload: RenderedPayload): Promise<void> {
+  await q(
+    `UPDATE distribution_queue
+     SET payload = $2::jsonb, placement = $3, updated_at = now()
+     WHERE id = $1`,
+    [id, JSON.stringify(payload), payload.placement],
+  );
 }
 
 /** What one publish pass did to the queue. */
