@@ -7,7 +7,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EvidenceGateError } from '../content/evidence.js';
 import { classifyFailure, MAX_STAGE_ATTEMPTS, stageRetryDelayMs } from './failures.js';
-import { extractJson, requireKeys } from '../llm/index.js';
+import { dossierCheck } from '../agents/researcher.js';
+import { extractJson, repromptJson, requireKeys, type ShapeCheck } from '../llm/index.js';
 
 const classOf = (err: unknown): string => classifyFailure(err).failureClass;
 
@@ -40,12 +41,41 @@ test("extractJson's own two refusals are transient", () => {
   assert.equal(classOf(noJson()), 'transient');
 });
 
-test('a shape complaint is transient - the model can be asked again', () => {
-  const complaint = requireKeys<{ facts: unknown; products: unknown }>('facts', 'products')({
-    facts: [],
-  });
-  assert.equal(classOf(new Error(String(complaint))), 'transient');
-  assert.equal(classOf(new Error('Expected a JSON object, got an array — return the whole object')), 'transient');
+test('a shape complaint is transient - the model can be asked again', async () => {
+  // Both producers the stages actually use, through repromptJson the way
+  // chatJson runs them: requireKeys on outline/write/seo_review and friends,
+  // and the dossier's own check on research, whose complaints share no words
+  // with requireKeys'. Classification must not depend on the phrasing.
+  const exhausted = async (reply: string, check: ShapeCheck<unknown>): Promise<unknown> => {
+    try {
+      await repromptJson(async () => reply, 'Produce the value.', check);
+    } catch (err) {
+      return err;
+    }
+    assert.fail('an unusable reply must not come back as a value');
+  };
+
+  for (const [reply, check] of [
+    ['{"facts":[]}', requireKeys<{ facts: unknown; products: unknown }>('facts', 'products')],
+    ['[1,2,3]', requireKeys<{ facts: unknown }>('facts')],
+    ['{"summary":"A dossier with nothing in it."}', dossierCheck('guide')],
+    ['[{"claim":"one fact"}]', dossierCheck('article')],
+  ] as const) {
+    const err = await exhausted(reply, check);
+    const complaint = check(JSON.parse(reply));
+    assert.equal((err as Error).message, complaint, 'the operator still reads the complaint itself');
+    assert.deepEqual(classifyFailure(err), { failureClass: 'transient', signal: 'shape' }, complaint ?? '');
+  }
+});
+
+test('a parse failure out of repromptJson is tagged as one', async () => {
+  let err: unknown;
+  try {
+    await repromptJson(async () => '{"summary":"cut off here', 'Produce the value.');
+  } catch (caught) {
+    err = caught;
+  }
+  assert.deepEqual(classifyFailure(err), { failureClass: 'transient', signal: 'parse' });
 });
 
 test('timeouts, socket faults and throttled providers are transient', () => {

@@ -16,6 +16,7 @@
 // hiccup burns three stage runs and still ends up failed, while mistaking a
 // hiccup for a content problem only costs what it costs today.
 import { EvidenceGateError } from '../content/evidence.js';
+import type { UnusableJsonError } from '../llm/index.js';
 
 export type FailureClass = 'transient' | 'genuine';
 
@@ -48,10 +49,13 @@ export function stageRetryDelayMs(attempt: number): number {
  * is why new throws from other stages need no entry here to behave correctly.
  */
 const TRANSIENT_SIGNATURES: ReadonlyArray<{ signal: string; pattern: RegExp }> = [
-  // extractJson's own two refusals, plus whatever JSON.parse says about a
-  // reply that is malformed rather than merely cut short ("Expected ',' or
-  // ']' after array element in JSON at position 2546" is the one that killed
-  // a card).
+  // A chatJson stage that runs out of reprompts throws UnusableJsonError and
+  // is recognised by name in classifyFailure; ShapeCheck complaints only ever
+  // reach the runner that way, so they need no entry here. This catches the
+  // JSON that is parsed outside chatJson (visionJson): extractJson's own two
+  // refusals, plus whatever JSON.parse says about a reply that is malformed
+  // rather than merely cut short ("Expected ',' or ']' after array element in
+  // JSON at position 2546" is the one that killed a card).
   //
   // Matched on JSON.parse's own phrasings rather than on the words "not valid
   // JSON", which also appear in deliberate refusals to overwrite stored data.
@@ -60,8 +64,6 @@ const TRANSIENT_SIGNATURES: ReadonlyArray<{ signal: string; pattern: RegExp }> =
     pattern:
       /Truncated JSON|No JSON value in LLM response|\bin JSON at position\b|Unexpected (?:token|end of JSON input|non-whitespace character)/i,
   },
-  // requireKeys / ShapeCheck complaints: well-formed JSON of the wrong shape.
-  { signal: 'shape', pattern: /Expected a JSON object|Missing required field/i },
   // An engine that answered with nothing at all, stopped before it did, hung
   // past its own deadline, or reported a failed run. `did not answer within`
   // is how claude.ts and gemini.ts spell their 10-minute deadline: it says
@@ -115,6 +117,12 @@ export function classifyFailure(err: unknown): FailureVerdict {
   // error ever crossed a second copy of the module.
   if (err instanceof EvidenceGateError || (err instanceof Error && err.name === 'EvidenceGateError')) {
     return { failureClass: 'genuine', signal: null };
+  }
+
+  // The model never produced usable JSON, however the complaint is worded.
+  // Checked by name for the same reason as the gate above.
+  if (err instanceof Error && err.name === 'UnusableJsonError') {
+    return { failureClass: 'transient', signal: (err as UnusableJsonError).reason };
   }
 
   const text = describe(err);

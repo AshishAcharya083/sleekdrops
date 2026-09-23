@@ -320,6 +320,25 @@ function repromptFor(why: string, attemptsSoFar: number): string {
 }
 
 /**
+ * A structured stage's reply was still unusable after every reprompt the
+ * budget allows. The message is the last complaint verbatim - it is what the
+ * operator reads on a failed card - and the class is what the stage runner
+ * classifies on, so a ShapeCheck is free to word its complaint however it
+ * helps the model rather than however the taxonomy happens to match.
+ */
+export class UnusableJsonError extends Error {
+  override readonly name = 'UnusableJsonError';
+
+  constructor(
+    readonly reason: 'parse' | 'shape',
+    readonly replies: number,
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+  }
+}
+
+/**
  * extractJson() + the shape check over a sender, with a bounded reprompt on a
  * parse failure OR a shape failure. `check` is what stops a well-formed reply
  * of the wrong shape reaching the database.
@@ -337,21 +356,26 @@ export async function repromptJson<T>(
   check?: ShapeCheck<T>,
 ): Promise<T> {
   let lastError: unknown;
+  let lastReason: UnusableJsonError['reason'] = 'parse';
   for (let unusable = 0; unusable <= JSON_REPROMPT_BUDGET; unusable++) {
     const why = lastError instanceof Error ? lastError.message : String(lastError);
     const text = await send(
       unusable === 0 ? prompt : `${prompt}\n\n${repromptFor(why, unusable)}`,
     );
+    let value: T;
     try {
-      const value = extractJson<T>(text);
-      const problem = check?.(value);
-      if (problem) throw new Error(problem);
-      return value;
+      value = extractJson<T>(text);
     } catch (err) {
       lastError = err;
+      lastReason = 'parse';
+      continue;
     }
+    const problem = check?.(value);
+    if (!problem) return value;
+    lastError = new Error(problem);
+    lastReason = 'shape';
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  throw new UnusableJsonError(lastReason, JSON_REPROMPT_BUDGET + 1, lastError);
 }
 
 /** chat() + repromptJson(), accumulating usage for every call it takes. */

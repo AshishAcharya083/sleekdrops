@@ -6,7 +6,7 @@
 // published a buying guide with an empty affiliate table.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractJson, JSON_REPROMPT_BUDGET, repromptJson, requireKeys } from './index.js';
+import { extractJson, JSON_REPROMPT_BUDGET, repromptJson, requireKeys, UnusableJsonError } from './index.js';
 
 test('a bare JSON object parses', () => {
   assert.deepEqual(extractJson('{"a":1}'), { a: 1 });
@@ -116,6 +116,30 @@ test('a reply that is never usable still fails, with the parse error intact', as
     'the message the stage runner classifies as a transient parse failure',
   );
   assert.equal(calls, 1 + JSON_REPROMPT_BUDGET, 'the budget is bounded, not a loop');
+});
+
+test('a spent budget throws UnusableJsonError naming what was wrong with the last reply', async () => {
+  const shapeOnly = (): Promise<unknown> =>
+    repromptJson<unknown>(async () => '{"summary":"..."}', 'Synthesize.', requireKeys<{ facts: unknown }>('facts'));
+  await assert.rejects(shapeOnly(), (err: unknown) => {
+    assert.ok(err instanceof UnusableJsonError);
+    assert.equal(err.name, 'UnusableJsonError');
+    assert.equal(err.reason, 'shape');
+    assert.equal(err.replies, 1 + JSON_REPROMPT_BUDGET);
+    assert.equal(err.message, 'Missing required field(s): facts.', 'the complaint verbatim, no wrapper text');
+    return true;
+  });
+
+  // The last reply decides the reason, not the first.
+  let calls = 0;
+  await assert.rejects(
+    repromptJson<unknown>(
+      async () => (++calls <= JSON_REPROMPT_BUDGET ? '{"summary":"..."}' : '{"facts": [1,'),
+      'Synthesize.',
+      requireKeys<{ facts: unknown }>('facts'),
+    ),
+    (err: unknown) => err instanceof UnusableJsonError && err.reason === 'parse',
+  );
 });
 
 test('a shape complaint is reprompted, and the complaint is what the model is told', async () => {

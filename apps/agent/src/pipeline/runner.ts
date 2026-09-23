@@ -699,8 +699,8 @@ export async function runStage(
           return;
         }
 
-        // The count lands before the wait, not after it: an operator watching
-        // a card that is mid-backoff should see that it is on its second run.
+        // The count lands before the wait, not after it, so a process that dies
+        // mid-backoff leaves the attempts it already spent on the row.
         // Through the claim guard like every other write this run makes - a
         // card that is no longer ours is not ours to retry either.
         if (
