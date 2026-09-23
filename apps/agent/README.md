@@ -348,6 +348,27 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
   hero buys a fresh card - so a retry that re-rendered would say something
   other than what an operator saw, and would buy a second image to say it with.
 
+- **Reading a post back.** A separate scheduled job (`distribution/insights.ts`,
+  its own interval so it can never hold up the queue that is posting) pulls the
+  aggregate impressions, clicks and reactions for each posted item at a widening
+  cadence - an hour, six, a day, three days, a week after the post - and then
+  stops. Readings land in `distribution_metrics` keyed by queue item, and
+  placement is joined from the queue row rather than copied onto the reading, so
+  `GET /api/distribution` can report what each placement actually earned. A
+  fetch that fails is logged and retried every 15 minutes until the window
+  closes; it never touches the row's `last_error`, which is the account of the
+  *post*.
+- **The flag.** A `first_comment` item accumulating impressions with near-zero
+  clicks sets `distribution_queue.insights_flag`. That is the signature of the
+  one failure the API cannot report - a comment link the network rendered as
+  unclickable plain text, where the comment posts fine and returns an id and the
+  only symptom is referrals that never arrive. The flag is recomputed from every
+  reading rather than latched, so a post whose clicks arrive late clears it. Only
+  `first_comment` can carry it, and a counter the network did not report is not
+  evidence of anything. Note the click side of the corroborating first-party
+  analytics is consent-gated (`apps/web/src/lib/analytics.ts`), so referral
+  counts are a floor, not a total.
+
 ## State model (PostgreSQL)
 
 - `topics` — scout suggestions; `suggested → approved/rejected` (unique on
@@ -365,7 +386,9 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
   rendered payload, placement, schedule, attempts and the remote post id;
   unique on `(slug, channel_connection_id)`
 - `distribution_metrics` — aggregate impressions/clicks/reactions per posted
-  item, joined back to the placement its row used
+  item, joined back to the placement its row used; filled on a widening
+  schedule (`insights_next_at`/`insights_done` on the queue row) that stops
+  eight days after the post
 
 The workers claim queued articles and topic searches atomically, run the
 corresponding agent, record the session, and route the work onward. Stranded

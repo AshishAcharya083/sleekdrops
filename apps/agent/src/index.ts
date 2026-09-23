@@ -1,6 +1,7 @@
 // SleekDrops agent platform entrypoint: wait for db → migrate → recover → serve + work.
 import { migrate } from './db/migrate.js';
 import { databaseConnectionHint, isDatabaseConnectionError, waitForDatabase } from './db/pool.js';
+import { startInsightsCollector } from './distribution/insights.js';
 import { registerProvider } from './distribution/providers.js';
 import { facebookProvider } from './distribution/providers/facebook.js';
 import { startDistributionWorker } from './distribution/worker.js';
@@ -24,6 +25,9 @@ async function main(): Promise<void> {
   // decision this file makes out loud.
   registerProvider(facebookProvider);
   startDistributionWorker();
+  // Its own interval, so a network that is slow to answer for insights cannot
+  // hold up the queue that is trying to post.
+  startInsightsCollector();
 }
 
 main().catch((err) => {

@@ -92,6 +92,13 @@ export const config = {
   distribution: {
     siteUrl: env('SITE_URL', 'https://sleekdrops.com').replace(/\/+$/, ''),
     pollMs: positiveNumber('DISTRIBUTION_POLL_MS', 15_000),
+    /**
+     * How often posted items are checked for a due insights reading. Coarse on
+     * purpose: the checkpoints themselves are hours apart, so this only bounds
+     * how late a reading is taken, and every poll that finds nothing due is a
+     * single indexed query.
+     */
+    insightsPollMs: positiveNumber('DISTRIBUTION_INSIGHTS_POLL_MS', 300_000),
   },
 
   /**
