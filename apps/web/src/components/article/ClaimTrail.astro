@@ -1,6 +1,7 @@
 ---
 import {
   citationLabel,
+  coverageNote,
   evidenceAnchor,
   evidenceState,
   gapNote,
@@ -134,12 +135,7 @@ const panelShown = evidenceState(entries, sources) !== 'legacy';
             </p>
           )}
 
-          {entry.tier === 'context' && entry.covers && (
-            <p class="claim-note">
-              This rating covers {entry.covers}. It is shown as context and is not
-              a measurement of {entry.subject}.
-            </p>
-          )}
+          {entry.covers && <p class="claim-note">{coverageNote(entry)}</p>}
 
           {!entry.comparison && entry.claimed && (
             <p class="claim-note">

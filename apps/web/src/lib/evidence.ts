@@ -127,6 +127,25 @@ export function makerFigureNote(claimed: NonNullable<ClaimData['claimed']>): str
 }
 
 /**
+ * What a figure's source says its own result covers, when it says anything.
+ *
+ * Printed on every tier that states coverage, not only on the rating shown as
+ * context. A cohort result is labelled "independently measured" exactly when
+ * its coverage names this model, so the coverage line is what lets a reader
+ * check that promotion - "the 12 handsets CHOICE lab-tested in August 2026,
+ * including the Galaxy S26 Ultra" under a figure about the Galaxy S26 is a
+ * mismatch anyone can see, and hiding the line on the promoted rows would hide
+ * it exactly where it is load-bearing.
+ */
+export function coverageNote(claim: ClaimData): string | null {
+  const covers = claim.covers?.trim();
+  if (!covers) return null;
+  return claim.tier === 'context'
+    ? `This rating covers ${covers}. It is shown as context and is not a measurement of ${claim.subject}.`
+    : `This result covers ${covers}.`;
+}
+
+/**
  * The attribution line under a figure, built from the tier.
  *
  * Each tier says a different thing, and all three say who: "Independently

@@ -294,3 +294,47 @@ test('a re-sweep that falls over propagates its own fault, never the gate’s ve
     (err: unknown) => err === upstream && !(err instanceof EvidenceGateError),
   );
 });
+
+test('a re-sweep’s figure for the second product survives the merge', () => {
+  // The failure this pins is silent: a claims row names itself in `subject`
+  // and `measuredSourceUrl`, and a dedupe key built from the fields the other
+  // row shapes use collapsed a whole roundup's claims onto their metric - so
+  // the second product's measurement was dropped as a duplicate of the first
+  // product's, with no error and no log line, on the one stratum a re-sweep
+  // exists to refill.
+  const measurement = (subject: string, measuredBy: string, url: string) => ({
+    subject,
+    metric: 'Battery life, screen-on',
+    claimedValue: null,
+    claimedBy: null,
+    claimedSourceUrl: null,
+    claimedConditions: null,
+    measuredValue: '16 h 42 min',
+    measuredBy,
+    conditions: 'Battery Life Test 2.0, fixed 200 nits',
+    measuredOn: '2026-09-16',
+    measuredSourceUrl: url,
+    withdrawnValue: null,
+    ownTest: false,
+    covers: null,
+  });
+  const base = sufficient();
+  base.claims = [measurement('Dyson V15 Detect', 'GSMArena', 'https://www.gsmarena.com/v15')];
+
+  const merged = mergeDossier(
+    base,
+    {
+      claims: [
+        measurement('Shark Detect Pro', 'GSMArena', 'https://www.gsmarena.com/detect-pro'),
+        // The same page re-found for the same product is still one row.
+        measurement('Dyson V15 Detect', 'GSMArena', 'https://www.gsmarena.com/v15'),
+      ],
+    },
+    [{ stratum: 'expert', label: 'x', have: 1, need: 2, fix: '' }],
+  );
+
+  assert.deepEqual(
+    merged.claims?.map((c) => c.subject),
+    ['Dyson V15 Detect', 'Shark Detect Pro'],
+  );
+});

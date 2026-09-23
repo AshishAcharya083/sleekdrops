@@ -272,3 +272,32 @@ test('a CHOICE cohort score is an aggregator row, the same thing the claim is la
   assert.equal(source.tier, 'aggregator');
   assert.equal(source.measured, undefined);
 });
+
+test('a cohort rater with no figure extracted is still an aggregator row', () => {
+  // The claim tier answers "manufacturer" for any row without a measured
+  // value, before it ever looks at who published it - so a tier test alone
+  // filed this as the expert stratum, and the panel printed a canstarblue.com.au
+  // page under "Independent testing / published a protocol beside the number".
+  const [source] = articleSources([], [{ ...canstarClaim, measuredValue: null }]);
+
+  assert.equal(source.publisher, 'Canstar Blue');
+  assert.equal(source.tier, 'aggregator', 'a brand survey is never the expert stratum');
+  assert.equal(source.measured, undefined);
+});
+
+test('a cited page with no measurement behind it is placed as unknown, never promoted', () => {
+  const [source] = articleSources(
+    [],
+    [
+      {
+        ...canstarClaim,
+        measuredBy: 'Notebookcheck',
+        measuredSourceUrl: 'https://www.notebookcheck.net/iphone-18-pro',
+        measuredValue: null,
+      },
+    ],
+  );
+
+  assert.equal(source.tier, 'unknown', 'being cited is not the same as having published a figure');
+  assert.equal(source.measured, undefined);
+});

@@ -17,6 +17,7 @@ import {
   claimRowId,
   claimsByTier,
   comparesWithClaimed,
+  coverageNote,
   EVIDENCE_PANEL_ID,
   evidenceAnchor,
   gapNote,
@@ -351,4 +352,29 @@ test('the in-page link does not claim a check nobody made', () => {
   assert.equal(methodLinkLabel('independent'), 'How we checked');
   assert.equal(methodLinkLabel('manufacturer'), 'Where this came from');
   assert.equal(methodLinkLabel('context'), 'Where this came from');
+});
+
+test('what a result covers is printed on the rows where it is load-bearing', () => {
+  // A cohort rating is labelled "independently measured" exactly when its own
+  // coverage names this model, so that line is what lets a reader check the
+  // promotion. Printing it only on the rows shown as context hid it precisely
+  // where it decides the label.
+  const labResult: ClaimData = {
+    subject: 'iPhone 18 Pro',
+    metric: 'Lab score',
+    tier: 'independent',
+    value: '82/100',
+    attribution: 'CHOICE',
+    covers: 'the 14 handsets CHOICE lab-tested in August 2026, including the iPhone 18 Pro',
+  };
+  assert.equal(
+    coverageNote(labResult),
+    'This result covers the 14 handsets CHOICE lab-tested in August 2026, including the iPhone 18 Pro.',
+  );
+  assert.equal(
+    coverageNote({ ...labResult, tier: 'context', attribution: 'Canstar Blue', covers: 'Apple as a brand' }),
+    'This rating covers Apple as a brand. It is shown as context and is not a measurement of iPhone 18 Pro.',
+  );
+  // A figure whose source states no coverage says nothing about coverage.
+  assert.equal(coverageNote(makerOnly), null);
 });

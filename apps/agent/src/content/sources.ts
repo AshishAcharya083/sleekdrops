@@ -10,7 +10,7 @@
 // pipeline/types.ts so this file type-checks against any dossier that carries
 // `fact` and `sourceUrl` - including the rows already in Postgres, written
 // before the researcher was tiered.
-import { claimTier } from './claims.js';
+import { claimTier, cohortRaterFor } from './claims.js';
 
 /**
  * Where a claim came from, and therefore what it is worth. Mirrors
@@ -78,6 +78,37 @@ export interface DossierClaim {
   withdrawnValue: string | null;
   /** What the source's result covers - the other half, for a cohort rater. */
   covers?: string | null;
+}
+
+/**
+ * Whether this claim is a figure somebody measured of the model on the page -
+ * the only thing a source row may present as one.
+ *
+ * Asked as "is it measured?" rather than "is it context?": the tier a claim
+ * with no figure at all carries is 'manufacturer', which short-circuits ahead
+ * of every cohort-rater test, so a rating filed without an extracted figure is
+ * not context and is not a measurement either.
+ */
+function measuresItsSubject(claim: DossierClaim): boolean {
+  const tier = claimTier(claim);
+  return tier === 'measured' || tier === 'independent';
+}
+
+/**
+ * Which stratum a source row taken from a claim belongs to.
+ *
+ * Somebody who published a figure and the protocol behind it is the expert
+ * stratum by definition - that is what the tier means. A cohort rater
+ * published neither: Canstar Blue's stars come off a brand satisfaction panel,
+ * and a CHOICE score whose coverage does not name this model covers other
+ * models, so the row is an aggregator - the same thing the claim itself is
+ * labelled as on the page. Anything else without a measurement behind it is a
+ * source we cannot place, and says so rather than being promoted into
+ * "Independent testing" on the strength of having been cited.
+ */
+function claimRowTier(claim: DossierClaim): SourceTier {
+  if (measuresItsSubject(claim)) return 'expert';
+  return cohortRaterFor(claim.measuredBy, claim.measuredSourceUrl) === null ? 'unknown' : 'aggregator';
 }
 
 /** The three date shapes a source may carry; anything else is not a date. */
@@ -151,7 +182,7 @@ export function articleSources(
     // exists to prevent. The tier decides it, so the row and the claim label
     // agree: a CHOICE lab result whose own coverage names this model is a
     // measurement of it, and a brand survey never is.
-    if (claimTier(claim) === 'context') continue;
+    if (!measuresItsSubject(claim)) continue;
     measurements.set(url, {
       metric,
       measured: claim.measuredValue.trim(),
@@ -198,13 +229,7 @@ export function articleSources(
       url,
       publisher,
       ...(date ? { date } : {}),
-      // Somebody who published a figure and the protocol behind it is the
-      // expert stratum by definition - that is what the tier means. A cohort
-      // rating published neither: Canstar Blue's stars come off a brand
-      // satisfaction panel, and a CHOICE score whose coverage does not name
-      // this model covers other models - so the row is an aggregator, the same
-      // thing the claim itself is labelled as on the page.
-      tier: claimTier(claim) === 'context' ? 'aggregator' : 'expert',
+      tier: claimRowTier(claim),
       ...(measurements.get(url) ?? {}),
     });
   }

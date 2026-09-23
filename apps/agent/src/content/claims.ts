@@ -113,11 +113,53 @@ function hostsRater(hostname: string, hosts: readonly string[]): boolean {
   return hostname !== '' && hosts.some((h) => hostname === h || hostname.endsWith(`.${h}`));
 }
 
-/** Whether `covers` actually names this subject. */
+/**
+ * A character that is part of a model's name where it sits against one, so a
+ * coverage line naming the "Galaxy S26+" is not read as naming the Galaxy S26.
+ */
+const NAME_CHARACTER = /^[a-z0-9+-]/i;
+
+/**
+ * A word that extends a model's name rather than resuming the sentence.
+ *
+ * Read off the source's own casing, because that is the one signal a coverage
+ * line reliably carries: the words that extend a name are the ones the maker
+ * capitalises or numbers - "Ultra", "Pro", "Max", "5G" - and the words that go
+ * back to prose are not ("and the Pixel", "among them", "tested in August").
+ */
+const NAME_SUFFIX = /^[A-Z0-9]/;
+
+/**
+ * Whether `covers` names this subject as one of the models it covers.
+ *
+ * This was a substring test, and a substring test reads coverage of the
+ * sibling model as coverage of this one: "Galaxy S26" sits inside "Galaxy S26
+ * Ultra", so a cohort result over the Ultra promoted a rating of a handset the
+ * lab never put on the bench into an independent measurement of the model on
+ * the page - the exact misattribution this rule exists to stop.
+ *
+ * So the name has to end where the subject ends. Every occurrence is checked,
+ * because a coverage line naming both ("the Galaxy S26 Ultra, the Galaxy S26
+ * and the Pixel 11 Pro") covers this model on its second mention.
+ */
 function coversSubject(covers: string | null | undefined, subject: string | null | undefined): boolean {
-  const stated = (covers ?? '').toLowerCase();
-  const named = (subject ?? '').trim().toLowerCase();
-  return named !== '' && stated.includes(named);
+  const stated = (covers ?? '').trim();
+  const named = (subject ?? '').trim();
+  if (stated === '' || named === '') return false;
+  const haystack = stated.toLowerCase();
+  const needle = named.toLowerCase();
+
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
+    // The name has to start where a name can start, so "S26" inside "GS26"
+    // is not a mention of it.
+    if (at > 0 && NAME_CHARACTER.test(stated[at - 1])) continue;
+    const after = stated.slice(at + needle.length);
+    if (after === '') return true;
+    if (NAME_CHARACTER.test(after)) continue;
+    const next = after.trimStart();
+    if (next === after || !NAME_SUFFIX.test(next)) return true;
+  }
+  return false;
 }
 
 /**
@@ -332,6 +374,8 @@ export const COVERS_RULE =
   `what that result actually covers, naming the models it covers - including when this exact model is one ` +
   `of them ("the 14 handsets CHOICE lab-tested in August 2026, including the Pixel 11 Pro"). ` +
   `${COHORT_RATERS.map((r) => `${r.rater} covers ${r.covers}`).join('; ')}. ` +
+  `Name each model in full, separated by commas or "and", because the check reads that line as a list: ` +
+  `coverage of "the Galaxy S26 Ultra" is not coverage of the Galaxy S26. ` +
   `A cohort rating attached to a model its own coverage does not name is refused in code, so if the result ` +
   `says nothing about this model, file it as an aggregator fact and not as a claim about the product. ` +
   `The coverage line is also what separates a CHOICE lab result on this model - an independent measurement - ` +

@@ -258,3 +258,52 @@ test('a row the frontmatter schema would refuse is dropped, not shipped', () => 
   assert.equal(rows[0].sourceUrl, undefined, 'an unopenable link is dropped, the figure is not');
   assert.equal(rows[0].date, undefined);
 });
+
+test('coverage of the sibling model is not coverage of this one', () => {
+  // "Galaxy S26" sits inside "Galaxy S26 Ultra". Read as a substring, a cohort
+  // result over the Ultra promoted a rating of a handset the lab never put on
+  // the bench into an independent measurement of this one - and the badge rule
+  // would then let a "Best overall" rest on it.
+  const sibling = claim({
+    subject: 'Galaxy S26',
+    metric: 'Lab score',
+    measuredValue: '82/100',
+    measuredBy: 'CHOICE',
+    measuredSourceUrl: 'https://www.choice.com.au/phones',
+    covers: 'the 12 handsets CHOICE lab-tested in August 2026, including the Galaxy S26 Ultra',
+  });
+  assert.equal(claimTier(sibling), 'context');
+  const problems = claimProblems(pageClaims([sibling], () => 'galaxy-s26'), [
+    { name: 'Galaxy S26', goSlug: 'galaxy-s26', badge: 'Best overall' },
+  ]);
+  assert.equal(problems.length, 2, 'the rating is refused, and the badge has nothing left to rest on');
+  assert.match(problems[0], /never evidence about a model it does not cover/);
+  assert.match(problems[1], /never rests on a manufacturer claim alone/);
+
+  // A sibling is a sibling however the line is phrased.
+  for (const covers of [
+    'the 12 handsets CHOICE lab-tested in August 2026, including the Galaxy S26 Ultra',
+    'the Galaxy S26+ and the Galaxy S26 Ultra, tested in August 2026',
+    'the Galaxy S26 Ultra among them',
+  ]) {
+    assert.equal(claimTier({ ...sibling, covers }), 'context', covers);
+  }
+
+  // The same line naming this model, in the shapes a list of models actually
+  // gets written in, is coverage of it - including where the sentence carries
+  // on past the name.
+  for (const covers of [
+    'the 12 handsets CHOICE lab-tested in August 2026, including the Galaxy S26',
+    'the Galaxy S26 Ultra, the Galaxy S26 and the Pixel 11 Pro',
+    'the handsets CHOICE lab-tested in August 2026, Galaxy S26 among them',
+    'the Galaxy S26 (August 2026 batch)',
+    'the Samsung Galaxy S26',
+  ]) {
+    assert.equal(claimTier({ ...sibling, covers }), 'independent', covers);
+  }
+});
+
+test('the brief tells the researcher how the coverage line is read', () => {
+  assert.match(COVERS_RULE, /separated by commas or "and"/);
+  assert.match(COVERS_RULE, /Galaxy S26 Ultra" is not coverage of the Galaxy S26/);
+});
