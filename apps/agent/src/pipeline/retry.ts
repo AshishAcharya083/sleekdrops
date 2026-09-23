@@ -202,6 +202,12 @@ const LEASE_LAPSED = "(status = 'running' AND (lease_expires_at IS NULL OR lease
  *  longer exists on a row the panel reads those columns off. */
 const CLAIM_CLEARED =
   'claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL, lease_expires_at = NULL';
+/**
+ * The verdict of the run that stopped, cleared. It goes with the message it
+ * explains: what a re-queued card carries is whatever this run produces, not
+ * how the last one failed or how many attempts that took.
+ */
+const VERDICT_CLEARED = 'error = NULL, failure_class = NULL, stage_attempts = 0';
 
 /**
  * Whether re-running `stage` regenerates the draft itself, which is what
@@ -241,7 +247,7 @@ export async function retryFromStage(id: string, stage: Stage): Promise<RetryOut
   const restartRevisions = restartsTheDraft(stage) ? 'revision_round = 0, ' : '';
   const [article] = await q<RequeuedArticle>(
     `UPDATE articles
-        SET attempt = attempt + 1, stage = $2, status = 'queued', error = NULL,
+        SET attempt = attempt + 1, stage = $2, status = 'queued', ${VERDICT_CLEARED},
             stale_from_stage = $2, ${restartRevisions}${CLAIM_CLEARED}, updated_at = now()
       WHERE id = $1 AND (status IN ${RETRYABLE_STATUSES} OR ${LEASE_LAPSED})
       RETURNING id, stage, status, attempt, stale_from_stage`,
@@ -264,7 +270,7 @@ export async function rerunAll(id: string): Promise<RetryOutcome> {
   // the row between the two must not have its stage re-queued underneath it.
   const [article] = await q<RequeuedArticle>(
     `UPDATE articles
-        SET attempt = attempt + 1, stage = 'research', status = 'queued', error = NULL,
+        SET attempt = attempt + 1, stage = 'research', status = 'queued', ${VERDICT_CLEARED},
             stale_from_stage = 'research', revision_round = 0, ${CLAIM_CLEARED},
             updated_at = now()
       WHERE id = $1 AND (status <> 'running' OR ${LEASE_LAPSED})
@@ -294,7 +300,7 @@ export async function requeueInPlace(id: string): Promise<RetryOutcome> {
 
   const [article] = await q<RequeuedArticle>(
     `UPDATE articles
-        SET attempt = attempt + 1, status = 'queued', error = NULL,
+        SET attempt = attempt + 1, status = 'queued', ${VERDICT_CLEARED},
             ${CLAIM_CLEARED}, updated_at = now()
       WHERE id = $1 AND status IN ('failed', 'timed_out', 'cancelled')
       RETURNING id, stage, status, attempt, stale_from_stage`,

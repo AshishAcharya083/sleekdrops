@@ -2,6 +2,15 @@
 // records an agent_session (model, tokens, cost, duration), and routes the
 // article to its next stage. Verdict-driven, bounded revision loop —
 // a light version of devteam-platform's card lane pattern.
+//
+// A stage that throws is classified before it is failed (pipeline/failures.ts):
+// a transient fault costs a retry with backoff, a genuine one fails the card
+// immediately with the operator-facing reason intact. Either way the card
+// carries the class and the attempt count, so the panel can say whether the
+// failure needs a human or just another run. A run stopped from outside - its
+// budget spent, or its lease taken - is not classified and not retried: the
+// card already says what stopped it, and repeating the attempt would cost the
+// same budget again to learn nothing.
 import { MONETISED_INTENTS } from '../content/contract.js';
 import { withDiscoveredProducts } from '../content/evidence.js';
 import { describeShapeSelection } from '../content/shapes.js';
@@ -31,6 +40,7 @@ import { runProductDiscovery, runResearcher } from '../agents/researcher.js';
 import { runSeoReviewer } from '../agents/seoReviewer.js';
 import { runWriter } from '../agents/writer.js';
 import { stageBudgetSeconds } from './budgets.js';
+import { classifyFailure, MAX_STAGE_ATTEMPTS, stageRetryDelayMs } from './failures.js';
 import {
   LEASE_LOST_MESSAGE,
   LEASE_RELEASED,
@@ -454,10 +464,19 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
   return { next, summary };
 };
 
+/** Overridable seams. Only the clock, and only so a test can skip the backoff. */
+export interface StageDeps {
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function runStage(
   article: ArticleRow,
   execute: StageExecutor = executeStage,
+  deps: StageDeps = {},
 ): Promise<void> {
+  const sleep = deps.sleep ?? wait;
   const stage = article.stage;
   if (stage === 'done') return;
   const agent = STAGE_AGENT[stage];
@@ -467,6 +486,11 @@ export async function runStage(
   // happens before there is a session row to fail. Record one anyway: an
   // article left 'running' would be reaped as a timeout it never got to have,
   // with nothing on screen to say why.
+  //
+  // Not retried whatever the class says: nothing about the next few seconds
+  // supplies a credential, and the claim is released either way, so an
+  // operator retry re-runs it. The class is still recorded - it is the whole
+  // point of the column that a card says which kind of failure it hit.
   let model: string | null;
   try {
     model = NO_LLM_AGENTS.has(agent) ? null : await modelFor(agent);
@@ -480,49 +504,23 @@ export async function runStage(
     await finishArticle(article, {
       status: 'failed',
       error: message,
+      failure_class: classifyFailure(err).failureClass,
+      stage_attempts: 1,
       ...LEASE_RELEASED,
     });
     console.error(`[pipeline] ${article.id} ${stage} could not start: ${message}`);
     return;
   }
 
-  const tracker = new UsageTracker();
-
-  const [session] = await q<{ id: string }>(
-    `INSERT INTO agent_sessions (article_id, agent, model, attempt) VALUES ($1, $2, $3, $4)
-     RETURNING id`,
-    [article.id, agent, model, article.attempt ?? 1],
-  );
-
-  // Only while this run's session is still open. A reaper or a boot recovery
-  // that already closed it has written what actually became of the run, and
-  // this process - which by then is the one that was reaped - is in no
-  // position to correct them.
-  const finishSession = async (status: SessionStatus, summary: string, error?: string) => {
-    await q(
-      `UPDATE agent_sessions SET status = $2, summary = $3, error = $4,
-         tokens_input = $5, tokens_output = $6, cost_usd = $7, llm_calls = $8,
-         model = COALESCE($9, model), ended_at = now()
-       WHERE id = $1 AND status = 'running'`,
-      [
-        session.id,
-        status,
-        summary,
-        error ?? null,
-        tracker.tokensInput,
-        tracker.tokensOutput,
-        tracker.costUsd,
-        tracker.llmCalls,
-        tracker.models.size > 0 ? [...tracker.models].join(',') : null,
-      ],
-    );
-  };
-
   // The stage runs under a wall-clock budget and holds its lease open while it
   // does: the budget is what stops a stage that has stopped making progress,
   // the lease is what lets another process see that this one stopped too.
+  //
+  // One lease covers the run, retries and backoff included - a card being
+  // retried is being worked on, not stranded - while the budget is per
+  // attempt, because each attempt is a whole stage that has to be given time
+  // to do its work.
   const startedAt = Date.now();
-  const trace = newLlmCallTrace();
   // A run that reaches here without a claim (an inline invocation, a test
   // harness) holds no lease and therefore has none to lose; everything the
   // worker starts is claimed, which is the path this guards.
@@ -543,11 +541,7 @@ export async function runStage(
   });
 
   try {
-    // Take the lease before the first await of the stage itself, so the run is
-    // covered by the reaper rather than only from the first heartbeat onwards
-    // - and so a claim that is already gone stops here rather than at the end.
     if (holder) {
-      if (!(await renewLease(article.id, holder))) throw new LeaseLostError();
       stopHeartbeat = startHeartbeat(article.id, holder, {
         onLost: () => abandon(new LeaseLostError()),
         onError: (err) =>
@@ -555,76 +549,199 @@ export async function runStage(
       });
     }
 
-    const { next, summary } = await withDeadline(
-      budgetSeconds * 1000,
-      () =>
-        Promise.race([
-          leaseLost,
-          withLlmCallTrace(trace, () => execute(article, stage, model, tracker)),
-        ]),
-      () =>
-        stageTimeoutError({
-          agent,
-          stage,
-          budgetSeconds,
-          elapsedSeconds: (Date.now() - startedAt) / 1000,
-          lastCall: describeLlmCall(trace.last),
-          timeoutCause: 'budget',
-        }),
-    );
-    await finishSession('done', summary);
-    await finishArticle(article, {
-      stage: next.stage,
-      status: next.status,
-      error: null,
-      ...LEASE_RELEASED,
-    });
-    console.log(`[pipeline] ${article.id} ${stage} done → ${next.stage}/${next.status}: ${summary}`);
-  } catch (err) {
-    if (err instanceof LeaseLostError) {
-      // Whoever took the article away from this run has already written what
-      // happened to it - reaped to 'timed_out', cancelled from the panel, or
-      // claimed again. Touching an article column here is how that outcome
-      // gets overwritten, so this run records only its own session.
-      await finishSession('failed', `${stage} stopped`, LEASE_LOST_MESSAGE);
-      log.warn('stage stopped: lease lost', {
-        article_id: article.id,
-        stage,
-        agent,
-        claimed_by: holder,
-        elapsed_seconds: Math.round((Date.now() - startedAt) / 1000),
-      });
-      return;
+    // Each attempt gets its own session row, so the tokens a failed attempt
+    // spent stay on the record instead of being overwritten by the one that
+    // worked.
+    let current = article;
+    for (let attempt = 1; ; attempt++) {
+      const tracker = new UsageTracker();
+      const trace = newLlmCallTrace();
+      const attemptStartedAt = Date.now();
+
+      const [session] = await q<{ id: string }>(
+        `INSERT INTO agent_sessions (article_id, agent, model, attempt) VALUES ($1, $2, $3, $4)
+         RETURNING id`,
+        [article.id, agent, model, article.attempt ?? 1],
+      );
+
+      // Only while this run's session is still open. A reaper or a boot
+      // recovery that already closed it has written what actually became of
+      // the run, and this process - which by then is the one that was reaped -
+      // is in no position to correct them.
+      const finishSession = async (status: SessionStatus, summary: string, error?: string) => {
+        await q(
+          `UPDATE agent_sessions SET status = $2, summary = $3, error = $4,
+             tokens_input = $5, tokens_output = $6, cost_usd = $7, llm_calls = $8,
+             model = COALESCE($9, model), ended_at = now()
+           WHERE id = $1 AND status = 'running'`,
+          [
+            session.id,
+            status,
+            summary,
+            error ?? null,
+            tracker.tokensInput,
+            tracker.tokensOutput,
+            tracker.costUsd,
+            tracker.llmCalls,
+            tracker.models.size > 0 ? [...tracker.models].join(',') : null,
+          ],
+        );
+      };
+
+      try {
+        // Renewed before the first await of the stage itself, so the attempt
+        // is covered by the reaper rather than only from the next heartbeat
+        // onwards - and so a claim that is already gone stops the run here
+        // rather than after it has paid for another stage.
+        if (holder && !(await renewLease(article.id, holder))) throw new LeaseLostError();
+
+        const { next, summary } = await withDeadline(
+          budgetSeconds * 1000,
+          () =>
+            Promise.race([
+              leaseLost,
+              withLlmCallTrace(trace, () => execute(current, stage, model, tracker)),
+            ]),
+          () =>
+            stageTimeoutError({
+              agent,
+              stage,
+              budgetSeconds,
+              elapsedSeconds: (Date.now() - attemptStartedAt) / 1000,
+              lastCall: describeLlmCall(trace.last),
+              timeoutCause: 'budget',
+            }),
+        );
+        await finishSession('done', summary);
+        await finishArticle(current, {
+          stage: next.stage,
+          status: next.status,
+          error: null,
+          failure_class: null,
+          stage_attempts: attempt,
+          ...LEASE_RELEASED,
+        });
+        console.log(
+          `[pipeline] ${article.id} ${stage} done → ${next.stage}/${next.status}: ${summary}` +
+            (attempt > 1 ? ` (recovered on attempt ${attempt})` : ''),
+        );
+        return;
+      } catch (err) {
+        if (err instanceof LeaseLostError) {
+          // Whoever took the article away from this run has already written
+          // what happened to it - reaped to 'timed_out', cancelled from the
+          // panel, or claimed again. Touching an article column here is how
+          // that outcome gets overwritten, so this run records only its own
+          // session, and there is nothing left to retry.
+          await finishSession('failed', `${stage} stopped`, LEASE_LOST_MESSAGE);
+          log.warn('stage stopped: lease lost', {
+            article_id: article.id,
+            stage,
+            agent,
+            claimed_by: holder,
+            elapsed_seconds: Math.round((Date.now() - startedAt) / 1000),
+          });
+          return;
+        }
+        if (err instanceof StageTimeoutError) {
+          // Terminal whatever the taxonomy would make of the word "timeout":
+          // a stage that spent its whole budget and stopped is not a hiccup,
+          // and another attempt costs the same budget again to find out. It
+          // is the operator's to retry, from the card that says so.
+          await finishSession('timed_out', `${stage} timed out`, err.message);
+          // The article keeps its stage and everything the run had written: a
+          // half-finished draft is the operator's to look at and retry from,
+          // not something to throw away because the run that produced it was
+          // stopped.
+          await finishArticle(current, {
+            status: 'timed_out',
+            error: err.message,
+            // No class: the taxonomy is a verdict on what a stage threw, and
+            // this stage threw nothing - it was stopped. Clearing it is what
+            // keeps an earlier attempt's verdict from reading as this one's.
+            failure_class: null,
+            stage_attempts: attempt,
+            ...LEASE_RELEASED,
+          });
+          log.warn('stage timed out', {
+            article_id: article.id,
+            stage,
+            agent,
+            cause: err.timeoutCause,
+            budget_seconds: err.budgetSeconds,
+            elapsed_seconds: Math.round(err.elapsedSeconds),
+            last_llm_call: err.lastCall,
+          });
+          return;
+        }
+
+        const message = scrubSecrets(err instanceof Error ? err.message : String(err));
+        const { failureClass, signal } = classifyFailure(err);
+        const retrying = failureClass === 'transient' && attempt < MAX_STAGE_ATTEMPTS;
+
+        await finishSession(
+          'failed',
+          retrying
+            ? `${stage} failed (${signal}, attempt ${attempt} of ${MAX_STAGE_ATTEMPTS}) - retrying`
+            : `${stage} failed`,
+          message,
+        );
+
+        if (!retrying) {
+          await finishArticle(current, {
+            status: 'failed',
+            error: message,
+            failure_class: failureClass,
+            stage_attempts: attempt,
+            ...LEASE_RELEASED,
+          });
+          console.error(`[pipeline] ${article.id} ${stage} FAILED (${failureClass}): ${message}`);
+          return;
+        }
+
+        // The count lands before the wait, not after it, so a process that dies
+        // mid-backoff leaves the attempts it already spent on the row.
+        // Through the claim guard like every other write this run makes - a
+        // card that is no longer ours is not ours to retry either.
+        if (
+          !(await updateClaimed(current, { failure_class: failureClass, stage_attempts: attempt }))
+        ) {
+          log.warn('stage retry abandoned: the article moved on while the stage ran', {
+            article_id: article.id,
+            stage,
+            attempt,
+          });
+          return;
+        }
+
+        const delay = stageRetryDelayMs(attempt);
+        console.warn(
+          `[pipeline] ${article.id} ${stage} transient failure (${signal}) on attempt ${attempt}, ` +
+            `retrying in ${delay}ms: ${message}`,
+        );
+        await sleep(delay);
+
+        // Re-read rather than retry against the row we claimed: a failed
+        // attempt may have written part of its work, and an operator may have
+        // cancelled the card while we waited. Anything that is no longer ours
+        // to run ends the loop without touching the row.
+        const [reloaded] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [article.id]);
+        if (
+          !reloaded ||
+          reloaded.status !== 'running' ||
+          reloaded.stage !== stage ||
+          reloaded.claimed_by !== holder
+        ) {
+          log.warn('stage retry abandoned: the article moved on while we waited', {
+            article_id: article.id,
+            stage,
+            attempt,
+          });
+          return;
+        }
+        current = reloaded;
+      }
     }
-    if (err instanceof StageTimeoutError) {
-      await finishSession('timed_out', `${stage} timed out`, err.message);
-      // The article keeps its stage and everything the run had written: a
-      // half-finished draft is the operator's to look at and retry from, not
-      // something to throw away because the run that produced it was stopped.
-      await finishArticle(article, {
-        status: 'timed_out',
-        error: err.message,
-        ...LEASE_RELEASED,
-      });
-      log.warn('stage timed out', {
-        article_id: article.id,
-        stage,
-        agent,
-        cause: err.timeoutCause,
-        budget_seconds: err.budgetSeconds,
-        elapsed_seconds: Math.round(err.elapsedSeconds),
-        last_llm_call: err.lastCall,
-      });
-      return;
-    }
-    const message = scrubSecrets(err instanceof Error ? err.message : String(err));
-    await finishSession('failed', `${stage} failed`, message);
-    await finishArticle(article, {
-      status: 'failed',
-      error: message,
-      ...LEASE_RELEASED,
-    });
-    console.error(`[pipeline] ${article.id} ${stage} FAILED: ${message}`);
   } finally {
     stopHeartbeat();
   }

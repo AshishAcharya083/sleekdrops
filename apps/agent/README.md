@@ -30,6 +30,12 @@ per post type (a guide carries the full owner set, a trend article is held to
 sourcing depth) and eases for categories with no Australian owner corpus.
 Widen the topic brief or re-run research; there is nothing to fix in the draft,
 because there is no draft.
+
+Every other stage failure is **classified before the card is failed** (`pipeline/failures.ts`).
+A transient fault - malformed JSON out of the model, a shape complaint, a hung or timed-out engine, a dropped socket, a provider on 429/5xx - costs a retry with exponential backoff (3 attempts) instead of the card, and structured stages get two JSON reprompts before that, not one.
+A genuine failure - a contract violation, the evidence gate, a validation error - goes straight to `failed` on the first attempt, because another run reaches the same verdict.
+The card carries both the class and the attempt count, so the board says whether a failure needs a person or just another run.
+
 With `publish_mode = approval` (default) the article parks at
 `waiting_approval` until you hit **Approve & publish** in the admin panel.
 
@@ -379,7 +385,8 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
 - `topics` — scout suggestions; `suggested → approved/rejected` (unique on
   normalized title = the "never repeat a topic" guard, alongside the D1 check)
 - `articles` — the work unit ("card"): stage, status, dossier/keyword plan/
-  brief/draft/review/frontmatter JSONB, revision round, error
+  brief/draft/review/frontmatter JSONB, revision round, error, failure class
+  (`transient`/`genuine`) and the attempts the last stage run took
 - `agent_sessions` — one row per agent run: model, tokens in/out, cost USD,
   duration, summary/error
 - `settings` — publish_mode, per-agent models, revision cap, worker toggle

@@ -678,7 +678,8 @@ export function createApp(): Hono<TraceEnv> {
   app.get('/api/articles', async (c) => {
     const rows = await q(
       `SELECT a.id, a.topic_id, a.title, a.slug, a.category, a.post_type, a.stage, a.status,
-              a.revision_round, a.error, a.published_at, a.created_at, a.updated_at,
+              a.revision_round, a.error, a.failure_class, a.stage_attempts,
+              a.published_at, a.created_at, a.updated_at,
               a.hero_image_url, (a.seo_review ->> 'score') seo_score,
               a.attempt, a.stale_from_stage, a.claimed_at, a.heartbeat_at, a.lease_expires_at,
               ${reviewStaleSql('a')} AS review_stale
