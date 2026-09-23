@@ -31,7 +31,7 @@ delete process.env.ANTHROPIC_API_KEY;
 
 const { getSetting, pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
-const { runStage } = await import('./runner.js');
+const { executeStage, runStage } = await import('./runner.js');
 const { MAX_STAGE_ATTEMPTS, stageRetryDelayMs } = await import('./failures.js');
 const { createApp } = await import('../api/server.js');
 
@@ -133,7 +133,7 @@ test('a transient fault costs a retry, not the card', { skip }, async () => {
   });
   const waits: number[] = [];
 
-  await runStage(article, { sleep: async (ms) => void waits.push(ms) });
+  await runStage(article, executeStage, { sleep: async (ms) => void waits.push(ms) });
 
   const done = await reload(article.id);
   assert.equal(done.status, 'done', 'the article finished the stage it would have died on');
@@ -161,7 +161,7 @@ test('a transient fault that never clears fails the card, bounded and labelled',
   });
   const waits: number[] = [];
 
-  await runStage(article, { sleep: async (ms) => void waits.push(ms) });
+  await runStage(article, executeStage, { sleep: async (ms) => void waits.push(ms) });
 
   const failed = await reload(article.id);
   assert.equal(failed.status, 'failed');
@@ -201,7 +201,7 @@ test('a genuine failure fails the card on the first attempt, message intact', { 
   );
   const waits: number[] = [];
 
-  await runStage(article, { sleep: async (ms) => void waits.push(ms) });
+  await runStage(article, executeStage, { sleep: async (ms) => void waits.push(ms) });
 
   const failed = await reload(article.id);
   assert.equal(failed.status, 'failed');
@@ -271,27 +271,42 @@ test('a card mid-backoff reads as busy, not stranded', { skip }, async () => {
   });
   const claim = async () =>
     (
-      await q<{ stage_attempts: number; failure_class: string | null; claimed_at: Date }>(
-        'SELECT stage_attempts, failure_class, claimed_at FROM articles WHERE id = $1',
+      await q<{
+        stage_attempts: number;
+        failure_class: string | null;
+        claimed_by: string | null;
+        lease_expires_at: Date | null;
+      }>(
+        'SELECT stage_attempts, failure_class, claimed_by, lease_expires_at FROM articles WHERE id = $1',
         [article.id],
       )
     )[0];
   const during: Array<Awaited<ReturnType<typeof claim>>> = [];
 
-  await runStage(article, { sleep: async () => void during.push(await claim()) });
+  await runStage(article, executeStage, { sleep: async () => void during.push(await claim()) });
 
-  const started = (await claim()).claimed_at;
+  const settled = await claim();
   assert.deepEqual(
     during.map((row) => row.stage_attempts),
     [1, 2],
     'the count is on the card while it waits, not only once it is over',
   );
   assert.equal(during[0].failure_class, 'transient');
-  assert.ok(
-    during[1].claimed_at > during[0].claimed_at,
-    'each retry renews the lease, so recoverStranded cannot hand the card to a second worker',
+  assert.deepEqual(
+    during.map((row) => row.claimed_by),
+    ['test-worker', 'test-worker'],
+    'the card is still held by the run that is retrying it',
   );
-  assert.equal(started, null, 'and the claim is released once the card finally fails');
+  assert.ok(
+    during.every((row) => row.lease_expires_at !== null && row.lease_expires_at > new Date()),
+    'the lease is live throughout the backoff, so the reaper leaves the card alone',
+  );
+  assert.ok(
+    during[1].lease_expires_at! > during[0].lease_expires_at!,
+    'and each attempt pushes it forward rather than coasting on the first claim',
+  );
+  assert.equal(settled.claimed_by, null, 'the claim is released once the card finally fails');
+  assert.equal(settled.lease_expires_at, null, 'and a stopped run holds no lease');
 });
 
 test('a card cancelled mid-backoff is left alone', { skip }, async () => {
@@ -300,7 +315,7 @@ test('a card cancelled mid-backoff is left alone', { skip }, async () => {
     throw new TypeError('fetch failed', { cause: new Error('ECONNRESET') });
   });
 
-  await runStage(article, {
+  await runStage(article, executeStage, {
     sleep: async () => {
       await q("UPDATE articles SET status = 'cancelled', updated_at = now() WHERE id = $1", [
         article.id,

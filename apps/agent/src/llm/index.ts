@@ -24,6 +24,7 @@
 // grounding, Claude uses the in-process tools in ./searchTools.ts.
 import { config } from '../config.js';
 import { getSetting } from '../db/pool.js';
+import { noteLlmCall, noteLlmCallEnded } from './callTrace.js';
 import { geminiChat } from './gemini.js';
 import { claudeChat, CLAUDE_NOT_CONFIGURED, resolveClaudeCredential } from './claude.js';
 
@@ -180,16 +181,31 @@ export class UsageTracker {
   }
 }
 
+/** Attempts one chat() makes before giving up. Reported in a timeout message. */
+export const CHAT_ATTEMPTS = 3;
+
 export async function chat(opts: ChatOptions): Promise<LlmResult> {
   const settings = await llmSettings();
   let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < CHAT_ATTEMPTS; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * attempt));
+    // What the stage is waiting on, for the message it gets if it never
+    // stops waiting. Costs nothing when no stage run is in scope.
+    noteLlmCall({
+      model: opts.model,
+      search: opts.search ?? false,
+      attempt: attempt + 1,
+      attemptsAllowed: CHAT_ATTEMPTS,
+      startedAt: Date.now(),
+    });
     try {
-      return isClaudeModel(opts.model)
+      const result = isClaudeModel(opts.model)
         ? await claudeChat(opts, settings)
         : await geminiChat(opts, settings);
+      noteLlmCallEnded();
+      return result;
     } catch (err) {
+      noteLlmCallEnded();
       lastError = err;
       // Config errors won't fix themselves — only retry transient failures.
       if (err instanceof Error && /not configured|no credential/i.test(err.message)) throw err;

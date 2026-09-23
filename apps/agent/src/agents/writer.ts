@@ -81,7 +81,7 @@ export async function runWriter(
   // The exact numbered list the published page will show under "Sources": the
   // assembler derives it from the same dossier with the same function, so a
   // marker the writer puts in the body points at the entry the reader sees.
-  const sources = articleSources(article.research?.facts ?? []);
+  const sources = articleSources(article.research?.facts ?? [], article.research?.claims ?? []);
   const operator = operatorBrief(topic);
 
   const result = await chat({

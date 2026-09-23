@@ -7,11 +7,19 @@
 // a transient fault costs a retry with backoff, a genuine one fails the card
 // immediately with the operator-facing reason intact. Either way the card
 // carries the class and the attempt count, so the panel can say whether the
-// failure needs a human or just another run.
+// failure needs a human or just another run. A run stopped from outside - its
+// budget spent, or its lease taken - is not classified and not retried: the
+// card already says what stopped it, and repeating the attempt would cost the
+// same budget again to learn nothing.
 import { MONETISED_INTENTS } from '../content/contract.js';
 import { withDiscoveredProducts } from '../content/evidence.js';
 import { describeShapeSelection } from '../content/shapes.js';
+import { offersForArticle } from '../db/offers.js';
 import { getSetting, q } from '../db/pool.js';
+import { describeEnqueue, enqueuePublishedArticle } from '../distribution/queue.js';
+import { withDeadline } from '../lib/deadline.js';
+import { createLogger } from '../lib/log.js';
+import { describeLlmCall, newLlmCallTrace, withLlmCallTrace } from '../llm/callTrace.js';
 import {
   claudeConfigured,
   CLAUDE_NOT_CONFIGURED,
@@ -31,8 +39,21 @@ import { runPublisher } from '../agents/publisher.js';
 import { runProductDiscovery, runResearcher } from '../agents/researcher.js';
 import { runSeoReviewer } from '../agents/seoReviewer.js';
 import { runWriter } from '../agents/writer.js';
+import { stageBudgetSeconds } from './budgets.js';
 import { classifyFailure, MAX_STAGE_ATTEMPTS, stageRetryDelayMs } from './failures.js';
-import type { ArticleRow, SeoReview, Stage, TopicRow } from './types.js';
+import {
+  LEASE_LOST_MESSAGE,
+  LEASE_RELEASED,
+  LeaseLostError,
+  renewLease,
+  startHeartbeat,
+  updateClaimed,
+} from './lease.js';
+import { scrubSecrets, stageTimeoutError } from './stageTimeout.js';
+import { StageTimeoutError } from './types.js';
+import type { ArticleRow, SeoReview, SessionStatus, Stage, TopicRow } from './types.js';
+
+const log = createLogger('pipeline');
 
 /** The agent that runs each stage. A stage missing here has no named session. */
 export const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
@@ -47,6 +68,15 @@ export const STAGE_AGENT: Record<Exclude<Stage, 'done'>, string> = {
   image: 'image_agent',
   publish: 'publisher',
 };
+
+/**
+ * The other half of a stage's definition: how long it may run. It belongs
+ * beside STAGE_AGENT and is re-exported here to be read beside it, but the
+ * literal lives in budgets.ts so that resolving a budget - which the admin API
+ * does on every article request - costs an import of configuration rather than
+ * an import of every agent in this file.
+ */
+export { STAGE_TIMEOUT_SECONDS } from './budgets.js';
 
 /** Stages that run deterministic code — no LLM chat, no model to pick. */
 export const NO_LLM_AGENTS = new Set(['assembler', 'publisher']);
@@ -148,13 +178,49 @@ export function summariseReview(review: SeoReview): string {
   }`;
 }
 
-async function updateArticle(id: string, fields: Record<string, unknown>): Promise<void> {
-  const keys = Object.keys(fields);
-  const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
-  await q(`UPDATE articles SET ${sets}, updated_at = now() WHERE id = $1`, [
-    id,
-    ...keys.map((k) => fields[k]),
-  ]);
+/**
+ * A stage body's own output - a dossier, a draft, an assembled frontmatter.
+ * Lands while the run still owns the article, which is what keeps the partial
+ * output of a stage that is later stopped: everything written before the
+ * budget expired was written under a live claim. Every write a stage makes
+ * goes through the claim guard, not just the one that ends it - `withDeadline`
+ * settles the promise runStage is waiting on, it does not stop the work behind
+ * it, so an abandoned stage runs on with more writes in it.
+ *
+ * A write that finds the claim gone is dropped, and ends the stage the way
+ * losing the lease does. Dropping it alone would not be enough - the body
+ * would carry on to its next write, and to the model calls between them - and
+ * the run that took the article over has already recorded what became of it.
+ *
+ * Exported only so a test can drive the guard against a real row: every stage
+ * body that uses it is in this file.
+ */
+export async function updateArticle(
+  article: ArticleRow,
+  fields: Record<string, unknown>,
+): Promise<void> {
+  if (await updateClaimed(article, fields)) return;
+  log.warn('stage output dropped: the article moved on while the stage ran', {
+    article_id: article.id,
+    stage: article.stage,
+    claimed_by: article.claimed_by,
+    columns: Object.keys(fields),
+  });
+  throw new LeaseLostError();
+}
+
+/**
+ * The write that ends this run. Same guard, but a drop is only logged: the
+ * routing decision of a run nobody is waiting for must not land on top of the
+ * state that replaced it, and by this point there is no stage left to stop.
+ */
+async function finishArticle(article: ArticleRow, fields: Record<string, unknown>): Promise<void> {
+  if (await updateClaimed(article, fields)) return;
+  log.warn('stage result dropped: the article moved on while the stage ran', {
+    article_id: article.id,
+    stage: article.stage,
+    claimed_by: article.claimed_by,
+  });
 }
 
 /** Ensure the brief's slug doesn't collide with another article. */
@@ -170,18 +236,27 @@ async function uniqueSlug(articleId: string, want: string): Promise<string> {
   return `${want}-${articleId.slice(0, 8)}`;
 }
 
+/** Where a finished stage sends the article, and the line its session carries. */
+export interface StageOutcome {
+  next: { stage: Stage; status: string };
+  summary: string;
+}
+
 /**
- * One attempt at a stage's work: run the agent, write what it produced, and
- * report where the article goes next. Everything about recording the attempt —
- * the session row, the failure class, the retry — belongs to runStage, so this
- * function is free to just throw.
+ * The body of one stage: everything between "the article is claimed" and "the
+ * stage has an answer". Separate from runStage because runStage is what is
+ * raced against the budget, and the thing being raced has to be a value it can
+ * hold - and because injecting one is how the timeout path is driven in a test
+ * without a live model.
  */
-async function executeStage(
-  stage: Exclude<Stage, 'done'>,
+export type StageExecutor = (
   article: ArticleRow,
+  stage: Exclude<Stage, 'done'>,
   model: string | null,
   tracker: UsageTracker,
-): Promise<{ summary: string; next: { stage: Stage; status: string } }> {
+) => Promise<StageOutcome>;
+
+export const executeStage: StageExecutor = async (article, stage, model, tracker) => {
   let next: { stage: Stage; status: string } = { stage: 'done', status: 'done' };
   let summary = '';
 
@@ -191,7 +266,7 @@ async function executeStage(
         ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
         : null;
       const dossier = await runResearcher(article, topic, model!, tracker);
-      await updateArticle(article.id, { research: JSON.stringify(dossier) });
+      await updateArticle(article, { research: JSON.stringify(dossier) });
       summary = `${dossier.facts?.length ?? 0} facts, ${dossier.products?.length ?? 0} products, primary keyword "${dossier.keywords?.primary}"`;
       next = { stage: 'keyword', status: 'queued' };
       break;
@@ -201,7 +276,7 @@ async function executeStage(
         ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
         : null;
       const plan = await runKeywordStrategist(article, topic, model!, tracker);
-      await updateArticle(article.id, { keyword_plan: JSON.stringify(plan) });
+      await updateArticle(article, { keyword_plan: JSON.stringify(plan) });
       // Earliest point at which "this piece has nothing to link" is knowable:
       // the dossier is built, and the SERP read has just named the intent.
       // Deal with it here rather than at assemble - outline, write, review
@@ -228,7 +303,7 @@ async function executeStage(
               `is not required to find products, so it did not) or add them to the topic brief by hand.`,
           );
         }
-        await updateArticle(article.id, {
+        await updateArticle(article, {
           research: JSON.stringify(withDiscoveredProducts(article.research, products)),
         });
         discoveryNote = `, ${products.length} product(s) recovered by a discovery pass`;
@@ -242,7 +317,7 @@ async function executeStage(
         ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
         : null;
       const angle = await runAngleEditor(article, topic, model!, tracker);
-      await updateArticle(article.id, { editorial_angle: JSON.stringify(angle) });
+      await updateArticle(article, { editorial_angle: JSON.stringify(angle) });
       summary = angle.defensible
         ? `"${angle.thesis}" - ${angle.shape} shape, ${angle.informationGain.length} claim(s) the top results miss, ${angle.byline} beat`
         : `no defensible take recorded (${angle.weakness}) - ${angle.shape} shape, ${angle.byline} beat`;
@@ -257,7 +332,7 @@ async function executeStage(
       // column is the record of the decision an operator can see and query.
       // Both are written here so they can never disagree.
       const shape = brief.structureShape ?? null;
-      await updateArticle(article.id, {
+      await updateArticle(article, {
         outline: JSON.stringify(brief),
         structure_shape: shape ? JSON.stringify(shape) : null,
         slug: brief.slug,
@@ -272,7 +347,7 @@ async function executeStage(
         ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
         : null;
       const draft = await runWriter(article, topic, model!, tracker);
-      await updateArticle(article.id, { draft_md: draft });
+      await updateArticle(article, { draft_md: draft });
       summary = `draft written (${draft.split(/\s+/).length} words)`;
       next = { stage: 'seo_review', status: 'queued' };
       break;
@@ -283,7 +358,7 @@ async function executeStage(
       if (!review.pass && article.revision_round >= maxRounds) {
         review.forcedThrough = true;
       }
-      await updateArticle(article.id, { seo_review: JSON.stringify(review) });
+      await updateArticle(article, { seo_review: JSON.stringify(review) });
       summary = summariseReview(review);
       next =
         review.pass || review.forcedThrough
@@ -293,7 +368,7 @@ async function executeStage(
     }
     case 'edit': {
       const revised = await runEditor(article, model!, tracker);
-      await updateArticle(article.id, {
+      await updateArticle(article, {
         draft_md: revised,
         revision_round: article.revision_round + 1,
         // Admin feedback is consumed by exactly one edit pass.
@@ -304,13 +379,21 @@ async function executeStage(
       break;
     }
     case 'assemble': {
-      const assembled = await runAssembler(article);
-      await updateArticle(article.id, {
+      // The offers an editor attached are read here, not inside the
+      // assembler: the assembler stays a pure function of the card it is
+      // handed, which is what lets it be driven straight from a fixture.
+      const offers = await offersForArticle(article.id);
+      const assembled = await runAssembler(article, offers);
+      await updateArticle(article, {
         draft_md: assembled.body,
         frontmatter: JSON.stringify(assembled.frontmatter),
         affiliate_links: JSON.stringify(assembled.affiliateLinks),
       });
       summary = `frontmatter + ${assembled.affiliateLinks.length} affiliate link(s) validated${
+        assembled.offerSlugs.length > 0
+          ? ` (${assembled.offerSlugs.length} from attached offer(s): ${assembled.offerSlugs.join(', ')})`
+          : ''
+      }${
         assembled.healedSlugs.length > 0
           ? ` (${assembled.healedSlugs.length} healed from the draft: ${assembled.healedSlugs.join(', ')})`
           : ''
@@ -324,21 +407,28 @@ async function executeStage(
     }
     case 'image': {
       const existing = article.frontmatter ?? {};
+      // Every path that settles a hero also records where it came from.
+      // Provenance is a rights fact, not a note: distribution may upload an
+      // image we generated to a social network and may not upload a
+      // photograph the agent found on someone else's site, and that decision
+      // cannot be made by parsing this stage's summary line.
       if (article.hero_image_url) {
         // The operator dropped a file in the admin panel; the assembler has
         // already stamped it into frontmatter. Searching would be waste.
+        await updateArticle(article, { hero_image_source: 'operator' });
         summary = 'operator-supplied hero image — image search skipped';
       } else if (existing.heroImage) {
         summary = 'hero image already set — keeping it';
       } else {
         const image = await runImageAgent(article, model!);
         if (image.heroImage) {
-          await updateArticle(article.id, {
+          await updateArticle(article, {
             frontmatter: JSON.stringify({
               ...existing,
               heroImage: image.heroImage,
               heroAlt: image.heroAlt ?? undefined,
             }),
+            hero_image_source: image.source,
           });
         }
         summary = image.summary;
@@ -352,170 +442,307 @@ async function executeStage(
     }
     case 'publish': {
       const result = await runPublisher(article);
-      await updateArticle(article.id, { published_at: new Date().toISOString() });
+      await updateArticle(article, { published_at: new Date().toISOString() });
       if (article.topic_id) {
         await q("UPDATE topics SET status = 'approved', updated_at = now() WHERE id = $1", [
           article.topic_id,
         ]);
       }
-      summary = `${result.slug} → D1 as '${result.d1Status}'${result.dispatched ? ', site rebuild dispatched' : ''}`;
+      // Social posting is enqueued, never sent from here. This stage is
+      // re-entered by a republish, by a retry-from-stage and by the editorial
+      // feedback loop, so a send would fire again for the same slug every
+      // time; the queue is unique on (slug, channel) and every later pass is a
+      // no-op. A draft enqueues nothing, on the same reading of the publish
+      // mode that keeps `dispatchContentUpdated` from firing for one.
+      const distribution = await enqueuePublishedArticle(article, { d1Status: result.d1Status });
+      summary = `${result.slug} → D1 as '${result.d1Status}'${result.dispatched ? ', site rebuild dispatched' : ''}; ${describeEnqueue(distribution)}`;
       next = { stage: 'done', status: 'done' };
       break;
     }
   }
 
-  return { summary, next };
-}
+  return { next, summary };
+};
 
-/** Overridable seams. Only the clock, and only so a test can skip the wait. */
+/** Overridable seams. Only the clock, and only so a test can skip the backoff. */
 export interface StageDeps {
   sleep?: (ms: number) => Promise<void>;
 }
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function runStage(article: ArticleRow, deps: StageDeps = {}): Promise<void> {
+export async function runStage(
+  article: ArticleRow,
+  execute: StageExecutor = executeStage,
+  deps: StageDeps = {},
+): Promise<void> {
   const sleep = deps.sleep ?? wait;
   const stage = article.stage;
   if (stage === 'done') return;
   const agent = STAGE_AGENT[stage];
+  const budgetSeconds = stageBudgetSeconds(stage);
 
   // Picking the model can fail now (a Claude stage with no credential), and it
   // happens before there is a session row to fail. Record one anyway: an
-  // article left 'running' would be re-queued by recoverStranded every 30
-  // minutes forever, with nothing on screen to say why.
+  // article left 'running' would be reaped as a timeout it never got to have,
+  // with nothing on screen to say why.
   //
-  // Not retried here whatever the class says: nothing about the next few
-  // seconds supplies a credential, and the claim is released either way, so an
-  // operator retry re-runs it. The class is still recorded — it is the whole
+  // Not retried whatever the class says: nothing about the next few seconds
+  // supplies a credential, and the claim is released either way, so an
+  // operator retry re-runs it. The class is still recorded - it is the whole
   // point of the column that a card says which kind of failure it hit.
   let model: string | null;
   try {
     model = NO_LLM_AGENTS.has(agent) ? null : await modelFor(agent);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = scrubSecrets(err instanceof Error ? err.message : String(err));
     await q(
-      `INSERT INTO agent_sessions (article_id, agent, status, summary, error, ended_at)
-       VALUES ($1, $2, 'failed', $3, $4, now())`,
-      [article.id, agent, `${stage} could not start`, message],
+      `INSERT INTO agent_sessions (article_id, agent, status, summary, error, attempt, ended_at)
+       VALUES ($1, $2, 'failed', $3, $4, $5, now())`,
+      [article.id, agent, `${stage} could not start`, message, article.attempt ?? 1],
     );
-    await updateArticle(article.id, {
+    await finishArticle(article, {
       status: 'failed',
       error: message,
       failure_class: classifyFailure(err).failureClass,
       stage_attempts: 1,
-      claimed_by: null,
-      claimed_at: null,
+      ...LEASE_RELEASED,
     });
     console.error(`[pipeline] ${article.id} ${stage} could not start: ${message}`);
     return;
   }
 
-  // Each attempt gets its own session row, so the tokens a failed attempt
-  // spent stay on the record instead of being overwritten by the one that
-  // worked.
-  let current = article;
-  for (let attempt = 1; ; attempt++) {
-    const tracker = new UsageTracker();
+  // The stage runs under a wall-clock budget and holds its lease open while it
+  // does: the budget is what stops a stage that has stopped making progress,
+  // the lease is what lets another process see that this one stopped too.
+  //
+  // One lease covers the run, retries and backoff included - a card being
+  // retried is being worked on, not stranded - while the budget is per
+  // attempt, because each attempt is a whole stage that has to be given time
+  // to do its work.
+  const startedAt = Date.now();
+  // A run that reaches here without a claim (an inline invocation, a test
+  // harness) holds no lease and therefore has none to lose; everything the
+  // worker starts is claimed, which is the path this guards.
+  const holder = article.claimed_by;
+  let stopHeartbeat = () => {};
+  // Losing the lease ends the stage the same way its budget running out does:
+  // by settling the promise runStage is waiting on. Nothing can cancel the
+  // work itself - a JavaScript promise has no cancel - so what matters is that
+  // this run stops writing, and that is the claim guard on every article write
+  // rather than this race: the body abandoned here runs on, and its next
+  // updateArticle is where it finds out the article is no longer its own.
+  let abandon: (reason: Error) => void = () => {};
+  const leaseLost = new Promise<never>((_, reject) => {
+    abandon = reject;
+  });
+  leaseLost.catch(() => {
+    /* rejected after the race has been decided is nobody's failure to handle */
+  });
 
-    const [session] = await q<{ id: string }>(
-      `INSERT INTO agent_sessions (article_id, agent, model) VALUES ($1, $2, $3) RETURNING id`,
-      [article.id, agent, model],
-    );
-
-    const finishSession = async (status: 'done' | 'failed', summary: string, error?: string) => {
-      await q(
-        `UPDATE agent_sessions SET status = $2, summary = $3, error = $4,
-           tokens_input = $5, tokens_output = $6, cost_usd = $7, llm_calls = $8,
-           model = COALESCE($9, model), ended_at = now()
-         WHERE id = $1`,
-        [
-          session.id,
-          status,
-          summary,
-          error ?? null,
-          tracker.tokensInput,
-          tracker.tokensOutput,
-          tracker.costUsd,
-          tracker.llmCalls,
-          tracker.models.size > 0 ? [...tracker.models].join(',') : null,
-        ],
-      );
-    };
-
-    try {
-      const { summary, next } = await executeStage(stage, current, model, tracker);
-
-      await finishSession('done', summary);
-      await updateArticle(article.id, {
-        stage: next.stage,
-        status: next.status,
-        error: null,
-        failure_class: null,
-        stage_attempts: attempt,
-        claimed_by: null,
-        claimed_at: null,
+  try {
+    if (holder) {
+      stopHeartbeat = startHeartbeat(article.id, holder, {
+        onLost: () => abandon(new LeaseLostError()),
+        onError: (err) =>
+          log.warn('lease renewal failed', { article_id: article.id, stage, error: err }),
       });
-      console.log(
-        `[pipeline] ${article.id} ${stage} done → ${next.stage}/${next.status}: ${summary}` +
-          (attempt > 1 ? ` (recovered on attempt ${attempt})` : ''),
-      );
-      return;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const { failureClass, signal } = classifyFailure(err);
-      const retrying = failureClass === 'transient' && attempt < MAX_STAGE_ATTEMPTS;
+    }
 
-      await finishSession(
-        'failed',
-        retrying
-          ? `${stage} failed (${signal}, attempt ${attempt} of ${MAX_STAGE_ATTEMPTS}) - retrying`
-          : `${stage} failed`,
-        message,
+    // Each attempt gets its own session row, so the tokens a failed attempt
+    // spent stay on the record instead of being overwritten by the one that
+    // worked.
+    let current = article;
+    for (let attempt = 1; ; attempt++) {
+      const tracker = new UsageTracker();
+      const trace = newLlmCallTrace();
+      const attemptStartedAt = Date.now();
+
+      const [session] = await q<{ id: string }>(
+        `INSERT INTO agent_sessions (article_id, agent, model, attempt) VALUES ($1, $2, $3, $4)
+         RETURNING id`,
+        [article.id, agent, model, article.attempt ?? 1],
       );
 
-      if (!retrying) {
-        await updateArticle(article.id, {
-          status: 'failed',
-          error: message,
-          failure_class: failureClass,
+      // Only while this run's session is still open. A reaper or a boot
+      // recovery that already closed it has written what actually became of
+      // the run, and this process - which by then is the one that was reaped -
+      // is in no position to correct them.
+      const finishSession = async (status: SessionStatus, summary: string, error?: string) => {
+        await q(
+          `UPDATE agent_sessions SET status = $2, summary = $3, error = $4,
+             tokens_input = $5, tokens_output = $6, cost_usd = $7, llm_calls = $8,
+             model = COALESCE($9, model), ended_at = now()
+           WHERE id = $1 AND status = 'running'`,
+          [
+            session.id,
+            status,
+            summary,
+            error ?? null,
+            tracker.tokensInput,
+            tracker.tokensOutput,
+            tracker.costUsd,
+            tracker.llmCalls,
+            tracker.models.size > 0 ? [...tracker.models].join(',') : null,
+          ],
+        );
+      };
+
+      try {
+        // Renewed before the first await of the stage itself, so the attempt
+        // is covered by the reaper rather than only from the next heartbeat
+        // onwards - and so a claim that is already gone stops the run here
+        // rather than after it has paid for another stage.
+        if (holder && !(await renewLease(article.id, holder))) throw new LeaseLostError();
+
+        const { next, summary } = await withDeadline(
+          budgetSeconds * 1000,
+          () =>
+            Promise.race([
+              leaseLost,
+              withLlmCallTrace(trace, () => execute(current, stage, model, tracker)),
+            ]),
+          () =>
+            stageTimeoutError({
+              agent,
+              stage,
+              budgetSeconds,
+              elapsedSeconds: (Date.now() - attemptStartedAt) / 1000,
+              lastCall: describeLlmCall(trace.last),
+              timeoutCause: 'budget',
+            }),
+        );
+        await finishSession('done', summary);
+        await finishArticle(current, {
+          stage: next.stage,
+          status: next.status,
+          error: null,
+          failure_class: null,
           stage_attempts: attempt,
-          claimed_by: null,
-          claimed_at: null,
+          ...LEASE_RELEASED,
         });
-        console.error(`[pipeline] ${article.id} ${stage} FAILED (${failureClass}): ${message}`);
-        return;
-      }
-
-      // The count lands before the wait, not after it: an operator watching a
-      // card that is mid-backoff should see that it is on its second run.
-      // `claimed_at` is renewed at the same time, because the claim is a lease
-      // — a card on its third attempt is being worked on, not stranded, and
-      // recoverStranded must not hand it to a second worker mid-retry.
-      await updateArticle(article.id, {
-        failure_class: failureClass,
-        stage_attempts: attempt,
-        claimed_at: new Date(),
-      });
-      const delay = stageRetryDelayMs(attempt);
-      console.warn(
-        `[pipeline] ${article.id} ${stage} transient failure (${signal}) on attempt ${attempt}, ` +
-          `retrying in ${delay}ms: ${message}`,
-      );
-      await sleep(delay);
-
-      // Re-read rather than retry against the row we claimed: a failed attempt
-      // may have written part of its work, and an operator may have cancelled
-      // the card while we waited. Anything that is no longer ours to run ends
-      // the loop without touching the row.
-      const [reloaded] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [article.id]);
-      if (!reloaded || reloaded.status !== 'running' || reloaded.stage !== stage) {
-        console.warn(
-          `[pipeline] ${article.id} ${stage} retry abandoned - the article moved on while we waited`,
+        console.log(
+          `[pipeline] ${article.id} ${stage} done → ${next.stage}/${next.status}: ${summary}` +
+            (attempt > 1 ? ` (recovered on attempt ${attempt})` : ''),
         );
         return;
+      } catch (err) {
+        if (err instanceof LeaseLostError) {
+          // Whoever took the article away from this run has already written
+          // what happened to it - reaped to 'timed_out', cancelled from the
+          // panel, or claimed again. Touching an article column here is how
+          // that outcome gets overwritten, so this run records only its own
+          // session, and there is nothing left to retry.
+          await finishSession('failed', `${stage} stopped`, LEASE_LOST_MESSAGE);
+          log.warn('stage stopped: lease lost', {
+            article_id: article.id,
+            stage,
+            agent,
+            claimed_by: holder,
+            elapsed_seconds: Math.round((Date.now() - startedAt) / 1000),
+          });
+          return;
+        }
+        if (err instanceof StageTimeoutError) {
+          // Terminal whatever the taxonomy would make of the word "timeout":
+          // a stage that spent its whole budget and stopped is not a hiccup,
+          // and another attempt costs the same budget again to find out. It
+          // is the operator's to retry, from the card that says so.
+          await finishSession('timed_out', `${stage} timed out`, err.message);
+          // The article keeps its stage and everything the run had written: a
+          // half-finished draft is the operator's to look at and retry from,
+          // not something to throw away because the run that produced it was
+          // stopped.
+          await finishArticle(current, {
+            status: 'timed_out',
+            error: err.message,
+            // No class: the taxonomy is a verdict on what a stage threw, and
+            // this stage threw nothing - it was stopped. Clearing it is what
+            // keeps an earlier attempt's verdict from reading as this one's.
+            failure_class: null,
+            stage_attempts: attempt,
+            ...LEASE_RELEASED,
+          });
+          log.warn('stage timed out', {
+            article_id: article.id,
+            stage,
+            agent,
+            cause: err.timeoutCause,
+            budget_seconds: err.budgetSeconds,
+            elapsed_seconds: Math.round(err.elapsedSeconds),
+            last_llm_call: err.lastCall,
+          });
+          return;
+        }
+
+        const message = scrubSecrets(err instanceof Error ? err.message : String(err));
+        const { failureClass, signal } = classifyFailure(err);
+        const retrying = failureClass === 'transient' && attempt < MAX_STAGE_ATTEMPTS;
+
+        await finishSession(
+          'failed',
+          retrying
+            ? `${stage} failed (${signal}, attempt ${attempt} of ${MAX_STAGE_ATTEMPTS}) - retrying`
+            : `${stage} failed`,
+          message,
+        );
+
+        if (!retrying) {
+          await finishArticle(current, {
+            status: 'failed',
+            error: message,
+            failure_class: failureClass,
+            stage_attempts: attempt,
+            ...LEASE_RELEASED,
+          });
+          console.error(`[pipeline] ${article.id} ${stage} FAILED (${failureClass}): ${message}`);
+          return;
+        }
+
+        // The count lands before the wait, not after it: an operator watching
+        // a card that is mid-backoff should see that it is on its second run.
+        // Through the claim guard like every other write this run makes - a
+        // card that is no longer ours is not ours to retry either.
+        if (
+          !(await updateClaimed(current, { failure_class: failureClass, stage_attempts: attempt }))
+        ) {
+          log.warn('stage retry abandoned: the article moved on while the stage ran', {
+            article_id: article.id,
+            stage,
+            attempt,
+          });
+          return;
+        }
+
+        const delay = stageRetryDelayMs(attempt);
+        console.warn(
+          `[pipeline] ${article.id} ${stage} transient failure (${signal}) on attempt ${attempt}, ` +
+            `retrying in ${delay}ms: ${message}`,
+        );
+        await sleep(delay);
+
+        // Re-read rather than retry against the row we claimed: a failed
+        // attempt may have written part of its work, and an operator may have
+        // cancelled the card while we waited. Anything that is no longer ours
+        // to run ends the loop without touching the row.
+        const [reloaded] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [article.id]);
+        if (
+          !reloaded ||
+          reloaded.status !== 'running' ||
+          reloaded.stage !== stage ||
+          reloaded.claimed_by !== holder
+        ) {
+          log.warn('stage retry abandoned: the article moved on while we waited', {
+            article_id: article.id,
+            stage,
+            attempt,
+          });
+          return;
+        }
+        current = reloaded;
       }
-      current = reloaded;
     }
+  } finally {
+    stopHeartbeat();
   }
 }

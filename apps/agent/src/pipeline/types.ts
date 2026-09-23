@@ -5,6 +5,7 @@
 // angle stage picks from and the library's record is the body behind one of
 // those ids.
 import type { ArticleShape as StructureShape } from '../content/shapes.js';
+import type { HeroImageSource } from '../distribution/types.js';
 
 export type { StructureShape };
 
@@ -21,13 +22,96 @@ export type Stage =
   | 'publish'
   | 'done';
 
+/**
+ * The pipeline in order. 'edit' loops back to 'seo_review' at runtime, so the
+ * order a run actually takes is not linear - this list is: it is the canonical
+ * answer to "is stage X downstream of stage Y", which is what decides whether
+ * a stored output was superseded by a re-run of something before it.
+ */
+export const STAGE_ORDER: readonly Stage[] = [
+  'research',
+  'keyword',
+  'angle',
+  'outline',
+  'write',
+  'seo_review',
+  'edit',
+  'assemble',
+  'image',
+  'publish',
+  'done',
+];
+
 export type ArticleStatus =
   | 'queued'
   | 'running'
   | 'failed'
+  /**
+   * The stage ran out of wall-clock time, or the worker holding it stopped
+   * reporting. Terminal and deliberately distinct from 'failed': nothing
+   * reported an error, so "failed" would send an operator looking for one -
+   * what actually happened is that the run was stopped, and whatever it had
+   * already written is still on the article as a draft.
+   */
+  | 'timed_out'
   | 'waiting_approval'
   | 'cancelled'
   | 'done';
+
+/** Status of one agent_sessions row. Mirrors ArticleStatus's timeout state. */
+export type SessionStatus = 'running' | 'done' | 'failed' | 'timed_out';
+
+/** Why a stage stopped: it spent its budget, or its lease went unrenewed. */
+export type StageTimeoutCause = 'budget' | 'lease';
+
+/**
+ * What an operator needs to know about a stopped stage, and the payload the
+ * error message is built from.
+ */
+export interface StageTimeoutDetail {
+  agent: string;
+  stage: Stage;
+  budgetSeconds: number;
+  elapsedSeconds: number;
+  /**
+   * The last LLM call the stage started, rendered for a human ("claude-opus-5
+   * with web search, retry 2 of 3, in flight for 41m"). Null or empty when the
+   * stage had not reached a model yet, or when the run was reaped by another
+   * process that cannot see what it was doing.
+   */
+  lastCall: string | null;
+  /**
+   * Named apart from the standard `Error.cause` on the class below, which by
+   * convention carries the underlying error rather than a discriminator.
+   */
+  timeoutCause: StageTimeoutCause;
+}
+
+/**
+ * A stage stopped by its wall-clock budget. Carries the detail rather than
+ * only a message so callers route on the type (a timeout is not a failure)
+ * without parsing text. The message is built - and scrubbed - by
+ * pipeline/stageTimeout.ts, which is the only thing that should construct one.
+ */
+export class StageTimeoutError extends Error {
+  readonly agent: string;
+  readonly stage: Stage;
+  readonly budgetSeconds: number;
+  readonly elapsedSeconds: number;
+  readonly lastCall: string | null;
+  readonly timeoutCause: StageTimeoutCause;
+
+  constructor(message: string, detail: StageTimeoutDetail) {
+    super(message);
+    this.name = 'StageTimeoutError';
+    this.agent = detail.agent;
+    this.stage = detail.stage;
+    this.budgetSeconds = detail.budgetSeconds;
+    this.elapsedSeconds = detail.elapsedSeconds;
+    this.lastCall = detail.lastCall || null;
+    this.timeoutCause = detail.timeoutCause;
+  }
+}
 
 export interface ArticleRow {
   id: string;
@@ -64,9 +148,49 @@ export interface ArticleRow {
    */
   hero_image_url: string | null;
   hero_alt: string | null;
+  /**
+   * Where the hero image came from: 'operator' (dropped in the admin panel),
+   * 'found' (a third party's photograph the image agent vetted) or 'generated'
+   * (ours). Null on articles that ran before the column existed, and on any
+   * article with no hero at all.
+   *
+   * A value rather than a sentence in the image stage's summary because it is
+   * read as a rights decision: only a hero we generated may be uploaded
+   * natively to a social network.
+   */
+  hero_image_source: HeroImageSource | null;
   /** Admin feedback awaiting application — consumed (cleared) by the editor stage. */
   feedback: string | null;
   error: string | null;
+  /**
+   * The claim on this article: which worker is running its current stage and
+   * when it took it. NULL while the article is not claimed.
+   */
+  claimed_by: string | null;
+  claimed_at: string | null;
+  /**
+   * Lease bookkeeping for the stage this article is currently claimed for, all
+   * NULL while it is not claimed. The worker renews both while it works; a
+   * claim whose `lease_expires_at` has passed is reaped to 'timed_out'.
+   */
+  heartbeat_at: string | null;
+  lease_expires_at: string | null;
+  /**
+   * Which pass over this article is current: the first pipeline run is 1, and
+   * a retry increments it. A claim does not - two claims of the same queued
+   * article are one attempt that was interrupted, not two.
+   */
+  attempt: number;
+  /**
+   * The earliest stage whose stored output has been superseded by a retry, so
+   * everything after it in STAGE_ORDER reads as out of date until the run
+   * passes it again. Written by the retry endpoints, never by the runner.
+   */
+  stale_from_stage: Stage | null;
+  /** Publication date, stamped on the first publish and reused on every later pass. */
+  pub_date: string | null;
+  /** Digest of what was last published, so a repeat publish can skip the rebuild dispatch. */
+  published_digest: string | null;
   published_at: string | null;
   created_at: string;
   updated_at: string;
@@ -204,6 +328,86 @@ export interface TestedClaim {
   sourceUrl: string;
 }
 
+/**
+ * A headline figure, and where the number came from - the record behind the
+ * three tier labels a page prints beside every claim it makes.
+ *
+ * One row holds both halves of a disputed spec deliberately. A maker's figure
+ * and an independent measurement of the same metric are one fact about the
+ * product, not two, and the pattern the category leaders use is to show them
+ * side by side with each side's conditions named. Dropping the maker's number
+ * is not an option either: the reader arrived having already seen it, and the
+ * gap is the most useful thing on the page.
+ */
+export interface MeasuredClaim {
+  /** The product this figure describes, named the way the page names it. */
+  subject: string;
+  /** What was measured: "Battery life, screen-on", "Peak brightness". */
+  metric: string;
+  /** The maker's own figure, as published; null when the maker publishes none. */
+  claimedValue: string | null;
+  /** Who published the claim - the brand. Null when there is no claim. */
+  claimedBy: string | null;
+  claimedSourceUrl: string | null;
+  /** The conditions the maker states for its own figure, where it states any. */
+  claimedConditions: string | null;
+  /** The independently measured figure; null when nobody has measured it yet. */
+  measuredValue: string | null;
+  /** Who measured it, named ("GSMArena", "Notebookcheck", "SleekDrops"). */
+  measuredBy: string | null;
+  /** The protocol the measurement was taken under, in the tester's words. */
+  conditions: string | null;
+  /** YYYY, YYYY-MM or YYYY-MM-DD the measurement published; null when undated. */
+  measuredOn: string | null;
+  measuredSourceUrl: string | null;
+  /**
+   * A figure this tester has since withdrawn, kept beside the corrected one.
+   * A correction the reader cannot see is indistinguishable from a number we
+   * quietly changed.
+   */
+  withdrawnValue: string | null;
+  /** True only when we ran the test ourselves - the one route to tier 1. */
+  ownTest: boolean;
+  /**
+   * What the source's result actually covers, in the source's own terms - "the
+   * Smart Home Appliances brand survey, 2026", "the 12 models CHOICE tested in
+   * March". Load-bearing for brand-level and cohort raters, whose rating is
+   * evidence about a survey or a cohort and not about every model in it.
+   */
+  covers: string | null;
+}
+
+/**
+ * When the product a piece is about actually went on sale, and therefore
+ * whether the piece is being written inside the launch window.
+ *
+ * Inside it, no Australian lab result exists by design: CHOICE runs phone
+ * tests through ICRT labs in Europe and publishes weeks to months after
+ * launch, Canstar Blue is a brand-level satisfaction survey, and
+ * ProductReview is owner reviews. Holding a launch piece to a local lab test
+ * does not produce one, it produces a piece that never ships.
+ */
+export interface LaunchRelease {
+  /** The product whose release date sets the window. */
+  product: string;
+  /** YYYY-MM-DD it went on sale in Australia; null when we could not date it. */
+  releaseDate: string | null;
+  /** Where the date came from. */
+  sourceUrl: string;
+}
+
+/** How a review unit was obtained - the disclosure the ACCC sweep found missing most often. */
+export interface ReviewUnit {
+  /** 'retail' bought, 'loan' supplied by the brand, 'none' no unit at all. */
+  acquisition: 'retail' | 'loan' | 'none';
+  /** The brand or PR agency that lent the unit; null on a bought or absent unit. */
+  supplier: string | null;
+  /** What we paid, as a reader reads it ("A$1,699"); null when we paid nothing. */
+  paid: string | null;
+  /** Month and year the loan unit went back ("2026-09"); null when it has not. */
+  returned: string | null;
+}
+
 /** One stratum that came up short, and what to do about it. */
 export interface EvidenceShortfall {
   stratum: string;
@@ -246,6 +450,16 @@ export interface ResearchDossier {
   ownerComplaints: OwnerComplaint[];
   priceObservations: PriceObservation[];
   testedClaims: TestedClaim[];
+  /**
+   * The headline figures, each with the number and where it came from. The
+   * page's tier labels and its claimed-vs-measured cards are rendered from
+   * these and from nothing else.
+   */
+  claims?: MeasuredClaim[];
+  /** Set only when the piece is about a product released recently. */
+  launch?: LaunchRelease | null;
+  /** How the unit under review was obtained, when there was a unit at all. */
+  reviewUnit?: ReviewUnit | null;
   keywords: { primary: string; secondary: string[] };
   competitorNotes: string;
   faqIdeas: Array<{ question: string; answerHint: string }>;
@@ -508,4 +722,92 @@ export interface AffiliateLinkRow {
    * dossier-backed destination. Pipeline-side only: D1 has no such column.
    */
   healed?: boolean;
+  /**
+   * Set when the destination came from an attached offer record rather than
+   * from the dossier. A human (or, later, the feed that took that record over)
+   * chose this URL, which is why it may point outside the Amazon marketplaces
+   * the pipeline is allowed to build destinations for on its own.
+   *
+   * Pipeline-side only, like `healed`: D1 has no such column.
+   */
+  manual?: boolean;
+}
+
+/**
+ * Who supplied an offer record, and therefore what its price is worth.
+ *
+ * 'editor' is a person typing what they can see on the merchant's page on
+ * announcement day. 'feed' and 'api' are the automated sources that take that
+ * record over once the merchant has published the SKU - later, better data for
+ * the same product, which is why they overwrite rather than sit beside it.
+ */
+export type OfferSource = 'editor' | 'feed' | 'api';
+
+export const OFFER_SOURCES: readonly OfferSource[] = ['editor', 'feed', 'api'];
+
+/**
+ * One product's offer on one article: where the reader is sent, what it cost,
+ * and when that price was seen.
+ *
+ * A launch-window SKU carries no feed row and cannot be polled through the
+ * Product Advertising API, so this record is the only thing standing between
+ * "announced today" and "has a real commissionable link today". `price` is
+ * nullable because a link with no price is still a link, and a figure invented
+ * to fill the column is exactly the misstatement the "as at" stamp exists to
+ * prevent.
+ *
+ * Dates are read as YYYY-MM-DD strings (see db/offers.ts) rather than as
+ * Date objects: what the reader is shown is a day, in the publication's own
+ * timezone, and a Date would drag the server's one into it.
+ */
+export interface ProductOffer {
+  id: string;
+  article_id: string;
+  go_slug: string;
+  product_name: string;
+  url: string;
+  /** NUMERIC, read back as a string so no cents are lost in a float. */
+  price: string | null;
+  currency: string;
+  price_observed_on: string | null;
+  preorder: boolean;
+  release_date: string | null;
+  merchant: string | null;
+  source: OfferSource;
+  entered_by: string | null;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One version of an offer as it was saved, newest first in the panel. */
+export interface ProductOfferRevision {
+  id: string;
+  go_slug: string;
+  url: string;
+  price: string | null;
+  currency: string;
+  price_observed_on: string | null;
+  preorder: boolean;
+  release_date: string | null;
+  merchant: string | null;
+  source: OfferSource;
+  entered_by: string | null;
+  saved_at: string;
+}
+
+/** The editable half of an offer - what a save writes. */
+export interface OfferInput {
+  goSlug: string;
+  productName: string;
+  url: string;
+  price: string | null;
+  currency: string;
+  priceObservedOn: string | null;
+  preorder: boolean;
+  releaseDate: string | null;
+  merchant: string | null;
+  source: OfferSource;
+  enteredBy: string;
+  note?: string | null;
 }

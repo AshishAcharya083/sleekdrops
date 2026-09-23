@@ -43,12 +43,14 @@
   --accent:       #C44F2A;  /* refined ember — used sparingly  */
   --accent-hover: #A23E1F;
   --accent-soft:  #F7EBE3;  /* tinted background for accent area */
+  --accent-text:  #A23E1F;  /* accent at small sizes - clears AA on paper */
 
   /* ----- Semantic ----- */
   --success:      #2F6B47;
   --success-soft: #E8F1EB;
   --warning:      #B08820;
   --warning-soft: #FBF3DA;
+  --warning-text: #7A5C10;  /* warning as small copy - clears AA on surface */
   --danger:       #B23A2A;
   --danger-soft:  #F6E4E0;
   --info:         #2A5A8C;
@@ -142,11 +144,13 @@
   --accent:       #E97757;   /* slightly warmer in dark         */
   --accent-hover: #F2906E;
   --accent-soft:  #2A1812;
+  --accent-text:  #F2906E;
 
   --success:      #7CC597;
   --success-soft: #1A2620;
   --warning:      #E3C46A;
   --warning-soft: #2A2418;
+  --warning-text: #E3C46A;
   --danger:       #E58571;
   --danger-soft:  #2A1A18;
   --info:         #7FB1E5;

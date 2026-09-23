@@ -1,0 +1,410 @@
+---
+import {
+  citationLabel,
+  coverageNote,
+  evidenceAnchor,
+  evidenceState,
+  gapNote,
+  makerFigureNote,
+  methodLinkLabel,
+  toClaimEntries,
+  varianceLabel,
+  VARIANCE_THRESHOLD_LABEL,
+} from '@lib/evidence';
+import { citationRel } from '@lib/sources';
+import type { ClaimData, SourceData } from '../../content/config';
+
+/**
+ * ClaimTrail - every headline figure on the page, labelled by where its number
+ * came from.
+ *
+ * Three treatments, and the difference between them is the whole component. A
+ * figure we measured, a figure someone independent measured, and a figure the
+ * maker states that nobody has checked are not the same evidence, and a page
+ * that prints them in one voice has adopted the weakest of them as its own.
+ * That adoption is the exposure: the ACCC's position is that a business cannot
+ * simply pass on a third party's information, and the Trivago penalty turned
+ * on the impression a site's own presentation creates.
+ *
+ * Where a maker's figure and a measured one disagree, both are shown side by
+ * side with each side's conditions named, and the gap is printed only past a
+ * threshold we publish - so a small difference between two honest methods does
+ * not read as an accusation. That card is for measurements only: its right
+ * column is headed "Measured", so putting a brand or cohort rating there would
+ * print a rating under a measurement's heading and compute a gap between two
+ * things nobody measured the same way. Those rows keep the maker's figure as
+ * an attributed line of its own instead. The maker's figure is never dropped:
+ * the reader arrived having already seen it, and its absence reads as a page
+ * that missed the spec.
+ *
+ * Each figure carries two links doing two different jobs. The citation is the
+ * outbound one and it names where it lands, because that is the link a reader
+ * follows to check us; the in-page jump to the evidence panel is a supplement,
+ * worded and styled as one. A citation-looking label that only scrolls the
+ * page is the case Nielsen Norman's in-page-link research singles out.
+ */
+export interface Props {
+  claims?: ClaimData[];
+  /** The article's sources, so a figure can point at its own row in the panel. */
+  sources?: SourceData[];
+  /** The heading above the block. */
+  title?: string;
+}
+
+const { claims = [], sources = [], title = 'What each number rests on' } = Astro.props;
+const entries = toClaimEntries(claims);
+// The panel is what "How we checked" scrolls to, and it draws nothing on a
+// post written before any of this was recorded. The link is offered only when
+// there is something to land on - an anchor with no target fails the build,
+// and rightly so.
+const panelShown = evidenceState(entries, sources) !== 'legacy';
+---
+
+{entries.length > 0 && (
+  <section class="claim-trail" aria-labelledby="claim-trail-title">
+    <div class="ct-head">
+      <h2 id="claim-trail-title">{title}</h2>
+      <p class="ct-intro">
+        Every figure below says who produced it. Where the maker's number and a
+        measured one disagree by more than {VARIANCE_THRESHOLD_LABEL}, both are shown with
+        the conditions each was taken under.
+      </p>
+    </div>
+
+    <ol class="claim-list">
+      {entries.map((entry, index) => (
+        <li class:list={['claim-card', `claim-card--${entry.tier}`]}>
+          <div class="claim-top">
+            <span class:list={['claim-chip', `claim-chip--${entry.tier}`]}>{entry.chip}</span>
+            <span class="claim-metric">{entry.subject} · {entry.metric}</span>
+          </div>
+
+          {entry.comparison && entry.claimed ? (
+            <div class="spec-compare">
+              <div class="sc-col">
+                <span class="sc-label">Claimed</span>
+                <span class="sc-figure sc-figure--claimed">{entry.claimed.value}</span>
+                <span class="sc-by">{entry.claimed.by}</span>
+                {entry.claimed.conditions && <span class="sc-cond">{entry.claimed.conditions}</span>}
+                {entry.claimed.sourceUrl && (
+                  <a
+                    class="claim-cite claim-cite--inline"
+                    href={entry.claimed.sourceUrl}
+                    target="_blank"
+                    rel={citationRel(entry.claimed.sourceUrl)}
+                  >
+                    {citationLabel(entry.claimed.by, undefined, 'Check the claim')}
+                  </a>
+                )}
+              </div>
+              <div class="sc-col">
+                <span class="sc-label">Measured</span>
+                <span class="sc-figure">{entry.value}</span>
+                <span class="sc-by">{entry.attribution}</span>
+                {entry.conditions && <span class="sc-cond">{entry.conditions}</span>}
+              </div>
+              <div class="sc-gap">
+                {entry.varianceShown && entry.variance !== null ? (
+                  <>
+                    <span class="sc-label">Gap</span>
+                    <span class="sc-delta">{varianceLabel(entry.variance)}</span>
+                    <p class="sc-why">
+                      The two numbers were taken under different conditions - each
+                      is stated above, and neither side is disputing the other's
+                      arithmetic.
+                    </p>
+                  </>
+                ) : (
+                  <p class="sc-why">{gapNote(entry)}</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p class:list={['claim-figure', entry.tier === 'manufacturer' && 'claim-figure--quoted']}>
+              {entry.tier === 'manufacturer' ? `“${entry.value}”` : entry.value}
+            </p>
+          )}
+
+          <p class="claim-conditions">{entry.attributionLine}</p>
+
+          {entry.withdrawn && (
+            <p class="claim-note claim-note--corrected">
+              <span class="cn-label">Corrected</span>
+              {entry.attribution} first published <s>{entry.withdrawn}</s> and has
+              since withdrawn it. The figure above is the corrected one.
+            </p>
+          )}
+
+          {entry.covers && <p class="claim-note">{coverageNote(entry)}</p>}
+
+          {!entry.comparison && entry.claimed && (
+            <p class="claim-note">
+              <span class="cn-label">Maker's figure</span>{' '}
+              {makerFigureNote(entry.claimed)}
+              {entry.claimed.sourceUrl && (
+                <>
+                  {' '}
+                  <a
+                    class="claim-cite claim-cite--inline"
+                    href={entry.claimed.sourceUrl}
+                    target="_blank"
+                    rel={citationRel(entry.claimed.sourceUrl)}
+                  >
+                    {citationLabel(entry.claimed.by, undefined, 'Check the claim')}
+                  </a>
+                </>
+              )}
+            </p>
+          )}
+
+          {(entry.sourceUrl || panelShown) && (
+            <p class="claim-links">
+              {entry.sourceUrl && (
+                <a
+                  class="claim-cite"
+                  href={entry.sourceUrl}
+                  target="_blank"
+                  rel={citationRel(entry.sourceUrl)}
+                >
+                  {citationLabel(entry.attribution, entry.date)}
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7"/><polyline points="9 7 17 7 17 15"/></svg>
+                </a>
+              )}
+              {panelShown && (
+                <a class="claim-method" href={evidenceAnchor(entry, index, sources)}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 10 12 16 18 10"/></svg>
+                  {methodLinkLabel(entry.tier)}
+                </a>
+              )}
+            </p>
+          )}
+        </li>
+      ))}
+    </ol>
+  </section>
+)}
+
+<style>
+  .claim-trail {
+    margin: 48px 0 0;
+    padding: 24px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+  }
+  .ct-head { padding-bottom: 16px; border-bottom: 1px solid var(--hairline); }
+  .ct-head h2 {
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 1.2;
+    font-weight: 400;
+    margin: 0;
+  }
+  .ct-intro {
+    margin: 8px 0 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--muted);
+    max-width: 70ch;
+  }
+
+  .claim-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+  .claim-card {
+    padding: 18px 20px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface);
+  }
+  /* The rule carries the tier before any word does: solid where something was
+     measured, dashed where only the maker has spoken, dotted where the figure
+     is about a brand rather than about this model. */
+  .claim-card--measured { border-left: 3px solid var(--success); }
+  .claim-card--independent { border-left: 3px solid var(--ink); }
+  .claim-card--manufacturer { border-left: 3px dashed var(--warning); }
+  .claim-card--context { border-left: 3px dotted var(--muted-2); }
+
+  .claim-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .claim-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: var(--r-full);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .claim-chip--measured { background: var(--success); color: var(--surface); border: 1px solid var(--success); }
+  .claim-chip--independent { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+  .claim-chip--manufacturer {
+    background: var(--warning-soft);
+    color: var(--warning-text);
+    border: 1px dashed var(--warning);
+  }
+  .claim-chip--context {
+    background: transparent;
+    color: var(--muted);
+    border: 1px dotted var(--hairline-strong);
+  }
+  .claim-metric { font-size: 13px; color: var(--muted); }
+
+  .claim-figure {
+    font-family: var(--font-display);
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    margin: 14px 0 0;
+  }
+  /* A maker's figure is quoted, not stated: the quotation marks and the italic
+     are the typographic form of "they said this, we did not check it". */
+  .claim-figure--quoted { font-style: italic; color: var(--ink-2); }
+
+  /* The caption sits clear of the display figure above it rather than flush
+     against it - the page's rhythm is generous everywhere else. */
+  .claim-conditions,
+  .claim-note { margin-top: 18px; }
+  .claim-conditions {
+    margin-bottom: 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+  .claim-note {
+    margin-bottom: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+    max-width: 68ch;
+  }
+  .claim-note--corrected { color: var(--ink-2); }
+  .claim-note .cn-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent-text);
+    margin-right: 8px;
+  }
+  .claim-note s { color: var(--muted-2); }
+  /* Two links, two behaviours, and they never look alike. The citation is
+     underlined ink with an outward arrow - it leaves the site. The method link
+     is mono, muted and boxed with a downward arrow - it moves you down this
+     page. Nielsen Norman's finding is that an in-page link dressed as an
+     ordinary one leaves the reader disoriented; the distinction is the fix. */
+  .claim-links {
+    display: flex;
+    align-items: center;
+    gap: 8px 20px;
+    flex-wrap: wrap;
+    margin: 14px 0 0;
+  }
+  /* Inline rather than inline-flex: the label wraps onto two lines on a
+     narrow screen, and a flex arrow would sit at the far right of the widest
+     line instead of after the last word it belongs to. */
+  .claim-cite {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-2);
+    text-underline-offset: 3px;
+  }
+  .claim-cite svg {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    margin-left: 5px;
+    vertical-align: -1px;
+    stroke: currentColor;
+    stroke-width: 1.9;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .claim-cite:hover { color: var(--accent-text); }
+  /* Compounded, and with a hover of its own: the shared `.claim-cite:hover`
+     out-weighs a single-class modifier once Astro scopes the block, so a bare
+     `.claim-cite--inline` would have its colour decided for it. */
+  .claim-cite.claim-cite--inline {
+    align-self: flex-start;
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+  }
+  .claim-cite.claim-cite--inline:hover { color: var(--accent-text); }
+  .claim-method {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--r-full);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .claim-method svg {
+    width: 12px;
+    height: 12px;
+    stroke: currentColor;
+    stroke-width: 2;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .claim-method:hover { border-color: var(--ink); color: var(--ink); }
+
+  /* Claimed vs measured. The third track is capped rather than auto-sized: an
+     `auto` track sizes to its own paragraph's max-content width, which took
+     three quarters of the card and crushed the two figure columns to a
+     character per line. */
+  .spec-compare {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(160px, 200px);
+    gap: 20px;
+    margin-top: 16px;
+    padding: 16px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+  }
+  @media (max-width: 700px) {
+    .spec-compare { grid-template-columns: 1fr; gap: 16px; }
+  }
+  .sc-col, .sc-gap { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .sc-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .sc-figure {
+    font-family: var(--font-display);
+    font-size: clamp(22px, 3vw, 30px);
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+  }
+  .sc-figure--claimed { font-style: italic; color: var(--ink-2); }
+  .sc-by { font-size: 13px; font-weight: 700; color: var(--ink-2); }
+  .sc-cond { font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: var(--muted); }
+  .sc-delta {
+    font-family: var(--font-display);
+    font-size: clamp(22px, 3vw, 30px);
+    line-height: 1.15;
+    color: var(--accent-text);
+  }
+  .sc-why { margin: 0; font-size: 12px; line-height: 1.55; color: var(--muted); }
+</style>

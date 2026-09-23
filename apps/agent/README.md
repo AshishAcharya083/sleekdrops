@@ -42,6 +42,23 @@ The card carries both the class and the attempt count, so the board says
 whether a failure needs a person or just another run.
 With `publish_mode = approval` (default) the article parks at
 `waiting_approval` until you hit **Approve & publish** in the admin panel.
+
+Every stage runs under a wall-clock budget - `AGENT_RUN_TIMEOUT_SECONDS`
+(default 3600s), capped by a hard ceiling in code that no configuration can
+raise, with an optional per-stage override in `STAGE_TIMEOUT_SECONDS`
+(`pipeline/budgets.ts`, read beside the stage map in `pipeline/runner.ts`). It
+is deliberately not an admin setting: a timeout is a safety guard, and what an
+operator acts on is the outcome. A
+stage that outlives its budget stops at `status = 'timed_out'` - a distinct
+terminal state from `failed`, because nothing reported an error - keeping
+whatever it had already written as a draft, with a message naming the agent,
+the stage, the limit, how long it ran and the last LLM call it was waiting on
+(scrubbed of any credential the process holds). A claim also carries a lease
+the worker renews while it works, and the worker reaps lapsed leases on its own
+poll (`REAPER_EVERY_TICKS`), so a run whose process died is stopped while the
+platform is up rather than at the next restart. A run that discovers its lease
+is gone - reaped, or cancelled from the panel - abandons the stage and writes
+nothing, leaving the outcome whoever took the article away recorded.
 Every agent prompt is grounded with today's date (Australia/Sydney) so years
 in titles/copy come from the calendar, not stale training data.
 
@@ -242,6 +259,68 @@ stopped.
 - **Publishing**: gated on your approval by default (`publish_mode=approval`);
   flip to `auto` for hands-off publishing or `draft` to stage in D1 only.
 
+## Social distribution
+
+Publishing an article queues it for every connected social channel instead of
+posting inline. Publish is re-entered by `/api/articles/:id/republish`, by a
+retry-from-stage and by the editorial feedback loop, so an inline post would
+fire again for the same slug every time; `distribution_queue` is unique on
+`(slug, channel_connection_id)`, which makes the second pass and every pass
+after it a no-op. A piece parked in D1 as a draft enqueues nothing, on the same
+reading of `publish_mode` that keeps the rebuild dispatch from firing.
+
+- **Readiness gate.** An item is handed to a provider only once
+  `SITE_URL/blog/<slug>` returns 200 and serves the `og:title` and `og:image`
+  the post was rendered against. The site is a static build: for about 90
+  seconds after publish that URL is a 404 or the previous piece, and the link
+  preview a network fetches first is the one it caches. The gate re-checks
+  every 15s and gives up after 10 minutes, which fails the item rather than
+  posting it.
+- **Retries.** Bounded at five provider calls with exponential backoff (60s
+  doubling to an hour) and a terminal `failed` state. An attempt is spent
+  immediately before the call, so a worker that dies mid-post cannot spend the
+  same one twice. A provider may throw `PermanentProviderError` to fail now.
+- **Providers.** A network is one file implementing `SocialProvider`
+  (`authenticate`, `refreshToken`, `post`, `fetchInsights`) that registers
+  itself in `distribution/providers.ts`. Nothing in the queue, the worker or
+  the schema names a network, and the worker only claims work for a provider
+  that is actually registered.
+- **Credentials.** A connection stores a `token_ref` - the *name* of a secret -
+  resolved at post time from the `channel_credentials` settings row, else from
+  the environment variable that name maps to (`facebook-page-token` →
+  `FACEBOOK_PAGE_TOKEN`), which is how Secret Manager arrives on Cloud Run. No
+  token value is stored in Postgres by this code, written to `last_error` or
+  logged, and `/api/settings` never returns the credentials row. Token expiry
+  staleness is derived in `distribution/channels.ts` and reported by
+  `GET /api/distribution`.
+- **Hero provenance.** `articles.hero_image_source` records `operator`, `found`
+  or `generated` at all three hero paths. Only a hero we generated is offered
+  to a provider for native upload: uploading grants the network a sublicensable
+  licence, which is not ours to grant in a photograph the image agent found.
+- **Per-channel rendering.** `distribution/render` composes the post a
+  provider sends - it never writes copy of its own. The caption is headline,
+  then the first-comment cue when that is the placement, then the affiliate
+  disclosure when the keyword plan's intent is a monetised one; the cue and the
+  disclosure are registered house text (`SOCIAL_HOUSE_BLOCKS`), so the
+  repetition metrics skip them and they are never what a caption limit cuts.
+  The generated headline is scored by `detectSlop()` - a trip buys the model
+  one regeneration with the hits handed back, and a second trip falls back to
+  the dek deterministically. Copy is rendered per channel against that
+  channel's caption limit (`render/channels.ts`), so a 300-character network is
+  one more entry rather than a rewrite.
+- **Image ladder.** A hero we generated is uploaded as it is; a `found` or
+  `operator` hero is replaced by a fresh 1200x630 social card through the same
+  `generateImage` path the image agent uses; if that fails there is no image
+  and the placement resolves to `in_body`, where the link preview carries the
+  post instead. The destination URL is UTM-tagged with the placement that was
+  actually used.
+- **Rendered once, then kept.** An adapter renders at post time through
+  `renderForItem`, which writes the result back onto the queue row (payload and
+  placement together) and reads it back on every later attempt. Rendering is
+  deliberately not idempotent - the copy call runs warm and a rights-unsafe
+  hero buys a fresh card - so a retry that re-rendered would say something
+  other than what an operator saw, and would buy a second image to say it with.
+
 ## State model (PostgreSQL)
 
 - `topics` — scout suggestions; `suggested → approved/rejected` (unique on
@@ -254,6 +333,13 @@ stopped.
 - `settings` — publish_mode, per-agent models, revision cap, worker toggle
 - `scout_runs` — durable topic-search jobs (`queued → running → done/failed`);
   heartbeat recovery re-queues work abandoned by a recycled instance
+- `channel_connections` — one connected social account per row: provider,
+  external account id, secret *references*, expiry, status
+- `distribution_queue` — one item per (published slug, channel), carrying the
+  rendered payload, placement, schedule, attempts and the remote post id;
+  unique on `(slug, channel_connection_id)`
+- `distribution_metrics` — aggregate impressions/clicks/reactions per posted
+  item, joined back to the placement its row used
 
 The workers claim queued articles and topic searches atomically, run the
 corresponding agent, record the session, and route the work onward. Stranded
@@ -273,6 +359,14 @@ Required env: `GEMINI_API_KEY` (or Vertex on GCP) and `TAVILY_API_KEY`; add
 `GITHUB_TOKEN` (repo dispatch). Optional: `ADMIN_TOKEN` to protect the API —
 required in practice when the API is deployed on Cloud Run.
 
+`DATABASE_URL` has no built-in default. Left unset, the `pg` driver resolves
+the connection from `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` and
+falls back to `localhost:5432` - the standard port a sidecar or service-container
+Postgres listens on. Port 5544 is only the host-side mapping `pnpm db:up`
+publishes on a laptop, so it is never right inside a container. Boot - and
+`pnpm db:migrate` - waits up to 30s for the database to answer before giving up,
+so the agent may start before Postgres does.
+
 ## Tests
 
 ```bash
@@ -287,7 +381,20 @@ working query), while `usage.db.test.ts` and `overview.db.test.ts` need a live
 one - SQL that reads fine in review still only fails on a server, and a
 partially failing overview only exists there - and skip themselves when no
 `DATABASE_URL` answers.
-Give it one with `pnpm db:up` (then
+The boot suites are the slow ones - about a minute of wall clock, most of it
+one deliberate 30s wait - and the only ones that start real processes:
+`index.db.test.ts` spawns the agent entrypoint and the `pnpm migrate` CLI the
+way the container does, and `db/boot.db.test.ts` puts a TCP proxy in front of
+Postgres to make it arrive late.
+The cases that only need an unreachable database run anywhere; the ones that
+have to reach a real one - late-arriving database, booting on `PG*` with no
+`DATABASE_URL`, a rejected connection - skip themselves when no `DATABASE_URL`
+answers, and each gives its spawned agent a throwaway database of its own,
+because that child boots the whole pipeline and would otherwise recover and
+claim the rows other suites are asserting on.
+`db/pool.noDatabaseUrl.test.ts` covers what an unset `DATABASE_URL` resolves to
+without connecting at all, so it runs everywhere.
+Give it a live database with `pnpm db:up` (then
 `DATABASE_URL=postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent`);
 CI runs it against a Postgres service container.
 

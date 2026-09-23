@@ -1,6 +1,6 @@
 import type { Session } from '../api';
-import { duration, fmtCost, fmtTime, fmtTokens } from '../api';
-import { ApiErrorBanner, Badge } from '../components';
+import { elapsedSeconds, fmtCost, fmtTime, fmtTokens, sessionBudgetSeconds } from '../api';
+import { ApiErrorBanner, Badge, Elapsed } from '../components';
 import { usePoll } from '../hooks';
 
 export function Sessions() {
@@ -21,7 +21,7 @@ export function Sessions() {
               <th>Model</th>
               <th>Tokens in/out</th>
               <th>Cost</th>
-              <th>Duration</th>
+              <th>Elapsed</th>
               <th>Started</th>
             </tr>
           </thead>
@@ -41,7 +41,15 @@ export function Sessions() {
                   {fmtTokens(s.tokens_input)} / {fmtTokens(s.tokens_output)}
                 </td>
                 <td className="mono">{fmtCost(s.cost_usd)}</td>
-                <td className="mono">{duration(s.started_at, s.ended_at)}</td>
+                <td>
+                  {/* Against the stage budget, so the run that sat at 2702
+                      minutes reads as stopped rather than as a long one. */}
+                  <Elapsed
+                    seconds={elapsedSeconds(s.started_at, s.ended_at)}
+                    budgetSeconds={sessionBudgetSeconds(s)}
+                    status={s.status}
+                  />
+                </td>
                 <td className="muted">{fmtTime(s.started_at)}</td>
               </tr>
             ))}
@@ -55,6 +63,10 @@ export function Sessions() {
           </tbody>
         </table>
       </div>
+      <p className="scroll-hint">
+        The table scrolls sideways for tokens, cost, elapsed and started - drag it, or focus it and
+        use the arrow keys.
+      </p>
     </>
   );
 }

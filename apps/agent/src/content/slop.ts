@@ -947,7 +947,11 @@ export type HouseBlockTag =
   | 'rating-scale'
   | 'affiliate-program'
   | 'price-currency'
-  | 'comparison-scope';
+  | 'comparison-scope'
+  /** The affiliate disclosure a social caption carries, where the endorsement is made. */
+  | 'social-disclosure'
+  /** The plain-language cue that the destination link is in the first comment. */
+  | 'link-placement-cue';
 
 export interface HouseBlock {
   id: string;
@@ -1055,6 +1059,48 @@ export const HOUSE_BLOCKS: HouseBlock[] = [
     text: 'We compare a selected range of products, not every product on sale in Australia. Other options may be available that we do not cover.',
   },
 ];
+
+/**
+ * House text a social caption carries, registered on the same terms as the
+ * body registry above and exempted from the repetition metrics with it.
+ *
+ * Separate from HOUSE_BLOCKS for one reason: the budget above is a budget on
+ * what an ARTICLE repeats, and the signal that it has been spent is "move this
+ * to a standing page and link it". A caption cannot link a standing page - on
+ * a network that demotes outbound links the link is the one thing it is not
+ * allowed to spend - so a social fixture would consume an article's allowance
+ * to buy nothing. Both entries are mandated: the FTC's position is that the
+ * disclosure belongs where the endorsement is made, which with the link in a
+ * comment is the caption itself, and a first-comment post that never tells the
+ * reader where the link went is a post with no destination.
+ *
+ * The wording is frozen here rather than in the renderer so that it is
+ * versioned, exempted and asserted in the same place as every other standing
+ * string the site repeats.
+ */
+export const SOCIAL_HOUSE_BLOCKS: HouseBlock[] = [
+  {
+    id: 'social-affiliate-disclosure',
+    tag: 'social-disclosure',
+    version: 1,
+    mandated: true,
+    text: 'Affiliate disclosure: we earn a commission on purchases made through the links in this piece.',
+  },
+  {
+    id: 'social-first-comment-cue',
+    tag: 'link-placement-cue',
+    version: 1,
+    mandated: true,
+    text: 'The link to the full piece is in the first comment.',
+  },
+];
+
+/** The registered wording of one block, from either registry. */
+export function houseBlock(tag: HouseBlockTag): HouseBlock {
+  const found = [...HOUSE_BLOCKS, ...SOCIAL_HOUSE_BLOCKS].find((entry) => entry.tag === tag);
+  if (!found) throw new Error(`no registered house block tagged ${tag}`);
+  return found;
+}
 
 /** Words of registered house text. Capped by `SCAN_THRESHOLDS.houseBlockWords`. */
 export function houseBlockWords(entries: HouseBlock[] = HOUSE_BLOCKS): number {
@@ -1180,7 +1226,7 @@ let houseKeys: { all: Set<string>; unrationed: Set<string> } | null = null;
 function houseShingles(): { all: Set<string>; unrationed: Set<string> } {
   if (!houseKeys) {
     houseKeys = { all: new Set<string>(), unrationed: new Set<string>() };
-    for (const block of HOUSE_BLOCKS) {
+    for (const block of [...HOUSE_BLOCKS, ...SOCIAL_HOUSE_BLOCKS]) {
       for (const key of shingleSet(proseLines(block.text), SCAN_THRESHOLDS.ngramSize)) {
         houseKeys.all.add(key);
         if (block.mandated) houseKeys.unrationed.add(key);
