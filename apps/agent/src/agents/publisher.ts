@@ -10,6 +10,7 @@
 // reused, and the dispatch fires only when the content that reaches D1 is
 // actually different from what was pushed last time.
 import { createHash } from 'node:crypto';
+import { todayInSydney } from '../content/contract.js';
 import { getSetting, q } from '../db/pool.js';
 import { createLogger } from '../lib/log.js';
 import { d1Query } from '../tools/d1.js';
@@ -151,7 +152,7 @@ export async function runPublisher(
     state.pub_date ??
     (typeof frontmatter.pubDate === 'string'
       ? frontmatter.pubDate
-      : new Date().toISOString().slice(0, 10));
+      : todayInSydney());
 
   // Asked again on the doorstep of the push itself: every affiliate write
   // above is a D1 round trip, and the cancel worth honouring is the one that

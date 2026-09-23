@@ -353,7 +353,10 @@ test('an offer saved after the card was assembled is flagged as not on the page 
     {
       draft_md: body,
       research,
-      affiliate_links: [{ ...links[0], default_url: attached.url, manual: true }],
+      // The row a rebuild actually writes, not an edited copy of the healed
+      // one: the offer's destination is a merchant URL, so it carries no
+      // regions at all.
+      affiliate_links: [offerLinkRow(attached, 'pixel-11-buying-guide')],
       frontmatter: {
         picks: [{ goSlug: 'pixel-11-pro', offer: pickOfferFrom(attached, TODAY) }],
       },
@@ -362,4 +365,134 @@ test('an offer saved after the card was assembled is flagged as not on the page 
     TODAY,
   );
   assert.equal(rebuilt.rows[0].pending, false);
+});
+
+test('correcting an Amazon offer’s ASIN is flagged, even though the search fallback is unchanged', () => {
+  // The reader-visible destination of an Amazon offer is the ASIN in
+  // regions_json - the resolver prefers it over default_url, which is only the
+  // search link built from the product name. Comparing the fallback alone
+  // would call the page up to date while it still sends readers to the old
+  // product.
+  const wrong = offer({ url: 'https://www.amazon.com.au/dp/B0AAAAAAAA' });
+  const corrected = offer({ url: 'https://www.amazon.com.au/dp/B0BBBBBBBB' });
+  const built = offerLinkRow(wrong, 'pixel-11-buying-guide');
+  assert.equal(
+    offerLinkRow(corrected, 'pixel-11-buying-guide').default_url,
+    built.default_url,
+    'the fallback search link is identical - the ASIN is the only difference',
+  );
+
+  const article = {
+    draft_md: body,
+    research,
+    affiliate_links: [built],
+    frontmatter: { picks: [{ goSlug: 'pixel-11-pro', offer: pickOfferFrom(wrong, TODAY) }] },
+  };
+  assert.equal(offerCoverage(article, [wrong], TODAY).rows[0].pending, false, 'this one is built');
+  assert.equal(
+    offerCoverage(article, [corrected], TODAY).rows[0].pending,
+    true,
+    'the page still carries the old ASIN',
+  );
+});
+
+test('renaming the merchant is flagged: the reader is shown that name', () => {
+  // "View at JB Hi-Fi" and "Check current price at JB Hi-Fi" - a page built
+  // against the old name says something the record no longer says.
+  const attached = offer();
+  const built = {
+    draft_md: body,
+    research,
+    affiliate_links: [offerLinkRow(attached, 'pixel-11-buying-guide')],
+    frontmatter: { picks: [{ goSlug: 'pixel-11-pro', offer: pickOfferFrom(attached, TODAY) }] },
+  };
+  assert.equal(offerCoverage(built, [attached], TODAY).rows[0].pending, false);
+  assert.equal(
+    offerCoverage(built, [offer({ merchant: 'The Good Guys' })], TODAY).rows[0].pending,
+    true,
+  );
+});
+
+test('a row read back out of JSONB is not mistaken for a changed one', () => {
+  // Postgres hands regions_json back with its own key order, which is not the
+  // order the row was built in.
+  const attached = offer({ url: 'https://www.amazon.com.au/dp/B0FQ1234XY' });
+  const built = offerLinkRow(attached, 'pixel-11-buying-guide');
+  const reordered: AffiliateLinkRow = {
+    ...built,
+    regions_json: {
+      asins: built.regions_json!.asins,
+      search: built.regions_json!.search,
+      network: built.regions_json!.network,
+    } as AffiliateLinkRow['regions_json'],
+  };
+  const coverage = offerCoverage(
+    {
+      draft_md: body,
+      research,
+      affiliate_links: [reordered],
+      frontmatter: { picks: [{ goSlug: 'pixel-11-pro', offer: pickOfferFrom(attached, TODAY) }] },
+    },
+    [attached],
+    TODAY,
+  );
+  assert.equal(coverage.rows[0].pending, false);
+});
+
+test('an offer on a product the draft does not link asks for no rebuild', () => {
+  // The assembler builds affiliate rows for the slugs in the body and nothing
+  // else, so no rebuild could ever put this offer on the page. Flagging it
+  // would leave a standing prompt that re-queues the card through assemble,
+  // image and publish every time it is pressed, and never clears.
+  const stray = offer({ go_slug: 'watch-9-classic', product_name: 'Watch 9 Classic' });
+  const coverage = offerCoverage(
+    {
+      draft_md: body,
+      research,
+      affiliate_links: [
+        {
+          slug: 'pixel-11-pro',
+          default_url: 'https://www.amazon.com.au/s?k=Google%20Pixel%2011%20Pro',
+          regions_json: { network: 'amazon', search: 'Google Pixel 11 Pro' },
+        },
+      ],
+      frontmatter: { picks: [] },
+    },
+    [stray],
+    TODAY,
+  );
+  const row = coverage.rows.find((r) => r.goSlug === 'watch-9-classic')!;
+  assert.equal(row.inBody, false);
+  assert.equal(row.pending, false, 'a rebuild cannot carry it, so it is not a rebuild prompt');
+  assert.match(row.destinationNote!, /the draft links no \/go\/ slug for it/);
+});
+
+test('a pre-order without a price is refused: the dispatch promise rides on the price', () => {
+  // pickOfferFrom writes no offer onto the pick without a price, and the page
+  // renders the callout only for a pick that carries one - so a price-less
+  // pre-order tells the reader nothing about when they are charged.
+  const parsed = validateOfferInput(
+    {
+      goSlug: 'pixel-11-pro',
+      url: 'https://example.com.au/p',
+      preorder: true,
+      releaseDate: '2026-10-02',
+    },
+    TODAY,
+  );
+  assert.equal(parsed.ok, false);
+  assert.match((parsed as { error: string }).error, /charged on dispatch/);
+
+  const priced = validateOfferInput(
+    {
+      goSlug: 'pixel-11-pro',
+      url: 'https://example.com.au/p',
+      price: '2899',
+      priceObservedOn: TODAY,
+      preorder: true,
+      releaseDate: '2026-10-02',
+    },
+    TODAY,
+  );
+  assert.equal(priced.ok, true);
 });

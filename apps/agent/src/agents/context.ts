@@ -7,19 +7,10 @@ import {
   bylineFor,
   CATEGORIES,
   POST_TYPES,
+  todayInSydney,
 } from '../content/contract.js';
 import { describeArticleShape } from '../pipeline/types.js';
 import type { EditorialAngle, KeywordPlan, TopicRow } from '../pipeline/types.js';
-
-/** Today in the audience's timezone (Australia/Sydney), e.g. "2026-07-13". */
-export function todayInSydney(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Australia/Sydney',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
 
 // A function, not a const: the current date must be evaluated per run, and
 // every agent needs it — model training data lags reality by a year or more,

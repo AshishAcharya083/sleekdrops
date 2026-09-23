@@ -20,6 +20,7 @@ const { migrate } = await import('../db/migrate.js');
 const { createApp } = await import('../api/server.js');
 const { runStage } = await import('./runner.js');
 const { saveOffer } = await import('../db/offers.js');
+const { todayInSydney } = await import('../content/contract.js');
 
 import type { AffiliateLinkRow, ArticleRow, ContentBrief } from './types.js';
 
@@ -33,7 +34,8 @@ if (reachable) await migrate();
 
 const app = createApp();
 const AUTH = { Authorization: 'Bearer test-admin-token', 'Content-Type': 'application/json' };
-const TODAY = new Date().toISOString().slice(0, 10);
+// The day the API dates a stamp with: the audience's, not the server's.
+const TODAY = todayInSydney();
 
 /** The dossier of a phone announced this morning: named, and unpollable. */
 const research = {
@@ -449,4 +451,109 @@ test('an offer attached after assembly is flagged, and the rebuild carries it', 
   );
   const done = (await final.json()) as { coverage: { rows: Array<{ pending: boolean }> } };
   assert.equal(done.coverage.rows[0].pending, false);
+});
+
+test('correcting the ASIN behind an offer is flagged, and the rebuild carries it', { skip }, async () => {
+  // The hole a default_url comparison leaves: for an Amazon offer the reader's
+  // destination is the ASIN in regions_json (the /go/ resolver prefers it), and
+  // default_url is only the search fallback built from the product name. Fix a
+  // wrong ASIN and the fallback does not move an inch.
+  const article = await insertAtAssemble();
+  const amazon = (asin: string) => ({
+    ...preorderBody,
+    url: `https://www.amazon.com.au/dp/${asin}`,
+  });
+
+  assert.equal((await attach(article.id, amazon('B0AAAAAAAA'))).status, 200);
+  await runStage(await reload(article.id));
+  const built = await reload(article.id);
+  const wrong = (built.affiliate_links ?? [])[0];
+  assert.deepEqual(wrong.regions_json?.asins, { au: 'B0AAAAAAAA' });
+
+  const corrected = await attach(article.id, amazon('B0BBBBBBBB'));
+  assert.equal(corrected.status, 200);
+  const seen = (await corrected.json()) as {
+    coverage: { rows: Array<{ pending: boolean; destination: string | null }> };
+  };
+  assert.equal(seen.coverage.rows[0].destination, 'https://www.amazon.com.au/dp/B0BBBBBBBB');
+  assert.equal(
+    (await reload(article.id)).affiliate_links![0].default_url,
+    wrong.default_url,
+    'the search fallback is identical - only the ASIN moved',
+  );
+  assert.equal(
+    seen.coverage.rows[0].pending,
+    true,
+    'the built page still sends every reader to the old product',
+  );
+
+  assert.equal(
+    (
+      await app.fetch(
+        new Request(`http://localhost/api/articles/${article.id}/reassemble`, {
+          method: 'POST',
+          headers: AUTH,
+        }),
+      )
+    ).status,
+    200,
+  );
+  await runStage(await q<ArticleRow>(
+    `UPDATE articles SET status = 'running', claimed_by = 'test-worker', claimed_at = now()
+      WHERE id = $1 RETURNING *`,
+    [article.id],
+  ).then((rows) => rows[0]));
+
+  const rebuilt = await reload(article.id);
+  assert.equal(rebuilt.status, 'queued', rebuilt.error ?? '');
+  assert.deepEqual(rebuilt.affiliate_links![0].regions_json?.asins, { au: 'B0BBBBBBBB' });
+
+  const final = await app.fetch(
+    new Request(`http://localhost/api/articles/${article.id}/offers`, { headers: AUTH }),
+  );
+  const done = (await final.json()) as { coverage: { rows: Array<{ pending: boolean }> } };
+  assert.equal(done.coverage.rows[0].pending, false, 'and the prompt clears');
+});
+
+test('an offer on a slug the draft never links prompts no rebuild', { skip }, async () => {
+  // The panel lists every product in the dossier, including ones the writer
+  // did not link. A rebuild only ever writes rows for the slugs in the body,
+  // so flagging this row would leave a standing prompt that re-queues the card
+  // through assemble, image and publish and never clears.
+  const article = await insertAtAssemble();
+  await runStage(await reload(article.id));
+
+  const saved = await app.fetch(
+    new Request(`http://localhost/api/articles/${article.id}/offers/watch-9-classic`, {
+      method: 'PUT',
+      headers: AUTH,
+      body: JSON.stringify({ ...preorderBody, productName: 'Watch 9 Classic' }),
+    }),
+  );
+  assert.equal(saved.status, 200);
+  const seen = (await saved.json()) as {
+    coverage: {
+      rows: Array<{ goSlug: string; inBody: boolean; pending: boolean; destinationNote: string | null }>;
+    };
+  };
+  const row = seen.coverage.rows.find((r) => r.goSlug === 'watch-9-classic')!;
+  assert.equal(row.inBody, false);
+  assert.equal(row.pending, false, 'no rebuild could carry it');
+  assert.match(row.destinationNote!, /the draft links no \/go\/ slug for it/);
+});
+
+test('a pre-order with no price is refused: without a figure the page says nothing', { skip }, async () => {
+  // The release date and the charged-on-dispatch line ride on the pick's
+  // offer, and a record with no price writes no offer onto the pick at all -
+  // so the page would carry the link and disclose none of it.
+  const article = await insertAtAssemble();
+  const refused = await attach(article.id, { ...preorderBody, price: null });
+  assert.equal(refused.status, 400);
+  assert.match(((await refused.json()) as { error: string }).error, /charged on dispatch/);
+
+  const [count] = await q<{ n: string }>(
+    'SELECT count(*) n FROM product_offers WHERE article_id = $1',
+    [article.id],
+  );
+  assert.equal(count.n, '0');
 });

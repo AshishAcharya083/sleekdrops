@@ -31,6 +31,24 @@ export const MONETISED_INTENTS = new Set(['Commercial Investigation', 'Transacti
 export const HOME_CURRENCY = 'AUD';
 
 /**
+ * Today as the publication reckons it - the audience's own day, in
+ * Australia/Sydney, e.g. "2026-07-13".
+ *
+ * Never the server's UTC day: between local midnight and 10:00 AEST (11:00
+ * AEDT) the two disagree, and everything dated here is a calendar day a person
+ * states - a pubDate, a review stamp, the day an editor saw a price. For those
+ * ten hours a UTC day would date them to yesterday.
+ */
+export function todayInSydney(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Sydney',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+/**
  * How one beat writes, as instructions a writer can actually follow.
  *
  * "Write in Mira's voice" produces the same prose as no instruction at all,

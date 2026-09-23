@@ -23,6 +23,7 @@ import {
   HOME_CURRENCY,
   MONETISED_INTENTS,
   pickCover,
+  todayInSydney,
   validateArticle,
 } from '../content/contract.js';
 import { offerLinkRow, pickOfferFrom } from '../content/offers.js';
@@ -59,7 +60,10 @@ export async function runAssembler(
   let body = article.draft_md!;
   const slugsInBody = goSlugsIn(body);
   const products = article.research?.products ?? [];
-  const today = new Date().toISOString().slice(0, 10);
+  // The audience's day, not the server's: every date stamped below is a
+  // calendar day this publication states - the pubDate, the review stamp, and
+  // the day an offer's price is judged current against.
+  const today = todayInSydney();
   const offerBySlug = new Map(offers.map((offer) => [offer.go_slug, offer]));
 
   // The deterministic parts never go through the LLM. A re-assembly (e.g. the

@@ -54,12 +54,19 @@ export function formatOfferPrice(price: string | number | null, currency: string
   return prefix ? `${prefix}${amount}` : `${currency.toUpperCase()} ${amount}`;
 }
 
-/** "18 September 2026" — the form of the date a reader is shown. */
+/**
+ * "September 18, 2026" — the form of the date a reader is shown.
+ *
+ * en-US, not en-AU, because this screen exists to show the site's own words:
+ * the page prints its dates through `formatLong` in apps/web/src/lib/format.ts,
+ * and a preview that says "18 September 2026" is previewing a sentence the
+ * reader never gets.
+ */
 export function formatOfferDate(iso: string | null): string {
   if (!iso || !ISO_DATE.test(iso)) return '';
   const date = new Date(`${iso}T00:00:00Z`);
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('en-AU', {
+  return date.toLocaleDateString('en-US', {
     timeZone: 'UTC',
     day: 'numeric',
     month: 'long',
@@ -100,6 +107,13 @@ export function validateOfferDraft(draft: OfferDraft, today: string): OfferError
       errors.priceObservedOn =
         'A price needs the day it was seen — that date is what the reader is shown.';
     }
+  } else if (draft.preorder) {
+    // The release date and the charge-on-dispatch line ride on the offer the
+    // price puts on the page: with no figure the page carries the link and
+    // none of the pre-order treatment.
+    errors.price =
+      'A pre-order needs the price it is offered at: without a figure the page carries no ' +
+      'pre-order notice at all.';
   }
   if (draft.priceObservedOn && !ISO_DATE.test(draft.priceObservedOn)) {
     errors.priceObservedOn = 'Use a date (YYYY-MM-DD).';

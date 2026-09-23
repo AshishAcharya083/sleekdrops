@@ -206,6 +206,7 @@ function CoverageScreen({
         article_id: articleId,
         stage: article?.stage,
         status: article?.status,
+        surface: 'offers',
       });
       onActed();
     } catch (e) {
@@ -806,7 +807,12 @@ function OfferEditor({
         <div className="field-row">
           <div className="field">
             <label htmlFor="offer-price">
-              Price <span className="opt">optional</span>
+              Price{' '}
+              {draft.preorder ? (
+                <span className="req">required</span>
+              ) : (
+                <span className="opt">optional</span>
+              )}
             </label>
             <input
               id="offer-price"
@@ -1099,25 +1105,39 @@ function ReaderPreview({
           withOffers.map((row) => (
             <div key={row.goSlug}>
               <p className="preview-label">/go/{row.goSlug}</p>
-              <div className="preview-frame">
-                <ReaderOffer
-                  name={row.productName}
-                  preview={offerPreview(
-                    {
-                      productName: row.productName,
-                      url: row.offer!.url,
-                      price: row.offer!.price ? String(Number(row.offer!.price)) : '',
-                      currency: row.offer!.currency,
-                      priceObservedOn: row.offer!.price_observed_on ?? '',
-                      preorder: row.offer!.preorder,
-                      releaseDate: row.offer!.release_date ?? '',
-                      merchant: row.offer!.merchant ?? '',
-                    },
-                    row.offer!.source,
-                    row.stale,
-                  )}
-                />
-              </div>
+              {/* The page renders an offer block only for a pick that carries a
+                  price and the day it was seen; with neither there is a working
+                  link and nothing else, and showing a treatment the site will
+                  not produce is the one thing this screen must not do. */}
+              {row.price && row.asAt ? (
+                <div className="preview-frame">
+                  <ReaderOffer
+                    name={row.productName}
+                    preview={offerPreview(
+                      {
+                        productName: row.productName,
+                        url: row.offer!.url,
+                        price: row.offer!.price ? String(Number(row.offer!.price)) : '',
+                        currency: row.offer!.currency,
+                        priceObservedOn: row.offer!.price_observed_on ?? '',
+                        preorder: row.offer!.preorder,
+                        releaseDate: row.offer!.release_date ?? '',
+                        merchant: row.offer!.merchant ?? '',
+                      },
+                      row.offer!.source,
+                      row.stale,
+                    )}
+                  />
+                </div>
+              ) : (
+                <div className="note-card">
+                  <p className="muted" style={{ margin: 0 }}>
+                    No price on this offer, so the page carries the link and nothing else: no
+                    figure, no “as at” date{row.preorder ? ', and no pre-order notice' : ''}. Add a
+                    price and the day you saw it to give the reader the rest.
+                  </p>
+                </div>
+              )}
             </div>
           ))
         )}

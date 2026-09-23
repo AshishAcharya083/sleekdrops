@@ -9,6 +9,13 @@
 // non-destructive: when a SKU finally appears in a feed, the row an editor
 // filled in on announcement day stops being what the page shows and starts
 // being the history of what it showed.
+//
+// That overwrite is supported, not yet exercised: saveOffer() upserts under
+// any source and validateOfferInput() accepts 'feed' and 'api', but the only
+// caller in the repo is the editor route, which fixes source to 'editor'.
+// Nothing ingests a feed or the Product Advertising API yet, so until an
+// ingestion path exists the feed-takes-over behaviour is reachable only from
+// a test.
 import { pool, q } from './pool.js';
 import type { OfferInput, ProductOffer, ProductOfferRevision } from '../pipeline/types.js';
 

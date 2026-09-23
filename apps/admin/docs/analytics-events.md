@@ -115,7 +115,7 @@ A pipeline-board action on one article: one name, with the action in a property.
 | `stage` | string | The stage it was in - for `retry_stage` and `test_stage`, the stage the operator picked. |
 | `status` | string | The status it was in. |
 | `attempt` | number | The article's run attempt when the action was taken. |
-| `surface` | string | `overview-stuck` when the action came from the Overview's stuck surface; absent on the run detail. |
+| `surface` | string | `overview-stuck` when the action came from the Overview's stuck surface, `offers` when it came from the offer coverage screen; absent on the run detail. |
 
 Owning screens: `pages/Pipeline.tsx` (article detail panel), `pages/Overview.tsx` (the stuck surface's row-level `Stop run` / `Cancel run`), and `pages/Offers.tsx` for `reassemble` and the approval taken from the coverage screen.
 The recovery actions are reported by what they do, never by what the stage returned: no agent output, error text or prose leaves the panel.

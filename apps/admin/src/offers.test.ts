@@ -91,7 +91,7 @@ test('a release date is only sent when the offer is a pre-order', () => {
 test('the preview quotes a hand-entered price as a dated RRP', () => {
   const view = offerPreview(draft());
   assert.equal(view.priceLabel, 'RRP A$1,699');
-  assert.equal(view.stamp, 'as at 18 September 2026');
+  assert.equal(view.stamp, 'as at September 18, 2026');
   assert.equal(view.datedReason, "manufacturer's RRP, not a live price");
   assert.equal(view.checkLabel, 'Check current price at JB Hi-Fi');
   assert.equal(view.ctaLabel, 'View at JB Hi-Fi');
@@ -107,13 +107,39 @@ test('a fed price is previewed as the price it is', () => {
 test('a pre-order preview names the ship date and the charge', () => {
   const view = offerPreview(draft({ preorder: true, releaseDate: '2026-10-02' }));
   assert.equal(view.preorder, true);
-  assert.equal(view.releaseNote, 'Ships 2 October 2026 — you are charged on dispatch, not today');
+  assert.equal(view.releaseNote, 'Ships October 2, 2026 — you are charged on dispatch, not today');
 });
 
 test('prices and dates are formatted the way the page prints them', () => {
   assert.equal(formatOfferPrice('2899.00', 'AUD'), 'A$2,899');
   assert.equal(formatOfferPrice('1199.50', 'USD'), 'US$1,199.50');
   assert.equal(formatOfferPrice(null, 'AUD'), null);
-  assert.equal(formatOfferDate('2026-10-02'), '2 October 2026');
+  // The site prints its dates through formatLong (en-US), so this screen has
+  // to print them that way too or it is previewing a sentence nobody gets.
+  assert.equal(formatOfferDate('2026-10-02'), 'October 2, 2026');
   assert.equal(formatOfferDate('not a date'), '');
+});
+
+test('a pre-order with no price is refused: the dispatch promise rides on it', () => {
+  // A price-less record writes no offer onto the pick, so the page renders no
+  // pre-order callout - the release date and the charge line never reach the
+  // reader at all.
+  const errors = validateOfferDraft(
+    draft({ price: '', priceObservedOn: '', preorder: true, releaseDate: '2026-10-02' }),
+    TODAY,
+  );
+  assert.match(errors.price!, /pre-order needs the price/);
+  assert.equal(countErrors(errors), 1, 'the release date is filled in, so that is the only fault');
+
+  const priced = validateOfferDraft(
+    draft({ preorder: true, releaseDate: '2026-10-02' }),
+    TODAY,
+  );
+  assert.equal(countErrors(priced), 0);
+});
+
+test('a price stays optional on an offer that is not a pre-order', () => {
+  // The link is the point of the record; a product with no figure still
+  // reaches the reader as a destination.
+  assert.equal(countErrors(validateOfferDraft(draft({ price: '', priceObservedOn: '' }), TODAY)), 0);
 });

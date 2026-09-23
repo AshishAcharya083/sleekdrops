@@ -8,7 +8,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { config } from '../config.js';
-import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
+import { CATEGORIES, POST_TYPES, slugify, todayInSydney } from '../content/contract.js';
 import { offerCoverage, validateOfferInput } from '../content/offers.js';
 import { deleteOffer, offerRevisionsForArticle, offersForArticle, saveOffer } from '../db/offers.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
@@ -77,9 +77,17 @@ interface OfferArticle {
   frontmatter: Record<string, unknown> | null;
 }
 
-/** Today in the publication's own terms - the day an "as at" stamp means. */
+/**
+ * Today in the publication's own terms - the day an "as at" stamp means, in
+ * the audience's timezone rather than the server's.
+ *
+ * The drawer takes the date input's `max` and its pre-filled "Price seen on"
+ * from this, and both validators compare against it, so a UTC day would spend
+ * the ten hours between Sydney midnight and 10:00 AEST refusing the day an
+ * editor is actually standing in as "the future".
+ */
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return todayInSydney();
 }
 
 /**

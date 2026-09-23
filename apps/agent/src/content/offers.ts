@@ -272,6 +272,20 @@ export function validateOfferInput(raw: unknown, today: string): Validated<Offer
   if (preorder && !release.value) {
     return { ok: false, error: 'a pre-order needs its release date - the reader is charged on dispatch' };
   }
+  // A price is optional on an ordinary offer - the link is the point, and a
+  // product with no figure still reaches the reader as a destination. On a
+  // pre-order it is not: the release date and the charged-on-dispatch line
+  // ride on the pick's offer, and a record with no price writes no offer onto
+  // the pick at all (pickOfferFrom), so the page would carry the link and tell
+  // the reader nothing about when they are charged.
+  if (preorder && price === null) {
+    return {
+      ok: false,
+      error:
+        'a pre-order needs the price it is offered at - without a figure the page carries no ' +
+        'pre-order notice, so the reader is never told they are charged on dispatch',
+    };
+  }
 
   const source: OfferSource =
     body.source === 'feed' || body.source === 'api' ? body.source : 'editor';
@@ -334,6 +348,10 @@ export interface OfferCoverageRow {
    * the old destination or the old stamp. Attaching an offer does not rewrite
    * a page that has already been built, so the panel says so rather than
    * implying the reader is already seeing it.
+   *
+   * Never true for a product the draft does not link (`inBody: false`): a
+   * rebuild only builds rows for the slugs in the body, so there is no rebuild
+   * that would clear it and nothing to prompt for.
    */
   pending: boolean;
   offer: ProductOffer | null;
@@ -349,20 +367,63 @@ export interface OfferCoverage {
 
 /**
  * The reader-visible half of an offer, as one comparable string: the price,
- * the day it was observed and the pre-order promise. Two records with the same
- * stamp say the same thing to a reader, which is the only difference that
- * makes a rebuild worth asking for.
+ * the day it was observed, the merchant it is named against and the pre-order
+ * promise. Two records with the same stamp say the same thing to a reader,
+ * which is the only difference that makes a rebuild worth asking for.
+ *
+ * The merchant is in here because it is not decoration: it is the name on the
+ * button ("View at JB Hi-Fi") and in the price-check link.
  */
 function stampOf(offer: PickOffer | null): string {
   if (!offer) return '';
-  return [offer.price, offer.asAt, offer.stale, offer.preorder ?? false, offer.releaseDate ?? '']
-    .join('|');
+  return [
+    offer.price,
+    offer.asAt,
+    offer.stale,
+    offer.merchant ?? '',
+    offer.preorder ?? false,
+    offer.releaseDate ?? '',
+  ].join('|');
+}
+
+/**
+ * A value as one comparable string, with object keys in a fixed order.
+ *
+ * `regions_json` has been through JSONB by the time it is read back, which
+ * returns the keys in the database's order rather than the builder's, so
+ * plain JSON.stringify would call two identical rows different.
+ */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/**
+ * Everything about a built affiliate row that decides where a reader lands.
+ *
+ * `default_url` alone is not that: for an Amazon offer the resolver prefers
+ * `regions_json.asins[region]` and the default is only the search fallback
+ * built from the product name, so correcting an ASIN changes nothing here
+ * unless the regions are compared too.
+ */
+function destinationOf(link: AffiliateLinkRow): string {
+  return canonical({
+    default_url: link.default_url,
+    regions_json: link.regions_json ?? null,
+    manual: link.manual === true,
+  });
 }
 
 /**
  * Whether the page as last assembled already says what this record says: the
- * same destination behind the link, and the same figure and promise in the
- * stamp.
+ * same destination behind the link - every part of it the resolver reads - and
+ * the same figure and promise in the stamp.
  */
 function onPage(
   link: AffiliateLinkRow | undefined,
@@ -371,9 +432,8 @@ function onPage(
   today: string,
 ): boolean {
   if (!link) return false;
-  const built = offerLinkRow(offer, '');
   return (
-    link.default_url === built.default_url &&
+    destinationOf(link) === destinationOf(offerLinkRow(offer, '')) &&
     publishedStamp === stampOf(pickOfferFrom(offer, today))
   );
 }
@@ -460,20 +520,29 @@ export function offerCoverage(
       const stale = offerPriceIsStale(offer, today);
       const provenance: OfferProvenance =
         offer.source === 'editor' ? 'editor' : stale ? 'healed' : 'resolved';
+      const attachedBy =
+        offer.source === 'editor'
+          ? `attached by hand${offer.merchant ? ` at ${offer.merchant}` : ''}`
+          : `from the ${offer.source}${offer.merchant ? ` at ${offer.merchant}` : ''}`;
       return {
         ...base,
         // A row is only pending when what the built page shows differs from
         // the record. `?? ''` rather than a strict lookup: an offer with no
         // price writes no stamp, and a pick that carries none is showing
         // exactly that.
-        pending: assembled && !onPage(link, offer, stampBySlug.get(slug) ?? '', today),
+        //
+        // And only when the draft links the slug at all: the assembler builds
+        // a row for the slugs in the body and nothing else, so a rebuild can
+        // never put this offer on a page that does not link the product. The
+        // row says that instead of asking for a rebuild that cannot clear it.
+        pending:
+          assembled && base.inBody && !onPage(link, offer, stampBySlug.get(slug) ?? '', today),
         provenance,
         label: offer.source === 'editor' ? PROVENANCE_LABEL.editor : `${offer.source} offer`,
         destination: offer.url,
-        destinationNote:
-          offer.source === 'editor'
-            ? `attached by hand${offer.merchant ? ` at ${offer.merchant}` : ''}`
-            : `from the ${offer.source}${offer.merchant ? ` at ${offer.merchant}` : ''}`,
+        destinationNote: base.inBody
+          ? attachedBy
+          : `${attachedBy} - the draft links no /go/ slug for it, so the page cannot carry it`,
         price: formatOfferPrice(offer.price, offer.currency),
         asAt: offer.price_observed_on,
         stale,
