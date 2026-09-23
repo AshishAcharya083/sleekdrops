@@ -100,6 +100,51 @@ test('an escaped headline is compared as a reader sees it', () => {
   assert.deepEqual(result, { ready: true });
 });
 
+test('a headline with an apostrophe still opens the gate', () => {
+  // Astro escapes only `&` and `"` in an attribute value, so `Don't` reaches
+  // the page with the apostrophe literal:
+  //   <meta property="og:title" content="Don't buy these | SleekDrops" />
+  // Reading that value with a `[^"']*` class stops at the apostrophe, so the
+  // gate compared against "Don", never opened, and failed the item after the
+  // whole window for a rebuild that had actually finished. Apostrophes are
+  // ordinary in headlines, so this was most of them.
+  const title = "Don't buy these noise-cancelling headphones";
+  assert.deepEqual(
+    evaluateReadiness(
+      { status: 200, body: page({ title: `${title} | SleekDrops`, image: null }) },
+      { ogTitle: title, ogImage: null },
+    ),
+    { ready: true },
+  );
+});
+
+test('a literal angle bracket in a headline does not hide the tag', () => {
+  // `<` and `>` are not escaped either, and a `>` inside a quoted value must
+  // not be read as the end of the tag that carries it.
+  const title = 'Sony > Bose, and <Insert Brand> is nowhere';
+  assert.deepEqual(
+    evaluateReadiness(
+      { status: 200, body: page({ title: `${title} | SleekDrops`, image: null }) },
+      { ogTitle: title, ogImage: null },
+    ),
+    { ready: true },
+  );
+});
+
+test('the tag is matched on its property, not on its position', () => {
+  // twitter:title carries the same text one tag later, and og:description sits
+  // between them. Whichever order they render in, og:title is the one read.
+  const body = [
+    '<meta name="twitter:title" content="A different headline | SleekDrops">',
+    "<meta content='The real headline | SleekDrops' property='og:title'>",
+    '<meta property="og:description" content="Four weeks on the 7:12, ranked." />',
+  ].join('\n');
+  assert.deepEqual(
+    evaluateReadiness({ status: 200, body }, { ogTitle: 'The real headline', ogImage: null }),
+    { ready: true },
+  );
+});
+
 test('a page with no meta tags at all is not mistaken for a rendered one', () => {
   const result = evaluateReadiness({ status: 200, body: '<html><body>ok</body></html>' }, expected);
   assert.deepEqual(result, { ready: false, reason: 'page serves no og:title yet' });

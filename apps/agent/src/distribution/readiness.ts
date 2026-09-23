@@ -36,22 +36,31 @@ export type ReadinessResult = { ready: true } | { ready: false; reason: string }
  * being asked is whether the page a rebuild produced carries the two values
  * this post was rendered against, and a whole DOM to answer it is a dependency
  * the agent does not otherwise have.
+ *
+ * The scan has to be quote-aware, though, because Astro escapes only `&` and
+ * `"` in an attribute value - an apostrophe, a `<` and a `>` all reach the
+ * page literally. A headline like "Don't buy these" therefore renders as
+ * `content="Don't buy these | SleekDrops"`, and reading the value with a
+ * `[^"']*` class would stop at the apostrophe and leave the gate comparing
+ * against "Don" forever, until the item was failed for a rebuild that had in
+ * fact finished. So a tag ends at the first `>` that is not inside a quoted
+ * value, and a value ends at the quote it opened with.
  */
+const META_TAG = /<meta\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
+const META_ATTRIBUTE = /([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+
 function metaContent(html: string, property: string): string | null {
-  const escaped = property.replace(':', '\\:');
-  const patterns = [
-    new RegExp(
-      `<meta[^>]+(?:property|name)\\s*=\\s*["']${escaped}["'][^>]*?content\\s*=\\s*["']([^"']*)["']`,
-      'i',
-    ),
-    new RegExp(
-      `<meta[^>]+content\\s*=\\s*["']([^"']*)["'][^>]*?(?:property|name)\\s*=\\s*["']${escaped}["']`,
-      'i',
-    ),
-  ];
-  for (const pattern of patterns) {
-    const match = pattern.exec(html);
-    if (match) return decodeEntities(match[1]);
+  const wanted = property.toLowerCase();
+  for (const tag of html.matchAll(META_TAG)) {
+    let key: string | null = null;
+    let content: string | null = null;
+    for (const [, name, doubleQuoted, singleQuoted] of tag[1].matchAll(META_ATTRIBUTE)) {
+      const value = doubleQuoted ?? singleQuoted ?? '';
+      const attribute = name.toLowerCase();
+      if (attribute === 'property' || attribute === 'name') key = value;
+      else if (attribute === 'content') content = value;
+    }
+    if (key?.toLowerCase() === wanted && content !== null) return decodeEntities(content);
   }
   return null;
 }

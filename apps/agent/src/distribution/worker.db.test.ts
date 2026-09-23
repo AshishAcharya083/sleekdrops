@@ -296,6 +296,36 @@ test('a token that lives only in settings is redacted too', { skip }, async () =
   }
 });
 
+test('a degraded post is recorded as posted, and says what was reduced', { skip }, async () => {
+  // The first-comment write is a second call that can fail on its own. An
+  // adapter that recovers by appending the link to the caption has still
+  // posted, so the item is not a retry - but the panel has to be told.
+  const provider = stub(async (_item, accessToken) => ({
+    remotePostId: 'remote-degraded',
+    degraded: true,
+    // Exactly the shape of an adapter that echoes the failed call it recovered
+    // from: the note lands in the same column last_error does.
+    note: `comment write rejected (access_token=${accessToken}); link appended to the caption`,
+  }));
+  const item = await queued(provider.name);
+
+  assert.equal(await processItem(item, { fetchPage: async () => livePage }), 'posted');
+  const posted = (await getItem(item.id))!;
+  assert.equal(posted.status, 'posted');
+  assert.equal(posted.remotePostId, 'remote-degraded');
+  assert.ok(!posted.lastError!.includes(TOKEN), 'a note is scrubbed like an error is');
+  assert.match(posted.lastError!, /link appended to the caption/);
+});
+
+test('a degraded post with no note still says so', { skip }, async () => {
+  const provider = stub(async () => ({ remotePostId: 'remote-bare', degraded: true }));
+  const item = await queued(provider.name);
+
+  assert.equal(await processItem(item, { fetchPage: async () => livePage }), 'posted');
+  const posted = (await getItem(item.id))!;
+  assert.ok(posted.lastError, 'the signal must not be lost because a provider left the note empty');
+});
+
 // ── Credentials ────────────────────────────────────────────────────────────
 
 test('a channel whose secret is configured nowhere stops asking', { skip }, async () => {

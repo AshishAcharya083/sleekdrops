@@ -19,6 +19,7 @@ process.env.GITHUB_TOKEN = 'test-github-token';
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
 const { executeStage } = await import('../pipeline/runner.js');
+const { createApp } = await import('../api/server.js');
 const { runPublisher } = await import('../agents/publisher.js');
 const { enqueuePublishedArticle } = await import('./queue.js');
 const { UsageTracker } = await import('../llm/index.js');
@@ -37,6 +38,9 @@ if (reachable) await migrate();
 const PROVIDER = `stub-publish-${randomUUID().slice(0, 8)}`;
 const TITLE = 'The headphones for a quiet commute';
 const HERO = 'https://storage.googleapis.com/images/heroes/quiet.png';
+
+const app = createApp();
+const AUTH = { Authorization: 'Bearer test-admin-token' };
 
 const realFetch = globalThis.fetch;
 const articles: string[] = [];
@@ -127,6 +131,55 @@ test('publish stage entered three times queues one item per channel', { skip }, 
   assert.equal(after.length, 1, 'one published article, one post per channel');
   assert.equal(after[0].id, queued[0].id);
   assert.equal(after[0].attempts, 0);
+});
+
+test('the endpoints that re-enter publish cannot post the same piece twice', { skip }, async () => {
+  // The two real doors into a second publish pass, driven the way the panel
+  // drives them - same verb, same bearer, same JSON body - rather than by
+  // calling the stage twice. Between them they are why this card exists: an
+  // inline social post would have fired once per pass.
+  const connection = await connect();
+  const row = await article();
+  stubCloudflareAndGithub();
+
+  await executeStage(row, 'publish', null, new UsageTracker());
+  const [first] = await itemsFor(row.slug!, connection);
+  assert.ok(first, 'the first pass queued the piece');
+
+  // `runStage` is what writes the routing decision the stage returned; the
+  // stage body itself only reports it, so the finished state is set here.
+  const settle = (status: string) =>
+    q("UPDATE articles SET stage = 'done', status = $2 WHERE id = $1", [row.id, status]);
+
+  await settle('done');
+  const republished = await app.request(`/api/articles/${row.id}/republish`, {
+    method: 'POST',
+    headers: AUTH,
+  });
+  assert.equal(republished.status, 200);
+  const requeued = await reload(row.id);
+  assert.equal(requeued.stage, 'publish');
+  assert.equal(requeued.status, 'queued', 'the worker will pick this up and run publish again');
+  await executeStage(requeued, 'publish', null, new UsageTracker());
+
+  // Retry-from-stage, off a publish that failed - the case where re-sending
+  // would be most tempting and most wrong, because the post already went out.
+  await settle('failed');
+  const retried = await app.request(`/api/articles/${row.id}/retry-stage`, {
+    method: 'POST',
+    headers: { ...AUTH, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stage: 'publish' }),
+  });
+  assert.equal(retried.status, 200);
+  const retriedRow = await reload(row.id);
+  assert.equal(retriedRow.stage, 'publish');
+  await executeStage(retriedRow, 'publish', null, new UsageTracker());
+
+  const after = await itemsFor(row.slug!, connection);
+  assert.equal(after.length, 1, 'three publish passes, one queued post');
+  assert.equal(after[0].id, first.id, 'the original row, not a replacement');
+  // `pg` hands these back as Date objects, so compare by value.
+  assert.deepEqual(after[0].created_at, first.created_at, 'and untouched by the later passes');
 });
 
 test('an item already in flight is not reset by a republish', { skip }, async () => {

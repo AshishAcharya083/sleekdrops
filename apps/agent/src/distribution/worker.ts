@@ -136,7 +136,14 @@ export async function processItem(
       externalAccountId: connection.external_account_id,
       item,
     });
-    await markPosted(item.id, receipt.remotePostId, receipt.degraded ? receipt.note : undefined);
+    // A degraded post still lands, but the panel has to be able to see that it
+    // did so in a reduced form - so the note is never dropped for want of a
+    // provider filling it in, and it goes through the same scrub as an error
+    // does: it is written to the same column an operator reads.
+    const note = receipt.degraded
+      ? redactToken(receipt.note ?? 'posted in a reduced form', accessToken)
+      : undefined;
+    await markPosted(item.id, receipt.remotePostId, note);
     log.info('distributed', {
       queue_item_id: item.id,
       slug: item.slug,
