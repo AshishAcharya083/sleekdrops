@@ -42,6 +42,7 @@ const ALLOWED_PROPS = new Set<string>([
   'post_type',
   'stage',
   'status',
+  'attempt',
   // request dimensions
   'method',
   'http_status',

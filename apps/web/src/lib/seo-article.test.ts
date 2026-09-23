@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildArticleSchema } from './seo.ts';
+import { buildArticleSchema, buildHomeSchema, jsonLdScript } from './seo.ts';
 import type { BlogPost } from './posts.ts';
 import { getAuthor } from '../data/authors.ts';
 
@@ -111,4 +111,20 @@ test('the publisher logo is the square mark as an ImageObject, not the social ca
   });
   // The hero, when there is one, is the article image; the card is only the fallback.
   assert.deepEqual(node(schema, 'Article').image, ['https://images.example/hero.jpg']);
+});
+
+test('the publisher claims the Facebook Page as an official profile', () => {
+  const publisher = nodeById(
+    buildArticleSchema(post, author),
+    'https://sleekdrops.com/#organization',
+  );
+  assert.deepEqual(publisher.sameAs, ['https://www.facebook.com/sleekdrops']);
+
+  // The home page declares the publisher in full, and the claim is only worth
+  // anything if it survives serialisation into the script tag the page ships.
+  const rendered = nodeById(
+    JSON.parse(jsonLdScript(buildHomeSchema())),
+    'https://sleekdrops.com/#organization',
+  );
+  assert.deepEqual(rendered.sameAs, ['https://www.facebook.com/sleekdrops']);
 });

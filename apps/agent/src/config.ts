@@ -5,11 +5,31 @@ function env(key: string, fallback = ''): string {
   return process.env[key] || fallback;
 }
 
+/**
+ * A positive number from the environment, or the fallback. Anything else -
+ * blank, a typo, a negative - falls back rather than propagating: these values
+ * bound a safety guard, and a guard configured to zero is worse than no guard.
+ */
+function positiveNumber(key: string, fallback: number): number {
+  const value = Number(env(key, String(fallback)));
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/**
+ * Wall-clock budget for one pipeline stage, as a deployment asks for it
+ * (AGENT_RUN_TIMEOUT_SECONDS). Deliberately a deployment value rather than an
+ * operator setting, and never the last word: the ceiling it cannot raise, the
+ * per-stage overrides and the reasoning behind all three live together in
+ * pipeline/budgets.ts.
+ */
+export const DEFAULT_STAGE_TIMEOUT_SECONDS = 3600;
+
 export const config = {
-  databaseUrl: env(
-    'DATABASE_URL',
-    'postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent',
-  ),
+  // No fallback on purpose: the docker-compose URL (port 5544 is a host-side
+  // mapping that exists only on a laptop running `pnpm db:up`) is documentation
+  // in .env.example, not a universal default. Empty means "let the `pg` driver
+  // resolve PGHOST/PGPORT/... itself" - see db/pool.ts.
+  databaseUrl: env('DATABASE_URL'),
 
   // Google AI Studio key — bills the GCP project it belongs to, so Google
   // Cloud credits apply. On Cloud Run, Vertex ADC replaces the key entirely.
@@ -54,8 +74,37 @@ export const config = {
     repo: env('GITHUB_REPO', 'AshishAcharya083/sleekdrops'),
   },
 
+  /**
+   * Social distribution. The site URL is where the readiness gate looks for a
+   * published slug before an item is handed to a provider, so it must be the
+   * origin the rebuild actually deploys to - the same default apps/web's
+   * astro.config.mjs carries, overridable with SITE_URL for a preview.
+   */
+  distribution: {
+    siteUrl: env('SITE_URL', 'https://sleekdrops.com').replace(/\/+$/, ''),
+    pollMs: positiveNumber('DISTRIBUTION_POLL_MS', 15_000),
+  },
+
   adminToken: env('ADMIN_TOKEN'),
   port: Number(env('PORT', '8787')),
   workerConcurrency: Number(env('WORKER_CONCURRENCY', '2')),
   pollMs: Number(env('POLL_MS', '5000')),
+
+  /**
+   * Wall-clock budget for one stage run. Clamped to MAX_STAGE_TIMEOUT_SECONDS
+   * where it is read (pipeline/budgets.ts) - this value is what the deployment
+   * asked for, not necessarily what it gets.
+   */
+  agentRunTimeoutSeconds: positiveNumber(
+    'AGENT_RUN_TIMEOUT_SECONDS',
+    DEFAULT_STAGE_TIMEOUT_SECONDS,
+  ),
+
+  /**
+   * How many worker polls between reaper sweeps. At the default poll of 5s
+   * that is a sweep a minute: often enough that a wedged run is noticed while
+   * the process is alive, rare enough that the sweep is not most of what the
+   * worker does.
+   */
+  reaperEveryTicks: positiveNumber('REAPER_EVERY_TICKS', 12),
 };

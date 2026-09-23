@@ -244,3 +244,39 @@ test('a post carrying none of the evidence fields still validates', () => {
   assert.equal(parsed.reviewUnit, undefined);
   assert.equal(parsed.picks?.[0].evidence, undefined);
 });
+
+test("an attached offer's price, stamp and pre-order promise reach the collection", () => {
+  // The three things a launch-window page cannot say without this record: what
+  // it costs, on what day somebody saw that, and when the reader is charged.
+  const offer = {
+    price: 'A$1,699',
+    currency: 'AUD',
+    asAt: '2026-09-18',
+    source: 'editor',
+    stale: true,
+    merchant: 'JB Hi-Fi',
+    preorder: true,
+    releaseDate: '2026-10-02',
+  };
+  const parsed = blogFrontmatterSchema.parse({
+    ...assemblerOutput,
+    picks: [{ name: 'Google Pixel 11 Pro', goSlug: 'pixel-11-pro', price: 'A$1,699', offer }],
+  });
+
+  assert.deepEqual(parsed.picks?.[0].offer, offer);
+});
+
+test('an offer with an unreadable observation date is refused', () => {
+  // Without a day the page can state, the figure would render as a live price.
+  for (const offer of [
+    { price: 'A$1,699', currency: 'AUD', asAt: '18 September 2026', source: 'editor', stale: true },
+    { price: 'A$1,699', currency: 'AUD', asAt: '2026-09-18', source: 'guess', stale: true },
+    { price: 'A$1,699', currency: 'AUD', asAt: '2026-09-18', source: 'editor' },
+  ]) {
+    const result = blogFrontmatterSchema.safeParse({
+      ...assemblerOutput,
+      picks: [{ name: 'Google Pixel 11 Pro', goSlug: 'pixel-11-pro', offer }],
+    });
+    assert.equal(result.success, false, `${JSON.stringify(offer)} should be rejected`);
+  }
+});

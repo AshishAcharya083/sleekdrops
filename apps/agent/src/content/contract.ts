@@ -33,6 +33,24 @@ export const MONETISED_INTENTS = new Set(['Commercial Investigation', 'Transacti
 export const HOME_CURRENCY = 'AUD';
 
 /**
+ * Today as the publication reckons it - the audience's own day, in
+ * Australia/Sydney, e.g. "2026-07-13".
+ *
+ * Never the server's UTC day: between local midnight and 10:00 AEST (11:00
+ * AEDT) the two disagree, and everything dated here is a calendar day a person
+ * states - a pubDate, a review stamp, the day an editor saw a price. For those
+ * ten hours a UTC day would date them to yesterday.
+ */
+export function todayInSydney(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Sydney',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+/**
  * How one beat writes, as instructions a writer can actually follow.
  *
  * "Write in Mira's voice" produces the same prose as no instruction at all,
@@ -274,6 +292,30 @@ export const reviewUnitSchema = z.object({
 });
 
 /**
+ * The offer behind a pick: a price somebody saw on a named day, not a price
+ * anything is polling.
+ *
+ * A launch-window SKU has no feed row and cannot be read through the Product
+ * Advertising API, so `asAt` is not decoration - it is the difference between
+ * quoting an RRP and misstating a live price. The merchant URL never appears
+ * here: the page's only destination is the /go/ hop.
+ */
+export const pickOfferSchema = z.object({
+  /** Formatted for the reader, e.g. "A$2,899". */
+  price: z.string().min(1),
+  currency: z.string().min(1),
+  /** The day the price was observed. */
+  asAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  source: z.enum(['editor', 'feed', 'api']),
+  /** True when the price must render as a dated RRP rather than as live. */
+  stale: z.boolean(),
+  merchant: z.string().min(1).optional(),
+  preorder: z.boolean().optional(),
+  /** When a pre-order ships - and therefore when the reader is charged. */
+  releaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+/**
  * A product the article recommends, one per /go/ slug the body actually links.
  * Becomes an ItemList -> Product node on guides and roundups.
  */
@@ -281,9 +323,10 @@ export const pickSchema = z.object({
   name: z.string().min(1),
   brand: z.string().min(1).optional(),
   /**
-   * As the dossier stated it, e.g. "A$229". The site parses the digits out of
-   * it into the pick's `offers.price`, quoted in `currency` - see `offerNode`
-   * in apps/web/src/lib/seo.ts.
+   * As the dossier stated it, e.g. "A$229", or the attached offer's price when
+   * one exists. The site parses the digits out of it into the pick's
+   * `offers.price`, quoted in `currency` - see `offerNode` in
+   * apps/web/src/lib/seo.ts.
    */
   price: z.string().min(1).optional(),
   goSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
@@ -296,6 +339,8 @@ export const pickSchema = z.object({
    * about our evidence, which is what it is.
    */
   evidence: z.enum(['tested', 'researched']).optional(),
+  /** The attached offer, when the product carries one. */
+  offer: pickOfferSchema.optional(),
 });
 
 export const frontmatterSchema = z.object({
@@ -356,6 +401,8 @@ export const affiliateLinkSchema = z.object({
   note: z.string().optional(),
   /** Rebuilt from the draft, with no dossier product behind it (see AffiliateLinkRow). */
   healed: z.boolean().optional(),
+  /** Destination taken from an attached offer record (see AffiliateLinkRow). */
+  manual: z.boolean().optional(),
 });
 
 export type AffiliateLink = z.infer<typeof affiliateLinkSchema>;
@@ -414,6 +461,34 @@ export function isApprovedMerchantUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * What is still wrong with a destination a human attached by hand.
+ *
+ * The merchant allowlist does not apply (see `validateArticle`), but two rules
+ * do: https, because a network may refuse to attribute a click that went out
+ * over plain http, and no `tag=` parameter, because an Associates tag is a
+ * per-marketplace credential the redirect resolver owns and one pasted into a
+ * stored row outlives the account it belongs to.
+ */
+export function manualDestinationProblems(slug: string, url: string): string[] {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return [`/go/${slug}: the attached offer URL is not a URL: ${url}`];
+  }
+  const problems: string[] = [];
+  if (parsed.protocol !== 'https:') {
+    problems.push(`/go/${slug}: the attached offer URL must be https: ${url}`);
+  }
+  if (parsed.searchParams.has('tag')) {
+    problems.push(
+      `/go/${slug}: the attached offer URL carries an Associates tag - the resolver adds one per marketplace`,
+    );
+  }
+  return problems;
 }
 
 export function slugify(text: string): string {
@@ -577,11 +652,21 @@ export function validateArticle(
     else problems.push(`affiliate link invalid: ${JSON.stringify(link).slice(0, 120)}`);
   }
 
-  // Merchant allowlist — every destination must be an approved marketplace.
+  // Merchant allowlist — every destination the pipeline builds for itself must
+  // be an approved marketplace. The allowlist is there because nothing in the
+  // pipeline is in a position to judge a URL (it is what let a news.com.au link
+  // reach production once), and that argument does not reach a destination an
+  // editor attached by hand: a launch-window product is monetised through
+  // whichever advertiser program carries it on announcement day, which is
+  // routinely not Amazon. So a manual row is held to the rules that still
+  // apply - https, and no credential baked into the data.
   for (const link of parsedLinks) {
-    if (!isApprovedMerchantUrl(link.default_url)) {
+    if (link.manual) {
+      problems.push(...manualDestinationProblems(link.slug, link.default_url));
+    } else if (!isApprovedMerchantUrl(link.default_url)) {
       problems.push(`/go/${link.slug}: default_url is not an approved merchant (Amazon only): ${link.default_url}`);
     }
+    // Per-region literals are always pipeline-built, manual row or not.
     for (const [key, value] of Object.entries(link.regions_json ?? {})) {
       if (['network', 'search', 'asins'].includes(key)) continue;
       if (typeof value === 'string' && !isApprovedMerchantUrl(value)) {

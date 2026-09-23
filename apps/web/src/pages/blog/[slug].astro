@@ -18,6 +18,7 @@ import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro
 import ProsConsList from '@components/affiliate/ProsConsList.astro';
 import PickEvidence from '@components/affiliate/PickEvidence.astro';
 import ProductCallout from '@components/affiliate/ProductCallout.astro';
+import OfferCallout from '@components/affiliate/OfferCallout.astro';
 import AuthorCard from '@components/blog/AuthorCard.astro';
 import RelatedPosts from '@components/blog/RelatedPosts.astro';
 import { getAllPosts, getRelatedPosts, type BlogPost } from '@lib/posts';
@@ -58,8 +59,15 @@ const measuredOurselves = (post.data.claims ?? []).some((claim) => claim.tier ==
 // The disclosure has to be visible alongside the links it disclosed, so it goes
 // under the byline on any page that carries one - which is every pipeline post,
 // and any hand-written one with a /go/ link in the body.
+// Picks carrying an attached offer: a launch-window product whose price
+// nothing is polling, so the page states the figure, the day it was seen and
+// (for a pre-order) when the reader is actually charged.
+const offerPicks = (post.data.picks ?? []).filter((pick) => pick.offer !== undefined);
 const hasAffiliateLinks =
-  product !== undefined || /\/go\//.test(post.body) || labelledPicks.length > 0;
+  product !== undefined ||
+  offerPicks.length > 0 ||
+  /\/go\//.test(post.body) ||
+  labelledPicks.length > 0;
 const highStakes = post.data.category === 'Health' || post.data.category === 'Finance';
 
 const meta = buildMeta({
@@ -180,6 +188,11 @@ const asideSummary = [
         <ArticleBody>
           {product && <Verdict product={product} postSlug={post.slug} />}
           <Content />
+          {offerPicks.length > 0 && (
+            <section class="offer-block" aria-label="Where to buy">
+              {offerPicks.map((pick) => <OfferCallout pick={pick} />)}
+            </section>
+          )}
           {product && <ProductCallout product={product} postSlug={post.slug} />}
           {product && <ProsConsList pros={product.pros} cons={product.cons} />}
           {hasAffiliateLinks && <AffiliateDisclosure />}

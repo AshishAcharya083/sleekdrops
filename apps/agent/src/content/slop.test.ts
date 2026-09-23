@@ -12,6 +12,7 @@ import {
   slopSeverity,
   HOUSE_BLOCKS,
   SCAN_THRESHOLDS,
+  SOCIAL_HOUSE_BLOCKS,
   SLOP_PASS_SCORE,
   type CorpusArticle,
   type HouseBlockTag,
@@ -660,6 +661,31 @@ test('the mandated Associates sentence is never a finding of any kind', () => {
   for (const f of withIt.findings) {
     assert.ok(!f.matches.some((m) => associates.toLowerCase().includes(m.toLowerCase())), f.rule);
   }
+});
+
+test('registered social house text is exempt wherever it appears', () => {
+  // The caption fixtures repeat on every post the site makes, by design: the
+  // disclosure is owed on each endorsement and the cue is the only thing
+  // telling the reader where the link went. Registered, they are removed from
+  // both sides before similarity is measured, exactly like the body registry.
+  const fixtures = SOCIAL_HOUSE_BLOCKS.map((entry) => entry.text).join('\n\n');
+  const everywhere = CORPUS.map((doc) => ({ ...doc, body: `${doc.body}\n\n${fixtures}` }));
+  const withThem = detectSlop(`${VARIED}\n\n${fixtures}`, { corpus: everywhere });
+
+  for (const finding of withThem.findings) {
+    assert.ok(
+      !finding.matches.some((match) => fixtures.toLowerCase().includes(match.toLowerCase())),
+      `${finding.rule} flagged registered social house text`,
+    );
+  }
+  assert.ok(
+    SOCIAL_HOUSE_BLOCKS.every((entry) => entry.mandated),
+    'both are owed to the reader whatever else the caption has room for',
+  );
+  assert.equal(
+    new Set([...HOUSE_BLOCKS, ...SOCIAL_HOUSE_BLOCKS].map((entry) => entry.id)).size,
+    HOUSE_BLOCKS.length + SOCIAL_HOUSE_BLOCKS.length,
+  );
 });
 
 test('the house-block registry stays inside its own budget', () => {

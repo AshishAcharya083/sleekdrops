@@ -5,6 +5,7 @@
 // angle stage picks from and the library's record is the body behind one of
 // those ids.
 import type { ArticleShape as StructureShape } from '../content/shapes.js';
+import type { HeroImageSource } from '../distribution/types.js';
 
 export type { StructureShape };
 
@@ -21,13 +22,96 @@ export type Stage =
   | 'publish'
   | 'done';
 
+/**
+ * The pipeline in order. 'edit' loops back to 'seo_review' at runtime, so the
+ * order a run actually takes is not linear - this list is: it is the canonical
+ * answer to "is stage X downstream of stage Y", which is what decides whether
+ * a stored output was superseded by a re-run of something before it.
+ */
+export const STAGE_ORDER: readonly Stage[] = [
+  'research',
+  'keyword',
+  'angle',
+  'outline',
+  'write',
+  'seo_review',
+  'edit',
+  'assemble',
+  'image',
+  'publish',
+  'done',
+];
+
 export type ArticleStatus =
   | 'queued'
   | 'running'
   | 'failed'
+  /**
+   * The stage ran out of wall-clock time, or the worker holding it stopped
+   * reporting. Terminal and deliberately distinct from 'failed': nothing
+   * reported an error, so "failed" would send an operator looking for one -
+   * what actually happened is that the run was stopped, and whatever it had
+   * already written is still on the article as a draft.
+   */
+  | 'timed_out'
   | 'waiting_approval'
   | 'cancelled'
   | 'done';
+
+/** Status of one agent_sessions row. Mirrors ArticleStatus's timeout state. */
+export type SessionStatus = 'running' | 'done' | 'failed' | 'timed_out';
+
+/** Why a stage stopped: it spent its budget, or its lease went unrenewed. */
+export type StageTimeoutCause = 'budget' | 'lease';
+
+/**
+ * What an operator needs to know about a stopped stage, and the payload the
+ * error message is built from.
+ */
+export interface StageTimeoutDetail {
+  agent: string;
+  stage: Stage;
+  budgetSeconds: number;
+  elapsedSeconds: number;
+  /**
+   * The last LLM call the stage started, rendered for a human ("claude-opus-5
+   * with web search, retry 2 of 3, in flight for 41m"). Null or empty when the
+   * stage had not reached a model yet, or when the run was reaped by another
+   * process that cannot see what it was doing.
+   */
+  lastCall: string | null;
+  /**
+   * Named apart from the standard `Error.cause` on the class below, which by
+   * convention carries the underlying error rather than a discriminator.
+   */
+  timeoutCause: StageTimeoutCause;
+}
+
+/**
+ * A stage stopped by its wall-clock budget. Carries the detail rather than
+ * only a message so callers route on the type (a timeout is not a failure)
+ * without parsing text. The message is built - and scrubbed - by
+ * pipeline/stageTimeout.ts, which is the only thing that should construct one.
+ */
+export class StageTimeoutError extends Error {
+  readonly agent: string;
+  readonly stage: Stage;
+  readonly budgetSeconds: number;
+  readonly elapsedSeconds: number;
+  readonly lastCall: string | null;
+  readonly timeoutCause: StageTimeoutCause;
+
+  constructor(message: string, detail: StageTimeoutDetail) {
+    super(message);
+    this.name = 'StageTimeoutError';
+    this.agent = detail.agent;
+    this.stage = detail.stage;
+    this.budgetSeconds = detail.budgetSeconds;
+    this.elapsedSeconds = detail.elapsedSeconds;
+    this.lastCall = detail.lastCall || null;
+    this.timeoutCause = detail.timeoutCause;
+  }
+}
 
 export interface ArticleRow {
   id: string;
@@ -64,9 +148,49 @@ export interface ArticleRow {
    */
   hero_image_url: string | null;
   hero_alt: string | null;
+  /**
+   * Where the hero image came from: 'operator' (dropped in the admin panel),
+   * 'found' (a third party's photograph the image agent vetted) or 'generated'
+   * (ours). Null on articles that ran before the column existed, and on any
+   * article with no hero at all.
+   *
+   * A value rather than a sentence in the image stage's summary because it is
+   * read as a rights decision: only a hero we generated may be uploaded
+   * natively to a social network.
+   */
+  hero_image_source: HeroImageSource | null;
   /** Admin feedback awaiting application — consumed (cleared) by the editor stage. */
   feedback: string | null;
   error: string | null;
+  /**
+   * The claim on this article: which worker is running its current stage and
+   * when it took it. NULL while the article is not claimed.
+   */
+  claimed_by: string | null;
+  claimed_at: string | null;
+  /**
+   * Lease bookkeeping for the stage this article is currently claimed for, all
+   * NULL while it is not claimed. The worker renews both while it works; a
+   * claim whose `lease_expires_at` has passed is reaped to 'timed_out'.
+   */
+  heartbeat_at: string | null;
+  lease_expires_at: string | null;
+  /**
+   * Which pass over this article is current: the first pipeline run is 1, and
+   * a retry increments it. A claim does not - two claims of the same queued
+   * article are one attempt that was interrupted, not two.
+   */
+  attempt: number;
+  /**
+   * The earliest stage whose stored output has been superseded by a retry, so
+   * everything after it in STAGE_ORDER reads as out of date until the run
+   * passes it again. Written by the retry endpoints, never by the runner.
+   */
+  stale_from_stage: Stage | null;
+  /** Publication date, stamped on the first publish and reused on every later pass. */
+  pub_date: string | null;
+  /** Digest of what was last published, so a repeat publish can skip the rebuild dispatch. */
+  published_digest: string | null;
   published_at: string | null;
   created_at: string;
   updated_at: string;
@@ -598,4 +722,92 @@ export interface AffiliateLinkRow {
    * dossier-backed destination. Pipeline-side only: D1 has no such column.
    */
   healed?: boolean;
+  /**
+   * Set when the destination came from an attached offer record rather than
+   * from the dossier. A human (or, later, the feed that took that record over)
+   * chose this URL, which is why it may point outside the Amazon marketplaces
+   * the pipeline is allowed to build destinations for on its own.
+   *
+   * Pipeline-side only, like `healed`: D1 has no such column.
+   */
+  manual?: boolean;
+}
+
+/**
+ * Who supplied an offer record, and therefore what its price is worth.
+ *
+ * 'editor' is a person typing what they can see on the merchant's page on
+ * announcement day. 'feed' and 'api' are the automated sources that take that
+ * record over once the merchant has published the SKU - later, better data for
+ * the same product, which is why they overwrite rather than sit beside it.
+ */
+export type OfferSource = 'editor' | 'feed' | 'api';
+
+export const OFFER_SOURCES: readonly OfferSource[] = ['editor', 'feed', 'api'];
+
+/**
+ * One product's offer on one article: where the reader is sent, what it cost,
+ * and when that price was seen.
+ *
+ * A launch-window SKU carries no feed row and cannot be polled through the
+ * Product Advertising API, so this record is the only thing standing between
+ * "announced today" and "has a real commissionable link today". `price` is
+ * nullable because a link with no price is still a link, and a figure invented
+ * to fill the column is exactly the misstatement the "as at" stamp exists to
+ * prevent.
+ *
+ * Dates are read as YYYY-MM-DD strings (see db/offers.ts) rather than as
+ * Date objects: what the reader is shown is a day, in the publication's own
+ * timezone, and a Date would drag the server's one into it.
+ */
+export interface ProductOffer {
+  id: string;
+  article_id: string;
+  go_slug: string;
+  product_name: string;
+  url: string;
+  /** NUMERIC, read back as a string so no cents are lost in a float. */
+  price: string | null;
+  currency: string;
+  price_observed_on: string | null;
+  preorder: boolean;
+  release_date: string | null;
+  merchant: string | null;
+  source: OfferSource;
+  entered_by: string | null;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One version of an offer as it was saved, newest first in the panel. */
+export interface ProductOfferRevision {
+  id: string;
+  go_slug: string;
+  url: string;
+  price: string | null;
+  currency: string;
+  price_observed_on: string | null;
+  preorder: boolean;
+  release_date: string | null;
+  merchant: string | null;
+  source: OfferSource;
+  entered_by: string | null;
+  saved_at: string;
+}
+
+/** The editable half of an offer - what a save writes. */
+export interface OfferInput {
+  goSlug: string;
+  productName: string;
+  url: string;
+  price: string | null;
+  currency: string;
+  priceObservedOn: string | null;
+  preorder: boolean;
+  releaseDate: string | null;
+  merchant: string | null;
+  source: OfferSource;
+  enteredBy: string;
+  note?: string | null;
 }
