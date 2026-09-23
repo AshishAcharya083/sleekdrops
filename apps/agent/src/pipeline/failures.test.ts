@@ -40,7 +40,7 @@ test("extractJson's own two refusals are transient", () => {
   assert.equal(classOf(noJson()), 'transient');
 });
 
-test('a shape complaint is transient — the model can be asked again', () => {
+test('a shape complaint is transient - the model can be asked again', () => {
   const complaint = requireKeys<{ facts: unknown; products: unknown }>('facts', 'products')({
     facts: [],
   });
@@ -69,7 +69,25 @@ test('timeouts, socket faults and throttled providers are transient', () => {
   assert.equal(classOf(fetchFailed), 'transient');
 });
 
-test('the evidence gate is genuine — it has already spent its own re-sweep', () => {
+test('an engine that hangs or falls over is transient', () => {
+  // The deadline messages claude.ts and gemini.ts actually throw. Neither says
+  // "timeout" or "aborted", so they only classify correctly if the engine
+  // signature names them - and a hung engine is the most retryable fault the
+  // pipeline has, well inside the stage budget that would otherwise catch it.
+  for (const message of [
+    'Claude engine did not answer within 10 minutes',
+    'Gemini engine did not answer within 10 minutes',
+    'Claude engine failed (error_during_execution)',
+    'Claude engine hit its 30-turn budget before answering',
+    'Claude engine ended without a result message',
+  ]) {
+    const verdict = classifyFailure(new Error(message));
+    assert.equal(verdict.failureClass, 'transient', message);
+    assert.equal(verdict.signal, 'engine', message);
+  }
+});
+
+test('the evidence gate is genuine - it has already spent its own re-sweep', () => {
   const gate = new EvidenceGateError({
     pass: false,
     postType: 'guide',

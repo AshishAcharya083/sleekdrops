@@ -166,7 +166,7 @@ function FailureExplainer({
     <div style={{ marginBottom: 8 }}>
       <strong>
         {article.failure_class} failure, {article.stage_attempts}{' '}
-        {article.stage_attempts === 1 ? 'attempt' : 'attempts'} — {note.label}
+        {article.stage_attempts === 1 ? 'attempt' : 'attempts'} - {note.label}
       </strong>
       <div style={{ fontSize: 12, marginTop: 2 }}>{note.title}</div>
     </div>

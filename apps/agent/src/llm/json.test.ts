@@ -74,7 +74,7 @@ test('requireKeys tolerates a null-valued key but not a missing one', () => {
 
 /**
  * A brief whose section array drops a comma between two objects - balanced
- * braces, malformed content. This is the exact shape that produced the
+ * braces, malformed content. This is the same shape that produced the
  * reported "Expected ',' or ']' after array element in JSON at position 2546".
  */
 const MALFORMED_BRIEF =
@@ -132,7 +132,7 @@ test('a shape complaint is reprompted, and the complaint is what the model is to
   assert.match(prompts[1], /Missing required field\(s\): facts/);
 });
 
-test('a transport fault is not reprompted — chat() has already retried it', async () => {
+test('a transport fault is not reprompted - chat() has already retried it', async () => {
   let calls = 0;
   await assert.rejects(
     repromptJson<unknown>(async () => {

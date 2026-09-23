@@ -1,17 +1,17 @@
-// Stage failure taxonomy — why a stage failed, and whether running it again
+// Stage failure taxonomy - why a stage failed, and whether running it again
 // could possibly help.
 //
 // Every stage failure used to look the same on the card: status 'failed', a
 // message, and a human to decide what it meant. Two kinds of failure were
 // hiding in there. A model that replies with malformed JSON twice, a socket
-// that resets, a provider that answers 429 — none of those say anything about
+// that resets, a provider that answers 429 - none of those say anything about
 // the article, and the card that died on one would very likely have passed on
 // the next run. A contract violation, an evidence shortfall or a validation
 // error says something true about the content: running it again spends a full
 // stage to reach the same verdict.
 //
 // So: `transient` is retried here with backoff, `genuine` goes straight to
-// failed. The default is `genuine` — transient is recognised only by an
+// failed. The default is `genuine` - transient is recognised only by an
 // explicit signature below, because mistaking a real content problem for a
 // hiccup burns three stage runs and still ends up failed, while mistaking a
 // hiccup for a content problem only costs what it costs today.
@@ -32,7 +32,7 @@ const RETRY_BASE_MS = 2_000;
 
 /**
  * How long to wait after `attempt` (1-based) failed transiently. Exponential,
- * because the faults this covers — a rate limit, a provider wobbling on 5xx —
+ * because the faults this covers - a rate limit, a provider wobbling on 5xx -
  * are the ones that clear with time rather than with immediacy.
  */
 export function stageRetryDelayMs(attempt: number): number {
@@ -43,7 +43,7 @@ export function stageRetryDelayMs(attempt: number): number {
  * The faults that are the pipeline's, not the content's.
  *
  * Order does not matter; the first match names the failure in the log. Each
- * entry is a signature we actually throw or actually receive — not a guess at
+ * entry is a signature we actually throw or actually receive - not a guess at
  * what an error might say. Anything unrecognised is genuine by default, which
  * is why new throws from other stages need no entry here to behave correctly.
  */
@@ -62,10 +62,15 @@ const TRANSIENT_SIGNATURES: ReadonlyArray<{ signal: string; pattern: RegExp }> =
   },
   // requireKeys / ShapeCheck complaints: well-formed JSON of the wrong shape.
   { signal: 'shape', pattern: /Expected a JSON object|Missing required field/i },
-  // An engine that answered with nothing at all, or stopped before it did.
+  // An engine that answered with nothing at all, stopped before it did, hung
+  // past its own deadline, or reported a failed run. `did not answer within`
+  // is how claude.ts and gemini.ts spell their 10-minute deadline: it says
+  // nothing about the article and is the most retryable fault there is, but it
+  // carries none of the words the timeout signature below looks for.
   {
     signal: 'engine',
-    pattern: /returned an empty completion|ended without a result message|turn budget before answering/i,
+    pattern:
+      /returned an empty completion|ended without a result message|turn budget before answering|did not answer within|engine failed \(/i,
   },
   { signal: 'timeout', pattern: /\bETIMEDOUT\b|\bTimeoutError\b|\bAbortError\b|aborted|timed out|timeout/i },
   {

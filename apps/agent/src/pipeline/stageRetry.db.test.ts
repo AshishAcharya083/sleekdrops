@@ -38,7 +38,7 @@ const { createApp } = await import('../api/server.js');
 import type { ArticleRow } from './types.js';
 
 /**
- * The two columns migration 012 adds. Declared here rather than on ArticleRow:
+ * The two columns migration 015 adds. Declared here rather than on ArticleRow:
  * pipeline/types.ts belongs to the card widening the evidence gate, and the
  * runner writes these through updateArticle(), which takes column names.
  */

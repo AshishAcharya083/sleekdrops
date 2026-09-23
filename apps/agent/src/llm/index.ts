@@ -299,7 +299,7 @@ export function requireKeys<T>(...keys: Array<keyof T & string>): ShapeCheck<T> 
  * malformed replies in a row ended an article that would very likely have
  * parsed on a third. A reprompt is one call against a prompt the model has
  * already been paid to read; the stage it saves is the whole rest of the
- * article. Two is where that stops being cheap — a model that has now failed
+ * article. Two is where that stops being cheap - a model that has now failed
  * three times is not having a bad moment, and the stage retry above it
  * (pipeline/failures.ts) is the better place to spend the next attempt.
  */
@@ -309,13 +309,13 @@ export const JSON_REPROMPT_BUDGET = 2;
 function repromptFor(why: string, attemptsSoFar: number): string {
   const base =
     `Your previous reply could not be used: ${why}\n` +
-    `Reply with ONLY the complete JSON value — no prose, no code fences, and do not omit any field.`;
+    `Reply with ONLY the complete JSON value - no prose, no code fences, and do not omit any field.`;
   // Second time around the likeliest cause is length: the reply ran long and
   // stopped mid-value. Asking for the same thing again just buys the same cut.
   return attemptsSoFar < 2
     ? base
     : `${base}\nThat is now ${attemptsSoFar} unusable replies. If the value is long, keep every ` +
-        `required field but make each one shorter — a complete, terse JSON value is worth far more ` +
+        `required field but make each one shorter - a complete, terse JSON value is worth far more ` +
         `than a detailed one that stops halfway.`;
 }
 
@@ -326,7 +326,7 @@ function repromptFor(why: string, attemptsSoFar: number): string {
  *
  * Split out from chatJson so the reprompt budget can be exercised without a
  * live engine: `send` is handed the prompt and returns the raw reply text.
- * A throw from `send` itself is NOT reprompted — a transport fault has already
+ * A throw from `send` itself is NOT reprompted - a transport fault has already
  * been retried inside chat(), and re-asking a socket that is down for better
  * JSON is nonsense. It propagates, and the stage runner decides what a
  * transport fault costs.
