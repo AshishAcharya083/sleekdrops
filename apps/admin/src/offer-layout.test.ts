@@ -90,6 +90,17 @@ test('the price-check underline hugs the words, not the tap target', () => {
   assert.match(screen, /<span className="lbl">/, 'the label carries the rule, the link carries the padding');
 });
 
+test('the offer screens show one failure sentence, the one that can be retried', () => {
+  // The Pipeline tab's own poll banner used to render above the offers surface
+  // as well, so an API failure printed the same sentence twice - and only the
+  // in-panel copy carried the Retry that retries the offers endpoint.
+  const pipeline = read('./pages/Pipeline.tsx');
+  const early = /if \(offersFor\) \{([\s\S]*?)\n  \}/.exec(pipeline);
+  assert.ok(early, 'Pipeline no longer hands the tab over to the offer screens');
+  assert.doesNotMatch(early[1], /ApiErrorBanner/);
+  assert.match(screen, /<ApiErrorBanner error=\{error\} onRetry=\{onRetry\} \/>/);
+});
+
 test('the pre-order stamp is grouped with the price and the button', () => {
   assert.match(rule('.offers-surface .reader-callout .cta .price-stamp'), /margin:\s*0/);
   const cta = screen.indexOf('<div className="cta">');
@@ -102,6 +113,10 @@ test('the pre-order stamp is grouped with the price and the button', () => {
     /grid-column:\s*1 \/ -1/,
     'the release line is the single closing full-width row',
   );
+  // The stamp and the check link wrap onto two lines at 390; a separator
+  // between them is left dangling on the end of the first one.
+  assert.doesNotMatch(screen, /aria-hidden="true">\u00b7</);
+  assert.match(rule('.offers-surface .reader-callout .cta .price-stamp'), /gap:\s*0 14px/);
 });
 
 test('below 680px the table and the history become stacked cards', () => {

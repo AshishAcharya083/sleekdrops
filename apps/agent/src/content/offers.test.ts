@@ -289,6 +289,50 @@ test('a healed row reads as a search link, not as an offer', () => {
   assert.equal(coverage.covered, 1, 'a search link is not an offer for that product');
 });
 
+test('a detached offer still on the built page is named, and flagged for rebuild', () => {
+  const attached = offer();
+  // What assembly left behind: the editor's destination, and the stamp the
+  // pick carried. The record itself is gone.
+  const links: AffiliateLinkRow[] = [
+    { slug: 'pixel-11-pro', default_url: attached.url, regions_json: null, manual: true },
+  ];
+  const coverage = offerCoverage(
+    {
+      draft_md: body,
+      research,
+      affiliate_links: links,
+      frontmatter: { picks: [{ goSlug: 'pixel-11-pro', offer: pickOfferFrom(attached, TODAY) }] },
+    },
+    [],
+    TODAY,
+  );
+  const row = coverage.rows[0];
+  assert.equal(row.provenance, 'none', 'nothing is attached to it any more');
+  assert.equal(row.label, 'Detached offer');
+  assert.equal(row.destination, attached.url, 'which is still where a reader lands');
+  assert.doesNotMatch(row.destinationNote!, /search/, 'the note has to match the URL beside it');
+  assert.match(row.destinationNote!, /detached/);
+  assert.equal(row.pending, true, 'the only thing that puts the page right is a rebuild');
+  assert.equal(row.price, null, 'no record, no price to quote');
+  assert.equal(coverage.covered, 1, 'and the product counts as uncovered');
+});
+
+test('a card never assembled has nothing left behind to rebuild', () => {
+  const coverage = offerCoverage(
+    { draft_md: body, research, affiliate_links: null, frontmatter: null },
+    [],
+    TODAY,
+  );
+  assert.deepEqual(
+    coverage.rows.map((row) => [row.provenance, row.pending]),
+    [
+      ['none', false],
+      ['resolved', false],
+      ['none', false],
+    ],
+  );
+});
+
 test('an offer saved after the card was assembled is flagged as not on the page yet', () => {
   const attached = offer();
   const links: AffiliateLinkRow[] = [

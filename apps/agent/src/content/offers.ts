@@ -399,6 +399,12 @@ const PROVENANCE_LABEL: Record<OfferProvenance, string> = {
 };
 
 /**
+ * The one row that reads as `none` without reading as empty: nothing is
+ * attached any more, but the last build is still serving what was.
+ */
+const DETACHED_LABEL = 'Detached offer';
+
+/**
  * Every product in a card, with the destination and price a reader would get
  * today.
  *
@@ -473,6 +479,31 @@ export function offerCoverage(
         stale,
         preorder: offer.preorder,
         releaseDate: offer.release_date,
+      };
+    }
+
+    // No record, but the built page is still shaped by one: detaching an offer
+    // leaves its destination in affiliate_links and its price stamp in the
+    // frontmatter until the card is rebuilt. Describing that URL as a search
+    // link would be describing a page we are not serving, and leaving the row
+    // unpending would hide the only control that puts the page right.
+    if (link?.manual) {
+      return {
+        ...base,
+        pending: true,
+        // Red, not amber: nothing is attached to this product any more. The
+        // amber bucket is the one the legend counts as search links, and this
+        // destination is not one - it is a merchant URL nobody stands behind.
+        provenance: 'none',
+        label: DETACHED_LABEL,
+        destination: link.default_url,
+        destinationNote:
+          'from an offer since detached - the built page keeps it until the card is rebuilt',
+        price: null,
+        asAt: null,
+        stale: false,
+        preorder: false,
+        releaseDate: null,
       };
     }
 

@@ -307,6 +307,75 @@ test('detaching keeps the history and hands the product back to the fallback', {
   assert.equal(again.status, 404);
 });
 
+test('detaching after assembly leaves the page flagged for a rebuild', { skip }, async () => {
+  // The order that actually bites: attach, build, then change your mind. The
+  // reader is still being sent to the detached destination and shown its price
+  // until the card is rebuilt, so the panel has to say so - and has to leave
+  // the rebuild reachable with no offer left on the card at all.
+  const article = await insertAtAssemble();
+  assert.equal((await attach(article.id)).status, 200);
+  await runStage(await reload(article.id));
+  const built = await reload(article.id);
+  assert.equal((built.affiliate_links ?? [])[0].default_url, preorderBody.url);
+
+  const removed = await app.fetch(
+    new Request(`http://localhost/api/articles/${article.id}/offers/pixel-11-pro`, {
+      method: 'DELETE',
+      headers: AUTH,
+    }),
+  );
+  assert.equal(removed.status, 200);
+  const after = (await removed.json()) as {
+    coverage: {
+      rows: Array<{
+        provenance: string;
+        label: string;
+        destination: string | null;
+        destinationNote: string | null;
+        price: string | null;
+        pending: boolean;
+      }>;
+      covered: number;
+    };
+  };
+  const row = after.coverage.rows[0];
+  assert.equal(row.provenance, 'none', 'nothing is attached to it any more');
+  assert.equal(row.destination, preorderBody.url, 'still where the built page sends a reader');
+  assert.equal(row.label, 'Detached offer');
+  assert.doesNotMatch(row.destinationNote!, /search/, 'the note has to match that URL');
+  assert.equal(row.price, null);
+  assert.equal(row.pending, true, 'the rebuild prompt is the whole point');
+  assert.equal(after.coverage.covered, 0);
+
+  const requeued = await app.fetch(
+    new Request(`http://localhost/api/articles/${article.id}/reassemble`, {
+      method: 'POST',
+      headers: AUTH,
+    }),
+  );
+  assert.equal(requeued.status, 200);
+  await runStage(await q<ArticleRow>(
+    `UPDATE articles SET status = 'running', claimed_by = 'test-worker', claimed_at = now()
+      WHERE id = $1 RETURNING *`,
+    [article.id],
+  ).then((rows) => rows[0]));
+
+  const rebuilt = await reload(article.id);
+  assert.equal(rebuilt.status, 'queued', rebuilt.error ?? '');
+  assert.match((rebuilt.affiliate_links ?? [])[0].default_url, /amazon\.com\.au\/s\?k=/);
+  const picks = (rebuilt.frontmatter?.picks ?? []) as Array<{ offer?: unknown }>;
+  assert.equal(picks[0].offer, undefined, 'the detached price is off the page');
+
+  const final = await app.fetch(
+    new Request(`http://localhost/api/articles/${article.id}/offers`, { headers: AUTH }),
+  );
+  const done = (await final.json()) as {
+    coverage: { rows: Array<{ provenance: string; label: string; pending: boolean }> };
+  };
+  assert.equal(done.coverage.rows[0].pending, false, 'nothing left to rebuild');
+  assert.equal(done.coverage.rows[0].label, 'Search link');
+});
+
 test('a card still in review cannot be pulled forward to assemble', { skip }, async () => {
   // The rebuild is for a page that already exists. Sending a piece that has
   // not been reviewed yet straight to assemble would skip the stages it has

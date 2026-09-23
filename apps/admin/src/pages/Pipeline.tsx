@@ -30,13 +30,12 @@ export function Pipeline() {
   const [offersFor, setOffersFor] = useState<string | null>(null);
   const articles = data?.articles ?? [];
 
+  // No board-level error banner over the offer screens: they poll their own
+  // endpoint and say so in the panel, with the Retry that actually retries it.
+  // Two copies of the same failure sentence is noise, and only one of them is
+  // actionable.
   if (offersFor) {
-    return (
-      <>
-        <ApiErrorBanner error={error} />
-        <Offers articleId={offersFor} onClose={() => setOffersFor(null)} onChanged={refresh} />
-      </>
-    );
+    return <Offers articleId={offersFor} onClose={() => setOffersFor(null)} onChanged={refresh} />;
   }
 
   return (

@@ -68,12 +68,7 @@ const ctaLabel = offer.merchant ? `View at ${offer.merchant}` : 'View offer';
           own below the release line: it qualifies the figure directly above
           it, and reads as one statement with it. */}
       <p class="price-stamp">
-        {view.stamp && (
-          <>
-            <time datetime={view.stampDate!}>{view.stamp}</time>
-            <span class="sep" aria-hidden="true">·</span>
-          </>
-        )}
+        {view.stamp && <time datetime={view.stampDate!}>{view.stamp}</time>}
         <a class="check" href={href} rel="sponsored nofollow" target="_blank"
            data-track={EVENTS.affiliateClick} data-track-props={trackProps}>
           <span class="lbl">{view.checkLabel}</span>
@@ -152,18 +147,20 @@ const ctaLabel = offer.merchant ? `View at ${offer.merchant}` : 'View offer';
     letter-spacing: -0.02em;
     color: var(--paper);
   }
+  /* No separator between the date and the link: the pair wraps onto two lines
+     on a phone, and a middot left behind on the end of the first line reads as
+     a typo. The gap carries the separation at every width instead. */
   .cta .price-stamp {
     margin: 0;
     font-size: 13px;
     color: rgba(250, 250, 247, 0.72);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 0 14px;
     flex-wrap: wrap;
     justify-content: flex-end;
     text-align: right;
   }
-  .price-stamp .sep { opacity: 0.5; }
 
   /* The tap target is the padded link; the ember rule belongs under the words,
      so it sits on the inner span rather than on the 44px box around them. */
@@ -176,7 +173,15 @@ const ctaLabel = offer.merchant ? `View at ${offer.merchant}` : 'View offer';
     text-decoration: none;
     font-weight: 600;
   }
-  .check .lbl { box-shadow: inset 0 -1px 0 var(--accent); }
+  /* `clone` so a label that wraps keeps its rule under both lines rather than
+     under the last one only; `anywhere` so even a merchant name with no space
+     in it breaks rather than pushing the card past the viewport. */
+  .check .lbl {
+    box-shadow: inset 0 -1px 0 var(--accent);
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+    overflow-wrap: anywhere;
+  }
   .check:hover .lbl { box-shadow: inset 0 -2px 0 var(--accent); }
   .offer-callout .check { color: var(--paper); }
 
@@ -245,7 +250,10 @@ const ctaLabel = offer.merchant ? `View at ${offer.merchant}` : 'View offer';
     color: var(--muted);
   }
   .strip-text .why::before { content: "· "; }
-  .offer-strip .check { color: var(--accent-hover); white-space: nowrap; }
+  /* The label wraps. "Check current price at Samsung AU" is wider than the
+     strip's content box on a phone, and an unbreakable one ran off the card
+     and took the whole document into horizontal scroll with it. */
+  .offer-strip .check { color: var(--accent-hover); }
 
   @media (max-width: 700px) {
     .offer-callout {

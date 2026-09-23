@@ -140,9 +140,17 @@ const CHIP_TITLE: Record<OfferProvenance, string> = {
   none: 'Nothing is attached: this product has no destination of its own.',
 };
 
+/**
+ * A row with no record of its own but a page still built from one: the only
+ * state where `pending` is set without an offer behind it.
+ */
+const DETACHED_TITLE =
+  'The offer was detached. The built page keeps its link and its price until the card is rebuilt.';
+
 function SourceChip({ row }: { row: OfferCoverageRow }) {
+  const title = row.offer === null && row.pending ? DETACHED_TITLE : CHIP_TITLE[row.provenance];
   return (
-    <span className={`source-chip ${row.provenance}`} title={CHIP_TITLE[row.provenance]}>
+    <span className={`source-chip ${row.provenance}`} title={title}>
       <i aria-hidden="true" />
       {row.label}
     </span>
@@ -320,13 +328,13 @@ function CoverageScreen({
                 <div className="notice-banner">
                   <span className="banner-text">
                     <b>
-                      {pending.length} attached offer{pending.length === 1 ? '' : 's'} not on the
-                      page yet.
+                      {pending.length} product{pending.length === 1 ? '' : 's'} the built page no
+                      longer matches.
                     </b>{' '}
-                    The card was assembled before{' '}
-                    {pending.length === 1 ? 'it was saved' : 'they were saved'} — rebuild it to
-                    carry the link and the stamp. Assembly is deterministic, so the rebuild costs
-                    nothing and comes back here for approval.
+                    Saving an offer — or detaching one — does not rewrite a page that has already
+                    been assembled, so the reader still has the old link and the old stamp. Rebuild
+                    it to carry what is attached now. Assembly is deterministic, so the rebuild
+                    costs nothing and comes back here for approval.
                   </span>
                   <button
                     className="btn violet-outline"
@@ -1025,12 +1033,7 @@ function ReaderOffer({
           {preview.priceLabel && <div className="price">{preview.priceLabel}</div>}
           <span className="reader-cta-btn">{preview.ctaLabel}</span>
           <p className="price-stamp">
-            {preview.stamp && (
-              <>
-                <span>{preview.stamp}</span>
-                <span aria-hidden="true">·</span>
-              </>
-            )}
+            {preview.stamp && <span>{preview.stamp}</span>}
             <span className="check-link">
               <span className="lbl">{preview.checkLabel}</span>
             </span>

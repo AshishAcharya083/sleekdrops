@@ -414,10 +414,12 @@
   display: inline-flex; align-items: center; gap: 8px;
 }
 /* The stamp sits with the price and the button, not in a row of its own under
-   the release line. */
+   the release line. No separator between the date and the check link either:
+   the pair wraps onto two lines on a phone, and a middot left behind at the
+   end of the first line reads as a typo - the gap separates them instead. */
 .offers-surface .reader-callout .cta .price-stamp {
   margin: 0; font-size: var(--type-eyebrow); color: rgba(250, 250, 247, 0.72);
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end;
+  display: flex; align-items: center; gap: 0 14px; flex-wrap: wrap; justify-content: flex-end;
 }
 .offers-surface .reader-callout .preorder-line {
   grid-column: 1 / -1; margin: 0; padding-top: 12px;
