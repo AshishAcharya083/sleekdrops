@@ -7,7 +7,15 @@
 // a measurement of a handset by being filed as one.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { claimProblems, claimTier, cohortRaterFor, isUs, pageClaims, pickEvidence } from './claims.js';
+import {
+  claimProblems,
+  claimTier,
+  cohortRaterFor,
+  COVERS_RULE,
+  isUs,
+  pageClaims,
+  pickEvidence,
+} from './claims.js';
 import type { MeasuredClaim } from '../pipeline/types.js';
 
 function claim(overrides: Partial<MeasuredClaim> = {}): MeasuredClaim {
@@ -139,6 +147,49 @@ test('the same rating over coverage that names the model is allowed through', ()
     }),
   ]);
   assert.deepEqual(claimProblems(claims, []), []);
+});
+
+test('a lab result whose coverage names this model is a measurement of it, not context', () => {
+  // CHOICE benches individual models through ICRT. Calling its result on the
+  // model the page is about "context, not a measurement of this model" is the
+  // mirror of the error the tiers exist to prevent - it understates the best
+  // independent evidence a launch-window piece can have.
+  const lab = claim({
+    subject: 'iPhone 18 Pro',
+    metric: 'Lab score',
+    measuredValue: '82/100',
+    measuredBy: 'CHOICE',
+    measuredSourceUrl: 'https://www.choice.com.au/phones',
+    covers: 'the 14 handsets CHOICE lab-tested in August 2026, including the iPhone 18 Pro',
+  });
+  assert.equal(claimTier(lab), 'independent');
+  assert.equal(pageClaims([lab])[0].tier, 'independent');
+  // Without a coverage line naming the model there is nothing saying the lab
+  // ran this one, so it stays context - and claimProblems still refuses it.
+  assert.equal(claimTier({ ...lab, covers: 'the 14 handsets CHOICE lab-tested in August 2026' }), 'context');
+});
+
+test('a brand survey is never promoted, whatever its coverage line says', () => {
+  // No coverage wording turns a commissioned satisfaction panel into a test.
+  const survey = claim({
+    subject: 'iPhone 18 Pro',
+    metric: 'Customer satisfaction',
+    measuredValue: '4 stars',
+    measuredBy: 'Canstar Blue',
+    measuredSourceUrl: 'https://www.canstarblue.com.au/phones/apple',
+    covers: 'Apple phone owners surveyed in 2026, including owners of the iPhone 18 Pro',
+  });
+  assert.equal(claimTier(survey), 'context');
+  assert.deepEqual(claimProblems(pageClaims([survey]), []), []);
+});
+
+test('the brief the researcher is handed asks for exactly what the check enforces', () => {
+  // The two used to contradict each other: the brief asked for "covers" only
+  // where the rating was about something other than this model, and the check
+  // then refused every row that followed it.
+  for (const rater of ['Canstar Blue', 'CHOICE']) assert.match(COVERS_RULE, new RegExp(rater));
+  assert.match(COVERS_RULE, /including when this exact model is one of them/);
+  assert.match(COVERS_RULE, /refused in code/);
 });
 
 test('a badge resting on a maker claim alone fails, and that failure is correct', () => {

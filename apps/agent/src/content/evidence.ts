@@ -238,17 +238,34 @@ export function daysSinceRelease(
 }
 
 /**
- * Whether this piece is being written inside a product's launch window.
+ * How far ahead of release a piece still counts as a launch piece.
  *
  * A release date in the future counts: a pre-order piece has even less
- * independent evidence available to it than a week-old one.
+ * independent evidence available to it than a week-old one. What does not
+ * count is a date years out - that is a rumour, not a launch - and an
+ * unbounded future side means any date at all opens the window.
+ */
+export const PRE_RELEASE_WINDOW_DAYS = 56;
+
+/**
+ * Whether this piece is being written inside a product's launch window.
+ *
+ * The launch record is the only field in a dossier that lowers the bar instead
+ * of meeting it, so it is held to the standard the rest of this path is held
+ * to: derived or checkable, never taken on the model's word. `ownTest` is
+ * forced to false unless we are the tester, a claim's tier is derived from who
+ * measured it - and a release date only relaxes anything when it carries a
+ * link to where it was published. A launch record with nothing to check it
+ * against is an assertion, and this is the one place an assertion would switch
+ * a floor off.
  */
 export function inLaunchWindow(
   launch: LaunchRelease | null | undefined,
   now: Date = new Date(),
 ): boolean {
+  if (!isWebUrl(typeof launch?.sourceUrl === 'string' ? launch.sourceUrl.trim() : '')) return false;
   const days = daysSinceRelease(launch, now);
-  return days !== null && days <= LAUNCH_WINDOW_DAYS;
+  return days !== null && days >= -PRE_RELEASE_WINDOW_DAYS && days <= LAUNCH_WINDOW_DAYS;
 }
 
 /**
@@ -795,10 +812,12 @@ export function describeBar(postType: string, category?: string): string {
     `One published fault rate (kind "aggregate", with its sample size and field window) ` +
     `stands in for the individual owner complaints. ` +
     (relaxed.length > 0
-      ? `If the product went on sale within the last ${LAUNCH_WINDOW_DAYS} days, fill "launch" with its ` +
-        `release date and the gate drops the ${relaxed.join(' and ')} floor - no lab has run it yet, and ` +
-        `no amount of searching will produce a result that does not exist. The expert-fact floor stays: ` +
-        `${STRATUM_FIX.expert}. `
+      ? `If the product went on sale within the last ${LAUNCH_WINDOW_DAYS} days (or goes on sale within the ` +
+        `next ${PRE_RELEASE_WINDOW_DAYS}), fill "launch" with its release date AND the http(s) page you read ` +
+        `that date on, and the gate drops the ${relaxed.join(' and ')} floor - no lab has run it yet, and ` +
+        `no amount of searching will produce a result that does not exist. A release date with no link to ` +
+        `where it was announced relaxes nothing: the gate cannot check it, so it does not act on it. ` +
+        `The expert-fact floor stays: ${STRATUM_FIX.expert}. `
       : '') +
     `Meet the bar with evidence you actually ` +
     `found - a padded count fails a reader where it would only have failed a counter.`

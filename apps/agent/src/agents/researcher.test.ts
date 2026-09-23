@@ -264,14 +264,18 @@ test('a second sweep that re-finds the same page does not get counted twice', ()
   assert.equal(merged.facts.length, base.facts.length + 1);
 });
 
-test('a release date the first pass missed is carried through - it decides the window', () => {
+test('a re-sweep cannot introduce the launch record that would lower the bar it just failed', () => {
+  // The second count is terminal, and `launch` is the one field that moves the
+  // bar rather than meeting it. A sweep that was asked for expert evidence and
+  // answered with a release date would clear the gate on a field nobody asked
+  // it for and nothing corroborates.
   const base = sufficient();
   const merged = mergeDossier(
     base,
     { launch: { product: 'Dyson V15 Detect', releaseDate: '2026-09-01', sourceUrl: 'https://dyson.com.au' } },
     [{ stratum: 'expert', label: 'x', have: 1, need: 2, fix: '' }],
   );
-  assert.equal(merged.launch?.releaseDate, '2026-09-01');
+  assert.equal(merged.launch, base.launch);
 });
 
 test('a re-sweep that falls over propagates its own fault, never the gate’s verdict', async () => {

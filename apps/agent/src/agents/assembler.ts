@@ -35,6 +35,17 @@ export interface AssembledArticle {
   droppedSlugs: string[];
 }
 
+/**
+ * Categories whose subject is a physical thing somebody could have sent us.
+ *
+ * The review-unit disclosure only answers a question the piece raises. A
+ * savings-account explainer or a travel guide has no unit to have been lent,
+ * and "we were not sent a unit and did not buy one" under its byline answers
+ * nobody while displacing the line that piece does need - the one saying we do
+ * not test products.
+ */
+const PHYSICAL_GOODS_CATEGORIES = new Set(['Tech', 'Home', 'Fashion', 'Health']);
+
 function uniqueEntities(entities: string[]): string[] {
   const seen = new Set<string>();
   for (const entity of entities) {
@@ -223,18 +234,30 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
       ...(isWebUrl(launch.sourceUrl ?? '') ? { sourceUrl: launch.sourceUrl } : {}),
     };
   }
-  // Stated on every piece this pipeline assembles, including - especially -
-  // the case where there was no unit. Silence is what the ACCC's reviews sweep
-  // found most often, and "we were not sent one" is the disclosure a reader of
-  // a no-sponsored-posts site is owed. Posts already in D1 carry none of this
-  // and render exactly as they did until they are next re-assembled.
+  // Stated on every piece about a product, including - especially - the case
+  // where there was no unit. Silence is what the ACCC's reviews sweep found
+  // most often, and "we were not sent one" is the disclosure a reader of a
+  // no-sponsored-posts site is owed. A piece with no product in it is the one
+  // case where the sentence is noise rather than disclosure. Posts already in
+  // D1 carry none of this and render exactly as they did until they are next
+  // re-assembled.
   const unit = article.research?.reviewUnit ?? null;
-  frontmatter.reviewUnit = {
-    acquisition: unit?.acquisition ?? 'none',
-    ...(unit?.supplier ? { supplier: unit.supplier } : {}),
-    ...(unit?.paid ? { paid: unit.paid } : {}),
-    ...(unit?.returned ? { returned: unit.returned } : {}),
-  };
+  // A benefit actually received is disclosed wherever it lands: a loaned or
+  // bought unit is the disclosure the sweep is about, and the category it was
+  // filed under does not change that.
+  const aboutAProduct =
+    (unit !== null && unit.acquisition !== 'none') ||
+    picks.length > 0 ||
+    products.length > 0 ||
+    PHYSICAL_GOODS_CATEGORIES.has(article.category);
+  if (aboutAProduct) {
+    frontmatter.reviewUnit = {
+      acquisition: unit?.acquisition ?? 'none',
+      ...(unit?.supplier ? { supplier: unit.supplier } : {}),
+      ...(unit?.paid ? { paid: unit.paid } : {}),
+      ...(unit?.returned ? { returned: unit.returned } : {}),
+    };
+  }
   frontmatter.currency = HOME_CURRENCY;
 
   // Anything left is a genuine contract violation (schema, raw merchant URL,

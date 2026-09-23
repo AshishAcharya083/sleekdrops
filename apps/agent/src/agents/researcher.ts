@@ -23,6 +23,7 @@ import {
   normaliseDossier,
   STRATUM_FIX,
 } from '../content/evidence.js';
+import { COVERS_RULE } from '../content/claims.js';
 import { operatorBrief, siteContext, SOURCE_DISCIPLINE, VERIFICATION_RULES } from './context.js';
 import type {
   ArticleRow,
@@ -208,10 +209,32 @@ const STRATUM_FIELDS: Record<string, ReadonlyArray<keyof ResearchDossier>> = {
   competing: [],
 };
 
-/** The identity of an entry, for deciding whether a second sweep re-filed it. */
+/**
+ * The identity of an entry, for deciding whether a second sweep re-filed it.
+ *
+ * Every row shape a stratum owns contributes the fields that actually name it.
+ * A `claims` row is the one that names itself in fields nothing else uses -
+ * `subject` and `measuredSourceUrl` - and without them a whole roundup's
+ * claims collapse onto their metric, so a re-sweep's figure for the second
+ * product is dropped as a duplicate of the first product's. The expert stratum
+ * is the one a re-sweep is usually run for; silently discarding what it found
+ * would make the second sweep pointless.
+ */
 function entryKey(entry: unknown): string {
   const e = entry as Record<string, unknown>;
-  const parts = [e.fact, e.claim, e.failure, e.complaint, e.audience, e.metric, e.retailer, e.product, e.sourceUrl]
+  const parts = [
+    e.fact,
+    e.claim,
+    e.failure,
+    e.complaint,
+    e.audience,
+    e.subject,
+    e.metric,
+    e.retailer,
+    e.product,
+    e.sourceUrl,
+    e.measuredSourceUrl,
+  ]
     .filter((part) => typeof part === 'string' && part.trim() !== '')
     .map((part) => (part as string).trim().toLowerCase());
   return parts.join('|');
@@ -255,10 +278,12 @@ export function mergeDossier(
     const found = (addition.competitorNotes ?? '').trim();
     if (found.length > (base.competitorNotes ?? '').trim().length) merged.competitorNotes = found;
   }
-  // A release date the first pass missed is what decides whether the launch
-  // window applies at all, so it is carried through even though no stratum
-  // owns it.
-  if (base.launch == null && addition.launch != null) merged.launch = addition.launch;
+  // The launch record is deliberately not merged. It is the one field that
+  // moves the bar rather than meeting it - it drops the tested-claim floor -
+  // and the second count is terminal, so a `launch` arriving out of the
+  // re-sweep would let the sweep clear the gate with a field it was never
+  // asked for and `resweepShape` never offered it. Whether the product is
+  // newly released is the first pass's finding, made before the gate ran.
 
   return merged;
 }
@@ -395,11 +420,14 @@ STRICT RULES:
   rather than inflating it.
 - WIDEN THE EXPERT STRATUM TO ANYONE WHO PUBLISHES A PROTOCOL. ${STRATUM_FIX.expert}.
 - NEW RELEASES: fill "launch" when the piece is about a product that went on
-  sale in roughly the last ${LAUNCH_WINDOW_DAYS} days, with the release date and
-  where you got it. Inside that window no Australian lab result exists yet, and
-  the gate stops asking for one - but it still asks for expert coverage, which
-  inside the window means the protocol-publishing outlets above and dated
-  hands-on where something was measured.
+  sale in roughly the last ${LAUNCH_WINDOW_DAYS} days, or goes on sale in the next
+  ${LAUNCH_WINDOW_DAYS}, with the release date and the http(s) page you read that date
+  on. The link is not optional here: a release date nobody can check relaxes
+  nothing, because it is the one field that lowers the bar rather than meeting
+  it. Inside that window no Australian lab result exists yet, and the gate
+  stops asking for one - but it still asks for expert coverage, which inside
+  the window means the protocol-publishing outlets above and dated hands-on
+  where something was measured.
 - LABEL EVERY HEADLINE NUMBER IN "claims". One row per figure that matters,
   carrying both halves where they disagree: the maker's claimedValue with
   claimedBy and claimedSourceUrl, and the measuredValue with measuredBy, the
@@ -408,10 +436,8 @@ STRICT RULES:
   the most useful thing on the page - and never restate it as if it were a
   measurement. A metric nobody has measured yet is still a row: claimedValue
   filled, measuredValue null. Set ownTest only if WE ran the test, which today
-  we do not. Fill "covers" with what the source's result actually covers
-  whenever the source rates a brand or a tested cohort rather than this exact
-  model (Canstar Blue, CHOICE) - a rating attached to a model it does not cover
-  is refused in code.
+  we do not.
+- A COHORT RATER'S FIGURE ALWAYS STATES ITS COVERAGE. ${COVERS_RULE}
 - amazonUrl: an Amazon PRODUCT page URL (amazon.com.au or amazon.com, containing
   /dp/ or /gp/product/) that you have actually seen in the evidence or in a
   search result — else null. A retailer or news site URL is NEVER an amazonUrl,
@@ -544,6 +570,11 @@ export async function runTargetedResweep(
   const gaps = shortfalls
     .map((s) => `- ${s.label}: ${s.have} of ${s.need} (${s.stratum}) - ${s.fix}`)
     .join('\n');
+  // The coverage rule only matters where the sweep may return claim rows, and
+  // that is where the first pass's brief and the check contradicted each other.
+  const returnsClaims = planned.some((stratum) =>
+    (STRATUM_FIELDS[stratum.key] ?? []).includes('claims'),
+  );
   const already = planned
     .map((stratum) => {
       const rows = existingRows(dossier, stratum.key);
@@ -573,7 +604,7 @@ RULES:
 - Same discipline as the first pass: tier and date every fact, name the
   publisher, verify before you file, and never carry a spec or a URL over from
   memory.
-- ${STRATUM_FIX.expert}.
+- ${STRATUM_FIX.expert}.${returnsClaims ? `\n- ${COVERS_RULE}` : ''}
 - Return an empty array for anything you looked for and did not find. Padding
   a count here is worse than failing the piece: the gate is the last thing
   between a thin dossier and a page of spec recitation.

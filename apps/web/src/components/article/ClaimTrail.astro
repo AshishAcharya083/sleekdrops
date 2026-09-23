@@ -4,6 +4,7 @@ import {
   evidenceAnchor,
   evidenceState,
   gapNote,
+  makerFigureNote,
   methodLinkLabel,
   toClaimEntries,
   varianceLabel,
@@ -27,9 +28,13 @@ import type { ClaimData, SourceData } from '../../content/config';
  * Where a maker's figure and a measured one disagree, both are shown side by
  * side with each side's conditions named, and the gap is printed only past a
  * threshold we publish - so a small difference between two honest methods does
- * not read as an accusation. The maker's figure is never dropped: the reader
- * arrived having already seen it, and its absence reads as a page that missed
- * the spec.
+ * not read as an accusation. That card is for measurements only: its right
+ * column is headed "Measured", so putting a brand or cohort rating there would
+ * print a rating under a measurement's heading and compute a gap between two
+ * things nobody measured the same way. Those rows keep the maker's figure as
+ * an attributed line of its own instead. The maker's figure is never dropped:
+ * the reader arrived having already seen it, and its absence reads as a page
+ * that missed the spec.
  *
  * Each figure carries two links doing two different jobs. The citation is the
  * outbound one and it names where it lands, because that is the link a reader
@@ -73,7 +78,7 @@ const panelShown = evidenceState(entries, sources) !== 'legacy';
             <span class="claim-metric">{entry.subject} · {entry.metric}</span>
           </div>
 
-          {entry.claimed ? (
+          {entry.comparison && entry.claimed ? (
             <div class="spec-compare">
               <div class="sc-col">
                 <span class="sc-label">Claimed</span>
@@ -133,6 +138,26 @@ const panelShown = evidenceState(entries, sources) !== 'legacy';
             <p class="claim-note">
               This rating covers {entry.covers}. It is shown as context and is not
               a measurement of {entry.subject}.
+            </p>
+          )}
+
+          {!entry.comparison && entry.claimed && (
+            <p class="claim-note">
+              <span class="cn-label">Maker's figure</span>{' '}
+              {makerFigureNote(entry.claimed)}
+              {entry.claimed.sourceUrl && (
+                <>
+                  {' '}
+                  <a
+                    class="claim-cite claim-cite--inline"
+                    href={entry.claimed.sourceUrl}
+                    target="_blank"
+                    rel={citationRel(entry.claimed.sourceUrl)}
+                  >
+                    {citationLabel(entry.claimed.by, undefined, 'Check the claim')}
+                  </a>
+                </>
+              )}
             </p>
           )}
 

@@ -232,6 +232,30 @@ test('a cohort rater the facts already cite keeps its row and gains no measured 
   assert.equal(source.measured, undefined);
 });
 
+test('a CHOICE lab result on this model is an expert row carrying its figure', () => {
+  // The other side of the same rule: the claim is labelled "independently
+  // measured" when CHOICE's own coverage names the model it bench-tested, so
+  // the source row has to say the same thing the label does.
+  const [source] = articleSources(
+    [],
+    [
+      {
+        ...canstarClaim,
+        subject: 'iPhone 18 Pro',
+        metric: 'Lab score',
+        measuredBy: 'CHOICE',
+        measuredSourceUrl: 'https://www.choice.com.au/phones/best-phones',
+        measuredValue: '78/100',
+        covers: 'the 14 handsets CHOICE lab-tested in August 2026, including the iPhone 18 Pro',
+      },
+    ],
+  );
+
+  assert.equal(source.tier, 'expert');
+  assert.equal(source.measured, '78/100');
+  assert.equal(source.metric, 'Lab score');
+});
+
 test('a CHOICE cohort score is an aggregator row, the same thing the claim is labelled', () => {
   const [source] = articleSources(
     [],

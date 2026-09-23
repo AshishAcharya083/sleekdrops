@@ -16,10 +16,17 @@ import type { ClaimData, LaunchData } from '../../content/config';
  * is owed that fact plainly, and owed a commitment about what happens when the
  * results land.
  *
- * One component, three states, decided at render time from the release date
- * and the claims the page carries - never from a stored sentence, because
- * "no independent test exists yet" is true the day it is written and false
- * three months later.
+ * One component, three states, derived from the release date and the claims
+ * the page carries rather than from a stored sentence - "no independent test
+ * exists yet" is true the day it is written and false three months later, and
+ * a sentence frozen into frontmatter at authoring time never catches up.
+ *
+ * The site builds statically, so "derived" means derived at build time: the
+ * state and the day count are as current as the last deploy, the same way
+ * reviewStatus() dates the trust stamp. The window still closes on its own,
+ * but it closes on the next build - so the guarantee this notice makes is only
+ * as good as how often the site is rebuilt, and a deploy cadence shorter than
+ * the window is what the promise of an update actually rests on.
  */
 export interface Props {
   launch: LaunchData;

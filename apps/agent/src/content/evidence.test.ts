@@ -15,6 +15,7 @@ import {
   LAUNCH_WINDOW_DAYS,
   normaliseDate,
   normaliseDossier,
+  PRE_RELEASE_WINDOW_DAYS,
   PROTOCOL_OUTLETS,
   STRATUM_FIX,
   withDiscoveredProducts,
@@ -620,10 +621,49 @@ test('a release older than the window is not a launch piece any more', () => {
 });
 
 test('a pre-order piece is inside the window too - it has even less to cite', () => {
-  assert.equal(inLaunchWindow({ product: 'x', releaseDate: daysAgo(-14), sourceUrl: '' }), true);
-  assert.equal(daysSinceRelease({ product: 'x', releaseDate: daysAgo(-14), sourceUrl: '' }), -14);
+  const announced = 'https://www.apple.com/au/newsroom/';
+  assert.equal(inLaunchWindow({ product: 'x', releaseDate: daysAgo(-14), sourceUrl: announced }), true);
+  assert.equal(daysSinceRelease({ product: 'x', releaseDate: daysAgo(-14), sourceUrl: announced }), -14);
   assert.equal(daysSinceRelease(null), null);
-  assert.equal(daysSinceRelease({ product: 'x', releaseDate: 'last month', sourceUrl: '' }), null);
+  assert.equal(daysSinceRelease({ product: 'x', releaseDate: 'last month', sourceUrl: announced }), null);
+});
+
+test('a release date years out is a rumour, not a launch window', () => {
+  // Without a bound on the future side, any date at all opens the window and
+  // the tested-claim floor is off for a product nobody can buy.
+  const announced = 'https://www.apple.com/au/newsroom/';
+  assert.equal(
+    inLaunchWindow({ product: 'x', releaseDate: daysAgo(-PRE_RELEASE_WINDOW_DAYS), sourceUrl: announced }),
+    true,
+  );
+  assert.equal(
+    inLaunchWindow({ product: 'x', releaseDate: daysAgo(-PRE_RELEASE_WINDOW_DAYS - 1), sourceUrl: announced }),
+    false,
+  );
+  assert.equal(inLaunchWindow({ product: 'x', releaseDate: daysAgo(-900), sourceUrl: announced }), false);
+});
+
+test('a launch record with no link to check it against relaxes nothing', () => {
+  // It is the one field that lowers the bar instead of meeting it, and it is
+  // model output over search-result text. Unchecked, it is an assertion - and
+  // an assertion is not allowed to switch a floor off.
+  const unsourced: ResearchDossier = {
+    ...sufficientGuide(),
+    testedClaims: [],
+    launch: { product: 'iPhone 18 Pro', releaseDate: daysAgo(9), sourceUrl: '' },
+  };
+  assert.equal(inLaunchWindow(unsourced.launch), false);
+  const verdict = checkEvidence(unsourced, 'guide');
+  assert.equal(verdict.pass, false);
+  assert.deepEqual(verdict.shortfalls.map((s) => s.label), ['attributed tested claims']);
+  // The same date, with the announcement behind it, is a launch piece.
+  assert.equal(
+    checkEvidence(
+      { ...unsourced, launch: { ...unsourced.launch!, sourceUrl: 'https://www.apple.com/au/newsroom/' } },
+      'guide',
+    ).pass,
+    true,
+  );
 });
 
 test('the expert stratum names the outlets that publish a protocol, and the rules around them', () => {

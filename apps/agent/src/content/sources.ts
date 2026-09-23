@@ -10,7 +10,7 @@
 // pipeline/types.ts so this file type-checks against any dossier that carries
 // `fact` and `sourceUrl` - including the rows already in Postgres, written
 // before the researcher was tiered.
-import { cohortRaterFor } from './claims.js';
+import { claimTier } from './claims.js';
 
 /**
  * Where a claim came from, and therefore what it is worth. Mirrors
@@ -67,6 +67,8 @@ export interface ArticleSource {
 
 /** The parts of a dossier claim this module reads. */
 export interface DossierClaim {
+  /** The product the figure is about - half of what decides whether it measured it. */
+  subject?: string | null;
   metric: string;
   measuredValue: string | null;
   measuredBy: string | null;
@@ -74,6 +76,8 @@ export interface DossierClaim {
   measuredOn: string | null;
   measuredSourceUrl: string | null;
   withdrawnValue: string | null;
+  /** What the source's result covers - the other half, for a cohort rater. */
+  covers?: string | null;
 }
 
 /** The three date shapes a source may carry; anything else is not a date. */
@@ -141,11 +145,13 @@ export function articleSources(
     // frontmatter schema refuses a blank metric - which would fail the whole
     // article over one incomplete row.
     if (url === null || !metric || !claim.measuredValue?.trim() || measurements.has(url)) continue;
-    // A cohort rater's figure is a rating over a brand or a tested group, not
-    // a measurement of the model on the page. Attaching it to a source row
-    // would print it under a measured figure's heading, which is the one
-    // presentation this surface exists to prevent.
-    if (cohortRaterFor(claim.measuredBy, claim.measuredSourceUrl)) continue;
+    // A rating over a brand or a tested group is not a measurement of the
+    // model on the page. Attaching it to a source row would print it under a
+    // measured figure's heading, which is the one presentation this surface
+    // exists to prevent. The tier decides it, so the row and the claim label
+    // agree: a CHOICE lab result whose own coverage names this model is a
+    // measurement of it, and a brand survey never is.
+    if (claimTier(claim) === 'context') continue;
     measurements.set(url, {
       metric,
       measured: claim.measuredValue.trim(),
@@ -194,11 +200,11 @@ export function articleSources(
       ...(date ? { date } : {}),
       // Somebody who published a figure and the protocol behind it is the
       // expert stratum by definition - that is what the tier means. A cohort
-      // rater published neither: Canstar Blue's stars come off a brand
-      // satisfaction panel and a CHOICE score covers the cohort CHOICE tested,
-      // so the row is an aggregator, the same thing the claim itself is
-      // labelled as on the page.
-      tier: cohortRaterFor(claim.measuredBy, claim.measuredSourceUrl) ? 'aggregator' : 'expert',
+      // rating published neither: Canstar Blue's stars come off a brand
+      // satisfaction panel, and a CHOICE score whose coverage does not name
+      // this model covers other models - so the row is an aggregator, the same
+      // thing the claim itself is labelled as on the page.
+      tier: claimTier(claim) === 'context' ? 'aggregator' : 'expert',
       ...(measurements.get(url) ?? {}),
     });
   }

@@ -654,6 +654,29 @@ test('the tier-labelled claims, the launch date and the provenance all reach fro
   assert.deepEqual(frontmatter.reviewUnit, { acquisition: 'none' });
 });
 
+test('a piece with no product in it carries no review-unit disclosure', async () => {
+  // "We were not sent a unit and did not buy one" under a savings-account
+  // explainer answers a question the piece never raises, and it displaces the
+  // line that piece does need - the one saying we do not test products.
+  const { frontmatter } = await runAssembler(
+    article({ category: 'Finance', post_type: 'article', research: null, draft_md: '## Rates\n\nRates moved.' }),
+  );
+  assert.equal(frontmatter.reviewUnit, undefined);
+
+  // A unit that was actually lent is disclosed wherever the piece is filed.
+  const lent = await runAssembler(
+    article({
+      category: 'Finance',
+      post_type: 'article',
+      draft_md: '## Rates\n\nRates moved.',
+      research: {
+        reviewUnit: { acquisition: 'loan', supplier: 'Apple Australia', paid: null, returned: null },
+      } as never,
+    }),
+  );
+  assert.deepEqual(lent.frontmatter.reviewUnit, { acquisition: 'loan', supplier: 'Apple Australia' });
+});
+
 test('a launch link that is not a web URL is dropped, and the article still assembles', async () => {
   // The dossier in D1 may have been filed before the researcher gated this
   // field, and the launch notice renders it as an outbound link - so the

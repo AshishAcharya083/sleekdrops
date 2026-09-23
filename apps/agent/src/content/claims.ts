@@ -44,16 +44,32 @@ export function isUs(name: string | null | undefined): boolean {
  * about something it never measured, which is the specific misrepresentation
  * the Trivago penalty was about.
  */
-export const COHORT_RATERS: ReadonlyArray<{ rater: string; hosts: readonly string[]; covers: string }> = [
+export const COHORT_RATERS: ReadonlyArray<{
+  rater: string;
+  hosts: readonly string[];
+  covers: string;
+  /**
+   * Whether this rater puts individual models through a published test
+   * protocol. CHOICE does - its score comes off an ICRT lab bench - so a
+   * CHOICE result whose own coverage names the model on the page is a
+   * measurement of that model, and calling it "context, not a measurement"
+   * would understate the best independent evidence a launch piece can get.
+   * Canstar Blue never does: the stars are a commissioned satisfaction panel
+   * answering about a brand, so no coverage line can make them a test result.
+   */
+  testsModels: boolean;
+}> = [
   {
     rater: 'Canstar Blue',
     hosts: ['canstarblue.com.au'],
     covers: 'a brand-level satisfaction survey, never a single model',
+    testsModels: false,
   },
   {
     rater: 'CHOICE',
     hosts: ['choice.com.au'],
     covers: 'only the models in the cohort CHOICE tested',
+    testsModels: true,
   },
 ];
 
@@ -97,23 +113,38 @@ function hostsRater(hostname: string, hosts: readonly string[]): boolean {
   return hostname !== '' && hosts.some((h) => hostname === h || hostname.endsWith(`.${h}`));
 }
 
+/** Whether `covers` actually names this subject. */
+function coversSubject(covers: string | null | undefined, subject: string | null | undefined): boolean {
+  const stated = (covers ?? '').toLowerCase();
+  const named = (subject ?? '').trim().toLowerCase();
+  return named !== '' && stated.includes(named);
+}
+
 /**
  * Which tier a figure sits in, derived from who produced it.
  *
- * A cohort rater's figure is context whatever else it carries: it is a rating
- * about a brand or a cohort, and promoting it to a measurement of the model on
- * the page is exactly the rule below that refuses to ship.
+ * A cohort rater's figure is context by default: it is a rating about a brand
+ * or a cohort, and promoting it to a measurement of the model on the page is
+ * exactly the rule below that refuses to ship. The one exception is the case
+ * where the rater does bench models and its own coverage names this one - a
+ * CHOICE ICRT lab result on the model the page is about is an independent
+ * measurement, and labelling it "not a measurement of this model" would be the
+ * mirror image of the error the tiers exist to prevent. A brand survey has no
+ * such exception: nothing it can say about its coverage makes it a test.
  */
 export function claimTier(claim: {
+  subject?: string | null;
   measuredValue: string | null;
   measuredBy: string | null;
   measuredSourceUrl?: string | null;
   ownTest?: boolean;
+  covers?: string | null;
 }): ClaimTier {
   if (claim.measuredValue === null) return 'manufacturer';
   if (claim.ownTest === true && isUs(claim.measuredBy)) return 'measured';
-  if (cohortRaterFor(claim.measuredBy, claim.measuredSourceUrl)) return 'context';
-  return 'independent';
+  const rater = cohortRaterFor(claim.measuredBy, claim.measuredSourceUrl);
+  if (rater === null) return 'independent';
+  return rater.testsModels && coversSubject(claim.covers, claim.subject) ? 'independent' : 'context';
 }
 
 /** The tiers a "best of" badge may rest on: somebody measured the thing. */
@@ -285,12 +316,26 @@ function claimsFor(pick: { name: string; goSlug: string }, claims: readonly Page
   );
 }
 
-/** Whether `covers` actually names this subject. */
-function coversSubject(covers: string | undefined, subject: string): boolean {
-  const stated = (covers ?? '').toLowerCase();
-  const named = subject.trim().toLowerCase();
-  return named !== '' && stated.includes(named);
-}
+/**
+ * The coverage rule, in the words the researcher is handed.
+ *
+ * Generated from COHORT_RATERS rather than written out beside it, for the same
+ * reason describeBar() is generated from EVIDENCE_BAR: the rule a model is
+ * asked to follow and the rule claimProblems() enforces have to be one rule.
+ * They were not. The brief asked for `covers` only where a rating was about a
+ * brand or a cohort "rather than this exact model", which is an instruction to
+ * leave it null on precisely the claims the check then refuses - and a refusal
+ * lands at assembly, after the writing stages have been paid for.
+ */
+export const COVERS_RULE =
+  `Every claim you attribute to ${COHORT_RATERS.map((r) => r.rater).join(' or ')} must fill "covers" with ` +
+  `what that result actually covers, naming the models it covers - including when this exact model is one ` +
+  `of them ("the 14 handsets CHOICE lab-tested in August 2026, including the Pixel 11 Pro"). ` +
+  `${COHORT_RATERS.map((r) => `${r.rater} covers ${r.covers}`).join('; ')}. ` +
+  `A cohort rating attached to a model its own coverage does not name is refused in code, so if the result ` +
+  `says nothing about this model, file it as an aggregator fact and not as a claim about the product. ` +
+  `The coverage line is also what separates a CHOICE lab result on this model - an independent measurement - ` +
+  `from a cohort score shown only as context.`;
 
 /**
  * The two rules that are not allowed to be advice.

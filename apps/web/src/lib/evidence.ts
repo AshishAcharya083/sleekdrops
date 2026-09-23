@@ -88,6 +88,42 @@ export interface ClaimEntry extends ClaimData {
   variance: number | null;
   /** True when the gap clears the published threshold and is worth printing. */
   varianceShown: boolean;
+  /** True when this row is a maker's figure set against a measurement of the same thing. */
+  comparison: boolean;
+}
+
+/**
+ * Whether a row's two figures may be printed against each other.
+ *
+ * Only where the second one is a measurement. The side-by-side card heads its
+ * right-hand column "Measured", so a brand or cohort rating printed there is a
+ * rating presented as a measurement of this model - the single presentation
+ * this surface exists to prevent, and the one the agent's sources.ts already
+ * refuses for source rows. The gap makes it worse: a maker's spec and a
+ * satisfaction survey are not two readings of one quantity, so a percentage
+ * between them, or a line saying neither side disputes the other's arithmetic,
+ * is the page asserting a comparison it has no basis for. The maker's figure
+ * still appears on those rows - attributed, and clear of the rating.
+ */
+export function comparesWithClaimed(claim: ClaimData): boolean {
+  return (
+    claim.claimed !== undefined && (claim.tier === 'measured' || claim.tier === 'independent')
+  );
+}
+
+/**
+ * The maker's figure on a row that has no measurement to set it against.
+ *
+ * Composed here rather than as fragments in the markup: the conditions are
+ * optional, and an absent one interpolated between two lines of JSX leaves a
+ * space sitting in front of the full stop.
+ */
+export function makerFigureNote(claimed: NonNullable<ClaimData['claimed']>): string {
+  return (
+    `${claimed.by} states ${claimed.value} for this metric` +
+    `${claimed.conditions ? ` (${claimed.conditions})` : ''}. ` +
+    `Nobody independent has verified it, and the figure above does not measure it.`
+  );
 }
 
 /**
@@ -178,7 +214,8 @@ export function gapNote(entry: { variance: number | null }): string {
  */
 export function toClaimEntries(claims: readonly ClaimData[] = []): ClaimEntry[] {
   return claims.map((claim) => {
-    const gap = claim.claimed ? variance(claim.claimed.value, claim.value) : null;
+    const comparison = comparesWithClaimed(claim);
+    const gap = comparison ? variance(claim.claimed!.value, claim.value) : null;
     return {
       ...claim,
       chip: CLAIM_TIER_CHIPS[claim.tier],
@@ -186,6 +223,7 @@ export function toClaimEntries(claims: readonly ClaimData[] = []): ClaimEntry[] 
       dateLabel: formatSourceDate(claim.date),
       variance: gap,
       varianceShown: gap !== null && Math.abs(gap) >= VARIANCE_THRESHOLD,
+      comparison,
     };
   });
 }

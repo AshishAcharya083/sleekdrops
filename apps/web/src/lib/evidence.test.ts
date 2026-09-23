@@ -16,9 +16,11 @@ import {
   citationLabel,
   claimRowId,
   claimsByTier,
+  comparesWithClaimed,
   EVIDENCE_PANEL_ID,
   evidenceAnchor,
   gapNote,
+  makerFigureNote,
   methodLinkLabel,
   onSaleSentence,
   evidenceState,
@@ -132,6 +134,39 @@ test('the gap column never claims an agreement it did not compute', () => {
     { ...measuredByGsm, value: '28 h', claimed: { value: '29 h', by: 'Apple' } },
   ])[0];
   assert.equal(gapNote(close), 'The two figures agree within 10%, so there is no gap worth reporting.');
+});
+
+test('a rating is never set against the maker’s figure as though it measured it', () => {
+  // The side-by-side card heads its right column "Measured". A cohort or brand
+  // rating printed there is a rating under a measurement's heading, and the
+  // gap beside it is a comparison between a spec sheet and a survey that the
+  // page would be asserting in its own voice.
+  const rating: ClaimData = {
+    subject: 'iPhone 18 Pro',
+    metric: 'Peak brightness',
+    tier: 'context',
+    value: '4 stars',
+    attribution: 'Canstar Blue',
+    covers: 'Apple as a brand',
+    claimed: { value: '3,000 nits', by: 'Apple' },
+  };
+  const [entry] = toClaimEntries([rating]);
+  assert.equal(entry.comparison, false);
+  assert.equal(entry.variance, null);
+  assert.equal(entry.varianceShown, false);
+  assert.equal(comparesWithClaimed(rating), false);
+  // Dropped from the comparison, not from the page: the maker's figure is
+  // still printed, attributed to the maker and clear of the rating.
+  assert.equal(
+    makerFigureNote(rating.claimed!),
+    'Apple states 3,000 nits for this metric. Nobody independent has verified it, and the figure above does not measure it.',
+  );
+  assert.match(
+    makerFigureNote({ value: '29 h', by: 'Apple', conditions: 'video playback' }),
+    /29 h for this metric \(video playback\)\. Nobody/,
+  );
+  // A measurement of the same metric still compares, and still reports its gap.
+  assert.equal(toClaimEntries([measuredByGsm])[0].comparison, true);
 });
 
 test('two figures in different units are not compared at all', () => {
