@@ -24,7 +24,13 @@ import {
   STRATUM_FIX,
 } from '../content/evidence.js';
 import { COVERS_RULE } from '../content/claims.js';
-import { operatorBrief, siteContext, SOURCE_DISCIPLINE, VERIFICATION_RULES } from './context.js';
+import {
+  operatorBrief,
+  requalificationBrief,
+  siteContext,
+  SOURCE_DISCIPLINE,
+  VERIFICATION_RULES,
+} from './context.js';
 import type {
   ArticleRow,
   EvidenceShortfall,
@@ -333,6 +339,12 @@ export async function runResearcher(
 ): Promise<ResearchDossier> {
   const keywords = topic?.keywords?.length ? topic.keywords.join(', ') : article.title;
   const brief = operatorBrief(topic);
+  // A requalification is researched against what is already on the page. The
+  // planner gets the framing without the body - it is choosing queries, and
+  // 9,000 characters of the old article would only steer them back towards the
+  // ground it already covers.
+  const rebuild = requalificationBrief(article.requalification, { includeBody: false });
+  const rebuildWithBody = requalificationBrief(article.requalification);
 
   // Pass 1: plan the searches, one set per stratum. Asking for a single list
   // is what produced a single kind of evidence.
@@ -346,7 +358,7 @@ Title: ${article.title}
 Category: ${article.category} | Post type: ${article.post_type}
 Angle: ${topic?.angle ?? 'n/a'}
 Target keywords: ${keywords}
-${brief ? `\n${brief}\n\nLet the operator brief steer these queries: search to verify and expand on it, not to second-guess it.\n` : ''}
+${rebuild ? `\n${rebuild}\n\nPlan the queries that find what the published version never had: what owners report after months of use, what somebody measured, what a named retailer charged and when.\n` : ''}${brief ? `\n${brief}\n\nLet the operator brief steer these queries: search to verify and expand on it, not to second-guess it.\n` : ''}
 Return JSON with exactly these keys, each holding ${QUERIES_PER_STRATUM} search queries:
 ${STRATA.map((s) => `"${s.key}": ${s.label.toLowerCase()} - ${s.brief}`).join('\n')}
 
@@ -376,7 +388,7 @@ Example shape: {${STRATA.map((s) => `"${s.key}": ["...", "..."]`).join(', ')}}`,
       maxTokens: 12000,
       search: true,
       prompt: `Synthesize a research dossier for "${article.title}" (${article.post_type}, ${article.category}).
-${brief ? `\n${brief}\n\nFold the operator's reference materials into the dossier as facts (with their source where given), and let the operator instructions shape the summary and angle. They are authoritative source material, on par with the search evidence below.\n` : ''}
+${rebuildWithBody ? `\n${rebuildWithBody}\n` : ''}${brief ? `\n${brief}\n\nFold the operator's reference materials into the dossier as facts (with their source where given), and let the operator instructions shape the summary and angle. They are authoritative source material, on par with the search evidence below.\n` : ''}
 STRICT RULES:
 - Your facts come from three places and nowhere else: the evidence below${brief ? ', the operator brief above' : ''},
   and what you confirm yourself with web_search / read_page. Never invent a

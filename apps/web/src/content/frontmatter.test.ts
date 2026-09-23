@@ -110,6 +110,26 @@ test("a source's tier and part-dated publication date survive intact", () => {
   assert.equal(parsed.pubDate.toISOString(), '2026-09-10T00:00:00.000Z');
 });
 
+test("an update note rides through to the collection, and an empty one does not", () => {
+  // The pipeline writes this only when a rebuild actually moved something, and
+  // the article renders it as the reason for the fresh date - so a blank or
+  // runaway string has to be refused here rather than shown to a reader.
+  const parsed = blogFrontmatterSchema.parse({
+    ...assemblerOutput,
+    updatedDate: '2026-09-17',
+    updateNote: 'Swapped the Shark Stratos for the Dyson V15 Detect.',
+  });
+  assert.equal(parsed.updateNote, 'Swapped the Shark Stratos for the Dyson V15 Detect.');
+
+  // Absent is the normal case: most posts were never revised.
+  assert.equal(blogFrontmatterSchema.parse(assemblerOutput).updateNote, undefined);
+
+  for (const updateNote of ['', 'x'.repeat(301)]) {
+    const result = blogFrontmatterSchema.safeParse({ ...assemblerOutput, updateNote });
+    assert.equal(result.success, false, `updateNote of ${updateNote.length} chars should be rejected`);
+  }
+});
+
 test('a tier the site cannot render, or a date it cannot read, is refused', () => {
   for (const source of [
     { url: 'https://a.example/1', tier: 'trusted' },

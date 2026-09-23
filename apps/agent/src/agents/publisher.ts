@@ -118,6 +118,21 @@ export async function runPublisher(
   // "draft" mode parks the row in D1 unpublished; anything else goes live.
   const d1Status = publishMode === 'draft' ? 'draft' : 'published';
 
+  // A requalification writes over the row a live page is served from, so
+  // parking it unpublished deletes that page from the next site build.
+  // Starting one in draft mode is refused up front (pipeline/requalify.ts),
+  // but the mode can be switched while a run is in flight, and this is the
+  // stage that would act on it. Failing here leaves the live page exactly as
+  // it is: the operator sees why on the article and retries the stage once the
+  // mode is back.
+  if (d1Status === 'draft' && article.requalification) {
+    throw new Error(
+      `${slug} is a rebuild of a live page and publish mode is "draft", which would replace the ` +
+        'published post with an unpublished one and 404 the page at the next build. The live page ' +
+        'is untouched. Set publish mode to approval (or auto) and retry this stage.',
+    );
+  }
+
   // Affiliate links first — fetch-content.mjs fails the site build if a
   // /go/ slug in a published body has no matching row.
   //
@@ -129,14 +144,21 @@ export async function runPublisher(
   // nothing has claimed yet - it must not send the readers of an
   // already-published article to a search page instead of the product page
   // they had.
+  //
+  // A requalification adds the second reason to stand down: the slug belongs to
+  // the page being rebuilt, its row is already live, and a pass that could not
+  // verify an ASIN of its own must not replace a verified destination with a
+  // search link. Both cases insert where the slug is free and yield where it
+  // is not.
   for (const link of links) {
-    const onSlugTaken = link.healed
-      ? 'DO NOTHING'
-      : `DO UPDATE SET
-           default_url = excluded.default_url,
-           regions_json = excluded.regions_json,
-           note = excluded.note,
-           updated_at = datetime('now')`;
+    const onSlugTaken =
+      link.healed || link.preserved
+        ? 'DO NOTHING'
+        : `DO UPDATE SET
+             default_url = excluded.default_url,
+             regions_json = excluded.regions_json,
+             note = excluded.note,
+             updated_at = datetime('now')`;
     await d1Query(
       `INSERT INTO affiliate_links (slug, default_url, regions_json, note, created_at, updated_at)
        VALUES (?1, ?2, ?3, ?4, datetime('now'), datetime('now'))

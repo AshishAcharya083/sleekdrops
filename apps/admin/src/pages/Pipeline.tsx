@@ -6,6 +6,7 @@ import type {
   ArticleSummary,
   EditorialAngle,
   KeywordPlan,
+  RequalifyResult,
   ResearchDetail,
   Session,
   StructureShape,
@@ -26,6 +27,7 @@ import {
   outOfDateStages,
   OUT_OF_DATE_LABEL,
   readTestStageResult,
+  REQUALIFIABLE_STATUSES,
   retryBlockedReason,
   REVIEW_STALE_BANNER,
   REVIEW_STALE_REASON,
@@ -523,6 +525,13 @@ function ArticlePanel({
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TestStageResult | null>(null);
 
+  // What this run will tell readers changed, if anything. Only a requalification
+  // writes one, and only when the rebuild actually moved something.
+  const updateNote =
+    typeof detail?.article.frontmatter?.updateNote === 'string'
+      ? detail.article.frontmatter.updateNote
+      : null;
+
   const load = () => {
     api<ArticleDetail>(`/api/articles/${id}`)
       .then(setDetail)
@@ -604,6 +613,46 @@ function ArticlePanel({
     }
   };
 
+  /**
+   * Send the live page back to the research stage. Unlike "Publish again" -
+   * which re-runs the deterministic publish of what is already written - this
+   * rebuilds the article from scratch at the same slug, which is the only way
+   * a page written under the old prompts reaches the new standard.
+   */
+  const requalify = async () => {
+    const slug = detail?.article.slug;
+    if (!slug) return;
+    if (
+      !window.confirm(
+        `Requalify "${detail.article.title}"?\n\n${slug} goes back to the research stage and runs the ` +
+          'whole pipeline again. It keeps this slug and its /go/ links, and still passes the normal ' +
+          'publish gate. The page is dated as updated only if the rebuild actually moves something, ' +
+          'and then it says what changed. It costs a full article run.',
+      )
+    ) {
+      return;
+    }
+    setBusy('requalify');
+    setErr(null);
+    try {
+      const res = await api<RequalifyResult>(`/api/articles/${id}/requalify`, { method: 'POST' });
+      track(EVENTS.publishedPostRequalified, {
+        slug,
+        surface: 'pipeline',
+        article_id: res.article_id,
+        created_article: res.created,
+        go_slugs: res.go_slugs.length,
+      });
+      load();
+      onChanged();
+    } catch (e) {
+      captureError(e, { action: 'article_requalify', article_id: id, surface: 'pipeline' });
+      setErr(toApiError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const sendFeedback = async () => {
     if (!feedback.trim()) return;
     try {
@@ -682,7 +731,25 @@ function ArticlePanel({
               {(article.attempt ?? 1) > 1 && (
                 <span className="badge gray">attempt {article.attempt}</span>
               )}
+              {article.requalification && (
+                <span
+                  className="badge violet"
+                  title={`Rebuild of the live page, requested ${fmtTime(article.requalification.requestedAt)}. The slug is held and ${article.requalification.goSlugs.length} /go/ link(s) are protected.`}
+                >
+                  🔁 requalification
+                </span>
+              )}
             </div>
+
+            {/* The one reader-facing claim the assembler writes on its own, and
+                the operator approving this run is the only person who checks it
+                before it is on the site. A rebuild that moved nothing writes
+                none, which is itself worth seeing. */}
+            {updateNote && (
+              <p className="muted" style={{ marginTop: 8 }}>
+                <strong>What the update will say:</strong> {updateNote}
+              </p>
+            )}
 
             {reviewStale && (
               <div className="warn-banner" role="status" style={{ marginTop: 12 }}>
@@ -735,6 +802,7 @@ function ArticlePanel({
               onCancel={() => void action('cancel')}
               onApprove={() => void action('approve-publish')}
               onRepublish={() => void action('republish')}
+              onRequalify={() => void requalify()}
             />
 
             {testResult && (
@@ -1007,6 +1075,7 @@ function RunActions({
   onCancel,
   onApprove,
   onRepublish,
+  onRequalify,
 }: {
   article: ArticleDetail['article'];
   /** Whether the agent's retry engine would accept this run at all. */
@@ -1023,6 +1092,7 @@ function RunActions({
   onCancel: () => void;
   onApprove: () => void;
   onRepublish: () => void;
+  onRequalify: () => void;
 }) {
   const stage = article.stage === 'done' ? 'publish' : article.stage;
   /**
@@ -1043,6 +1113,7 @@ function RunActions({
   const cancellable = ['running', 'queued', 'failed', 'timed_out', 'waiting_approval'].includes(
     article.status,
   );
+  const requalifiable = Boolean(article.slug) && REQUALIFIABLE_STATUSES.includes(article.status);
 
   return (
     <div className="actions">
@@ -1122,6 +1193,16 @@ function RunActions({
         {article.stage === 'done' && article.status === 'done' && (
           <button className="btn ghost" onClick={onRepublish}>
             ♻️ Publish again
+          </button>
+        )}
+        {requalifiable && (
+          <button
+            className="btn violet-outline"
+            disabled={busy === 'requalify'}
+            title="Send the live page back through the whole pipeline at the same slug"
+            onClick={onRequalify}
+          >
+            {busy === 'requalify' ? 'Requalifying…' : '🔁 Requalify'}
           </button>
         )}
         {cancellable && (

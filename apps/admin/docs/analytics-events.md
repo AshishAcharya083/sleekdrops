@@ -174,6 +174,31 @@ A live post was removed from Cloudflare D1.
 
 Owning screen: `pages/Published.tsx`.
 
+### Published Post Requalified
+
+A page that is already live was sent back through the whole pipeline at its own slug.
+Fired from the Published list and from the article view on the pipeline board.
+
+| Property | Type | Notes |
+|---|---|---|
+| `slug` | string | The page being rebuilt. |
+| `surface` | string | `published` or `pipeline` - where the operator triggered it. |
+| `article_id` | string | The pipeline article now carrying the rebuild. |
+| `created_article` | boolean | True when the page had no pipeline article behind it until now. |
+| `go_slugs` | number | How many `/go/` destinations the live body carried. |
+
+Owning screens: `pages/Published.tsx`, `pages/Pipeline.tsx`.
+
+### Corpus Audit Started
+
+An audit sweep over every published page was started from the Published tab.
+
+| Property | Type | Notes |
+|---|---|---|
+| `outcome` | string | `started` or `locked` - a sweep already holding the lock is refused. |
+
+Owning screen: `pages/Published.tsx`.
+
 ### Published Post Hero Updated
 
 The hero image of a post that is already live was replaced, re-labelled or removed.

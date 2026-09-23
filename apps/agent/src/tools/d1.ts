@@ -3,6 +3,15 @@
 import { goSlugsIn } from '../content/contract.js';
 import { config } from '../config.js';
 
+/**
+ * Whether D1 is reachable at all. Routes that need the live site answer 503
+ * with this rather than surfacing the credential error as an unhandled 500.
+ */
+export function d1Configured(): boolean {
+  const { accountId, databaseId, token } = config.d1;
+  return Boolean(accountId && databaseId && token);
+}
+
 export async function d1Query<T = Record<string, unknown>>(
   sql: string,
   params: unknown[] = [],
@@ -84,6 +93,33 @@ export async function fetchPublishedBodies(
      LIMIT ?2`,
     [excludeSlug ?? '', limit],
   );
+}
+
+/** A post row, whole - what a requalification reads to rebuild it. */
+export interface PublishedPostDetail {
+  slug: string;
+  status: string;
+  title: string;
+  category: string;
+  post_type: string;
+  pub_date: string | null;
+  frontmatter_json: string;
+  body_md: string | null;
+}
+
+/**
+ * One post row by slug - draft rows included, so `status` is part of the shape
+ * above rather than a filter here. A caller that needs the page to be live
+ * checks it and says so (pipeline/requalify.ts), which beats a 404 that cannot
+ * tell "no such page" from "that page is not published".
+ */
+export async function fetchD1Post(slug: string): Promise<PublishedPostDetail | null> {
+  const [post] = await d1Query<PublishedPostDetail>(
+    `SELECT slug, status, title, category, post_type, pub_date, frontmatter_json, body_md
+     FROM posts WHERE slug = ?1`,
+    [slug],
+  );
+  return post ?? null;
 }
 
 export interface PostHero {

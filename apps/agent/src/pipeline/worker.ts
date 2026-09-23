@@ -13,6 +13,7 @@ import { config } from '../config.js';
 import { createLogger } from '../lib/log.js';
 import { getSetting, q } from '../db/pool.js';
 import { stageBudgetSeconds } from './budgets.js';
+import { recoverStaleCorpusAudits } from './corpusAudit.js';
 import { STAGE_LEASE_SECONDS } from './lease.js';
 import { STAGE_AGENT, runStage } from './runner.js';
 import { recoverStaleScoutRuns } from './scout.js';
@@ -219,4 +220,7 @@ export async function recoverStranded(): Promise<void> {
   );
   // Topic-search jobs use their own queue but share the same recovery pass.
   await recoverStaleScoutRuns();
+  // Same story for a corpus audit: a detached background sweep whose row is
+  // also its lock.
+  await recoverStaleCorpusAudits();
 }

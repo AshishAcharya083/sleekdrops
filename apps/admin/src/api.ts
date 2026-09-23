@@ -269,9 +269,25 @@ export interface ResearchDetail {
   sufficiency?: EvidenceSufficiency;
 }
 
+/**
+ * The live page a requalification started from, as the agent captured it.
+ * Present only while (and after) an article is a rebuild of a published page.
+ */
+export interface RequalificationSource {
+  slug: string;
+  title: string;
+  angle: string;
+  pubDate: string | null;
+  goSlugs: string[];
+  requestedAt: string;
+  /** The published body. Carried by the API; the panel shows the length, not the text. */
+  body: string;
+}
+
 export interface ArticleDetail {
   article: ArticleSummary & {
     hero_alt: string | null;
+    requalification: RequalificationSource | null;
     research: ResearchDetail | null;
     keyword_plan: KeywordPlan | null;
     editorial_angle: EditorialAngle | null;
@@ -386,6 +402,77 @@ export interface PublishedPost {
   /** Read out of the live post's frontmatter — null when it has no hero. */
   hero_image: string | null;
   hero_alt: string | null;
+}
+
+/** One published page's place in the corpus audit's ranking. */
+export interface AuditedArticle {
+  slug: string;
+  title: string;
+  publishedAt: string | null;
+  words: number;
+  scanScore: number;
+  scanFindings: number;
+  worstRules: Array<{ category: string; rule: string; count: number; severity: string }>;
+  review: {
+    dimensions: Record<string, number>;
+    score: number;
+    summary: string;
+    issues: Array<{ severity: string; issue: string; fix: string }>;
+  } | null;
+  reviewError: string | null;
+  score: number;
+  band: 'requalify' | 'review' | 'ok';
+  verdict: string;
+}
+
+/** The ranked report one audit sweep wrote - worst page first. */
+export interface CorpusAuditReport {
+  generatedAt: string;
+  scanned: number;
+  articles: AuditedArticle[];
+  bands: Record<string, number>;
+  requalify: string[];
+  summary: string;
+}
+
+/** The audit sweep itself. `report` is null until it finishes. */
+export interface CorpusAudit {
+  id: string;
+  status: string;
+  articles_scanned: number;
+  report: CorpusAuditReport | null;
+  error: string | null;
+  started_at: string;
+  ended_at: string | null;
+}
+
+/**
+ * The run holding the audit lock, as far as the panel reads it. A sweep is a
+ * detached background task, and a run whose instance died stops holding the
+ * lock once its heartbeat goes stale - the agent decides that, not the panel.
+ */
+export interface CorpusAuditLock {
+  id: string;
+  started_at: string;
+  age_seconds: number;
+}
+
+/**
+ * The statuses a published page can be requalified from - the ones in which
+ * nothing is mid-flight. Mirrors REQUALIFIABLE_STATUSES in
+ * apps/agent/src/pipeline/requalify.ts, which stays the authority: it answers
+ * 409 if this list ever drifts past it.
+ */
+export const REQUALIFIABLE_STATUSES = ['done', 'failed', 'timed_out', 'cancelled'];
+
+/** What the requalify routes answer with. */
+export interface RequalifyResult {
+  ok: boolean;
+  article_id: string;
+  slug: string;
+  /** True when the live page had no pipeline article behind it until now. */
+  created: boolean;
+  go_slugs: string[];
 }
 
 /** What the hero routes report back about the site rebuild they asked for. */
@@ -518,6 +605,13 @@ export const fmtTokens = (v: number | string): string => {
 };
 export const fmtTime = (iso: string | null): string =>
   iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+/** An age in seconds, the way the agent words it in the corpus-audit lock message. */
+export const fmtAge = (seconds: number): string => {
+  const total = Math.max(0, Math.round(seconds));
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+};
 export const duration = (start: string, end: string | null): string => {
   const ms = (end ? new Date(end).getTime() : Date.now()) - new Date(start).getTime();
   return fmtSeconds(ms / 1000);

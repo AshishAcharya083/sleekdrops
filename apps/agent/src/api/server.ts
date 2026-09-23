@@ -21,6 +21,13 @@ import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
 import { MAX_STAGE_TIMEOUT_SECONDS, stageBudgetSeconds } from '../pipeline/budgets.js';
 import {
+  describeCorpusAuditLock,
+  heldCorpusAuditLock,
+  latestCorpusAudit,
+  startCorpusAudit,
+} from '../pipeline/corpusAudit.js';
+import { requalifyPublished } from '../pipeline/requalify.js';
+import {
   cancelArticle,
   groupAttempts,
   isReviewStale,
@@ -668,6 +675,28 @@ export function createApp(): Hono<TraceEnv> {
     return c.json({ runs: rows });
   });
 
+  // ── Requalification ──────────────────────────────────────────────────────
+  // Put a page that is already live back through the whole rebuilt pipeline,
+  // at the same address. Reachable by slug (the Published list, where most of
+  // the site has no pipeline article behind it at all) and by article id (the
+  // pipeline board's article view); both land in the same place.
+  const requalify = async (c: Context<TraceEnv>, slug: string) => {
+    const outcome = await requalifyPublished(slug);
+    if (!outcome.ok) return c.json({ error: outcome.error }, outcome.status);
+    log.info('published page re-queued for requalification', {
+      slug,
+      article_id: outcome.articleId,
+      created_article: outcome.created,
+    });
+    return c.json({
+      ok: true,
+      article_id: outcome.articleId,
+      slug,
+      created: outcome.created,
+      go_slugs: outcome.source.goSlugs,
+    });
+  };
+
   // ── Articles (the pipeline board) ────────────────────────────────────────
   // attempt / stale_from_stage / review_stale ride along on the list because
   // the panel renders "attempt 2", "out of date" and a disabled publish
@@ -1053,10 +1082,43 @@ export function createApp(): Hono<TraceEnv> {
     return c.json({ ok: true });
   });
 
+  // The same requalification, reached from the article view rather than the
+  // published list. The article has to be published for there to be anything
+  // to requalify - the slug is what the live page is found by.
+  app.post('/api/articles/:id/requalify', async (c) => {
+    const [article] = await q<{ slug: string | null }>('SELECT slug FROM articles WHERE id = $1', [
+      c.req.param('id'),
+    ]);
+    if (!article) return c.json({ error: 'not found' }, 404);
+    if (!article.slug) {
+      return c.json({ error: 'this article has no slug yet, so it is not published' }, 409);
+    }
+    return requalify(c, article.slug);
+  });
+
   // ── Published site content (Cloudflare D1 — what the website builds from) ─
   app.get('/api/published', async (c) => {
     const posts = await listD1Posts();
     return c.json({ posts });
+  });
+
+  app.post('/api/published/:slug/requalify', async (c) => requalify(c, c.req.param('slug')));
+
+  // ── Corpus audit ─────────────────────────────────────────────────────────
+  // Scanner v2 plus a reviewer pass over every published page, ranked worst
+  // first. A sweep, like the topic scout: started here, run in the background,
+  // polled through the GET.
+  app.post('/api/corpus-audit', async (c) => {
+    const lock = await heldCorpusAuditLock();
+    if (lock) return c.json({ error: describeCorpusAuditLock(lock), lock }, 409);
+    const id = await startCorpusAudit();
+    log.info('corpus audit started', { corpus_audit_id: id });
+    return c.json({ started: id });
+  });
+
+  app.get('/api/corpus-audit', async (c) => {
+    const [audit, lock] = await Promise.all([latestCorpusAudit(), heldCorpusAuditLock()]);
+    return c.json({ audit, lock });
   });
 
   // Hero image on a post that is already live. The pipeline only knows about

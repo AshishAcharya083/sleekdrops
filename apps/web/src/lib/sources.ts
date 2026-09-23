@@ -234,6 +234,47 @@ export function reviewStatus(
   };
 }
 
+/** The update line under the review stamp, or null when there is nothing to say. */
+export interface UpdateLine {
+  date: Date;
+  /** What changed, as the reader is shown it. */
+  sentence: string;
+}
+
+/**
+ * What the last update was, and whether it is worth a line of its own.
+ *
+ * Without a note the line can only restate the stamp above it, so a piece
+ * updated on the day it published - or on the day it was last reviewed - is
+ * better off silent than repeating a date the reader has already read.
+ *
+ * A note changes that completely. The pipeline writes one only when a rebuild
+ * actually moved something, and it names what moved in the article's own terms,
+ * so the line stops restating the date and becomes the evidence behind it -
+ * which is what Google's guidance asks a publisher to show for a fresh date,
+ * and what one fixed sentence repeated across a corpus conspicuously fails to.
+ */
+export function updateLine(post: {
+  pubDate: Date;
+  updatedDate?: Date;
+  updateNote?: string;
+  /** The date the stamp above this line already shows. */
+  reviewDate: Date;
+}): UpdateLine | null {
+  if (!post.updatedDate) return null;
+  const note = post.updateNote?.trim();
+  if (note) return { date: post.updatedDate, sentence: note };
+  const restatesTheStamp =
+    post.updatedDate.getTime() === post.pubDate.getTime() ||
+    post.updatedDate.getTime() === post.reviewDate.getTime();
+  return restatesTheStamp
+    ? null
+    : {
+        date: post.updatedDate,
+        sentence: 're-researched and re-checked against the sources listed at the foot of this page.',
+      };
+}
+
 /**
  * How long ago the last review was, in the units a shopper thinks in. Used in
  * place of a warning once a re-check falls due: "last checked 14 months ago"

@@ -1,5 +1,5 @@
 ---
-import { agoLabel, reviewStatus } from '@lib/sources';
+import { agoLabel, reviewStatus, updateLine } from '@lib/sources';
 import { formatLong, formatMonth } from '@lib/format';
 import ReviewProvenance from './ReviewProvenance.astro';
 import type { ReviewUnitData } from '../../content/config';
@@ -35,6 +35,12 @@ export interface Props {
   /** The accountable byline, named in the stamp. */
   reviewedBy: string;
   /**
+   * What changed at `updatedDate`, in this article's own terms. Written by the
+   * pipeline only when a rebuild actually moved something, which is why it can
+   * be shown as the reason for the fresh date rather than beside it.
+   */
+  updateNote?: string;
+  /**
    * How the unit under review was obtained. When the pipeline recorded one,
    * the provenance block states it in full and the independence line below
    * drops the sentence it would otherwise repeat - and contradict, on a piece
@@ -52,6 +58,7 @@ const {
   lastReviewed,
   category,
   reviewedBy,
+  updateNote,
   reviewUnit,
   measuredOurselves = false,
 } = Astro.props;
@@ -71,13 +78,9 @@ const staleNote = review.due
   : null;
 // An update line only says something the stamp above it does not: a piece
 // updated on the day it published, or on the day it was last reviewed, has
-// nothing to add.
-const updated =
-  updatedDate &&
-  updatedDate.getTime() !== pubDate.getTime() &&
-  updatedDate.getTime() !== review.date.getTime()
-    ? updatedDate
-    : undefined;
+// nothing to add - unless it carries a note, which names what moved and is
+// therefore the one thing on this block no other article could be showing.
+const updated = updateLine({ pubDate, updatedDate, updateNote, reviewDate: review.date });
 ---
 
 <div class="trust-stack">
@@ -99,8 +102,8 @@ const updated =
   {updated && (
     <p class="update-flash">
       <span class="flash-label">Updated</span>
-      <time datetime={updated.toISOString().slice(0, 10)}>{formatLong(updated)}</time>
-      <span>— re-researched and re-checked against the sources listed at the foot of this page.</span>
+      <time datetime={updated.date.toISOString().slice(0, 10)}>{formatLong(updated.date)}</time>
+      <span>— {updated.sentence}</span>
     </p>
   )}
 

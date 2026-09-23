@@ -300,6 +300,12 @@ export const blogFrontmatterSchema = z
      * Optional: every post published before the assembler stamped one has none.
      */
     lastReviewed: z.coerce.date().optional(),
+    /**
+     * One sentence on what changed at `updatedDate`, written by the pipeline
+     * when a requalification actually moved something. Optional: a page whose
+     * update was cosmetic carries no fresh date, and so carries no note.
+     */
+    updateNote: z.string().min(1).max(300).optional(),
     readTime: z.number().int().positive(),
     cover: z.enum([
       'fill-1',

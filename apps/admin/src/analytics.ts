@@ -44,7 +44,9 @@ export const EVENTS = {
   articleFeedbackSubmitted: 'Article Feedback Submitted',
   offerSaved: 'Offer Saved',
   publishedPostDeleted: 'Published Post Deleted',
+  publishedPostRequalified: 'Published Post Requalified',
   publishedHeroUpdated: 'Published Post Hero Updated',
+  corpusAuditStarted: 'Corpus Audit Started',
   settingsSaved: 'Settings Saved',
   connectionSettingChanged: 'Connection Setting Changed',
 } as const;

@@ -154,3 +154,26 @@ test('sanitizeError keeps message and stack for an error from another realm', ()
   assert.equal(safe.message, 'out of range at https://api.example.com/x');
   assert.equal(safe.stack, 'RangeError: out of range\n    at frame.js:1:1');
 });
+
+test('the dimensions a requalification and an audit report survive the scrub', () => {
+  // The panel's analytics docs promise these; an allowlist that dropped them
+  // would leave the documented properties silently missing in the dashboard.
+  assert.deepEqual(
+    scrubProps({
+      slug: 'beef-tallow-skincare',
+      surface: 'published',
+      article_id: '0d1c8f5a-3c2b-4a5e-9f10-2b3c4d5e6f70',
+      created_article: true,
+      go_slugs: 4,
+      outcome: 'locked',
+    }),
+    {
+      slug: 'beef-tallow-skincare',
+      surface: 'published',
+      article_id: '0d1c8f5a-3c2b-4a5e-9f10-2b3c4d5e6f70',
+      created_article: true,
+      go_slugs: 4,
+      outcome: 'locked',
+    },
+  );
+});
