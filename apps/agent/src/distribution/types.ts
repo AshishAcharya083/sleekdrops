@@ -272,6 +272,20 @@ export class PermanentProviderError extends Error {
 }
 
 /**
+ * This item cannot be posted as it stands, and no number of retries will
+ * change that - but nothing is wrong either. A provider's ladder throws this
+ * when it has run out of ways to post an item safely (no image it may upload
+ * and no link budget left, say), and the worker parks the row in 'held' where
+ * the admin panel shows it until an operator or the next month moves it.
+ */
+export class ProviderHoldError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProviderHoldError';
+  }
+}
+
+/**
  * The article fields a payload is rendered from. Declared structurally rather
  * than as a Pick of ArticleRow: ArticleRow already names HeroImageSource from
  * here, and a payload renderer has no business seeing a dossier or a draft.
