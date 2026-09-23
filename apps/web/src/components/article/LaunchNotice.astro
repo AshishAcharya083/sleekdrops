@@ -1,6 +1,7 @@
 ---
-import { launchStatus, nameList } from '@lib/evidence';
+import { citationLabel, launchStatus, nameList } from '@lib/evidence';
 import { formatLong, formatMonth } from '@lib/format';
+import { citationRel, hostLabel } from '@lib/sources';
 import type { ClaimData, LaunchData } from '../../content/config';
 
 /**
@@ -135,6 +136,16 @@ const statusLabel =
       <span class="chip">CHOICE</span>
     </p>
     )}
+    {/* The on-sale date is a figure like any other on this page, and the one
+        the whole notice is reasoned from - so it carries the same outbound
+        citation, naming where it lands. */}
+    {launch.sourceUrl && (
+      <p class="ln-source">
+        <a href={launch.sourceUrl} target="_blank" rel={citationRel(launch.sourceUrl)}>
+          {citationLabel(hostLabel(launch.sourceUrl), undefined, 'On-sale date')}
+        </a>
+      </p>
+    )}
     <p class="ln-link"><a href={updatesHref}>How we research</a></p>
   </div>
 </aside>
@@ -241,6 +252,15 @@ const statusLabel =
     padding: 3px 9px;
   }
   .ln-link { margin-top: 12px; font-size: 13px; }
+  /* Mono and small: this is a citation, and the mono is what tells the reader
+     it is a recorded fact rather than another line of the notice's prose. */
+  .ln-source {
+    margin-top: 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  .ln-source a { color: var(--ink-2); text-underline-offset: 3px; }
 
   /* Wide placement: the status column uses the space the prose measure leaves
      rather than 500px of empty slab. Both columns stretch to the same row
@@ -268,6 +288,7 @@ const statusLabel =
       border-top: 0;
     }
     .launch-notice--split .ln-watch,
+    .launch-notice--split .ln-source,
     .launch-notice--split .ln-link { margin-top: 0; }
   }
 </style>

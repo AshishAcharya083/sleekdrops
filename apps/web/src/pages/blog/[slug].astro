@@ -185,7 +185,7 @@ const asideSummary = [
           {hasAffiliateLinks && <AffiliateDisclosure />}
         </ArticleBody>
         <PickEvidence picks={labelledPicks} claims={post.data.claims} />
-        <ClaimTrail claims={post.data.claims} />
+        <ClaimTrail claims={post.data.claims} sources={post.data.sources} />
         <EvidencePanel sources={post.data.sources} claims={post.data.claims} />
         <Sources
           sources={post.data.sources}

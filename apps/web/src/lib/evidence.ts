@@ -21,8 +21,14 @@
  * runner (see evidence.test.ts), which needs real specifiers.
  */
 
-import type { ClaimData, ClaimTier, LaunchData, ReviewUnitData } from '../content/frontmatter.ts';
-import { formatSourceDate } from './sources.ts';
+import type {
+  ClaimData,
+  ClaimTier,
+  LaunchData,
+  ReviewUnitData,
+  SourceData,
+} from '../content/frontmatter.ts';
+import { displayUrl, formatSourceDate } from './sources.ts';
 
 /**
  * The tiers, strongest first - the order the page groups them in, and the
@@ -162,6 +168,78 @@ export function toClaimEntries(claims: readonly ClaimData[] = []): ClaimEntry[] 
       varianceShown: gap !== null && Math.abs(gap) >= VARIANCE_THRESHOLD,
     };
   });
+}
+
+/**
+ * Where each figure's evidence is addressed, on the page and off it.
+ *
+ * The citation beside a figure is the outbound link, and it names the
+ * publisher it lands on: Google's review guidance rewards pointing a reader at
+ * the evidence, and a label reading like a citation that silently scrolls the
+ * page instead is the in-page-link failure Nielsen Norman documents - the
+ * reader clicks expecting to arrive somewhere and does not.
+ *
+ * The in-page jump to the evidence panel stays, but as a supplement with its
+ * own wording and its own styling, never as the citation. Both behaviours on
+ * one page are fine; the same label doing both is not.
+ */
+
+/** The id on the evidence panel's heading - the anchor a figure falls back to. */
+export const EVIDENCE_PANEL_ID = 'evidence-panel-title';
+
+/** The evidence-panel row for a figure we measured ourselves. */
+export function claimRowId(index: number): string {
+  return `evidence-claim-${index + 1}`;
+}
+
+/** The evidence-panel row for one of the article's sources. */
+export function sourceRowId(index: number): string {
+  return `evidence-source-${index + 1}`;
+}
+
+/**
+ * The panel row a figure's "How we checked" link lands on.
+ *
+ * Our own measurements have a row of their own; everything else is matched to
+ * the source row it came from by address, ignoring the scheme, `www.` and a
+ * trailing slash so two spellings of one URL are still one row. A figure whose
+ * source is not in the list lands on the panel itself rather than nowhere.
+ */
+export function evidenceAnchor(
+  claim: ClaimData,
+  claimIndex: number,
+  sources: readonly SourceData[] = [],
+): string {
+  if (claim.tier === 'measured') return `#${claimRowId(claimIndex)}`;
+  if (claim.sourceUrl) {
+    const wanted = displayUrl(claim.sourceUrl);
+    const position = sources.findIndex((source) => displayUrl(source.url) === wanted);
+    if (position >= 0) return `#${sourceRowId(position)}`;
+  }
+  return `#${EVIDENCE_PANEL_ID}`;
+}
+
+/**
+ * What the in-page link to the panel says, which is not the same sentence for
+ * every tier. "How we checked" over a figure nobody has checked would be the
+ * page claiming a verification it did not do - the one thing the tier labels
+ * exist to prevent - so a maker's number and a brand rating offer the reader
+ * the provenance instead, which is what their rows actually hold.
+ */
+export function methodLinkLabel(tier: ClaimTier): string {
+  return tier === 'measured' || tier === 'independent'
+    ? 'How we checked'
+    : 'Where this came from';
+}
+
+/**
+ * The text on an outbound citation: who it lands on, and the date they put on
+ * it. The date is on the link rather than only in the prose above it because a
+ * launch-window reader's actual doubt is how current the figure is.
+ */
+export function citationLabel(publisher: string, date?: string, lead = 'Check it yourself'): string {
+  const shown = formatSourceDate(date);
+  return `${lead}: ${publisher}${shown ? `, ${shown}` : ''}`;
 }
 
 /** The claims of one tier, in the order the research filed them. */

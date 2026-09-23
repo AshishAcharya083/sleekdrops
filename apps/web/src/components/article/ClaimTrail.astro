@@ -1,6 +1,15 @@
 ---
-import { toClaimEntries, varianceLabel, VARIANCE_THRESHOLD } from '@lib/evidence';
-import type { ClaimData } from '../../content/config';
+import {
+  citationLabel,
+  evidenceAnchor,
+  evidenceState,
+  methodLinkLabel,
+  toClaimEntries,
+  varianceLabel,
+  VARIANCE_THRESHOLD,
+} from '@lib/evidence';
+import { citationRel } from '@lib/sources';
+import type { ClaimData, SourceData } from '../../content/config';
 
 /**
  * ClaimTrail - every headline figure on the page, labelled by where its number
@@ -20,16 +29,29 @@ import type { ClaimData } from '../../content/config';
  * not read as an accusation. The maker's figure is never dropped: the reader
  * arrived having already seen it, and its absence reads as a page that missed
  * the spec.
+ *
+ * Each figure carries two links doing two different jobs. The citation is the
+ * outbound one and it names where it lands, because that is the link a reader
+ * follows to check us; the in-page jump to the evidence panel is a supplement,
+ * worded and styled as one. A citation-looking label that only scrolls the
+ * page is the case Nielsen Norman's in-page-link research singles out.
  */
 export interface Props {
   claims?: ClaimData[];
+  /** The article's sources, so a figure can point at its own row in the panel. */
+  sources?: SourceData[];
   /** The heading above the block. */
   title?: string;
 }
 
-const { claims = [], title = 'What each number rests on' } = Astro.props;
+const { claims = [], sources = [], title = 'What each number rests on' } = Astro.props;
 const entries = toClaimEntries(claims);
 const thresholdLabel = `${Math.round(VARIANCE_THRESHOLD * 100)}%`;
+// The panel is what "How we checked" scrolls to, and it draws nothing on a
+// post written before any of this was recorded. The link is offered only when
+// there is something to land on - an anchor with no target fails the build,
+// and rightly so.
+const panelShown = evidenceState(entries, sources) !== 'legacy';
 ---
 
 {entries.length > 0 && (
@@ -44,7 +66,7 @@ const thresholdLabel = `${Math.round(VARIANCE_THRESHOLD * 100)}%`;
     </div>
 
     <ol class="claim-list">
-      {entries.map((entry) => (
+      {entries.map((entry, index) => (
         <li class:list={['claim-card', `claim-card--${entry.tier}`]}>
           <div class="claim-top">
             <span class:list={['claim-chip', `claim-chip--${entry.tier}`]}>{entry.chip}</span>
@@ -58,6 +80,16 @@ const thresholdLabel = `${Math.round(VARIANCE_THRESHOLD * 100)}%`;
                 <span class="sc-figure sc-figure--claimed">{entry.claimed.value}</span>
                 <span class="sc-by">{entry.claimed.by}</span>
                 {entry.claimed.conditions && <span class="sc-cond">{entry.claimed.conditions}</span>}
+                {entry.claimed.sourceUrl && (
+                  <a
+                    class="claim-cite claim-cite--inline"
+                    href={entry.claimed.sourceUrl}
+                    target="_blank"
+                    rel={citationRel(entry.claimed.sourceUrl)}
+                  >
+                    {citationLabel(entry.claimed.by, undefined, 'Check the claim')}
+                  </a>
+                )}
               </div>
               <div class="sc-col">
                 <span class="sc-label">Measured</span>
@@ -107,9 +139,25 @@ const thresholdLabel = `${Math.round(VARIANCE_THRESHOLD * 100)}%`;
             </p>
           )}
 
-          {entry.sourceUrl && (
-            <p class="claim-note claim-note--source">
-              <a href={entry.sourceUrl} target="_blank" rel="noopener nofollow">Check it yourself</a>
+          {(entry.sourceUrl || panelShown) && (
+            <p class="claim-links">
+              {entry.sourceUrl && (
+                <a
+                  class="claim-cite"
+                  href={entry.sourceUrl}
+                  target="_blank"
+                  rel={citationRel(entry.sourceUrl)}
+                >
+                  {citationLabel(entry.attribution, entry.date)}
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7"/><polyline points="9 7 17 7 17 15"/></svg>
+                </a>
+              )}
+              {panelShown && (
+                <a class="claim-method" href={evidenceAnchor(entry, index, sources)}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 10 12 16 18 10"/></svg>
+                  {methodLinkLabel(entry.tier)}
+                </a>
+              )}
             </p>
           )}
         </li>
@@ -228,8 +276,75 @@ const thresholdLabel = `${Math.round(VARIANCE_THRESHOLD * 100)}%`;
     margin-right: 8px;
   }
   .claim-note s { color: var(--muted-2); }
-  .claim-note--source { margin-top: 10px; font-size: 13px; }
-  .claim-note--source a { color: var(--ink-2); text-underline-offset: 3px; }
+  /* Two links, two behaviours, and they never look alike. The citation is
+     underlined ink with an outward arrow - it leaves the site. The method link
+     is mono, muted and boxed with a downward arrow - it moves you down this
+     page. Nielsen Norman's finding is that an in-page link dressed as an
+     ordinary one leaves the reader disoriented; the distinction is the fix. */
+  .claim-links {
+    display: flex;
+    align-items: center;
+    gap: 8px 20px;
+    flex-wrap: wrap;
+    margin: 14px 0 0;
+  }
+  /* Inline rather than inline-flex: the label wraps onto two lines on a
+     narrow screen, and a flex arrow would sit at the far right of the widest
+     line instead of after the last word it belongs to. */
+  .claim-cite {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-2);
+    text-underline-offset: 3px;
+  }
+  .claim-cite svg {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    margin-left: 5px;
+    vertical-align: -1px;
+    stroke: currentColor;
+    stroke-width: 1.9;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .claim-cite:hover { color: var(--accent-text); }
+  /* Compounded, and with a hover of its own: the shared `.claim-cite:hover`
+     out-weighs a single-class modifier once Astro scopes the block, so a bare
+     `.claim-cite--inline` would have its colour decided for it. */
+  .claim-cite.claim-cite--inline {
+    align-self: flex-start;
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+  }
+  .claim-cite.claim-cite--inline:hover { color: var(--accent-text); }
+  .claim-method {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--r-full);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .claim-method svg {
+    width: 12px;
+    height: 12px;
+    stroke: currentColor;
+    stroke-width: 2;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .claim-method:hover { border-color: var(--ink); color: var(--ink); }
 
   /* Claimed vs measured. The third track is capped rather than auto-sized: an
      `auto` track sizes to its own paragraph's max-content width, which took

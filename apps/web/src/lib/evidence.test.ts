@@ -13,13 +13,19 @@ import assert from 'node:assert/strict';
 
 import {
   attributionLine,
+  citationLabel,
+  claimRowId,
   claimsByTier,
+  EVIDENCE_PANEL_ID,
+  evidenceAnchor,
+  methodLinkLabel,
   evidenceState,
   launchStatus,
   LAUNCH_WINDOW_DAYS,
   nameList,
   provenanceCopy,
   shownOfLabel,
+  sourceRowId,
   tiersPresent,
   toClaimEntries,
   variance,
@@ -215,4 +221,57 @@ test('a count in a header is the count on screen', () => {
   assert.equal(shownOfLabel(9, 9), '9 sources');
   assert.equal(shownOfLabel(1, 9), '1 of 9 sources shown');
   assert.equal(shownOfLabel(1, 1), '1 source');
+});
+
+test('a citation names where it lands and when that source dated it', () => {
+  // "Check it yourself" on its own says nothing about where it goes, which is
+  // the link a reader follows to check us. The date rides on the link because
+  // how current the figure is is a launch-window reader's actual doubt.
+  assert.equal(
+    citationLabel(measuredByGsm.attribution, measuredByGsm.date),
+    'Check it yourself: GSMArena, Sep 16, 2026',
+  );
+  assert.equal(citationLabel('Apple'), 'Check it yourself: Apple');
+  assert.equal(citationLabel('Apple', undefined, 'Check the claim'), 'Check the claim: Apple');
+});
+
+test('a figure points at its own row in the panel, not at the panel', () => {
+  const sources = [
+    { url: 'https://www.apple.com/au/iphone-18-pro/specs/' },
+    { url: 'https://www.gsmarena.com/apple_iphone_18_pro-review.php' },
+  ];
+  // Our own run has a row of its own, numbered by where the claim sits.
+  assert.equal(
+    evidenceAnchor({ ...measuredByGsm, tier: 'measured' }, 2, sources),
+    `#${claimRowId(2)}`,
+  );
+  // Everything else lands on the source row it came from - matched on the
+  // address a reader reads, so http/https, `www.` and a trailing slash are
+  // still one row rather than two.
+  assert.equal(
+    evidenceAnchor({ ...measuredByGsm, sourceUrl: 'http://gsmarena.com/apple_iphone_18_pro-review.php' }, 0, sources),
+    `#${sourceRowId(1)}`,
+  );
+  assert.equal(claimRowId(0), 'evidence-claim-1');
+  assert.equal(sourceRowId(1), 'evidence-source-2');
+});
+
+test('a figure whose source is not in the list still lands somewhere', () => {
+  // An anchor with no target fails the build, so the fallback is the panel
+  // itself rather than a row that may not have been rendered.
+  assert.equal(
+    evidenceAnchor({ ...makerOnly, sourceUrl: 'https://example.com/elsewhere' }, 0, []),
+    `#${EVIDENCE_PANEL_ID}`,
+  );
+  assert.equal(evidenceAnchor(makerOnly, 0), `#${EVIDENCE_PANEL_ID}`);
+});
+
+test('the in-page link does not claim a check nobody made', () => {
+  // "How we checked" over a maker's number would be the page claiming a
+  // verification it did not do, which is the one thing the tier labels exist
+  // to stop.
+  assert.equal(methodLinkLabel('measured'), 'How we checked');
+  assert.equal(methodLinkLabel('independent'), 'How we checked');
+  assert.equal(methodLinkLabel('manufacturer'), 'Where this came from');
+  assert.equal(methodLinkLabel('context'), 'Where this came from');
 });

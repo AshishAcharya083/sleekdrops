@@ -1,6 +1,13 @@
 ---
-import { evidenceState, shownOfLabel, toClaimEntries } from '@lib/evidence';
-import { displayUrl, formatSourceDate, TIER_LABELS, TIER_ORDER } from '@lib/sources';
+import {
+  claimRowId,
+  EVIDENCE_PANEL_ID,
+  evidenceState,
+  shownOfLabel,
+  sourceRowId,
+  toClaimEntries,
+} from '@lib/evidence';
+import { citationRel, displayUrl, formatSourceDate, TIER_LABELS, TIER_ORDER } from '@lib/sources';
 import type { ClaimData, SourceData, SourceTier } from '../../content/config';
 
 /**
@@ -20,6 +27,12 @@ import type { ClaimData, SourceData, SourceTier } from '../../content/config';
  * A post carrying no measurements renders nothing at all: that is not weak
  * evidence, it is a post written before any of this was recorded, and an empty
  * panel would imply something is missing.
+ *
+ * Every row carries a stable id, so one figure's evidence can be linked to and
+ * shared on its own rather than only as "somewhere in this panel", and repeats
+ * the outbound link beside the protocol and the date - the panel is where a
+ * reader arrives from a figure's "How we checked", and arriving at a row with
+ * no way out to the source would strand them.
  */
 export interface Props {
   sources?: SourceData[];
@@ -39,10 +52,16 @@ const TIER_MEANING: Record<SourceTier, string> = {
   unknown: 'We could not confirm who publishes this page.',
 };
 
-const measuredByUs = entries.filter((entry) => entry.tier === 'measured');
+// Each row keeps the position its figure has in the article's own list, so a
+// row's id is the id the figure above links to and stays put when the panel
+// regroups the rows by tier.
+const numbered = sources.map((source, position) => ({ source, id: sourceRowId(position) }));
+const measuredByUs = entries
+  .map((entry, position) => ({ entry, id: claimRowId(position) }))
+  .filter(({ entry }) => entry.tier === 'measured');
 const groups = TIER_ORDER.map((tier) => {
-  const rows = sources.filter((source) => source.tier === tier);
-  const corrected = rows.filter((source) => source.withdrawn).length;
+  const rows = numbered.filter(({ source }) => source.tier === tier);
+  const corrected = rows.filter(({ source }) => source.withdrawn).length;
   return {
     tier,
     label: TIER_LABELS[tier],
@@ -57,7 +76,7 @@ const groups = TIER_ORDER.map((tier) => {
 // Untiered rows are still rows a reader can open. They are listed under their
 // own heading rather than dropped, because a source list that hides its weak
 // entries has stopped being one.
-const untiered = sources.filter((source) => !source.tier);
+const untiered = numbered.filter(({ source }) => !source.tier);
 const shown = groups.reduce((total, group) => total + group.rows.length, 0) + untiered.length;
 const measuredRows = sources.filter((source) => source.measured).length;
 // Counted, not assumed to be one: a header that says "one correction" over two
@@ -69,10 +88,10 @@ const publisherOf = (source: SourceData): string => source.publisher?.trim() || 
 ---
 
 {state !== 'legacy' && (
-  <section class="evidence-panel" aria-labelledby="evidence-panel-title">
+  <section class="evidence-panel" aria-labelledby={EVIDENCE_PANEL_ID}>
     <div class="ep-head">
       <div>
-        <h2 id="evidence-panel-title">The evidence trail</h2>
+        <h2 id={EVIDENCE_PANEL_ID}>The evidence trail</h2>
         <p class="ep-sub">
           {shownOfLabel(shown, sources.length)}
           {measuredRows > 0 && ` · ${measuredRows} carrying a measured figure`}
@@ -111,8 +130,8 @@ const publisherOf = (source: SourceData): string => source.publisher?.trim() || 
           <span class="ep-count">{measuredByUs.length} shown here</span>
         </div>
         <ul class="ep-rows">
-          {measuredByUs.map((entry) => (
-            <li class="ep-row">
+          {measuredByUs.map(({ entry, id }) => (
+            <li class="ep-row" id={id}>
               <div class="ep-row-top">
                 <span class="ep-publisher">SleekDrops</span>
                 {entry.dateLabel && <span class="ep-date">{entry.dateLabel}</span>}
@@ -136,8 +155,8 @@ const publisherOf = (source: SourceData): string => source.publisher?.trim() || 
         </div>
         <p class="ep-meaning">{group.meaning}</p>
         <ul class="ep-rows">
-          {group.rows.map((source) => (
-            <li class="ep-row">
+          {group.rows.map(({ source, id }) => (
+            <li class="ep-row" id={id}>
               <div class="ep-row-top">
                 <span class="ep-publisher">{publisherOf(source)}</span>
                 <span class="ep-date">{formatSourceDate(source.date) ?? 'No date shown'}</span>
@@ -157,7 +176,7 @@ const publisherOf = (source: SourceData): string => source.publisher?.trim() || 
                 </p>
               )}
               {source.conditions && <p class="ep-protocol">{source.conditions}</p>}
-              <a class="ep-link" href={source.url} target="_blank" rel="noopener nofollow">
+              <a class="ep-link" href={source.url} target="_blank" rel={citationRel(source.url)}>
                 {displayUrl(source.url)}
               </a>
             </li>
@@ -187,13 +206,13 @@ const publisherOf = (source: SourceData): string => source.publisher?.trim() || 
           Nothing on this page rests on one of these alone.
         </p>
         <ul class="ep-rows">
-          {untiered.map((source) => (
-            <li class="ep-row">
+          {untiered.map(({ source, id }) => (
+            <li class="ep-row" id={id}>
               <div class="ep-row-top">
                 <span class="ep-publisher">{publisherOf(source)}</span>
                 <span class="ep-date">{formatSourceDate(source.date) ?? 'No date shown'}</span>
               </div>
-              <a class="ep-link" href={source.url} target="_blank" rel="noopener nofollow">
+              <a class="ep-link" href={source.url} target="_blank" rel={citationRel(source.url)}>
                 {displayUrl(source.url)}
               </a>
             </li>
@@ -227,6 +246,7 @@ const publisherOf = (source: SourceData): string => source.publisher?.trim() || 
     line-height: 1.2;
     font-weight: 400;
     margin: 0;
+    scroll-margin-top: 100px;
   }
   .ep-sub {
     margin: 6px 0 0;
@@ -295,6 +315,10 @@ const publisherOf = (source: SourceData): string => source.publisher?.trim() || 
     border: 1px solid var(--hairline);
     border-radius: var(--r-md);
     background: var(--surface-2);
+    /* A row linked to from a figure above has to land below the fixed header,
+       the same clearance the numbered sources block uses. The chrome script
+       scrolls with the offset too; this is what holds without it. */
+    scroll-margin-top: 100px;
   }
   .ep-group--measured .ep-row { border-left: 3px solid var(--success); }
   .ep-group--expert .ep-row { border-left: 3px solid var(--ink); }

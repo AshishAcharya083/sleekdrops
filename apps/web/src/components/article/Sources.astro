@@ -1,5 +1,5 @@
 ---
-import { sourceCountLabel, toSourceEntries, unverifiedCount } from '@lib/sources';
+import { citationRel, sourceCountLabel, toSourceEntries, unverifiedCount } from '@lib/sources';
 import type { SourceData } from '../../content/config';
 
 /**
@@ -77,7 +77,7 @@ const unverified = unverifiedCount(entries);
                 </span>
               )}
             </div>
-            <a class="src-title" href={entry.url} target="_blank" rel="noopener nofollow">
+            <a class="src-title" href={entry.url} target="_blank" rel={citationRel(entry.url)}>
               {entry.linkLabel}
             </a>
             <div class="src-dates">
