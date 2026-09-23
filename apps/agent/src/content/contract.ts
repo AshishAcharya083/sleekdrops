@@ -187,8 +187,28 @@ export function defaultAuthorFor(category: string): AuthorProfile {
  */
 export const SOURCE_DATE_RE = /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/;
 
+/**
+ * Whether a string is a URL a reader could safely be linked to.
+ *
+ * `z.string().url()` is not this check: it accepts `javascript:` and `data:`,
+ * so a schema that only calls it hands a click-to-execute href to whatever
+ * renders the field. Every source, claim and launch URL below is rendered as
+ * an `href` on the published page, and all of them originate in search-result
+ * text nobody controls - so the scheme is checked here rather than assumed.
+ */
+export function isWebUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value.trim());
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+const webUrl = () => z.string().url().refine(isWebUrl, { message: 'must be an http(s) URL' });
+
 export const sourceSchema = z.object({
-  url: z.string().url(),
+  url: webUrl(),
   publisher: z.string().min(1).optional(),
   date: z.string().regex(SOURCE_DATE_RE).optional(),
   tier: z.enum(SOURCE_TIERS).optional(),
@@ -222,7 +242,7 @@ export const claimSchema = z.object({
   attribution: z.string().min(1),
   conditions: z.string().min(1).optional(),
   date: z.string().regex(SOURCE_DATE_RE).optional(),
-  sourceUrl: z.string().url().optional(),
+  sourceUrl: webUrl().optional(),
   /** What the source's result actually covers - load-bearing for cohort raters. */
   covers: z.string().min(1).optional(),
   withdrawn: z.string().min(1).optional(),
@@ -232,7 +252,7 @@ export const claimSchema = z.object({
       value: z.string().min(1),
       by: z.string().min(1),
       conditions: z.string().min(1).optional(),
-      sourceUrl: z.string().url().optional(),
+      sourceUrl: webUrl().optional(),
     })
     .optional(),
 });
@@ -241,7 +261,7 @@ export const claimSchema = z.object({
 export const launchSchema = z.object({
   product: z.string().min(1),
   releaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  sourceUrl: z.string().url().optional(),
+  sourceUrl: webUrl().optional(),
 });
 
 /** How the unit under review was obtained - the ACCC's most-missed disclosure. */

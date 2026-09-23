@@ -217,6 +217,26 @@ test('a claim with no attribution is refused', () => {
   }
 });
 
+test('a URL the browser would execute rather than follow is refused', () => {
+  // `z.string().url()` accepts `javascript:` and `data:`. Every URL on this
+  // contract is rendered as an `href` by an article component, and the values
+  // originate in search-result text nobody controls, so the schema is the
+  // gate rather than the assembler that happens to write them.
+  const hostile = ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', 'file:///etc/passwd'];
+  for (const url of hostile) {
+    const cases = [
+      { launch: { ...launchOutput.launch, sourceUrl: url } },
+      { claims: [{ ...launchOutput.claims[0], sourceUrl: url }] },
+      { claims: [{ ...launchOutput.claims[0], claimed: { value: '3,000 nits', by: 'Apple', sourceUrl: url } }] },
+      { sources: [{ ...launchOutput.sources[0], url }] },
+    ];
+    for (const override of cases) {
+      const result = blogFrontmatterSchema.safeParse({ ...launchOutput, ...override });
+      assert.equal(result.success, false, `${url} in ${Object.keys(override)[0]}`);
+    }
+  }
+});
+
 test('a post carrying none of the evidence fields still validates', () => {
   const parsed = blogFrontmatterSchema.parse(assemblerOutput);
   assert.equal(parsed.claims, undefined);

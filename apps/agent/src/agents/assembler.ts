@@ -15,6 +15,7 @@ import {
   goLinkSearchTerms,
   goSlugsIn,
   HOME_CURRENCY,
+  isWebUrl,
   MONETISED_INTENTS,
   pickCover,
   validateArticle,
@@ -216,7 +217,10 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
     frontmatter.launch = {
       product: launch.product || (picks[0]?.name ?? brief.seoTitle),
       releaseDate: launch.releaseDate,
-      ...(launch.sourceUrl ? { sourceUrl: launch.sourceUrl } : {}),
+      // Re-checked rather than trusted: this dossier may have been filed
+      // before the researcher gated the scheme, and the notice renders it as
+      // an outbound link. A bad link is dropped; the release date stands.
+      ...(isWebUrl(launch.sourceUrl ?? '') ? { sourceUrl: launch.sourceUrl } : {}),
     };
   }
   // Stated on every piece this pipeline assembles, including - especially -

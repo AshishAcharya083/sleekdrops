@@ -689,6 +689,25 @@ test('an unrecognised acquisition is no review-unit record, not a guessed one', 
   });
 });
 
+test('a launch link the browser would not follow is dropped, the date is not', () => {
+  // The notice renders this one as an outbound link, and the value is model
+  // output over search-result text nobody controls - so a `javascript:` or
+  // `data:` URL would be a click-to-execute href on a published page.
+  for (const hostile of ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', 'not a url']) {
+    const launch = normaliseDossier({
+      launch: { product: 'iPhone 18 Pro', releaseDate: '2026-09-11', sourceUrl: hostile },
+    }).launch;
+    assert.equal(launch?.releaseDate, '2026-09-11', 'the release date is the record and survives');
+    assert.equal(launch?.sourceUrl, '', `${hostile} is not a link a reader can be given`);
+  }
+  assert.equal(
+    normaliseDossier({
+      launch: { product: 'iPhone 18 Pro', releaseDate: '2026-09-11', sourceUrl: ' https://www.apple.com/au/newsroom/ ' },
+    }).launch?.sourceUrl,
+    'https://www.apple.com/au/newsroom/',
+  );
+});
+
 test('a release date the source only gave to the year is no launch record', () => {
   // The page tells a reader the day a product went on sale and counts the
   // window from it; "2026" can do neither, and the frontmatter schema would

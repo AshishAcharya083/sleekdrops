@@ -7,7 +7,7 @@
 // actually worth, in code, the same way every time. Nothing here calls an LLM
 // or the network, which is also what makes it testable.
 import { claimTier, isUs } from './claims.js';
-import { parseAmazonUrl, slugify } from './contract.js';
+import { isWebUrl, parseAmazonUrl, slugify } from './contract.js';
 import type {
   BuyerExclusion,
   ComplaintKind,
@@ -524,13 +524,18 @@ export function normaliseDossier(raw: unknown): ResearchDossier {
   // is still open - so a partial one is no launch record at all rather than a
   // record the page then has to hedge around.
   const releaseDate = normaliseDate(launchRaw.releaseDate);
+  // The page links this one, so the scheme is checked here rather than
+  // trusted: the value is model output over search-result text, and a
+  // `javascript:` href on a published page is the whole of the damage. The
+  // date is the record; the link is the part that is allowed to be missing.
+  const launchSource = text(launchRaw.sourceUrl);
   const launch: LaunchRelease | null =
     releaseDate === null || !/^\d{4}-\d{2}-\d{2}$/.test(releaseDate)
       ? null
       : {
           product: text(launchRaw.product),
           releaseDate,
-          sourceUrl: text(launchRaw.sourceUrl),
+          sourceUrl: isWebUrl(launchSource) ? launchSource : '',
         };
 
   const unitRaw = asRecord(d.reviewUnit);

@@ -259,3 +259,35 @@ test('claims, the launch date and the review unit survive both JSONB columns', {
   assert.equal(sources.at(-1)?.measured, '1,684 nits');
   assert.equal(sources.at(-1)?.conditions, 'spectrophotometer, 10% APL');
 });
+
+test('a launch link that is not http(s) never reaches the stored frontmatter', { skip }, async () => {
+  // The dossier in this column is synthesised from search-result text nobody
+  // controls, and the launch notice renders its sourceUrl as an outbound
+  // link - so a `javascript:` URL that reached the page would be a
+  // click-to-execute href. The date is the record and still publishes.
+  const [inserted] = await q<ArticleRow>(
+    `INSERT INTO articles (title, category, post_type, stage, status, research, outline, draft_md)
+     VALUES ($1, 'Tech', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
+    [
+      'iPhone 18 Pro, four days in',
+      JSON.stringify({
+        ...launchResearch,
+        launch: { ...launchResearch.launch, sourceUrl: 'javascript:alert(document.cookie)' },
+      }),
+      JSON.stringify({ ...brief, slug: `iphone-18-pro-${randomUUID().slice(0, 8)}` }),
+      '## The screen\n\nThe [iPhone 18 Pro](/go/iphone-18-pro) ships on 11 September.[1]',
+    ],
+  );
+  const [article] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [inserted.id]);
+  const assembled = await runAssembler(article);
+  await q('UPDATE articles SET frontmatter = $2 WHERE id = $1', [
+    article.id,
+    JSON.stringify(assembled.frontmatter),
+  ]);
+  const [stored] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [article.id]);
+
+  assert.deepEqual(stored.frontmatter?.launch, {
+    product: 'iPhone 18 Pro',
+    releaseDate: '2026-09-11',
+  });
+});

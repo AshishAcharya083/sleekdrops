@@ -654,6 +654,23 @@ test('the tier-labelled claims, the launch date and the provenance all reach fro
   assert.deepEqual(frontmatter.reviewUnit, { acquisition: 'none' });
 });
 
+test('a launch link that is not a web URL is dropped, and the article still assembles', async () => {
+  // The dossier in D1 may have been filed before the researcher gated this
+  // field, and the launch notice renders it as an outbound link - so the
+  // assembler checks it again rather than failing the whole article on the
+  // schema (or worse, publishing a `javascript:` href).
+  const { frontmatter } = await runAssembler(
+    article({
+      research: {
+        ...launchResearch,
+        launch: { ...launchResearch.launch, sourceUrl: 'javascript:alert(document.cookie)' },
+      } as never,
+      draft_md: launchDraft,
+    }),
+  );
+  assert.deepEqual(frontmatter.launch, { product: 'iPhone 18 Pro', releaseDate: '2026-09-11' });
+});
+
 test('the measuring source joins the list with its protocol, after the facts', async () => {
   const { frontmatter } = await runAssembler(
     article({ research: launchResearch as never, draft_md: launchDraft }),
