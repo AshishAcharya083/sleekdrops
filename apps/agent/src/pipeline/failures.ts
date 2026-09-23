@@ -105,9 +105,11 @@ function describe(err: unknown): string {
 }
 
 export function classifyFailure(err: unknown): FailureVerdict {
-  // The evidence gate has already spent its own bounded re-sweep before it
-  // throws, so a stage-level retry would buy nothing and cost a full research
-  // pass. It is terminal by construction, whatever its message happens to say.
+  // The gate is a deterministic count of what the research stage gathered
+  // against a fixed bar. A stage-level retry re-runs that identical gather and
+  // hands the same check the same kind of dossier, with no guarantee of a
+  // different result - and a research pass is the most expensive stage there
+  // is. So it is terminal, whatever its message happens to say.
   // The name is checked alongside the class because that is what the gate
   // guarantees to keep; `instanceof` alone would quietly stop matching if the
   // error ever crossed a second copy of the module.

@@ -87,7 +87,7 @@ test('an engine that hangs or falls over is transient', () => {
   }
 });
 
-test('the evidence gate is genuine - it has already spent its own re-sweep', () => {
+test('the evidence gate is genuine - another gather reaches the same count', () => {
   const gate = new EvidenceGateError({
     pass: false,
     postType: 'guide',
