@@ -1,6 +1,7 @@
 // SleekDrops agent platform entrypoint: wait for db → migrate → recover → serve + work.
 import { migrate } from './db/migrate.js';
 import { databaseConnectionHint, isDatabaseConnectionError, waitForDatabase } from './db/pool.js';
+import { startDistributionWorker } from './distribution/worker.js';
 import { startScheduler } from './pipeline/scheduler.js';
 import { startScoutWorker } from './pipeline/scout.js';
 import { recoverStranded, startWorker } from './pipeline/worker.js';
@@ -16,6 +17,7 @@ async function main(): Promise<void> {
   startWorker();
   startScoutWorker();
   startScheduler();
+  startDistributionWorker();
 }
 
 main().catch((err) => {
