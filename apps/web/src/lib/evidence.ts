@@ -73,6 +73,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** The gap at which a claimed and a measured figure are reported as disagreeing. */
 export const VARIANCE_THRESHOLD = 0.1;
 
+/** The threshold as the page prints it, so the copy and the maths are one number. */
+export const VARIANCE_THRESHOLD_LABEL = `${Math.round(VARIANCE_THRESHOLD * 100)}%`;
+
 /** One claim, with everything the page needs to print it already resolved. */
 export interface ClaimEntry extends ClaimData {
   /** 'We measured it', 'Manufacturer claim' - the chip beside the figure. */
@@ -147,6 +150,23 @@ export function variance(claimed: string, measured: string): number | null {
 export function varianceLabel(gap: number): string {
   const percent = Math.round(gap * 100);
   return `${percent > 0 ? '+' : ''}${percent}%`;
+}
+
+/**
+ * What the gap column says when there is no percentage to print, which is two
+ * different facts and never one sentence.
+ *
+ * A gap under the threshold means the two figures were compared and agree. A
+ * null variance means they were never comparable at all - "All-day battery"
+ * against a measured "6 h 10 min" has no percentage between it - and printing
+ * "they agree within 10%" over that pair is the page asserting in its own
+ * voice a consistency it never computed, which launders the maker's phrase as
+ * consistent with a measurement. So the incomparable case says what it is.
+ */
+export function gapNote(entry: { variance: number | null }): string {
+  return entry.variance === null
+    ? 'These two figures are not directly comparable, so there is no gap to report. Each is shown above with who produced it and under what conditions.'
+    : `The two figures agree within ${VARIANCE_THRESHOLD_LABEL}, so there is no gap worth reporting.`;
 }
 
 /**
@@ -250,6 +270,19 @@ export function claimsByTier(entries: readonly ClaimEntry[], tier: ClaimTier): C
 /** The tiers this page actually uses, strongest first. Empty tiers are not drawn. */
 export function tiersPresent(entries: readonly ClaimEntry[]): ClaimTier[] {
   return CLAIM_TIER_ORDER.filter((tier) => entries.some((entry) => entry.tier === tier));
+}
+
+/**
+ * The sentence every launch notice opens with, in the tense the release date
+ * actually calls for.
+ *
+ * A pre-order page is inside the launch window and carries the notice, but its
+ * release date has not happened yet: "went on sale on 14 October" beside a
+ * "Pre-order" chip is the notice contradicting itself, on the one page whose
+ * subject is getting provenance right.
+ */
+export function onSaleSentence(product: string, released: string, daysSinceRelease: number): string {
+  return `${product} ${daysSinceRelease < 0 ? 'goes' : 'went'} on sale on ${released}.`;
 }
 
 /** Where a product is in its launch window. */

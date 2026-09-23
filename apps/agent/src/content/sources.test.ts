@@ -188,3 +188,63 @@ test('a post with no claims produces exactly the list it always did', () => {
   ];
   assert.deepEqual(articleSources(facts), articleSources(facts, []));
 });
+
+// ── Cohort raters, which are never a tested claim ────────────────────────────
+// A Canstar Blue star rating is a brand satisfaction panel and a CHOICE score
+// covers the cohort CHOICE tested. Either one filed as the expert stratum
+// would be shown to a reader under "Independent testing", beside a measured
+// figure, as evidence about a model neither of them measured.
+
+const canstarClaim = {
+  metric: 'Owner satisfaction',
+  measuredValue: '4 out of 5 stars',
+  measuredBy: 'Canstar Blue',
+  conditions: null,
+  measuredOn: '2026-06',
+  measuredSourceUrl: 'https://www.canstarblue.com.au/phones/mobile-phones',
+  withdrawnValue: null,
+};
+
+test('a cohort rater cited only in the claims is an aggregator row, carrying no measurement', () => {
+  const [source] = articleSources([], [canstarClaim]);
+
+  assert.equal(source.publisher, 'Canstar Blue');
+  assert.equal(source.tier, 'aggregator', 'a brand survey is never the expert stratum');
+  assert.equal(source.measured, undefined, 'a rating is not a measurement of the model on the page');
+  assert.equal(source.metric, undefined);
+});
+
+test('a cohort rater the facts already cite keeps its row and gains no measured figure', () => {
+  const [source] = articleSources(
+    [
+      {
+        fact: 'Rated 4 out of 5 for satisfaction.',
+        sourceUrl: 'https://www.canstarblue.com.au/phones/mobile-phones',
+        tier: 'aggregator' as const,
+        date: '2026-06',
+        publisher: 'Canstar Blue',
+      },
+    ],
+    [canstarClaim],
+  );
+
+  assert.equal(source.tier, 'aggregator');
+  assert.equal(source.measured, undefined);
+});
+
+test('a CHOICE cohort score is an aggregator row, the same thing the claim is labelled', () => {
+  const [source] = articleSources(
+    [],
+    [
+      {
+        ...canstarClaim,
+        measuredBy: 'CHOICE',
+        measuredSourceUrl: 'https://www.choice.com.au/phones/best-phones',
+        measuredValue: '78/100',
+      },
+    ],
+  );
+
+  assert.equal(source.tier, 'aggregator');
+  assert.equal(source.measured, undefined);
+});

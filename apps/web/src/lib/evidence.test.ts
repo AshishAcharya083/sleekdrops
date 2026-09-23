@@ -18,7 +18,9 @@ import {
   claimsByTier,
   EVIDENCE_PANEL_ID,
   evidenceAnchor,
+  gapNote,
   methodLinkLabel,
+  onSaleSentence,
   evidenceState,
   launchStatus,
   LAUNCH_WINDOW_DAYS,
@@ -110,6 +112,28 @@ test('a gap is only reported past the threshold this site publishes', () => {
   assert.equal(close.varianceShown, false, 'a small difference between honest methods is not an accusation');
 });
 
+test('the gap column never claims an agreement it did not compute', () => {
+  // "All-day battery" against a measured figure has no percentage between it.
+  // Printing "they agree within 10%" over that pair would launder the maker's
+  // phrase as consistent with a measurement nobody compared it to.
+  const incomparable = toClaimEntries([
+    {
+      ...measuredByGsm,
+      value: '6 h 10 min',
+      claimed: { value: 'All-day battery', by: 'Apple' },
+    },
+  ])[0];
+  assert.equal(incomparable.variance, null);
+  assert.equal(incomparable.varianceShown, false);
+  assert.match(gapNote(incomparable), /not directly comparable/);
+  assert.doesNotMatch(gapNote(incomparable), /agree within/);
+
+  const close = toClaimEntries([
+    { ...measuredByGsm, value: '28 h', claimed: { value: '29 h', by: 'Apple' } },
+  ])[0];
+  assert.equal(gapNote(close), 'The two figures agree within 10%, so there is no gap worth reporting.');
+});
+
 test('two figures in different units are not compared at all', () => {
   assert.equal(variance('29 h', '1,684 nits'), null);
   assert.equal(variance('A+', '31 hours'), null);
@@ -166,6 +190,24 @@ test('a pre-order piece is inside the window too', () => {
   assert.equal(status.state, 'awaiting');
   assert.equal(status.daysSinceRelease, -10);
   assert.equal(status.open, true);
+});
+
+test('a release still ahead of us is written in the tense it deserves', () => {
+  // The chip beside this sentence reads "Pre-order"; "went on sale on 14
+  // October" under it is the notice contradicting itself about the one fact
+  // the whole notice is reasoned from.
+  assert.equal(
+    onSaleSentence('Nova Watch 2', 'October 14, 2026', launchStatus(launch, [], day(-10)).daysSinceRelease),
+    'Nova Watch 2 goes on sale on October 14, 2026.',
+  );
+  assert.equal(
+    onSaleSentence('iPhone 18 Pro', 'September 11, 2026', 0),
+    'iPhone 18 Pro went on sale on September 11, 2026.',
+  );
+  assert.equal(
+    onSaleSentence('iPhone 18 Pro', 'September 11, 2026', 4),
+    'iPhone 18 Pro went on sale on September 11, 2026.',
+  );
 });
 
 test('the review-unit line names the supplier and what happened to the unit', () => {

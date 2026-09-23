@@ -1,5 +1,5 @@
 ---
-import { citationLabel, launchStatus, nameList } from '@lib/evidence';
+import { citationLabel, launchStatus, nameList, onSaleSentence } from '@lib/evidence';
 import { formatLong, formatMonth } from '@lib/format';
 import { citationRel, hostLabel } from '@lib/sources';
 import type { ClaimData, LaunchData } from '../../content/config';
@@ -31,6 +31,10 @@ export interface Props {
 const { launch, claims = [], updatesHref = '/how-we-research' } = Astro.props;
 const status = launchStatus(launch, claims);
 const released = formatLong(status.releaseDate);
+// A pre-order page is inside the window with its release date still ahead of
+// it, so the sentence is written in the tense the date calls for rather than
+// contradicting the "Pre-order" chip beside it.
+const onSale = onSaleSentence(launch.product, released, status.daysSinceRelease);
 const dayLabel =
   status.daysSinceRelease < 0
     ? 'Pre-order'
@@ -62,8 +66,7 @@ const statusLabel =
     {status.state === 'awaiting' && (
       <>
         <h2 id="launch-notice-title">
-          {launch.product} went on sale on {released}. No independent lab has
-          measured one yet.
+          {onSale} No independent lab has measured one yet.
         </h2>
         <p>
           That is not an oversight, it is the calendar. No Australian lab result
@@ -87,8 +90,7 @@ const statusLabel =
     {status.state === 'first-result' && (
       <>
         <h2 id="launch-notice-title">
-          {launch.product} went on sale on {released}. The first independent
-          measurements are in.
+          {onSale} The first independent measurements are in.
         </h2>
         <p>
           {testers} {status.independentBy.length === 1 ? 'has' : 'have'} published
@@ -106,8 +108,7 @@ const statusLabel =
     {status.state === 'closed' && (
       <>
         <h2 id="launch-notice-title">
-          {launch.product} went on sale on {released}. Its launch window has
-          closed.
+          {onSale} Its launch window has closed.
         </h2>
         <p>
           {status.independentBy.length > 0

@@ -751,3 +751,48 @@ test('a brand survey attached to a model it does not cover fails assembly', asyn
     /never evidence about a model it does not cover/,
   );
 });
+
+test('a cohort rating the page may show still lands as an aggregator source, with no measured figure', async () => {
+  // The rating covers this model, so it ships - as context. What it may not
+  // become is an expert row carrying a measured figure: the panel would file
+  // it under "Independent testing" while the claim beside it says it is not a
+  // measurement of this model at all.
+  const surveyed = {
+    ...launchResearch,
+    claims: [
+      ...launchResearch.claims,
+      {
+        ...launchResearch.claims[0],
+        metric: 'Owner satisfaction',
+        claimedValue: null,
+        claimedBy: null,
+        claimedSourceUrl: null,
+        claimedConditions: null,
+        measuredValue: '4 out of 5 stars',
+        measuredBy: 'Canstar Blue',
+        conditions: null,
+        measuredOn: '2026-06',
+        measuredSourceUrl: 'https://www.canstarblue.com.au/phones/apple/',
+        withdrawnValue: null,
+        covers: 'Apple phone owners surveyed in 2026, iPhone 18 Pro among them',
+      },
+    ],
+  };
+
+  const { frontmatter } = await runAssembler(
+    article({ research: surveyed as never, draft_md: launchDraft }),
+  );
+
+  const survey = frontmatter.sources.find((source) => source.publisher === 'Canstar Blue');
+  assert.deepEqual(survey, {
+    url: 'https://www.canstarblue.com.au/phones/apple/',
+    publisher: 'Canstar Blue',
+    date: '2026-06',
+    tier: 'aggregator',
+  });
+  assert.equal(
+    frontmatter.claims.find((claim) => claim.attribution === 'Canstar Blue')?.tier,
+    'context',
+    'the claim and its source row say the same thing about the same rating',
+  );
+});

@@ -3,10 +3,11 @@ import {
   citationLabel,
   evidenceAnchor,
   evidenceState,
+  gapNote,
   methodLinkLabel,
   toClaimEntries,
   varianceLabel,
-  VARIANCE_THRESHOLD,
+  VARIANCE_THRESHOLD_LABEL,
 } from '@lib/evidence';
 import { citationRel } from '@lib/sources';
 import type { ClaimData, SourceData } from '../../content/config';
@@ -46,7 +47,6 @@ export interface Props {
 
 const { claims = [], sources = [], title = 'What each number rests on' } = Astro.props;
 const entries = toClaimEntries(claims);
-const thresholdLabel = `${Math.round(VARIANCE_THRESHOLD * 100)}%`;
 // The panel is what "How we checked" scrolls to, and it draws nothing on a
 // post written before any of this was recorded. The link is offered only when
 // there is something to land on - an anchor with no target fails the build,
@@ -60,7 +60,7 @@ const panelShown = evidenceState(entries, sources) !== 'legacy';
       <h2 id="claim-trail-title">{title}</h2>
       <p class="ct-intro">
         Every figure below says who produced it. Where the maker's number and a
-        measured one disagree by more than {thresholdLabel}, both are shown with
+        measured one disagree by more than {VARIANCE_THRESHOLD_LABEL}, both are shown with
         the conditions each was taken under.
       </p>
     </div>
@@ -109,10 +109,7 @@ const panelShown = evidenceState(entries, sources) !== 'legacy';
                     </p>
                   </>
                 ) : (
-                  <p class="sc-why">
-                    The two figures agree within {thresholdLabel}, so there is no
-                    gap worth reporting.
-                  </p>
+                  <p class="sc-why">{gapNote(entry)}</p>
                 )}
               </div>
             </div>
