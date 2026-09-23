@@ -73,6 +73,14 @@ export interface RenderedPayload {
   /** The destination, UTM-tagged for the placement this item was rendered for. */
   url: string;
   /**
+   * The placement this copy was actually composed for, which is not always the
+   * one that was asked for: a renderer that could not produce an image it is
+   * allowed to upload resolves to 'in_body', where the link preview carries
+   * the post instead. Everything else here - the cue, the tagged url - follows
+   * from this value rather than from the caller's request.
+   */
+  placement: LinkPlacement;
+  /**
    * What to post as the first comment when `placement` is 'first_comment'. A
    * provider with no comment concept ignores it and carries `url` in the body.
    */
@@ -259,4 +267,12 @@ export interface DistributableArticle {
   frontmatter: Record<string, unknown> | null;
   hero_image_url: string | null;
   hero_image_source: HeroImageSource | null;
+  /**
+   * The keyword stage's read of what the search intent is. Present because the
+   * affiliate disclosure is owed on the piece that makes an endorsement and
+   * only on that one, and `MONETISED_INTENTS` is where that is decided.
+   * Optional: an article outlined before the keyword stage existed carries no
+   * plan, and no plan means no disclosure rather than a crash.
+   */
+  keyword_plan?: { intent: string; primaryKeyword?: string } | null;
 }

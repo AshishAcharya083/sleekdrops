@@ -84,7 +84,10 @@ export function taggedUrl(slug: string, provider: string, placement: LinkPlaceme
  * it. The og:title the site renders carries the site name; the gate compares
  * on the article's own title, which is the part a rebuild changes.
  */
-function expectedOpenGraph(article: DistributableArticle): { ogTitle: string; ogImage: string | null } {
+export function expectedOpenGraph(article: DistributableArticle): {
+  ogTitle: string;
+  ogImage: string | null;
+} {
   const frontmatter = article.frontmatter ?? {};
   const title = typeof frontmatter.title === 'string' ? frontmatter.title : article.title;
   const heroImage = typeof frontmatter.heroImage === 'string' ? frontmatter.heroImage : null;
@@ -137,6 +140,7 @@ export function renderPayload(
   return {
     caption,
     url,
+    placement,
     commentText: url,
     ...uploadableImage(article),
     expected: expectedOpenGraph(article),
