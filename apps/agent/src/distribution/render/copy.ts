@@ -151,21 +151,116 @@ export function clamp(text: string, limit: number): string {
 }
 
 /**
+ * Words that end in '.' in the middle of a sentence. Letters only, lower case.
+ *
+ * Product copy is the dialect this is aimed at: a measurement, a price given
+ * as an approximation, a company suffix, a rank.
+ */
+const MID_SENTENCE_ABBREVIATIONS = new Set([
+  'approx',
+  'apt',
+  'assn',
+  'attn',
+  'ave',
+  'blvd',
+  'cf',
+  'co',
+  'corp',
+  'dept',
+  'dr',
+  'ed',
+  'eg',
+  'est',
+  'etc',
+  'fig',
+  'ft',
+  'gen',
+  'ie',
+  'inc',
+  'jr',
+  'lb',
+  'lbs',
+  'llc',
+  'ltd',
+  'max',
+  'min',
+  'mr',
+  'mrs',
+  'ms',
+  'mt',
+  'no',
+  'oz',
+  'pp',
+  'prof',
+  'pt',
+  'rd',
+  'rev',
+  'sq',
+  'sr',
+  'st',
+  'vol',
+  'vs',
+  'wt',
+]);
+
+/** What can open a sentence: a capital, a figure, a price, an opening quote. */
+const SENTENCE_OPENER = /^["'“‘(\[]*[A-Z0-9$£€]/;
+
+/** Words in `text`, for the "is this long enough to be a sentence" test. */
+function wordCount(text: string): number {
+  return text.split(/\s+/).filter((word) => /[A-Za-z0-9]/.test(word)).length;
+}
+
+/**
+ * Whether the terminator `fragment` ends on really ends a sentence, given the
+ * `next` fragment that would follow it.
+ *
+ * A terminator is believed when what precedes it is a plausible sentence and
+ * what follows it opens like one. "Costs approx. $400" and "the U.S. market"
+ * fail both halves of that and stay in one piece.
+ */
+function endsSentence(fragment: string, next: string): boolean {
+  if (wordCount(fragment) < 2) return false;
+  if (!fragment.endsWith('.')) return true;
+
+  const lastToken = /(\S+)$/.exec(fragment)?.[1] ?? '';
+  if (/^(?:[A-Za-z]\.)+$/.test(lastToken)) return false;
+  if (MID_SENTENCE_ABBREVIATIONS.has(lastToken.replace(/[^A-Za-z]/g, '').toLowerCase())) {
+    return false;
+  }
+
+  return SENTENCE_OPENER.test(next);
+}
+
+/**
  * `text` cut into sentences at a terminator the text really ends a sentence
- * with: one followed by whitespace or by the end of the line.
+ * with: one followed by whitespace or by the end of the line, with a plausible
+ * sentence on either side of it.
  *
  * A bare '.' is not enough. A price ("$1,299.99"), a spec ("2.4 GHz") or an
- * abbreviation would end the sentence inside the number, and on this rung the
- * result is posted with nothing downstream to catch it - a headline cut to
- * "$1,299" understates the price, which is the misrepresentation the
- * price-currency house block exists to keep the site out of. Text with no
- * terminator of that kind is one sentence: the whole of it.
+ * abbreviation ("costs approx. $400") would end the sentence inside the fact,
+ * and on this rung the result is posted with nothing downstream to catch it -
+ * a headline cut to "$1,299" understates the price and one cut to "costs
+ * approx." drops it, and the first is the misrepresentation the price-currency
+ * house block exists to keep the site out of. A boundary that fails the test
+ * is not one: the piece after it is joined back on. Text with no terminator we
+ * believe is one sentence: the whole of it.
  */
 function sentences(text: string): string[] {
-  return text
+  const pieces = text
     .split(/(?<=[.!?])(?=\s)/)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence !== '');
+    .map((piece) => piece.trim())
+    .filter((piece) => piece !== '');
+
+  return pieces.reduce<string[]>((built, piece) => {
+    const previous = built[built.length - 1];
+    if (previous !== undefined && !endsSentence(previous, piece)) {
+      built[built.length - 1] = `${previous} ${piece}`;
+      return built;
+    }
+    built.push(piece);
+    return built;
+  }, []);
 }
 
 /**

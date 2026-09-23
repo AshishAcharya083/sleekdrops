@@ -360,6 +360,33 @@ test('a decimal inside a sentence is not read as the end of it', () => {
   );
 });
 
+test('a terminator with no sentence on both sides of it is not one', () => {
+  // The same rung, and the same cost: a headline cut at "costs approx." is a
+  // fragment that drops the price it was about to give.
+  assert.equal(
+    fallbackHeadline(
+      { title: 'unused', dek: 'The Sony XM6 costs approx. $400 on the high street. Buy it now.' },
+      HEADLINE_MAX_CHARS,
+    ),
+    'The Sony XM6 costs approx. $400 on the high street.',
+  );
+  assert.equal(
+    fallbackHeadline(
+      { title: 'unused', dek: 'The U.S. price is $549 until Friday. Buy it now.' },
+      HEADLINE_MAX_CHARS,
+    ),
+    'The U.S. price is $549 until Friday.',
+  );
+  assert.equal(
+    fallbackHeadline(
+      { title: 'unused', dek: 'Wow. The $399 Bose is the one to buy. And it ships today.' },
+      HEADLINE_MAX_CHARS,
+    ),
+    'Wow. The $399 Bose is the one to buy.',
+    'a fragment too short to stand alone carries on into the sentence it opens',
+  );
+});
+
 test('a title that claims someone here used the product is no fallback either', () => {
   // A title is guarded by prompt instruction only, and this rung posts without
   // a further check, so it is measured like everything else on the way out.
