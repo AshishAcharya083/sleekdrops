@@ -27,11 +27,11 @@ export interface OfferPresentation {
   dated: boolean;
   /** "RRP A$2,899" or, for a live figure, "A$2,899". */
   priceLabel: string;
-  /** "as at 18 September 2026", or null when the price is live. */
+  /** "as at September 18, 2026", or null when the price is live. */
   stamp: string | null;
   /** The observed date as YYYY-MM-DD, for the <time datetime> attribute. */
   stampDate: string | null;
-  /** "Ships 30 September 2026 — charged on dispatch", or null. */
+  /** "Ships October 2, 2026 — you are charged on dispatch, not today", or null. */
   releaseNote: string | null;
   releaseDate: string | null;
   /** "Check current price at Amazon AU" where we know the merchant. */
