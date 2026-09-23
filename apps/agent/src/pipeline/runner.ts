@@ -6,6 +6,7 @@ import { MONETISED_INTENTS } from '../content/contract.js';
 import { withDiscoveredProducts } from '../content/evidence.js';
 import { describeShapeSelection } from '../content/shapes.js';
 import { getSetting, q } from '../db/pool.js';
+import { describeEnqueue, enqueuePublishedArticle } from '../distribution/queue.js';
 import { withDeadline } from '../lib/deadline.js';
 import { createLogger } from '../lib/log.js';
 import { describeLlmCall, newLlmCallTrace, withLlmCallTrace } from '../llm/callTrace.js';
@@ -387,9 +388,15 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
     }
     case 'image': {
       const existing = article.frontmatter ?? {};
+      // Every path that settles a hero also records where it came from.
+      // Provenance is a rights fact, not a note: distribution may upload an
+      // image we generated to a social network and may not upload a
+      // photograph the agent found on someone else's site, and that decision
+      // cannot be made by parsing this stage's summary line.
       if (article.hero_image_url) {
         // The operator dropped a file in the admin panel; the assembler has
         // already stamped it into frontmatter. Searching would be waste.
+        await updateArticle(article, { hero_image_source: 'operator' });
         summary = 'operator-supplied hero image — image search skipped';
       } else if (existing.heroImage) {
         summary = 'hero image already set — keeping it';
@@ -402,6 +409,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
               heroImage: image.heroImage,
               heroAlt: image.heroAlt ?? undefined,
             }),
+            hero_image_source: image.source,
           });
         }
         summary = image.summary;
@@ -421,7 +429,14 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
           article.topic_id,
         ]);
       }
-      summary = `${result.slug} → D1 as '${result.d1Status}'${result.dispatched ? ', site rebuild dispatched' : ''}`;
+      // Social posting is enqueued, never sent from here. This stage is
+      // re-entered by a republish, by a retry-from-stage and by the editorial
+      // feedback loop, so a send would fire again for the same slug every
+      // time; the queue is unique on (slug, channel) and every later pass is a
+      // no-op. A draft enqueues nothing, on the same reading of the publish
+      // mode that keeps `dispatchContentUpdated` from firing for one.
+      const distribution = await enqueuePublishedArticle(article, { d1Status: result.d1Status });
+      summary = `${result.slug} → D1 as '${result.d1Status}'${result.dispatched ? ', site rebuild dispatched' : ''}; ${describeEnqueue(distribution)}`;
       next = { stage: 'done', status: 'done' };
       break;
     }

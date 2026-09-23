@@ -249,6 +249,45 @@ stopped.
 - **Publishing**: gated on your approval by default (`publish_mode=approval`);
   flip to `auto` for hands-off publishing or `draft` to stage in D1 only.
 
+## Social distribution
+
+Publishing an article queues it for every connected social channel instead of
+posting inline. Publish is re-entered by `/api/articles/:id/republish`, by a
+retry-from-stage and by the editorial feedback loop, so an inline post would
+fire again for the same slug every time; `distribution_queue` is unique on
+`(slug, channel_connection_id)`, which makes the second pass and every pass
+after it a no-op. A piece parked in D1 as a draft enqueues nothing, on the same
+reading of `publish_mode` that keeps the rebuild dispatch from firing.
+
+- **Readiness gate.** An item is handed to a provider only once
+  `SITE_URL/blog/<slug>` returns 200 and serves the `og:title` and `og:image`
+  the post was rendered against. The site is a static build: for about 90
+  seconds after publish that URL is a 404 or the previous piece, and the link
+  preview a network fetches first is the one it caches. The gate re-checks
+  every 15s and gives up after 10 minutes, which fails the item rather than
+  posting it.
+- **Retries.** Bounded at five provider calls with exponential backoff (60s
+  doubling to an hour) and a terminal `failed` state. An attempt is spent
+  immediately before the call, so a worker that dies mid-post cannot spend the
+  same one twice. A provider may throw `PermanentProviderError` to fail now.
+- **Providers.** A network is one file implementing `SocialProvider`
+  (`authenticate`, `refreshToken`, `post`, `fetchInsights`) that registers
+  itself in `distribution/providers.ts`. Nothing in the queue, the worker or
+  the schema names a network, and the worker only claims work for a provider
+  that is actually registered.
+- **Credentials.** A connection stores a `token_ref` - the *name* of a secret -
+  resolved at post time from the `channel_credentials` settings row, else from
+  the environment variable that name maps to (`facebook-page-token` →
+  `FACEBOOK_PAGE_TOKEN`), which is how Secret Manager arrives on Cloud Run. No
+  token value is stored in Postgres by this code, written to `last_error` or
+  logged, and `/api/settings` never returns the credentials row. Token expiry
+  staleness is derived in `distribution/channels.ts` and reported by
+  `GET /api/distribution`.
+- **Hero provenance.** `articles.hero_image_source` records `operator`, `found`
+  or `generated` at all three hero paths. Only a hero we generated is offered
+  to a provider for native upload: uploading grants the network a sublicensable
+  licence, which is not ours to grant in a photograph the image agent found.
+
 ## State model (PostgreSQL)
 
 - `topics` — scout suggestions; `suggested → approved/rejected` (unique on
@@ -260,6 +299,13 @@ stopped.
 - `settings` — publish_mode, per-agent models, revision cap, worker toggle
 - `scout_runs` — durable topic-search jobs (`queued → running → done/failed`);
   heartbeat recovery re-queues work abandoned by a recycled instance
+- `channel_connections` — one connected social account per row: provider,
+  external account id, secret *references*, expiry, status
+- `distribution_queue` — one item per (published slug, channel), carrying the
+  rendered payload, placement, schedule, attempts and the remote post id;
+  unique on `(slug, channel_connection_id)`
+- `distribution_metrics` — aggregate impressions/clicks/reactions per posted
+  item, joined back to the placement its row used
 
 The workers claim queued articles and topic searches atomically, run the
 corresponding agent, record the session, and route the work onward. Stranded

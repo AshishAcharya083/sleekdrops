@@ -74,6 +74,17 @@ export const config = {
     repo: env('GITHUB_REPO', 'AshishAcharya083/sleekdrops'),
   },
 
+  /**
+   * Social distribution. The site URL is where the readiness gate looks for a
+   * published slug before an item is handed to a provider, so it must be the
+   * origin the rebuild actually deploys to - the same default apps/web's
+   * astro.config.mjs carries, overridable with SITE_URL for a preview.
+   */
+  distribution: {
+    siteUrl: env('SITE_URL', 'https://sleekdrops.com').replace(/\/+$/, ''),
+    pollMs: positiveNumber('DISTRIBUTION_POLL_MS', 15_000),
+  },
+
   adminToken: env('ADMIN_TOKEN'),
   port: Number(env('PORT', '8787')),
   workerConcurrency: Number(env('WORKER_CONCURRENCY', '2')),
