@@ -83,6 +83,14 @@ test('no tab explains a failure as "API unreachable" any more', () => {
 test('every polling tab is covered by that guarantee', () => {
   assert.deepEqual(
     pollingPages.map((p) => p.name).sort(),
-    ['Offers.tsx', 'Overview.tsx', 'Pipeline.tsx', 'Published.tsx', 'Sessions.tsx', 'Topics.tsx'],
+    [
+      'Channels.tsx',
+      'Offers.tsx',
+      'Overview.tsx',
+      'Pipeline.tsx',
+      'Published.tsx',
+      'Sessions.tsx',
+      'Topics.tsx',
+    ],
   );
 });

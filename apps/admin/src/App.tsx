@@ -5,10 +5,11 @@ import { Overview } from './pages/Overview';
 import { Topics } from './pages/Topics';
 import { Pipeline } from './pages/Pipeline';
 import { Published } from './pages/Published';
+import { Channels } from './pages/Channels';
 import { Sessions } from './pages/Sessions';
 import { SettingsPage } from './pages/Settings';
 
-const TABS = ['Overview', 'Topics', 'Pipeline', 'Published', 'Sessions', 'Settings'] as const;
+const TABS = ['Overview', 'Topics', 'Pipeline', 'Published', 'Channels', 'Sessions', 'Settings'] as const;
 type Tab = (typeof TABS)[number];
 
 /** The tab the panel opens on. main.tsx boots analytics with it before render. */
@@ -92,6 +93,7 @@ export function App() {
         <Pipeline openArticleId={runToOpen} onOpened={() => setRunToOpen(null)} />
       )}
       {tab === 'Published' && <Published />}
+      {tab === 'Channels' && <Channels />}
       {tab === 'Sessions' && <Sessions />}
       {tab === 'Settings' && <SettingsPage />}
     </div>

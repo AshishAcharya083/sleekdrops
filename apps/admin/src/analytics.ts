@@ -46,6 +46,8 @@ export const EVENTS = {
   publishedPostDeleted: 'Published Post Deleted',
   publishedHeroUpdated: 'Published Post Hero Updated',
   settingsSaved: 'Settings Saved',
+  channelActioned: 'Channel Actioned',
+  distributionItemActioned: 'Distribution Item Actioned',
   connectionSettingChanged: 'Connection Setting Changed',
 } as const;
 

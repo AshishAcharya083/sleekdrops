@@ -48,7 +48,7 @@ Fired on boot and on every tab change.
 
 | Property | Type | Notes |
 |---|---|---|
-| `tab` | string | `Overview`, `Topics`, `Pipeline`, `Published`, `Sessions` or `Settings`. |
+| `tab` | string | `Overview`, `Topics`, `Pipeline`, `Published`, `Channels`, `Sessions` or `Settings`. |
 | `path` | string | The SPA's path - constant in practice, kept for parity with the website. |
 
 Owning screen: `App.tsx`.
@@ -207,6 +207,34 @@ Platform settings were written. Shape only - which engines are configured and wh
 | `claude_token_set` | boolean | Whether a Claude token is present. **Never the token.** |
 
 Owning screen: `pages/Settings.tsx`.
+
+### Channel Actioned
+
+A social channel was connected, reconnected, disconnected, had its token replaced, or had its default link placement changed.
+**Never carries the token, the secret name or the account id** - a pasted token is reported only as `value_present`.
+
+| Property | Type | Notes |
+|---|---|---|
+| `action` | string | `connect`, `reconnect`, `replace_token`, `disconnect` or `placement_default`. |
+| `provider` | string | The network, e.g. `facebook`. |
+| `status` | string | The connection's status afterwards: `active`, `disabled` or `needs_reauth`. |
+| `placement` | string | `placement_default` only: `first_comment` or `in_body`. |
+| `value_present` | boolean | Connect/replace only: whether a token was pasted (false when a mounted secret was named). |
+
+Owning screen: `pages/Channels.tsx`.
+
+### Distribution Item Actioned
+
+An operator moved a queue item: a manual retry of a failed item, a manual release of a held one, or a per-item placement override.
+
+| Property | Type | Notes |
+|---|---|---|
+| `action` | string | `retry`, `release`, `bulk_retry`, `bulk_release` or `placement`. |
+| `provider` | string | The network the item is queued for. |
+| `count` | number | Items actually moved (a bulk action skips any no longer in the right state). |
+| `placement` | string | `placement` only: the placement chosen. |
+
+Owning screen: `pages/Channels.tsx`.
 
 ### Connection Setting Changed
 

@@ -37,6 +37,8 @@ const ALLOWED_PROPS = new Set<string>([
   // entity dimensions (opaque ids and enums, never operator prose)
   'topic_id',
   'article_id',
+  'provider',
+  'placement',
   'slug',
   'category',
   'post_type',

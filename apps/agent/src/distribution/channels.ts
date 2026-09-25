@@ -7,7 +7,7 @@
 // one), else from the environment, which is where Cloud Run mounts a Secret
 // Manager secret. Nothing in this module returns a token to anything that
 // logs, and no caller may put one in `last_error` - see redactToken.
-import { getSetting, q } from '../db/pool.js';
+import { getSetting, q, setSetting } from '../db/pool.js';
 import { createLogger } from '../lib/log.js';
 import { scrubSecrets } from '../pipeline/stageTimeout.js';
 import type { ChannelConnectionRow, ChannelStatus } from './types.js';
@@ -94,6 +94,100 @@ export function tokenStaleness(expiresAt: string | null, now: Date = new Date())
     stale: remainingMs <= TOKEN_STALE_WINDOW_MS,
     hoursRemaining: Math.floor(remainingMs / 3_600_000),
   };
+}
+
+/**
+ * The staleness ladder the panel escalates through, calmest first: a heads-up
+ * a month out, a warning inside the week the worker already treats as stale,
+ * and a final day that reads the same as expired because it is one missed
+ * working day from it. 'ok' covers a token that never expires or is further
+ * out than a month.
+ */
+export type TokenTier = 'ok' | 'notice' | 'warning' | 'critical' | 'expired';
+
+export const TOKEN_NOTICE_WINDOW_MS = 30 * 24 * 3_600_000;
+export const TOKEN_CRITICAL_WINDOW_MS = 24 * 3_600_000;
+
+export function tokenTier(expiresAt: string | null, now: Date = new Date()): TokenTier {
+  const staleness = tokenStaleness(expiresAt, now);
+  if (staleness.expired) return 'expired';
+  if (!expiresAt) return 'ok';
+  const remainingMs = new Date(expiresAt).getTime() - now.getTime();
+  if (remainingMs <= TOKEN_CRITICAL_WINDOW_MS) return 'critical';
+  if (staleness.stale) return 'warning';
+  if (remainingMs <= TOKEN_NOTICE_WINDOW_MS) return 'notice';
+  return 'ok';
+}
+
+/**
+ * Where the secret a reference names is configured, never what it is. The
+ * admin panel's credential readback is exactly this: present or not, and
+ * whether an operator pasted it or the deployment mounted it.
+ */
+export type CredentialSource = 'panel' | 'environment';
+
+export async function credentialSource(ref: string | null): Promise<CredentialSource | null> {
+  if (!ref) return null;
+  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  if (typeof stored[ref] === 'string' && stored[ref] !== '') return 'panel';
+  return process.env[credentialEnvName(ref)] ? 'environment' : null;
+}
+
+/**
+ * Keep a pasted credential under its reference in the `channel_credentials`
+ * row, which /api/settings never returns. Nothing reads it back out except
+ * `resolveCredential` at post time.
+ */
+export async function storeCredential(ref: string, value: string): Promise<void> {
+  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  await setSetting('channel_credentials', { ...stored, [ref]: value });
+}
+
+/** Forget a pasted credential. A secret mounted in the environment is not ours to remove. */
+export async function removeCredential(ref: string): Promise<void> {
+  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  if (!(ref in stored)) return;
+  const { [ref]: _removed, ...rest } = stored;
+  await setSetting('channel_credentials', rest);
+}
+
+/**
+ * Create the connection for one account on one network, or bring the existing
+ * one back to 'active' with the reference and expiry just established. Keyed on
+ * `channel_connections_account_idx`, so connecting the same Page twice is a
+ * reconnect rather than a second channel posting everything twice.
+ */
+export async function upsertConnection(input: {
+  provider: string;
+  externalAccountId: string;
+  displayName: string | null;
+  tokenRef: string;
+  expiresInSeconds: number | null;
+}): Promise<ChannelConnectionRow> {
+  const [row] = await q<ChannelConnectionRow>(
+    `INSERT INTO channel_connections
+       (provider, external_account_id, display_name, token_ref, expires_at, status)
+     VALUES ($1, $2, $3, $4,
+             CASE WHEN $5::int IS NULL THEN NULL ELSE now() + make_interval(secs => $5) END,
+             'active')
+     ON CONFLICT (provider, external_account_id) DO UPDATE
+       SET display_name = EXCLUDED.display_name, token_ref = EXCLUDED.token_ref,
+           expires_at = EXCLUDED.expires_at, status = 'active', updated_at = now()
+     RETURNING *`,
+    [
+      input.provider,
+      input.externalAccountId,
+      input.displayName,
+      input.tokenRef,
+      input.expiresInSeconds,
+    ],
+  );
+  log.info('channel connected', {
+    channel_connection_id: row.id,
+    provider: row.provider,
+    token_ref: row.token_ref,
+  });
+  return row;
 }
 
 /** Every connection that may currently be enqueued for or posted to. */

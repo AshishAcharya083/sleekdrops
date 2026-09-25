@@ -164,11 +164,12 @@ export async function processItem(
     if (err instanceof ProviderHoldError) {
       // Not a failure: the provider is telling us this item must not go out as
       // it stands and that no retry changes that. It waits in the panel.
-      await holdItem(item.id, message);
+      await holdItem(item.id, message, err.reason);
       log.warn('distribution item held', {
         queue_item_id: item.id,
         slug: item.slug,
         provider: item.provider,
+        hold_reason: err.reason,
         reason: message,
       });
       return 'held';

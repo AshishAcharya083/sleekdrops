@@ -665,3 +665,219 @@ details.attempt .sum-meta { color: var(--muted); font-size: 12px; font-family: v
   .skel, .live { animation: none; }
   button.btn, details.attempt .chev { transition: none; }
 }
+
+/* ══ Channels and the distribution queue ══════════════════════════════════
+   The seventh tab. Built from the tokens above: 1px borders rather than
+   shadow, glyph-plus-word on every status, and one new tier - the calm
+   info-blue banner - for the 30-day rung of the token-expiry ladder, so a
+   heads-up a month out never reads with the urgency of the amber week or the
+   red last day. */
+
+.info-banner {
+  background: rgba(108, 140, 255, 0.12); border: 1px solid rgba(108, 140, 255, 0.4);
+  color: #b9c6ff; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px;
+}
+.info-banner strong { color: var(--text); }
+.banner-row { display: flex; align-items: flex-start; gap: 10px 14px; flex-wrap: wrap; }
+.banner-row .banner-text { flex: 1 1 320px; min-width: 0; overflow-wrap: anywhere; }
+.banner-sub { display: block; margin-top: 6px; font-size: 12px; opacity: 0.85; }
+
+.section-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.section-head h2 {
+  font-size: 14px; color: var(--muted); font-weight: 600; margin: 0; flex: 1 1 auto;
+  text-transform: uppercase; letter-spacing: 0.6px;
+}
+.empty-channels h3 { text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--text); font-weight: 600; }
+.empty-channels p { margin: 6px 0 12px; font-size: 13px; }
+
+/* The channel list: a row per connected account, not a tab per network. */
+.chan-list {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+}
+.chan-row {
+  display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px 14px;
+  align-items: start; padding: 14px; border-bottom: 1px solid var(--border);
+  transition: background 120ms ease-out, border-color 120ms ease-out;
+}
+.chan-row:last-child { border-bottom: none; }
+.chan-row.selected { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent); }
+/* Last known good, not fresh: the fill and the border say so, the text keeps
+   full contrast. Reusable for any row that is showing cached data. */
+.chan-row.stale {
+  background: repeating-linear-gradient(
+    -45deg, var(--panel), var(--panel) 8px, var(--panel-2) 8px, var(--panel-2) 16px
+  );
+  border: 1px dashed var(--border-strong);
+}
+.stale-note { font-size: 12px; margin: 6px 2px 0; }
+.chan-glyph {
+  width: 36px; height: 36px; border-radius: 8px; background: var(--panel-3);
+  border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700; color: var(--text); font-size: 15px;
+}
+.chan-main { min-width: 0; }
+.chan-name {
+  background: none; border: none; padding: 0; color: var(--text); cursor: pointer; font: inherit;
+  font-size: 14px; font-weight: 600; text-align: left; overflow-wrap: anywhere;
+  min-height: 24px;
+}
+.chan-name:hover { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+.chan-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-top: 4px;
+  color: var(--muted); font-size: 12px;
+}
+.chan-meta .mono { overflow-wrap: anywhere; }
+.chan-waiting { color: var(--text); }
+.chan-note { font-size: 12px; margin: 6px 0 0; }
+.chan-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Token expiry chip - the only place the expiry tier is coloured. */
+.tok {
+  display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 6px;
+  font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--border);
+  color: var(--muted); background: var(--panel-2); white-space: nowrap;
+}
+.tok.notice { color: #b9c6ff; border-color: rgba(108, 140, 255, 0.4); }
+.tok.warning { color: var(--amber); border-color: rgba(245, 184, 77, 0.45); }
+.tok.critical, .tok.expired { color: var(--red); border-color: rgba(244, 100, 125, 0.45); }
+
+/* Presence-only credential readback. */
+.secret {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font-size: 12px;
+}
+.secret .state { font-weight: 600; }
+.secret .state.set { color: var(--green); }
+.secret .state.stale { color: var(--muted); }
+.secret .state.missing { color: var(--red); }
+.secret .ref { color: var(--muted); overflow-wrap: anywhere; }
+.secret .when { color: var(--muted); }
+.secret .when .alert { color: var(--red); }
+
+.settings-label { color: var(--muted); font-size: 13px; }
+.settings-note { font-size: 12.5px; margin: 12px 0 0; line-height: 1.55; max-width: 760px; }
+.settings-note .saved { color: var(--green); }
+.budget-spent { color: var(--amber); font-size: 12.5px; }
+
+/* Filter chips, then the bulk bar, then the table. */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.chip {
+  background: var(--panel); border: 1px solid var(--border); color: var(--muted); cursor: pointer;
+  border-radius: 20px; padding: 5px 12px; font-size: 12.5px; font-weight: 600; font-family: inherit;
+  min-height: 32px; display: inline-flex; align-items: center; gap: 6px;
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+.chip:hover { color: var(--text); border-color: var(--border-strong); }
+.chip[aria-pressed='true'] { color: var(--text); background: var(--panel-3); border-color: var(--accent); }
+.chip-n { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.chip[aria-pressed='true'] .chip-n { color: var(--text); }
+
+.bulkbar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; margin-bottom: 10px;
+  padding: 10px 14px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--panel-2);
+}
+.bulkbar .bb-count { flex: 1 1 200px; min-width: 0; font-size: 13px; }
+.bulkbar .bb-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.row-check { accent-color: var(--accent); width: 16px; height: 16px; margin: 2px 0 0; cursor: pointer; }
+.row-check:disabled { cursor: not-allowed; opacity: 0.4; }
+.queue-card th.chk, .queue-card td.chk { width: 36px; padding-right: 0; }
+
+/* The recovery actions stay pinned to the card's trailing edge, so Retry and
+   Release are reachable without a sideways scroll at any width. */
+.queue-card th:last-child, .queue-card td:last-child {
+  position: sticky; right: 0; background: var(--panel);
+  box-shadow: -8px 0 10px -8px rgba(0, 0, 0, 0.5);
+}
+.queue-card thead th:last-child { z-index: 1; }
+.queue-card .q-title { min-width: 220px; max-width: 320px; }
+.q-headline { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.q-slug { display: block; color: var(--muted); margin-top: 2px; word-break: break-all; }
+.q-placement { white-space: nowrap; }
+.q-sub { display: block; font-size: 11.5px; margin-top: 2px; }
+.queue-card .q-reason { min-width: 260px; max-width: 420px; }
+.reason-head { display: block; font-weight: 600; }
+.reason-head.hold, .reason-head.degraded { color: var(--amber); }
+.reason-head.error { color: var(--muted); }
+.reason-detail {
+  display: block; color: var(--muted); font-size: 12px; margin-top: 3px; line-height: 1.5;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.reason-detail.mono { white-space: normal; }
+.q-actions { display: flex; gap: 6px; flex-wrap: nowrap; justify-content: flex-end; }
+.queue-card th:last-child { text-align: right; }
+.q-post { white-space: nowrap; }
+/* The checkbox's hit area, not the box, is the touch target. */
+.chk-hit {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 28px; min-height: 28px; margin: -6px 0 0 -6px; cursor: pointer;
+}
+
+/* Outcome toast. The message shrinks and wraps its own text, so the icon never
+   ends up alone on a line at the narrowest width. */
+.bulk-toast {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;
+  padding: 10px 14px; border-radius: 8px; font-size: 13px; border: 1px solid var(--border);
+  background: var(--panel);
+}
+.bulk-toast.ok { border-color: rgba(62, 207, 142, 0.4); }
+.bulk-toast.ok .bt-icon { color: var(--green); }
+.bulk-toast.partial { border-color: rgba(245, 184, 77, 0.45); }
+.bulk-toast.partial .bt-icon { color: var(--amber); }
+.bulk-toast .bt-icon { flex: none; font-weight: 700; }
+.bulk-toast .bt-msg { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+
+/* Queue item drawer. */
+.drawer .card.table-scroll table { min-width: 460px; }
+.drawer pre {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; word-break: break-word;
+  margin: 0;
+}
+.reason-card {
+  border: 1px solid rgba(245, 184, 77, 0.4); background: rgba(245, 184, 77, 0.08);
+  border-radius: 10px; padding: 12px 14px; margin-bottom: 18px; font-size: 13px;
+}
+.reason-card.error { border-color: rgba(244, 100, 125, 0.4); background: rgba(244, 100, 125, 0.08); }
+.reason-card strong { display: block; }
+.reason-card.hold strong, .reason-card.degraded strong { color: var(--amber); }
+.reason-card p { margin: 6px 0 0; color: var(--text); line-height: 1.55; }
+.reason-card pre { margin-top: 10px; }
+.placement-options { display: grid; gap: 8px; }
+.placement-option {
+  display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); font-size: 13px;
+  transition: border-color 120ms ease-out;
+}
+.placement-option.on { border-color: var(--accent); }
+.placement-option input { accent-color: var(--accent); margin-top: 3px; flex: none; }
+.placement-option .hint { display: block; margin: 3px 0 0; }
+.item-facts {
+  display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 14px; margin: 0 0 18px; font-size: 13px;
+}
+.item-facts dt { color: var(--muted); }
+.item-facts dd { margin: 0; overflow-wrap: anywhere; }
+
+@media (max-width: 900px) {
+  .chan-row { grid-template-columns: 36px minmax(0, 1fr); }
+  .chan-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  /* Row controls are touch targets from tablet down. */
+  .chip { min-height: 44px; padding: 8px 14px; }
+  .row-check { width: 20px; height: 20px; margin: 0; }
+  .chk-hit { min-width: 44px; min-height: 44px; margin: -10px 0 0 -12px; }
+  .queue-card th.chk, .queue-card td.chk { width: 48px; }
+  .chan-name { min-height: 44px; }
+}
+/* The shipped grid keeps a 220px label column at every width, which squeezes
+   a select to a few characters on a phone. Below 560px the label sits above
+   its control - on this tab and on Settings alike. */
+@media (max-width: 560px) {
+  .settings-grid { grid-template-columns: minmax(0, 1fr); gap: 4px 0; }
+  .settings-grid label, .settings-grid .settings-label { margin-top: 10px; }
+}
+@media (max-width: 520px) {
+  .item-facts { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+  .item-facts dd { margin-bottom: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chan-row, .chip, .placement-option { transition: none; }
+}
