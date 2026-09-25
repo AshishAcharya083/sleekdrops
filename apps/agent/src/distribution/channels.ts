@@ -7,7 +7,8 @@
 // one), else from the environment, which is where Cloud Run mounts a Secret
 // Manager secret. Nothing in this module returns a token to anything that
 // logs, and no caller may put one in `last_error` - see redactToken.
-import { getSetting, q, setSetting } from '../db/pool.js';
+import { CONFIG_ENV_KEYS } from '../config.js';
+import { getSetting, q } from '../db/pool.js';
 import { createLogger } from '../lib/log.js';
 import { scrubSecrets } from '../pipeline/stageTimeout.js';
 import type { ChannelConnectionRow, ChannelStatus } from './types.js';
@@ -31,19 +32,44 @@ export function credentialEnvName(ref: string): string {
 }
 
 /**
- * The secret `ref` names, or null when it is configured nowhere.
+ * Whether `ref` is a name reserved for one of `provider`'s channel secrets:
+ * its env form starts with the network's own name or with `CHANNEL_`, and is
+ * not a variable the agent reads as its own configuration. Anything else would
+ * let a token_ref name an unrelated deployment secret - `ADMIN_TOKEN`,
+ * `DATABASE_URL`, `FACEBOOK_APP_SECRET` - and have it sent to a network as if
+ * it were an account token.
+ */
+export function isChannelTokenRef(ref: string, provider: string): boolean {
+  const name = credentialEnvName(ref);
+  if (CONFIG_ENV_KEYS.has(name)) return false;
+  return [`${credentialEnvName(provider)}_`, 'CHANNEL_'].some(
+    (prefix) => name.startsWith(prefix) && name.length > prefix.length,
+  );
+}
+
+/** The mounted secret `ref` names for `provider`, when it is a name a channel may read. */
+function environmentCredential(ref: string, provider: string): string | null {
+  if (!isChannelTokenRef(ref, provider)) return null;
+  return process.env[credentialEnvName(ref)] || null;
+}
+
+/**
+ * The secret `ref` names for a `provider` channel, or null when it is
+ * configured nowhere.
  *
  * Settings first: that is the one an operator can set without a redeploy, and
  * a rotated token pasted into the panel has to win over the stale value still
  * mounted in the environment.
  */
-export async function resolveCredential(ref: string | null): Promise<string | null> {
+export async function resolveCredential(
+  ref: string | null,
+  provider: string,
+): Promise<string | null> {
   if (!ref) return null;
   const stored = await getSetting<Record<string, string>>('channel_credentials', {});
   const fromSettings = stored[ref];
   if (typeof fromSettings === 'string' && fromSettings !== '') return fromSettings;
-  const fromEnv = process.env[credentialEnvName(ref)];
-  return fromEnv ? fromEnv : null;
+  return environmentCredential(ref, provider);
 }
 
 /**
@@ -126,29 +152,42 @@ export function tokenTier(expiresAt: string | null, now: Date = new Date()): Tok
  */
 export type CredentialSource = 'panel' | 'environment';
 
-export async function credentialSource(ref: string | null): Promise<CredentialSource | null> {
+export async function credentialSource(
+  ref: string | null,
+  provider: string,
+): Promise<CredentialSource | null> {
   if (!ref) return null;
   const stored = await getSetting<Record<string, string>>('channel_credentials', {});
   if (typeof stored[ref] === 'string' && stored[ref] !== '') return 'panel';
-  return process.env[credentialEnvName(ref)] ? 'environment' : null;
+  return environmentCredential(ref, provider) ? 'environment' : null;
 }
 
 /**
  * Keep a pasted credential under its reference in the `channel_credentials`
  * row, which /api/settings never returns. Nothing reads it back out except
  * `resolveCredential` at post time.
+ *
+ * One key is written in place rather than the whole row read and rewritten:
+ * every channel's credential shares the row, and a read-modify-write racing
+ * another connect would put back a copy without the other's token.
  */
 export async function storeCredential(ref: string, value: string): Promise<void> {
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
-  await setSetting('channel_credentials', { ...stored, [ref]: value });
+  await q(
+    `INSERT INTO settings (key, value, updated_at)
+     VALUES ('channel_credentials', jsonb_build_object($1::text, $2::text), now())
+     ON CONFLICT (key) DO UPDATE
+       SET value = settings.value || EXCLUDED.value, updated_at = now()`,
+    [ref, value],
+  );
 }
 
 /** Forget a pasted credential. A secret mounted in the environment is not ours to remove. */
 export async function removeCredential(ref: string): Promise<void> {
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
-  if (!(ref in stored)) return;
-  const { [ref]: _removed, ...rest } = stored;
-  await setSetting('channel_credentials', rest);
+  await q(
+    `UPDATE settings SET value = value - $1::text, updated_at = now()
+      WHERE key = 'channel_credentials' AND value ? $1::text`,
+    [ref],
+  );
 }
 
 /**

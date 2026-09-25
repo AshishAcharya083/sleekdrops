@@ -368,6 +368,27 @@ export function bulkOutcomeMessage(
   };
 }
 
+/**
+ * What the disconnect modal says becomes of a channel's queue. A queued item
+ * posts once the channel is back; a held one does not, because only a release
+ * moves it out of held - reconnecting is not one.
+ */
+export function disconnectQueueNote(counts: { pending: number; held: number }): string {
+  const notes: string[] = [];
+  if (counts.pending > 0) {
+    const one = counts.pending === 1;
+    notes.push(
+      `${plural(counts.pending, 'queued item')} ${one ? 'stays' : 'stay'} in the queue and ${one ? 'posts' : 'post'} if you reconnect.`,
+    );
+  }
+  if (counts.held > 0) {
+    notes.push(
+      `${plural(counts.held, 'held item')} ${counts.held === 1 ? 'stays' : 'stay'} in the queue, but reconnecting releases nothing: an item held for you still needs its own release.`,
+    );
+  }
+  return notes.join(' ');
+}
+
 /** Where the article sits on the live site, for the row's title link. */
 export function articleUrl(slug: string): string {
   return `https://sleekdrops.com/blog/${slug}/`;

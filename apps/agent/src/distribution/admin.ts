@@ -12,6 +12,7 @@ import { createLogger } from '../lib/log.js';
 import {
   credentialSource,
   getConnection,
+  isChannelTokenRef,
   listConnections,
   recordTokenExpiry,
   redactToken,
@@ -340,7 +341,7 @@ async function channelView(
   now: Date,
 ): Promise<ChannelView> {
   const [source, placement, linkBudget] = await Promise.all([
-    credentialSource(connection.token_ref),
+    credentialSource(connection.token_ref, connection.provider),
     configuredPlacement(connection.provider),
     linkBudgetFor(connection),
   ]);
@@ -396,20 +397,35 @@ async function authenticateWith(provider: string, token: string): Promise<AuthTo
 /**
  * The secret name a new connection stores its token under: whatever the
  * operator named, else the name this account already used, else the adapter's
- * documented default - suffixed with the account id when a different account on
- * the same network already holds that name, so two Pages never share a token.
+ * documented default - suffixed with the account id when a different account
+ * already holds that name, so two Pages never share a token. A name the
+ * operator typed that another account's connection already reads is refused
+ * rather than suffixed: storing under it would silently replace that
+ * channel's token with this one.
  */
 async function chooseTokenRef(
   provider: string,
   externalAccountId: string,
   requested: string | null,
 ): Promise<string> {
-  if (requested) return requested;
   const connections = await listConnections();
-  const existing = connections.find(
-    (connection) =>
-      connection.provider === provider && connection.external_account_id === externalAccountId,
-  );
+  const isThisAccount = (connection: ChannelConnectionRow) =>
+    connection.provider === provider && connection.external_account_id === externalAccountId;
+  if (requested) {
+    const holder = connections.find(
+      (connection) => connection.token_ref === requested && !isThisAccount(connection),
+    );
+    if (holder) {
+      throw new ChannelAdminError(
+        409,
+        `the secret name ${requested} is already used by ${holder.provider} channel ` +
+          `${holder.display_name || holder.external_account_id} - choose another name, ` +
+          'or leave it empty and one is chosen for this account',
+      );
+    }
+    return requested;
+  }
+  const existing = connections.find(isThisAccount);
   if (existing) return existing.token_ref;
   const fallback = getProvider(provider)?.defaultTokenRef ?? `${provider}-token`;
   const taken = connections.some((connection) => connection.token_ref === fallback);
@@ -440,11 +456,18 @@ export async function connectChannel(input: {
       'the secret name may use letters, digits, dots, dashes and underscores (up to 100)',
     );
   }
+  if (requestedRef && !isChannelTokenRef(requestedRef, provider)) {
+    throw new ChannelAdminError(
+      400,
+      `the secret name must start with ${provider}- or channel- and name a token for this channel, ` +
+        "not one of the platform's own settings",
+    );
+  }
   const pasted = typeof input.token === 'string' ? input.token.trim() : '';
 
   let token = pasted;
   if (!token) {
-    const mounted = requestedRef ? await resolveCredential(requestedRef) : null;
+    const mounted = requestedRef ? await resolveCredential(requestedRef, provider) : null;
     if (!mounted) {
       throw new ChannelAdminError(
         400,
@@ -535,12 +558,12 @@ export async function disconnectChannel(id: string): Promise<{
     (other) =>
       other.id !== id && other.token_ref === connection.token_ref && other.status !== 'disabled',
   );
-  const before = await credentialSource(connection.token_ref);
+  const before = await credentialSource(connection.token_ref, connection.provider);
   let credentialRemoved = false;
   if (!sharing && before === 'panel') {
     await removeCredential(connection.token_ref);
     credentialRemoved = true;
   }
-  const after = await credentialSource(connection.token_ref);
+  const after = await credentialSource(connection.token_ref, connection.provider);
   return { channel: await viewOf(id), credentialRemoved, environmentSecret: after === 'environment' };
 }

@@ -11,6 +11,7 @@ import {
   bulkOutcomeMessage,
   channelBadge,
   credentialLine,
+  disconnectQueueNote,
   expiryPhrase,
   pruneSelection,
   queueStatusBadge,
@@ -240,4 +241,16 @@ test('the outcome toast says how many moved and why any did not', () => {
   assert.equal(partial.tone, 'partial');
   assert.match(partial.text, /1 item released.*1 item skipped \(no longer held/);
   assert.match(bulkOutcomeMessage('retry', { updated: [], skipped: ['a'] }).text, /^Nothing moved\./);
+});
+
+test('the disconnect note does not promise that a held item posts on reconnect', () => {
+  assert.equal(
+    disconnectQueueNote({ pending: 1, held: 0 }),
+    '1 queued item stays in the queue and posts if you reconnect.',
+  );
+  const both = disconnectQueueNote({ pending: 3, held: 2 });
+  assert.match(both, /^3 queued items stay in the queue and post if you reconnect\. /);
+  assert.match(both, /2 held items stay in the queue, but reconnecting releases nothing/);
+  assert.doesNotMatch(disconnectQueueNote({ pending: 0, held: 1 }), /post/);
+  assert.equal(disconnectQueueNote({ pending: 0, held: 0 }), '');
 });

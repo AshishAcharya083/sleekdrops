@@ -9,9 +9,8 @@ process.env.ADMIN_TOKEN = 'test-admin-token';
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
 const { createApp } = await import('../api/server.js');
-const { getSetting, setSetting } = await import('../db/pool.js');
 const { enqueuePublishedArticle } = await import('./queue.js');
-const { TOKEN_STALE_WINDOW_MS } = await import('./channels.js');
+const { TOKEN_STALE_WINDOW_MS, removeCredential, storeCredential } = await import('./channels.js');
 
 import type { DistributableArticle } from './types.js';
 
@@ -27,7 +26,7 @@ const app = createApp();
 const AUTH = { Authorization: 'Bearer test-admin-token' };
 const PROVIDER = `stub-admin-${randomUUID().slice(0, 8)}`;
 const SECRET_VALUE = 'a-page-token-nobody-should-see';
-process.env.STUB_ADMIN_TOKEN_REF = SECRET_VALUE;
+process.env.CHANNEL_STUB_ADMIN_TOKEN_REF = SECRET_VALUE;
 
 const articles: string[] = [];
 const connections: string[] = [];
@@ -52,7 +51,7 @@ interface ChannelView {
 async function connect(expiresAt: string | null): Promise<string> {
   const [row] = await q<{ id: string }>(
     `INSERT INTO channel_connections (provider, external_account_id, token_ref, expires_at)
-     VALUES ($1, $2, 'stub-admin-token-ref', $3) RETURNING id`,
+     VALUES ($1, $2, 'channel-stub-admin-token-ref', $3) RETURNING id`,
     [PROVIDER, `page-${randomUUID().slice(0, 8)}`, expiresAt],
   );
   connections.push(row.id);
@@ -98,7 +97,7 @@ test('the panel reads channel staleness and the queue, never a token', { skip },
   };
   const mine = body.channels.find((channel) => channel.id === connection)!;
   assert.equal(mine.provider, PROVIDER);
-  assert.equal(mine.tokenRef, 'stub-admin-token-ref', 'the reference, so an operator knows what to rotate');
+  assert.equal(mine.tokenRef, 'channel-stub-admin-token-ref', 'the reference, so an operator knows what to rotate');
   assert.equal(mine.token.expired, false);
   assert.equal(mine.token.stale, true, 'a token inside the warning window says so before it lapses');
   assert.equal(
@@ -151,8 +150,7 @@ test('an article carries its own distribution queue', { skip }, async () => {
 });
 
 test('the settings the panel polls never carry a channel credential', { skip }, async () => {
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
-  await setSetting('channel_credentials', { ...stored, 'stub-admin-token-ref': SECRET_VALUE });
+  await storeCredential('channel-stub-admin-token-ref', SECRET_VALUE);
   try {
     const res = await app.request('/api/settings', { headers: AUTH });
     assert.equal(res.status, 200);
@@ -160,7 +158,7 @@ test('the settings the panel polls never carry a channel credential', { skip }, 
     assert.ok(!raw.includes(SECRET_VALUE), '/api/settings is polled by a browser');
     assert.equal('channel_credentials' in (JSON.parse(raw) as Record<string, unknown>), false);
   } finally {
-    await setSetting('channel_credentials', stored);
+    await removeCredential('channel-stub-admin-token-ref');
   }
 });
 

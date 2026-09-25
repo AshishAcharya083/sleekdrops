@@ -13,12 +13,12 @@ process.env.SITE_URL = 'https://sleekdrops.com';
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
-const { getSetting, setSetting } = await import('../db/pool.js');
 const { claimNextItem, enqueuePublishedArticle, getItem, retryDelaySeconds, MAX_POST_ATTEMPTS } =
   await import('./queue.js');
 const { registerProvider, registeredProviders, unregisterProvider } = await import('./providers.js');
 const { distributionTick, processItem } = await import('./worker.js');
 const { READINESS_RETRY_SECONDS, READINESS_WINDOW_SECONDS } = await import('./readiness.js');
+const { removeCredential, storeCredential } = await import('./channels.js');
 const { PermanentProviderError } = await import('./types.js');
 
 import type { DistributableArticle, DistributionItem, PostReceipt, SocialProvider } from './types.js';
@@ -32,8 +32,8 @@ const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to 
 if (reachable) await migrate();
 
 const TOKEN = 'stub-access-token-9f3c1a';
-const TOKEN_REF = 'stub-worker-token';
-process.env.STUB_WORKER_TOKEN = TOKEN;
+const TOKEN_REF = 'channel-stub-worker-token';
+process.env.CHANNEL_STUB_WORKER_TOKEN = TOKEN;
 
 const articles: string[] = [];
 const connections: string[] = [];
@@ -283,8 +283,7 @@ test('a token that lives only in settings is redacted too', { skip }, async () =
   await connect(provider.name, ref);
   await enqueuePublishedArticle(await article(), { d1Status: 'published' });
 
-  const current = await getSetting<Record<string, string>>('channel_credentials', {});
-  await setSetting('channel_credentials', { ...current, [ref]: secret });
+  await storeCredential(ref, secret);
   try {
     const item = (await claimNextItem([provider.name]))!;
     await processItem(item, { fetchPage: async () => livePage });
@@ -292,7 +291,7 @@ test('a token that lives only in settings is redacted too', { skip }, async () =
     assert.ok(!failed.lastError!.includes(secret));
     assert.match(failed.lastError!, /rejected credential \[redacted\]/);
   } finally {
-    await setSetting('channel_credentials', current);
+    await removeCredential(ref);
   }
 });
 
@@ -355,14 +354,13 @@ test('a token pasted into settings wins over the environment', { skip }, async (
   await connect(provider.name, ref);
   await enqueuePublishedArticle(await article(), { d1Status: 'published' });
 
-  const current = await getSetting<Record<string, string>>('channel_credentials', {});
-  await setSetting('channel_credentials', { ...current, [ref]: 'rotated-token-value' });
+  await storeCredential(ref, 'rotated-token-value');
   try {
     const item = (await claimNextItem([provider.name]))!;
     assert.equal(await processItem(item, { fetchPage: async () => livePage }), 'posted');
     assert.deepEqual(seen, ['rotated-token-value']);
   } finally {
-    await setSetting('channel_credentials', current);
+    await removeCredential(ref);
   }
 });
 

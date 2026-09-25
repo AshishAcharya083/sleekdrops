@@ -10,10 +10,11 @@ import { randomUUID } from 'node:crypto';
 process.env.ADMIN_TOKEN = 'test-admin-token';
 process.env.SITE_URL = 'https://sleekdrops.com';
 
-const { pool, q, getSetting, setSetting } = await import('../db/pool.js');
+const { pool, q, getSetting } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
 const { createApp } = await import('../api/server.js');
-const { enqueuePublishedArticle, getItem } = await import('./queue.js');
+const { enqueuePublishedArticle, getItem, renderPayload } = await import('./queue.js');
+const { removeCredential, resolveCredential, storeCredential } = await import('./channels.js');
 const { registerProvider, unregisterProvider } = await import('./providers.js');
 const { processItem } = await import('./worker.js');
 const { PermanentProviderError, ProviderHoldError } = await import('./types.js');
@@ -52,9 +53,7 @@ after(async () => {
       [connections, registered],
     );
     await q('DELETE FROM articles WHERE id = ANY($1)', [articles]);
-    const stored = await getSetting<Record<string, string>>('channel_credentials', {});
-    for (const ref of refs) delete stored[ref];
-    await setSetting('channel_credentials', stored);
+    for (const ref of refs) await removeCredential(ref);
     for (const name of registered) await q('DELETE FROM settings WHERE key = $1', [`${name}_link_placement`]);
   }
   await pool.end();
@@ -197,6 +196,86 @@ test('connect refuses a network with no adapter and a request with no credential
   assert.equal(badRef.status, 400);
 });
 
+test('a secret name outside the channel namespace is refused before the network is asked', { skip }, async () => {
+  let calls = 0;
+  const provider = stubNetwork(
+    {},
+    {
+      async authenticate() {
+        calls += 1;
+        throw new PermanentProviderError('rejected');
+      },
+    },
+  );
+  // ADMIN_TOKEN and DATABASE_URL are both set in this process.
+  for (const tokenRef of ['ADMIN_TOKEN', 'database-url', 'github-token', 'facebook-app-secret']) {
+    for (const token of [undefined, `pasted-${randomUUID()}`]) {
+      const res = await connectVia({ provider, tokenRef, token });
+      assert.equal(res.status, 400, tokenRef);
+      const raw = await res.text();
+      assert.match(raw, /must start with/, tokenRef);
+      assert.ok(!raw.includes(process.env.ADMIN_TOKEN!) && !raw.includes(process.env.DATABASE_URL!));
+    }
+  }
+  assert.equal(calls, 0, 'no platform secret is ever sent to a network');
+  const [row] = await q<{ n: number }>(
+    'SELECT count(*)::int n FROM channel_connections WHERE provider = $1',
+    [provider],
+  );
+  assert.equal(row.n, 0);
+});
+
+test('a stored token_ref naming a platform secret resolves to nothing', { skip }, async () => {
+  const provider = stubNetwork({});
+  const [connection] = await q<{ id: string }>(
+    `INSERT INTO channel_connections (provider, external_account_id, token_ref, status)
+     VALUES ($1, $2, 'admin-token', 'disabled') RETURNING id`,
+    [provider, `page-${randomUUID().slice(0, 8)}`],
+  );
+  connections.push(connection.id);
+
+  assert.equal(await resolveCredential('admin-token', provider), null);
+  assert.equal(await resolveCredential('database-url', provider), null);
+  const mine = (await channelsList()).find((channel) => channel.id === connection.id)!;
+  assert.deepEqual(mine.credential, { stored: false, source: null });
+
+  const ref = `channel-${provider}`;
+  process.env[ref.toUpperCase().replace(/[^A-Z0-9]+/g, '_')] = 'channel-scoped-secret';
+  assert.equal(await resolveCredential(ref, provider), 'channel-scoped-secret', 'CHANNEL_ is reserved for channels');
+});
+
+test('a secret name another account already uses is refused, not overwritten', { skip }, async () => {
+  const firstToken = `first-${randomUUID()}`;
+  const secondToken = `second-${randomUUID()}`;
+  const secondAccount = `page-${randomUUID().slice(0, 8)}`;
+  const provider = stubNetwork({
+    [firstToken]: { id: `page-${randomUUID().slice(0, 8)}`, name: 'First Page', expiresIn: null },
+    [secondToken]: { id: secondAccount, name: 'Second Page', expiresIn: null },
+  });
+  const { channel: first } = (await (await connectVia({ provider, token: firstToken })).json()) as {
+    channel: ChannelView;
+  };
+  connections.push(first.id);
+
+  const clash = await connectVia({ provider, token: secondToken, tokenRef: first.tokenRef });
+  assert.equal(clash.status, 409);
+  const raw = await clash.text();
+  assert.ok(!raw.includes(secondToken));
+  assert.match(raw, /already used by .*First Page/);
+  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  assert.equal(stored[first.tokenRef], `exchanged-${firstToken}`, "the first Page's token is untouched");
+  const [row] = await q<{ n: number }>(
+    'SELECT count(*)::int n FROM channel_connections WHERE provider = $1 AND external_account_id = $2',
+    [provider, secondAccount],
+  );
+  assert.equal(row.n, 0);
+
+  // The account that owns the name may still reconnect under it.
+  const again = await connectVia({ provider, token: firstToken, tokenRef: first.tokenRef });
+  assert.equal(again.status, 201);
+  assert.equal(((await again.json()) as { channel: ChannelView }).channel.id, first.id);
+});
+
 test('a mounted secret connects by name without the panel storing a copy', { skip }, async () => {
   const token = `mounted-token-${randomUUID()}`;
   const account = `page-${randomUUID().slice(0, 8)}`;
@@ -274,8 +353,7 @@ test('disconnecting disables the channel, keeps its history and forgets the toke
     channel: ChannelView;
   };
   connections.push(channel.id);
-  const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  const queued = await queueOn(await article(), channel.id, provider);
 
   const res = await app.request(`/api/distribution/channels/${channel.id}`, {
     method: 'DELETE',
@@ -291,7 +369,10 @@ test('disconnecting disables the channel, keeps its history and forgets the toke
   assert.equal(body.credentialRemoved, true);
   assert.equal(body.environmentSecret, false);
   assert.deepEqual(body.channel.credential, { stored: false, source: null });
-  assert.equal(body.channel.counts.all, 1, 'the queue row survives the disconnect');
+  // Checked by id, not by count: until the disconnect this channel was active,
+  // so a concurrent suite's enqueue may have queued onto it too.
+  const kept = await queueOf(channel.id, 'all');
+  assert.ok(kept.some((item) => item.id === queued), 'the queue row survives the disconnect');
 
   const stored = await getSetting<Record<string, string>>('channel_credentials', {});
   assert.equal(channel.tokenRef in stored, false);
@@ -348,7 +429,39 @@ async function article(): Promise<DistributableArticle> {
   };
 }
 
-/** A channel with one item in every state the panel distinguishes. */
+/**
+ * The row enqueuePublishedArticle writes for one connection, written directly.
+ * An enqueue fans out over every active connection in the database, and
+ * `node --test` runs the db suites concurrently against it, so going through
+ * it here would queue onto other suites' channels as well as this one.
+ */
+async function queueOn(
+  piece: DistributableArticle,
+  connectionId: string,
+  provider: string,
+): Promise<string> {
+  const [row] = await q<{ id: string }>(
+    `INSERT INTO distribution_queue
+       (article_id, slug, channel_connection_id, provider, payload, placement)
+     VALUES ($1, $2, $3, $4, $5::jsonb, 'first_comment')
+     RETURNING id`,
+    [
+      piece.id,
+      piece.slug,
+      connectionId,
+      provider,
+      JSON.stringify(renderPayload(piece, provider, 'first_comment')),
+    ],
+  );
+  return row.id;
+}
+
+/**
+ * A channel with one item in every state the panel distinguishes. Disabled,
+ * so no other suite's enqueue can add a row to the exact counts asserted on
+ * it; nothing the queue view, the counts or the manual moves read depends on
+ * the connection being active.
+ */
 async function populatedChannel(): Promise<{
   channelId: string;
   provider: string;
@@ -356,20 +469,14 @@ async function populatedChannel(): Promise<{
 }> {
   const provider = stubNetwork({});
   const [connection] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref)
-     VALUES ($1, $2, 'stub-channels-ref') RETURNING id`,
+    `INSERT INTO channel_connections (provider, external_account_id, token_ref, status)
+     VALUES ($1, $2, 'stub-channels-ref', 'disabled') RETURNING id`,
     [provider, `page-${randomUUID().slice(0, 8)}`],
   );
   connections.push(connection.id);
   const ids = {} as Record<'pending' | 'gate' | 'held' | 'failed' | 'posted', string>;
   for (const state of ['pending', 'gate', 'held', 'failed', 'posted'] as const) {
-    const piece = await article();
-    await enqueuePublishedArticle(piece, { d1Status: 'published' });
-    const [row] = await q<{ id: string }>(
-      'SELECT id FROM distribution_queue WHERE slug = $1 AND channel_connection_id = $2',
-      [piece.slug, connection.id],
-    );
-    ids[state] = row.id;
+    ids[state] = await queueOn(await article(), connection.id, provider);
   }
   await q(`UPDATE distribution_queue SET readiness_started_at = now(),
              last_error = 'waiting for the site: HTTP 404' WHERE id = $1`, [ids.gate]);
@@ -606,6 +713,7 @@ test("a network's own placement setting is writable and wins at enqueue", { skip
   const mine = (await channelsList()).find((channel) => channel.id === channelId)!;
   assert.deepEqual(mine.placement, { value: 'in_body', setting: key });
 
+  await q(`UPDATE channel_connections SET status = 'active' WHERE id = $1`, [channelId]);
   const piece = await article();
   await enqueuePublishedArticle(piece, { d1Status: 'published' });
   const [row] = await q<{ placement: string }>(
@@ -637,20 +745,19 @@ test('a provider hold writes its reason onto the row', { skip }, async () => {
   );
   const ref = `${provider}-hold`;
   refs.push(ref);
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
-  await setSetting('channel_credentials', { ...stored, [ref]: token });
+  await storeCredential(ref, token);
+  // Disabled for the same reason as populatedChannel; processItem is handed
+  // the item directly, so it never goes through a claim.
   const [connection] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref)
-     VALUES ($1, $2, $3) RETURNING id`,
+    `INSERT INTO channel_connections (provider, external_account_id, token_ref, status)
+     VALUES ($1, $2, $3, 'disabled') RETURNING id`,
     [provider, `page-${randomUUID().slice(0, 8)}`, ref],
   );
   connections.push(connection.id);
-  const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
-  const [row] = await q<DistributionQueueRow>(
-    'SELECT * FROM distribution_queue WHERE slug = $1 AND channel_connection_id = $2',
-    [piece.slug, connection.id],
-  );
+  const id = await queueOn(await article(), connection.id, provider);
+  const [row] = await q<DistributionQueueRow>('SELECT * FROM distribution_queue WHERE id = $1', [
+    id,
+  ]);
   const { toDistributionItem } = await import('./types.js');
 
   const outcome = await processItem(toDistributionItem(row), {

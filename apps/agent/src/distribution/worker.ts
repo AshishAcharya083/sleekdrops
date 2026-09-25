@@ -96,7 +96,7 @@ export async function processItem(
     return 'failed';
   }
 
-  const accessToken = await resolveCredential(connection.token_ref);
+  const accessToken = await resolveCredential(connection.token_ref, connection.provider);
   if (!accessToken) {
     // The secret the connection names is configured nowhere. That is an
     // operator action, so the connection leaves the rotation and says why -

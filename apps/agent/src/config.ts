@@ -1,6 +1,16 @@
 import 'dotenv/config';
 
+const configEnvKeys = new Set<string>();
+
+/**
+ * Every environment variable the agent reads as its own configuration. A
+ * channel's secret name must never resolve to one of these - see
+ * distribution/channels.ts.
+ */
+export const CONFIG_ENV_KEYS: ReadonlySet<string> = configEnvKeys;
+
 function env(key: string, fallback = ''): string {
+  configEnvKeys.add(key);
   // `||` not `??`: empty strings in .env must fall back too.
   return process.env[key] || fallback;
 }

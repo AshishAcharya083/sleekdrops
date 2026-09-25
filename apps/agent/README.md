@@ -286,7 +286,12 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
 - **Credentials.** A connection stores a `token_ref` - the *name* of a secret -
   resolved at post time from the `channel_credentials` settings row, else from
   the environment variable that name maps to (`facebook-page-token` →
-  `FACEBOOK_PAGE_TOKEN`), which is how Secret Manager arrives on Cloud Run. No
+  `FACEBOOK_PAGE_TOKEN`), which is how Secret Manager arrives on Cloud Run.
+  Only names reserved for channel secrets resolve from the environment: the
+  env form must start with the network's own name (`FACEBOOK_`) or `CHANNEL_`,
+  and must not be a variable the agent reads as its own configuration
+  (`FACEBOOK_APP_SECRET`, `ADMIN_TOKEN`, `DATABASE_URL`, ...), so a `token_ref`
+  can never forward a platform secret to a network. No
   token value is stored in Postgres by this code, written to `last_error` or
   logged, and `/api/settings` never returns the credentials row. Token expiry
   staleness is derived in `distribution/channels.ts` and reported by
@@ -365,7 +370,9 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
   gate, which retries by itself). `POST /api/distribution/channels` connects from
   a pasted token (checked with the network's `authenticate` before anything is
   stored, then kept in `channel_credentials` under the adapter's
-  `defaultTokenRef`) or from the name of a secret the deployment already mounts;
+  `defaultTokenRef`) or from the name of a secret the deployment already mounts
+  (a secret name another account's connection already uses is refused rather
+  than overwritten);
   `PUT .../channels/:id/credential` replaces a token and refuses one for a
   different account; `DELETE .../channels/:id` disables rather than deletes, so
   the queue's history and insights survive, and forgets a pasted token. Manual

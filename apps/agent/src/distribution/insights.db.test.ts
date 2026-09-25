@@ -42,8 +42,8 @@ const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to 
 if (reachable) await migrate();
 
 const TOKEN = 'stub-insights-token-4b21e7';
-const TOKEN_REF = 'stub-insights-token';
-process.env.STUB_INSIGHTS_TOKEN = TOKEN;
+const TOKEN_REF = 'channel-stub-insights-token';
+process.env.CHANNEL_STUB_INSIGHTS_TOKEN = TOKEN;
 
 const PROVIDER = `stub-insights-${randomUUID().slice(0, 8)}`;
 const articles: string[] = [];

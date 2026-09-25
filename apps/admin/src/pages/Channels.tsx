@@ -16,6 +16,7 @@ import {
   channelBadge,
   channelName,
   credentialLine,
+  disconnectQueueNote,
   FILTERS,
   HOLD_REASON_COPY,
   PLACEMENT_HINT,
@@ -1173,7 +1174,9 @@ function CredentialDrawer({
                 disabled={busy}
               />
               <p className="hint">
-                The name the token is stored under. Leave the token empty and name a secret the deployment already
+                The name the token is stored under. It starts with <span className="mono">{provider}-</span> or{' '}
+                <span className="mono">channel-</span>, and each account needs its own - a name another channel
+                already uses is refused. Leave the token empty and name a secret the deployment already
                 mounts (for example <span className="mono">{defaultRef}</span> → <span className="mono">{defaultRef.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}</span>)
                 to connect without pasting it here.
               </p>
@@ -1223,7 +1226,7 @@ function DisconnectModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const label = `${providerLabel(channel.provider)} · ${channelName(channel)}`;
-  const queued = channel.counts.pending + channel.counts.held;
+  const queueNote = disconnectQueueNote(channel.counts);
 
   const disconnect = async () => {
     setBusy(true);
@@ -1254,9 +1257,7 @@ function DisconnectModal({
         <h3>Disconnect {label}?</h3>
         <p>Nothing more is posted to this account, and new articles are not queued for it.</p>
         <p className="muted">
-          {queued > 0
-            ? `${queued} queued or held item${queued === 1 ? ' stays' : 's stay'} in the queue and post${queued === 1 ? 's' : ''} if you reconnect. `
-            : ''}
+          {queueNote && `${queueNote} `}
           Posting history and insights are kept.
           {channel.credential.source === 'panel' ? ' The pasted token is deleted.' : ''}
         </p>

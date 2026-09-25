@@ -24,7 +24,7 @@ const {
   POSTING_LEASE_SECONDS,
 } = await import('./queue.js');
 
-import type { DistributableArticle, DistributionQueueRow } from './types.js';
+import type { DistributableArticle, DistributionItem, DistributionQueueRow } from './types.js';
 
 const reachable = await pool
   .query('SELECT 1')
@@ -219,19 +219,31 @@ test('the payload is rendered once, at enqueue', { skip }, async () => {
 
 // ── Claiming ───────────────────────────────────────────────────────────────
 
+/**
+ * Claim for `provider` until this test's own item comes up or nothing is due.
+ * A connection is active for the whole test, so a concurrent suite's enqueue
+ * can land an item on it, and a claim may hand that one back first.
+ */
+async function claimOwn(provider: string, slug: string): Promise<DistributionItem | null> {
+  for (;;) {
+    const claimed = await claimNextItem([provider]);
+    if (!claimed || claimed.slug === slug) return claimed;
+  }
+}
+
 test('a claim takes one due item and spends no attempt', { skip }, async () => {
   const provider = uniqueProvider();
   await connect({ provider });
   const piece = await article();
   await enqueuePublishedArticle(piece, { d1Status: 'published' });
 
-  const claimed = await claimNextItem([provider]);
+  const claimed = await claimOwn(provider, piece.slug!);
   assert.ok(claimed, 'the item was due');
   assert.equal(claimed.slug, piece.slug);
   assert.equal(claimed.status, 'posting');
   assert.equal(claimed.attempts, 0, 'waiting for a rebuild is not a provider call');
 
-  assert.equal(await claimNextItem([provider]), null, 'and nobody else can take it');
+  assert.equal(await claimOwn(provider, piece.slug!), null, 'and nobody else can take it');
 });
 
 test('an item waiting out a backoff is not due yet', { skip }, async () => {
@@ -240,9 +252,9 @@ test('an item waiting out a backoff is not due yet', { skip }, async () => {
   const piece = await article();
   await enqueuePublishedArticle(piece, { d1Status: 'published' });
 
-  const claimed = (await claimNextItem([provider]))!;
+  const claimed = (await claimOwn(provider, piece.slug!))!;
   await releaseItem(claimed.id, 900, 'waiting for the site: HTTP 404');
-  assert.equal(await claimNextItem([provider]), null);
+  assert.equal(await claimOwn(provider, piece.slug!), null);
 
   const row = await itemOn(piece.slug!, connection);
   assert.equal(row.status, 'pending');
@@ -279,7 +291,7 @@ test('an item stranded by a dead worker comes back, its attempt already spent', 
   const piece = await article();
   await enqueuePublishedArticle(piece, { d1Status: 'published' });
 
-  const claimed = (await claimNextItem([provider]))!;
+  const claimed = (await claimOwn(provider, piece.slug!))!;
   const attempts = await startPostAttempt(claimed.id);
   assert.equal(attempts, 1);
   // The worker dies here, between spending the attempt and recording anything.
@@ -301,7 +313,7 @@ test('a posted item is never taken back by recovery', { skip }, async () => {
   const piece = await article();
   await enqueuePublishedArticle(piece, { d1Status: 'published' });
 
-  const claimed = (await claimNextItem([provider]))!;
+  const claimed = (await claimOwn(provider, piece.slug!))!;
   await startPostAttempt(claimed.id);
   await markPosted(claimed.id, 'remote-post-1');
   await q(

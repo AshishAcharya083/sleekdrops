@@ -235,10 +235,19 @@ export async function enqueuePublishedArticle(
   const connections = await activeConnections();
   if (connections.length === 0) return { ...none, skipped: 'no-channels' };
 
+  const providers = [...new Set(connections.map((connection) => connection.provider))];
+  const placements = new Map(
+    await Promise.all(
+      providers.map(
+        async (provider) => [provider, (await configuredPlacement(provider)).placement] as const,
+      ),
+    ),
+  );
+
   let created = 0;
   let disconnected = 0;
   for (const connection of connections) {
-    const { placement } = await configuredPlacement(connection.provider);
+    const placement = placements.get(connection.provider)!;
     const payload = renderPayload(article, connection.provider, placement);
     let rows: Array<{ id: string }>;
     try {
