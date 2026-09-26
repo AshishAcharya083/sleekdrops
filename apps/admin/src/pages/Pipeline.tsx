@@ -696,7 +696,11 @@ function ArticlePanel({
                   <strong>⏱ Timed out</strong>
                   <span className="muted mono">{stoppedStage ?? '—'}</span>
                 </div>
-                <p className="oneline">{timedOutSentence(budgetSeconds)}</p>
+                <p className="oneline">
+                  {timedOutSentence(budgetSeconds, {
+                    error: timedOutSession?.error ?? article.error,
+                  })}
+                </p>
                 <BudgetLine budgetSeconds={budgetSeconds} />
                 {/* Already scrubbed by the agent, and rendered exactly as it
                     arrived: it names the stage and the last call it made. */}

@@ -18,7 +18,10 @@
 // (which renews it while the stage runs), so the two can never disagree about
 // how long a claim is good for.
 import { q } from '../db/pool.js';
+import { createLogger } from '../lib/log.js';
 import { STAGE_HEARTBEAT_SECONDS } from './budgets.js';
+
+const log = createLogger('lease');
 
 /**
  * How long a claim stays valid without a renewal. Long enough to survive a
@@ -131,14 +134,34 @@ export async function claimHeld(article: ClaimedArticle): Promise<boolean> {
  * A renewal that throws is reported and retried - a database blip is not proof
  * the claim is gone, and the lease has several renewals' worth of slack for
  * exactly that. Only a renewal that succeeds in updating nothing is proof.
+ *
+ * A beat that comes more than twice its interval after the previous one is
+ * logged as `heartbeat_late` with the lag. `now` is injectable for the same
+ * reason the interval is.
  */
 export function startHeartbeat(
   articleId: string,
   claimedBy: string,
   handlers: { onLost: () => void; onError: (err: unknown) => void },
   intervalMs: number = HEARTBEAT_MS,
+  now: () => number = Date.now,
 ): () => void {
+  let lastBeatAt = now();
   const timer = setInterval(() => {
+    // A timer that fires this late means the whole process was not running:
+    // CPU throttled between requests, or frozen. It is the one sign of that
+    // left in the logs before the lease lapses and the claim is lost.
+    const beatAt = now();
+    const sinceLast = beatAt - lastBeatAt;
+    lastBeatAt = beatAt;
+    if (sinceLast > 2 * intervalMs) {
+      log.warn('heartbeat_late', {
+        article_id: articleId,
+        claimed_by: claimedBy,
+        interval_ms: intervalMs,
+        lag_ms: sinceLast - intervalMs,
+      });
+    }
     void renewLease(articleId, claimedBy)
       .then((held) => {
         if (held) return;

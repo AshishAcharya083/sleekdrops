@@ -441,9 +441,9 @@ function StuckRow({
   const stopped = ran === null && run.stopped_at ? ` Stopped ${fmtTime(run.stopped_at)}.` : '';
   const why =
     run.status === 'timed_out'
-      ? `${timedOutSentence(budget)}${stopped}`
+      ? `${timedOutSentence(budget, { error: run.error, elapsedSeconds: run.elapsed_seconds })}${stopped}`
       : run.lease_expired
-        ? `${lapsed} - nothing is renewing it, and the next worker tick stops it on the budget.`
+        ? `${lapsed} - nothing is renewing it, and the agent's next sweep puts it back in the queue.`
         : band === 'over'
           ? `Still running${ran ? ` ${ran}` : ''} into a ${minutes} minute budget - nothing has stopped it.`
           : `Past half of its ${minutes} minute budget and still running.`;

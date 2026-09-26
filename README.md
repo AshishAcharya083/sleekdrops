@@ -112,11 +112,28 @@ key in the repo. The provider is pinned to this repository, and
 `github-deployer@sleekdrops.iam.gserviceaccount.com` may only push to Artifact
 Registry, deploy Cloud Run, and act as the agent's runtime service account.
 
-Deploying by image alone leaves the rest of the service untouched — runtime
-service account, min-instances, and the Secret Manager wiring for
-`DATABASE_URL`, `ADMIN_TOKEN`, `TAVILY_API_KEY`, `CLOUDFLARE_D1_TOKEN` and
-`GITHUB_TOKEN`. Change those with `gcloud run services update`, never with
-`--set-env-vars` in the workflow (that flag replaces the whole set).
+Each deploy also pins the instance shape the worker needs, because it is a
+background loop rather than a request handler: `--no-cpu-throttling` (CPU
+always on, so heartbeats keep renewing a stage's claim between requests),
+`--min-instances 1 --max-instances 1` (one worker per revision, never scaled
+to zero or out to a second one; during a rollout the old revision's instance
+is the one that gets SIGTERM) and `--memory` (default `2Gi`, overridable with
+the `AGENT_MEMORY` repository variable). A setting changed by hand in the
+console is put back by the next deploy - change it in the workflow instead.
+
+Everything else about the service is left untouched - runtime service account
+and the Secret Manager wiring for `DATABASE_URL`, `ADMIN_TOKEN`,
+`TAVILY_API_KEY`, `CLOUDFLARE_D1_TOKEN` and `GITHUB_TOKEN`. Change those with
+`gcloud run services update`, never with `--set-env-vars` in the workflow
+(that flag replaces the whole set).
+
+When an instance stops mid-stage anyway (a rollout, a memory kill, a host
+move), nothing is lost: on SIGTERM the agent hands the articles it holds back
+to the queue before the 10-second grace period ends, and a claim whose worker
+died without that is re-queued once its lease lapses. The same article is
+re-queued at most twice per attempt; the third lapse fails the card with a
+plain message, draft kept, and **Retry from this stage** starts the count
+again. Stages stopped by their own time budget still end as timed out.
 
 ### Connecting the Facebook Page
 
@@ -182,7 +199,8 @@ docker buildx build --platform linux/amd64 \
 
 gcloud run deploy sleekdrops-agent \
   --image us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent:vN \
-  --region us-central1 --project sleekdrops
+  --region us-central1 --project sleekdrops \
+  --no-cpu-throttling --min-instances 1 --max-instances 1 --memory 2Gi
 ```
 
 The admin token for the hosted panel:

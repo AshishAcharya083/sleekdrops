@@ -387,6 +387,82 @@ test(
   },
 );
 
+// Cloud Run sends SIGTERM on every redeploy and scale-in, and SIGKILLs ten
+// seconds later. Before SLE-132 nothing handled it: every article the process
+// held stayed 'running' under a claim nobody would renew, the next instance
+// booted straight past it, and five minutes later the reaper stopped it.
+test(
+  'SIGTERM hands every claim this process holds back to the queue and exits inside the grace period',
+  { skip: skipLive, timeout: 90_000 },
+  async () => {
+    const scratch = await scratchDatabase();
+    const revision = 'sleekdrops-agent-00132-sig';
+    const agent = bootAgent({ DATABASE_URL: scratch.url.href, K_REVISION: revision });
+    const db = new pg.Pool({ connectionString: scratch.url.href, max: 1 });
+    try {
+      await agent.waitFor(/post insights polling/);
+      const workerId = /\[worker\] (worker-\S+) polling/.exec(agent.output())?.[1];
+      assert.ok(workerId?.startsWith(`worker-${revision}-`), 'the worker id names the revision');
+
+      const insert = (claimedBy: string) =>
+        db.query<{ id: string }>(
+          `INSERT INTO articles (title, category, post_type, stage, status, claimed_by, claimed_at,
+                                 heartbeat_at, lease_expires_at, draft_md)
+           VALUES ('Shutdown test card', 'Tech', 'guide', 'seo_review', 'running', $1, now(), now(),
+                   now() + interval '5 minutes', '## Half a draft')
+           RETURNING id`,
+          [claimedBy],
+        );
+      const mine = (await insert(`${workerId}/${randomUUID()}`)).rows[0].id;
+      const theirs = (await insert(`worker-another-instance/${randomUUID()}`)).rows[0].id;
+      await db.query(
+        "INSERT INTO agent_sessions (article_id, agent, status) VALUES ($1, 'seo_reviewer', 'running')",
+        [mine],
+      );
+
+      const signalledAt = Date.now();
+      agent.child.kill('SIGTERM');
+      assert.equal(await agent.exited, 0, 'a clean exit, not a kill');
+      const took = Date.now() - signalledAt;
+      assert.ok(took < 10_000, `exited ${took}ms after SIGTERM, past Cloud Run's 10 second grace`);
+      assert.match(agent.output(), /released 1 claimed article\(s\) back to the queue/);
+
+      const rows = await db.query<{
+        id: string;
+        status: string;
+        stage: string;
+        claimed_by: string | null;
+        lease_expires_at: string | null;
+        draft_md: string | null;
+        lease_requeues: number;
+      }>('SELECT * FROM articles WHERE id = ANY($1)', [[mine, theirs]]);
+      const released = rows.rows.find((r) => r.id === mine)!;
+      assert.equal(released.status, 'queued');
+      assert.equal(released.stage, 'seo_review', 'the same stage, for the next instance to claim');
+      assert.equal(released.draft_md, '## Half a draft');
+      assert.equal(released.claimed_by, null);
+      assert.equal(released.lease_expires_at, null);
+      assert.equal(released.lease_requeues, 0, 'a clean hand-back does not count against the cap');
+      assert.equal(
+        rows.rows.find((r) => r.id === theirs)!.status,
+        'running',
+        'another instance keeps its claim',
+      );
+      const session = await db.query<{ status: string; error: string }>(
+        'SELECT status, error FROM agent_sessions WHERE article_id = $1',
+        [mine],
+      );
+      assert.equal(session.rows[0].status, 'failed');
+      assert.match(session.rows[0].error, /shut down mid-stage; stage re-queued/);
+    } finally {
+      agent.child.kill('SIGKILL');
+      await agent.exited;
+      await db.end();
+      await scratch.drop();
+    }
+  },
+);
+
 // `pnpm db:up && pnpm db:migrate` runs this while the Postgres container is
 // still starting, so the standalone runner needs the same patience as boot.
 test('the migrate CLI waits for the database instead of failing on the first refusal', async () => {

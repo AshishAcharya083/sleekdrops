@@ -205,9 +205,10 @@ const CLAIM_CLEARED =
 /**
  * The verdict of the run that stopped, cleared. It goes with the message it
  * explains: what a re-queued card carries is whatever this run produces, not
- * how the last one failed or how many attempts that took.
+ * how the last one failed or how many attempts that took - nor how many times
+ * a worker stopped under it, since the automatic re-queue cap is per attempt.
  */
-const VERDICT_CLEARED = 'error = NULL, failure_class = NULL, stage_attempts = 0';
+const VERDICT_CLEARED = 'error = NULL, failure_class = NULL, stage_attempts = 0, lease_requeues = 0';
 
 /**
  * Whether re-running `stage` regenerates the draft itself, which is what

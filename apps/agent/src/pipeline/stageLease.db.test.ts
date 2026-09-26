@@ -4,10 +4,16 @@
 // long a stage could run, and the only code that noticed a stranded claim ran
 // at boot - so a wedged run survived until someone restarted the container.
 // Three things have to be true here: a stage that never settles is stopped by
-// its own budget, a claim nobody is renewing is reaped by a worker that is
-// already running, and the run that was reaped cannot then write over the reap.
+// its own budget, a claim nobody is renewing is re-queued by a worker that is
+// already running, and the run that lost its claim cannot then write over it.
+//
+// SLE-132: a lapsed claim used to be reaped to a terminal 'timed_out'. A lease
+// only lapses when the process holding it has stopped - a redeploy, a memory
+// kill, a scale-in - so it is re-queued now, up to a cap, the same way boot
+// recovery always treated it, and a shutdown hands its claims back itself.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 
 // A stage that never settles has to be stopped in a second here, not in an
 // hour. Set before config.js reads it.
@@ -27,7 +33,21 @@ const { LEASE_LOST_MESSAGE, renewLease, startHeartbeat, STAGE_LEASE_SECONDS } = 
   './lease.js'
 );
 const { noteLlmCall } = await import('../llm/callTrace.js');
-const { claimNext, isReapTick, reapExpiredLeases, recoverStranded } = await import('./worker.js');
+const {
+  claimIdentity,
+  claimNext,
+  isReapTick,
+  LEASE_REQUEUED_MESSAGE,
+  MAX_LEASE_REQUEUES,
+  reapExpiredLeases,
+  recoverStranded,
+  releaseHeldClaims,
+  SHUTDOWN_RELEASED_MESSAGE,
+  workerId,
+  workerIdentity,
+  workerStoppedRepeatedlyMessage,
+} = await import('./worker.js');
+const { retryFromStage } = await import('./retry.js');
 
 import type { ArticleRow } from './types.js';
 
@@ -149,7 +169,7 @@ test('no credential reaches a persisted error string', { skip }, async () => {
   assert.equal(session.error?.includes(PLANTED_TOKEN), false);
 });
 
-test('a lease that stops being refreshed is reaped on the tick, not on a restart', { skip }, async () => {
+test('a lease that stops being refreshed is re-queued on the tick, not on a restart', { skip }, async () => {
   const lapsed = await claimedArticle();
   const live = await claimedArticle(600);
   await q("INSERT INTO agent_sessions (article_id, agent, status) VALUES ($1, 'assembler', 'running')", [
@@ -170,16 +190,24 @@ test('a lease that stops being refreshed is reaped on the tick, not on a restart
   ]);
   assert.ok((await reapExpiredLeases()) >= 1);
 
-  const reaped = await reload(lapsed.id);
-  assert.equal(reaped.status, 'timed_out');
-  assert.equal(reaped.stage, 'assemble');
-  assert.equal(reaped.draft_md, DRAFT);
-  assert.equal(reaped.lease_expires_at, null);
-  assert.match(reaped.error ?? '', /stopped reporting progress/);
-  assert.match(reaped.error ?? '', /assembler/);
-  const [reapedSession] = await sessionsFor(lapsed.id);
-  assert.equal(reapedSession.status, 'timed_out');
-  assert.equal(reapedSession.error, reaped.error);
+  const requeued = await reload(lapsed.id);
+  // Cancelled at once: a queued row on the shared database is a row another
+  // file's claimNext may take.
+  await q("UPDATE articles SET status = 'cancelled' WHERE id = $1", [lapsed.id]);
+  assert.equal(requeued.status, 'queued', 'the worker is gone, so the stage runs again');
+  assert.equal(requeued.stage, 'assemble', 'the same stage');
+  assert.equal(requeued.draft_md, DRAFT, 'with the draft it had');
+  assert.equal(requeued.attempt, 1, 'on the same attempt');
+  assert.equal(requeued.lease_requeues, 1, 'and the re-queue is counted');
+  assert.equal(requeued.error, null, 'nothing failed, so nothing is reported as an error');
+  assert.equal(requeued.claimed_by, null);
+  assert.equal(requeued.claimed_at, null);
+  assert.equal(requeued.heartbeat_at, null);
+  assert.equal(requeued.lease_expires_at, null);
+  const [requeuedSession] = await sessionsFor(lapsed.id);
+  assert.equal(requeuedSession.status, 'failed');
+  assert.equal(requeuedSession.error, LEASE_REQUEUED_MESSAGE);
+  assert.equal(requeuedSession.error, 'worker instance stopped mid-stage; stage re-queued');
 
   const untouched = await reload(live.id);
   assert.equal(untouched.status, 'running', 'a renewed lease is left alone');
@@ -188,6 +216,50 @@ test('a lease that stops being refreshed is reaped on the tick, not on a restart
 
   await q("UPDATE articles SET status = 'cancelled' WHERE id = $1", [live.id]);
   await q("UPDATE agent_sessions SET status = 'done' WHERE article_id = $1", [live.id]);
+});
+
+test('past its re-queue cap a lapsed claim fails, keeping the stage and draft for a retry', { skip }, async () => {
+  assert.equal(MAX_LEASE_REQUEUES, 2);
+  const lastChance = await claimedArticle(-60);
+  const exhausted = await claimedArticle(-60);
+  await q('UPDATE articles SET lease_requeues = 1 WHERE id = $1', [lastChance.id]);
+  await q('UPDATE articles SET lease_requeues = 2 WHERE id = $1', [exhausted.id]);
+  await q("INSERT INTO agent_sessions (article_id, agent, status) VALUES ($1, 'assembler', 'running')", [
+    exhausted.id,
+  ]);
+
+  assert.ok((await reapExpiredLeases()) >= 2);
+
+  const second = await reload(lastChance.id);
+  await q("UPDATE articles SET status = 'cancelled' WHERE id = $1", [lastChance.id]);
+  assert.equal(second.status, 'queued', 'the second re-queue is still automatic');
+  assert.equal(second.lease_requeues, 2);
+
+  const failed = await reload(exhausted.id);
+  assert.equal(failed.status, 'failed', 'the third lapse is not re-queued');
+  assert.equal(failed.stage, 'assemble', 'the stage is kept for Retry from this stage');
+  assert.equal(failed.draft_md, DRAFT, 'and so is the draft');
+  assert.equal(failed.failure_class, 'transient', 'nothing about the content failed');
+  assert.equal(failed.lease_requeues, 2);
+  assert.equal(failed.claimed_by, null);
+  assert.equal(failed.lease_expires_at, null);
+  assert.equal(failed.error, workerStoppedRepeatedlyMessage('assemble'));
+  assert.match(failed.error ?? '', /worker instance running the assemble stage/);
+  assert.match(failed.error ?? '', /stopped 3 times/);
+  assert.match(failed.error ?? '', /Retry from this stage/);
+  const [session] = await sessionsFor(exhausted.id);
+  assert.equal(session.status, 'failed');
+  assert.equal(session.error, failed.error);
+
+  // The cap is per attempt: the operator's retry starts the count again.
+  const retried = await retryFromStage(exhausted.id, 'assemble');
+  assert.equal(retried.ok, true);
+  const again = await reload(exhausted.id);
+  await q("UPDATE articles SET status = 'cancelled' WHERE id = $1", [exhausted.id]);
+  assert.equal(again.status, 'queued');
+  assert.equal(again.attempt, 2);
+  assert.equal(again.lease_requeues, 0, 'a retry resets the automatic re-queue count');
+  assert.equal(again.draft_md, DRAFT);
 });
 
 test('renewing a lease pushes it forward, and only for the claim that took it', { skip }, async () => {
@@ -218,16 +290,126 @@ test('recoverStranded re-queues a lapsed claim at boot and leaves a live one alo
   await recoverStranded();
 
   const requeued = await reload(lapsed.id);
+  const untouched = await reload(live.id);
+  await q("UPDATE articles SET status = 'cancelled' WHERE id = ANY($1)", [[lapsed.id, live.id]]);
   assert.equal(requeued.status, 'queued', 'a process that died never spent the budget');
   assert.equal(requeued.claimed_by, null);
   assert.equal(requeued.lease_expires_at, null);
+  assert.equal(requeued.lease_requeues, 1, 'boot counts the re-queue exactly as the reaper does');
   const [session] = await sessionsFor(lapsed.id);
   assert.equal(session.status, 'failed');
-  assert.match(session.error ?? '', /re-queued/);
+  assert.equal(session.error, LEASE_REQUEUED_MESSAGE);
 
-  assert.equal((await reload(live.id)).status, 'running', 'another instance is still working');
+  assert.equal(untouched.status, 'running', 'another instance is still working');
+});
 
-  await q("UPDATE articles SET status = 'cancelled' WHERE id = ANY($1)", [[lapsed.id, live.id]]);
+test('boot recovery and the tick reaper reach the same state for the same lapsed claim', { skip }, async () => {
+  // Two identical rows at each count: one for each path.
+  const outcomes: Record<string, unknown>[] = [];
+  for (const requeues of [0, MAX_LEASE_REQUEUES]) {
+    const byReaper = await claimedArticle(-60);
+    const byBoot = await claimedArticle(-60);
+    await q('UPDATE articles SET lease_requeues = $2 WHERE id = ANY($1)', [
+      [byReaper.id, byBoot.id],
+      requeues,
+    ]);
+    await q(
+      "INSERT INTO agent_sessions (article_id, agent, status) SELECT unnest($1::uuid[]), 'assembler', 'running'",
+      [[byReaper.id, byBoot.id]],
+    );
+
+    // Each path is given only its own row: the other one is briefly live.
+    await q("UPDATE articles SET lease_expires_at = now() + interval '1 hour' WHERE id = $1", [byBoot.id]);
+    await reapExpiredLeases();
+    await q("UPDATE articles SET lease_expires_at = now() - interval '1 minute' WHERE id = $1", [byBoot.id]);
+    await recoverStranded();
+
+    const shape = async (id: string) => {
+      const row = await reload(id);
+      const [session] = await sessionsFor(id);
+      return {
+        status: row.status,
+        stage: row.stage,
+        draft_md: row.draft_md,
+        error: row.error,
+        failure_class: row.failure_class,
+        lease_requeues: row.lease_requeues,
+        claimed_by: row.claimed_by,
+        lease_expires_at: row.lease_expires_at,
+        session_status: session.status,
+        session_error: session.error,
+      };
+    };
+    const reaped = await shape(byReaper.id);
+    const recovered = await shape(byBoot.id);
+    await q("UPDATE articles SET status = 'cancelled' WHERE id = ANY($1)", [[byReaper.id, byBoot.id]]);
+    assert.deepEqual(recovered, reaped, `the two paths agree at ${requeues} prior re-queue(s)`);
+    outcomes.push(reaped);
+  }
+  assert.equal(outcomes[0].status, 'queued');
+  assert.equal(outcomes[1].status, 'failed', 'and both honour the cap');
+});
+
+test('the worker id names the Cloud Run revision it runs on', () => {
+  assert.equal(workerIdentity('sleekdrops-agent-00042-xyz', 'ab12cd34'), 'worker-sleekdrops-agent-00042-xyz-ab12cd34');
+  assert.equal(workerIdentity('', 'ab12cd34'), 'worker-ab12cd34', 'and stays short off Cloud Run');
+  assert.ok(claimIdentity().startsWith(`${workerId}/`), 'every claim carries it');
+});
+
+test('a shutdown hands its claims back, and the run it abandoned writes nothing afterwards', { skip }, async () => {
+  const mine = await claimedArticle();
+  await q('UPDATE articles SET claimed_by = $2 WHERE id = $1', [mine.id, claimIdentity()]);
+  const theirs = await claimedArticle();
+  await q('UPDATE articles SET claimed_by = $2 WHERE id = $1', [
+    theirs.id,
+    `worker-another-instance/${randomUUID()}`,
+  ]);
+  const held = await reload(mine.id);
+
+  let released: () => void = () => {};
+  const shutdownDone = new Promise<void>((resolve) => {
+    released = resolve;
+  });
+  let lateWrite: unknown;
+  // The run is mid-stage when the process is told to stop: it wrote half a
+  // draft under its claim, and is still working when the claim goes back.
+  const run = runStage(held, async () => {
+    await updateArticle(held, { draft_md: DRAFT + '\n\nMore, still under the claim.' });
+    await shutdownDone;
+    lateWrite = await updateArticle(held, { draft_md: '## Written after the shutdown' }).catch(
+      (err: unknown) => err,
+    );
+    return { next: { stage: 'image', status: 'queued' }, summary: 'late answer' };
+  });
+
+  // Let the body reach its first write before the shutdown lands.
+  await waitFor('the in-flight write', async () =>
+    ((await reload(mine.id)).draft_md ?? '').includes('still under the claim'),
+  );
+  assert.equal(await releaseHeldClaims(), 1, 'only the claim this process holds');
+  const requeued = await reload(mine.id);
+  released();
+  await run;
+
+  const settled = await reload(mine.id);
+  const other = await reload(theirs.id);
+  await q("UPDATE articles SET status = 'cancelled' WHERE id = ANY($1)", [[mine.id, theirs.id]]);
+  assert.equal(requeued.status, 'queued');
+  assert.equal(requeued.claimed_by, null);
+  assert.equal(requeued.lease_expires_at, null);
+  assert.equal(requeued.lease_requeues, 0, 'a clean hand-back is not a lost claim');
+  assert.match(requeued.draft_md ?? '', /still under the claim/, 'what it wrote under the claim is kept');
+
+  assert.ok(lateWrite instanceof Error && /lease lost/.test(lateWrite.message));
+  assert.equal(settled.status, 'queued', 'the abandoned run never overwrites the re-queued row');
+  assert.equal(settled.stage, 'assemble', 'nor moves it on');
+  assert.equal(settled.draft_md, requeued.draft_md, 'nor writes its late output');
+
+  const [session] = await sessionsFor(mine.id);
+  assert.equal(session.status, 'failed');
+  assert.equal(session.error, SHUTDOWN_RELEASED_MESSAGE);
+
+  assert.equal(other.status, 'running', "another instance's claim is not this shutdown's to release");
 });
 
 test('claiming an article takes its lease without spending an attempt', { skip }, async () => {
@@ -300,11 +482,46 @@ test('a heartbeat renews while the claim is live and reports the moment it is no
   }
 });
 
-test('a run whose claim was reaped stops, writes nothing and says the lease is gone', { skip }, async () => {
+test('a heartbeat that fires more than twice its interval late says so, with the lag', { skip }, async () => {
+  const article = await claimedArticle();
+  // The clock the heartbeat reads: steady beats, then one that arrives a full
+  // second after the last - a process that was frozen or starved of CPU.
+  const beats = [0, 20, 40, 1040, 1060];
+  let reads = 0;
+  const clock = () => beats[Math.min(reads++, beats.length - 1)];
+  const warned: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (line: unknown) => {
+    warned.push(String(line));
+  };
+  const stop = startHeartbeat(
+    article.id,
+    HOLDER,
+    { onLost: () => {}, onError: () => {} },
+    20,
+    clock,
+  );
+  try {
+    await waitFor('every scripted beat', () => reads >= beats.length);
+  } finally {
+    stop();
+    console.warn = realWarn;
+  }
+
+  const late = warned.filter((line) => line.includes('"heartbeat_late"'));
+  assert.equal(late.length, 1, 'on time beats say nothing');
+  const fields = JSON.parse(late[0]);
+  assert.equal(fields.level, 'warn');
+  assert.equal(fields.article_id, article.id);
+  assert.equal(fields.interval_ms, 20);
+  assert.equal(fields.lag_ms, 980, 'the time past the interval the beat should have fired at');
+});
+
+test('a run whose claim was re-queued stops, writes nothing and says the lease is gone', { skip }, async () => {
   const article = await claimedArticle(-60);
   assert.equal(await reapExpiredLeases(), 1);
   const reaped = await reload(article.id);
-  assert.equal(reaped.status, 'timed_out');
+  assert.equal(reaped.status, 'queued');
 
   // The reaped worker only finds out when it next tries to renew, which is
   // what starting the stage does first.
@@ -314,9 +531,10 @@ test('a run whose claim was reaped stops, writes nothing and says the lease is g
   }));
 
   const current = await reload(article.id);
-  assert.equal(current.status, 'timed_out', 'the reap stands');
+  await q("UPDATE articles SET status = 'cancelled' WHERE id = $1", [article.id]);
+  assert.equal(current.status, 'queued', 'the re-queue stands');
   assert.equal(current.stage, 'assemble', 'and the article did not advance');
-  assert.equal(current.error, reaped.error, 'the operator still reads why it stopped');
+  assert.equal(current.lease_requeues, 1);
 
   const sessions = await sessionsFor(article.id);
   const lost = sessions.at(-1)!;
@@ -357,7 +575,7 @@ test('a stage abandoned at its budget cannot write its output afterwards', { ski
   );
 });
 
-test('a run reaped mid-stage cannot overwrite the reap when it finishes', { skip }, async () => {
+test('a run re-queued mid-stage cannot overwrite the re-queue when it finishes', { skip }, async () => {
   const article = await claimedArticle();
 
   // The stage is already running when its claim is taken away - the case the
@@ -371,9 +589,11 @@ test('a run reaped mid-stage cannot overwrite the reap when it finishes', { skip
   });
 
   const current = await reload(article.id);
-  assert.equal(current.status, 'timed_out', 'the run that was reaped does not resurrect itself');
+  await q("UPDATE articles SET status = 'cancelled' WHERE id = $1", [article.id]);
+  assert.equal(current.status, 'queued', 'the run that lost its claim does not resurrect itself');
   assert.equal(current.stage, 'assemble');
   assert.equal(current.claimed_by, null);
   const [session] = await sessionsFor(article.id);
-  assert.equal(session.status, 'timed_out', 'and its session stays the timeout the reaper wrote');
+  assert.equal(session.status, 'failed', 'and its session stays what the reaper wrote');
+  assert.equal(session.error, LEASE_REQUEUED_MESSAGE);
 });

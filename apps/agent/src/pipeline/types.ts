@@ -171,10 +171,16 @@ export interface ArticleRow {
   /**
    * Lease bookkeeping for the stage this article is currently claimed for, all
    * NULL while it is not claimed. The worker renews both while it works; a
-   * claim whose `lease_expires_at` has passed is reaped to 'timed_out'.
+   * claim whose `lease_expires_at` has passed is re-queued, because the worker
+   * that held it is gone.
    */
   heartbeat_at: string | null;
   lease_expires_at: string | null;
+  /**
+   * Automatic re-queues this attempt has taken because the worker holding it
+   * stopped mid-stage. Past the cap the card fails instead; a retry resets it.
+   */
+  lease_requeues: number;
   /**
    * Which pass over this article is current: the first pipeline run is 1, and
    * a retry increments it. A claim does not - two claims of the same queued

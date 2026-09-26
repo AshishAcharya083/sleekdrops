@@ -166,10 +166,47 @@ export function elapsedBand(
 /** Budget in whole minutes, as every operator sentence about it prints it. */
 export const budgetMinutes = (budgetSeconds: number): number => Math.round(budgetSeconds / 60);
 
-/** The one sentence a stopped run explains itself with. */
-export const timedOutSentence = (budgetSeconds: number): string =>
-  `Stopped after ${budgetMinutes(budgetSeconds)} minutes (the limit for this agent). ` +
-  'Any partial output has been saved as a draft.';
+/**
+ * Why a timed-out run stopped, read off the message the agent stored with it.
+ * 'lease' is a run whose worker stopped under it: the agent reaped those to
+ * timed_out before SLE-132 (it re-queues them now), and its message said so -
+ * "... its claim was reaped after 6m 3s". Everything else is the budget.
+ */
+export type TimedOutCause = 'budget' | 'lease';
+
+const LEASE_REAPED = /claim was reaped after (\d+h \d+m|\d+m \d+s|\d+s)/;
+
+export const timedOutCause = (error?: string | null): TimedOutCause =>
+  error && /claim was reaped/.test(error) ? 'lease' : 'budget';
+
+/** What the panel knows about a stopped run beyond its budget. */
+export interface TimedOutRun {
+  /** The stored error - the article's or the stopped session's. */
+  error?: string | null;
+  /** How long it actually ran, when the panel has a clock for it. */
+  elapsedSeconds?: number | null;
+}
+
+/**
+ * The one sentence a stopped run explains itself with. A run the budget
+ * stopped ran for the whole limit, so the limit is the figure; a run whose
+ * worker stopped did not, and naming the limit would say it ran for an hour
+ * when it ran for six minutes.
+ */
+export const timedOutSentence = (budgetSeconds: number, run: TimedOutRun = {}): string => {
+  const saved = 'Any partial output has been saved as a draft.';
+  if (timedOutCause(run.error) === 'budget') {
+    return `Stopped after ${budgetMinutes(budgetSeconds)} minutes (the limit for this agent). ${saved}`;
+  }
+  const ran =
+    typeof run.elapsedSeconds === 'number' && Number.isFinite(run.elapsedSeconds)
+      ? fmtSeconds(run.elapsedSeconds)
+      : (LEASE_REAPED.exec(run.error ?? '')?.[1] ?? null);
+  const limit = `before its ${budgetMinutes(budgetSeconds)} minute limit`;
+  return ran
+    ? `The worker running this agent stopped after ${ran}, ${limit}. ${saved}`
+    : `The worker running this agent stopped ${limit}. ${saved}`;
+};
 
 /** The budget as read-only text. It is configuration, not a panel field. */
 export const stageBudgetLine = (budgetSeconds: number): string =>
@@ -334,6 +371,8 @@ export interface StuckRun {
   budget_seconds: number;
   /** The claim's lease ran out - nothing is renewing it any more. */
   lease_expired?: boolean;
+  /** The stored reason a stopped run carries, which is what says what stopped it. */
+  error?: string | null;
 }
 
 /** The article-list row this surface reads. */
@@ -345,6 +384,7 @@ export interface StuckArticle {
   claimed_at?: string | null;
   lease_expires_at?: string | null;
   updated_at?: string | null;
+  error?: string | null;
 }
 
 /** The session-list row it reads alongside it. */
@@ -448,6 +488,7 @@ export function stuckRuns(
         article.status === 'timed_out' ? (session?.ended_at ?? article.updated_at ?? null) : null,
       budget_seconds: budget,
       lease_expired: leaseExpired,
+      error: article.error ?? null,
     });
   }
   return runs;

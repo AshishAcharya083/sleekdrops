@@ -4,27 +4,64 @@
 //
 // The poll does two jobs. It claims work, and every Nth tick it reaps: a claim
 // carries a lease now (012_stage_lease.sql), and a lease nobody is renewing is
-// how a wedged or abandoned run becomes visible while this process is still
-// alive. Recovery used to happen only at boot, which is why a stage that
-// stopped making progress sat in 'running' for 2702 minutes - the code that
-// would have noticed only ran when the container was replaced.
+// how an abandoned run becomes visible while this process is still alive.
+// Recovery used to happen only at boot, which is why a stage that stopped
+// making progress sat in 'running' for 2702 minutes - the code that would have
+// noticed only ran when the container was replaced.
+//
+// A lapsed lease is re-queued, not timed out. A stage that is merely slow or
+// stuck keeps renewing and is stopped by its own budget; the only way a lease
+// lapses is that the process holding it stopped - a redeploy, a memory kill, a
+// scale-in - and that process never got to spend the stage's budget.
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { createLogger } from '../lib/log.js';
 import { getSetting, q } from '../db/pool.js';
-import { stageBudgetSeconds } from './budgets.js';
 import { STAGE_LEASE_SECONDS } from './lease.js';
 import { STAGE_AGENT, runStage } from './runner.js';
 import { recoverStaleScoutRuns } from './scout.js';
-import { stageTimeoutMessage } from './stageTimeout.js';
 import type { ArticleRow, Stage } from './types.js';
 
 const log = createLogger('worker');
 
-const workerId = `worker-${randomUUID().slice(0, 8)}`;
+/**
+ * This process, as every claim it takes records it. The Cloud Run revision
+ * leads when there is one, so `claimed_by` and the reaper's log say which
+ * deploy a lost claim belonged to rather than only a random id.
+ */
+export function workerIdentity(revision: string, suffix: string): string {
+  return revision ? `worker-${revision}-${suffix}` : `worker-${suffix}`;
+}
+
+export const workerId = workerIdentity(config.revision, randomUUID().slice(0, 8));
 let active = 0;
 let stopped = false;
 let ticks = 0;
+let poller: NodeJS.Timeout | undefined;
+const inFlightTicks = new Set<Promise<void>>();
+
+/**
+ * Automatic re-queues one attempt gets when the worker holding it stops. Two
+ * covers a redeploy landing on a restart; a third lapse on the same attempt
+ * says the stage itself is what keeps taking the instance down (a memory kill
+ * is the usual one), and looping would only take it down again.
+ */
+export const MAX_LEASE_REQUEUES = 2;
+
+/** The session line of a run whose worker stopped and whose stage was re-queued. */
+export const LEASE_REQUEUED_MESSAGE = 'worker instance stopped mid-stage; stage re-queued';
+
+/** The session line of a run this process let go of as it shut down. */
+export const SHUTDOWN_RELEASED_MESSAGE = 'worker instance shut down mid-stage; stage re-queued';
+
+/** What a card says once its worker has stopped under it more than the cap allows. */
+export function workerStoppedRepeatedlyMessage(stage: Exclude<Stage, 'done'>): string {
+  return (
+    `The worker instance running the ${stage} stage (${STAGE_AGENT[stage]} agent) stopped ` +
+    `${MAX_LEASE_REQUEUES + 1} times before the stage could finish, so it was not re-queued ` +
+    'again. Any partial output has been saved as a draft - use Retry from this stage to run it again.'
+  );
+}
 
 /**
  * What one claim writes into `claimed_by`: this worker, plus a token unique to
@@ -77,75 +114,93 @@ export function isReapTick(tickCount: number, every = config.reaperEveryTicks): 
 }
 
 /**
- * Stop every article whose lease has run out.
+ * A claim nobody is holding any more: still 'running', with a lease that has
+ * run out (or never existed). Both the tick reaper and boot recovery select on
+ * exactly this, so the two paths can never disagree about which rows are theirs.
+ */
+const CLAIM_LAPSED =
+  "status = 'running' AND stage <> 'done' AND (lease_expires_at IS NULL OR lease_expires_at < now())";
+
+const CLAIM_CLEARED =
+  'claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL, lease_expires_at = NULL';
+
+/**
+ * Put every article whose claim lapsed back in the queue, or fail it once the
+ * attempt has used up its automatic re-queues.
  *
  * This is the case a stage's own budget cannot cover: the process that held
- * the claim is gone (recycled, killed, wedged below the level its own timer
- * runs at), so nobody is left to notice its budget. The lease is what outlives
- * it, and any live worker can act on it - which is the point, because waiting
- * for a restart is what left a run sitting in 'running' for two days.
+ * the claim is gone (recycled, killed, scaled in), so nobody is left to notice
+ * its budget. The lease is what outlives it, and any live worker can act on it.
+ * The stage, the draft and every partial output stay on the row - the next
+ * claim runs the same stage again on the same attempt.
  *
- * Per row rather than one statement, because the message names the stage, the
- * agent and how long it actually ran. Each update re-checks the lease it read,
- * so two workers reaping at once cannot both claim the same row.
+ * Per row, because the message names the stage and the log says who lost it.
+ * Each update re-checks the lapse and the claim it read, so two workers
+ * sweeping at once cannot both act on the same row.
  */
 export async function reapExpiredLeases(): Promise<number> {
-  const expired = await q<{
-    // `stage <> 'done'` below is what makes this type honest: a finished
-    // article has no agent to name, and the claim never takes one anyway.
+  const lapsed = await q<{
+    // `stage <> 'done'` in CLAIM_LAPSED is what makes this type honest: a
+    // finished article has no agent to name, and the claim never takes one.
     id: string;
     stage: Exclude<Stage, 'done'>;
     claimed_by: string | null;
+    lease_requeues: number;
     elapsed_seconds: string;
   }>(
-    `SELECT id, stage, claimed_by,
+    `SELECT id, stage, claimed_by, lease_requeues,
             EXTRACT(EPOCH FROM (now() - COALESCE(claimed_at, updated_at))) elapsed_seconds
      FROM articles
-     WHERE status = 'running' AND stage <> 'done' AND lease_expires_at < now()`,
+     WHERE ${CLAIM_LAPSED}`,
   );
 
-  let reaped = 0;
-  for (const row of expired) {
-    const agent = STAGE_AGENT[row.stage];
-    const budgetSeconds = stageBudgetSeconds(row.stage);
-    const elapsedSeconds = Number(row.elapsed_seconds);
-    const message = stageTimeoutMessage({
-      agent,
-      stage: row.stage,
-      budgetSeconds,
-      elapsedSeconds,
-      // The worker that was running this is not this one, so what it was
-      // waiting on died with it. Saying so beats naming nothing.
-      lastCall: null,
-      timeoutCause: 'lease',
-    });
-    const claimed = await q(
-      `UPDATE articles
-       SET status = 'timed_out', error = $2, claimed_by = NULL, claimed_at = NULL,
-           heartbeat_at = NULL, lease_expires_at = NULL, updated_at = now()
-       WHERE id = $1 AND status = 'running' AND lease_expires_at < now()
-       RETURNING id`,
-      [row.id, message],
-    );
-    // Someone renewed the lease, cancelled the article or reaped it first.
-    if (claimed.length === 0) continue;
+  let handled = 0;
+  for (const row of lapsed) {
+    const exhausted = row.lease_requeues >= MAX_LEASE_REQUEUES;
+    const message = exhausted ? workerStoppedRepeatedlyMessage(row.stage) : LEASE_REQUEUED_MESSAGE;
+    const updated = exhausted
+      ? // 'transient': nothing about the content failed, and a retry once the
+        // worker is stable is exactly what it needs.
+        await q(
+          `UPDATE articles
+           SET status = 'failed', error = $3, failure_class = 'transient', ${CLAIM_CLEARED},
+               updated_at = now()
+           WHERE id = $1 AND claimed_by IS NOT DISTINCT FROM $2 AND ${CLAIM_LAPSED}
+           RETURNING id`,
+          [row.id, row.claimed_by, message],
+        )
+      : // `updated_at` is left alone so the article keeps its place in the
+        // queue: claimNext takes the longest-waiting row first, and this one
+        // was already being worked on.
+        await q(
+          `UPDATE articles
+           SET status = 'queued', lease_requeues = lease_requeues + 1, ${CLAIM_CLEARED}
+           WHERE id = $1 AND claimed_by IS NOT DISTINCT FROM $2 AND ${CLAIM_LAPSED}
+           RETURNING id`,
+          [row.id, row.claimed_by],
+        );
+    // Someone renewed the lease, cancelled the article or swept it first.
+    if (updated.length === 0) continue;
     await q(
-      `UPDATE agent_sessions SET status = 'timed_out', error = $2, ended_at = now()
+      `UPDATE agent_sessions SET status = 'failed', error = $2, ended_at = now()
        WHERE article_id = $1 AND status = 'running'`,
       [row.id, message],
     );
-    reaped += 1;
-    log.warn('stage timed out', {
+    handled += 1;
+    const fields = {
       article_id: row.id,
       stage: row.stage,
-      agent,
+      agent: STAGE_AGENT[row.stage],
       cause: 'lease',
-      budget_seconds: budgetSeconds,
-      elapsed_seconds: Math.round(elapsedSeconds),
       claimed_by: row.claimed_by,
-    });
+      elapsed_seconds: Math.round(Number(row.elapsed_seconds)),
+      lease_requeues: exhausted ? row.lease_requeues : row.lease_requeues + 1,
+      max_lease_requeues: MAX_LEASE_REQUEUES,
+    };
+    if (exhausted) log.error('stage failed: its worker stopped repeatedly', fields);
+    else log.warn('stage re-queued: its worker stopped', fields);
   }
-  return reaped;
+  return handled;
 }
 
 async function tick(): Promise<void> {
@@ -160,9 +215,12 @@ async function tick(): Promise<void> {
   const enabled = await getSetting<boolean>('worker_enabled', true);
   if (!enabled) return;
 
-  while (active < config.workerConcurrency) {
+  while (!stopped && active < config.workerConcurrency) {
     const article = await claimNext();
     if (!article) return;
+    // Claimed as the process was told to stop: the claim is already this
+    // worker's, so releaseHeldClaims hands it back rather than it running here.
+    if (stopped) return;
     active += 1;
     void runStage(article)
       .catch((err) => console.error('[worker] runStage crashed:', err))
@@ -173,43 +231,71 @@ async function tick(): Promise<void> {
 }
 
 export function startWorker(): void {
+  stopped = false;
   console.log(`[worker] ${workerId} polling every ${config.pollMs}ms (concurrency ${config.workerConcurrency})`);
-  const interval = setInterval(() => {
-    void tick().catch((err) => console.error('[worker] tick failed:', err));
+  poller = setInterval(() => {
+    const running: Promise<void> = tick()
+      .catch((err) => console.error('[worker] tick failed:', err))
+      .finally(() => inFlightTicks.delete(running));
+    inFlightTicks.add(running);
   }, config.pollMs);
-  interval.unref();
+  poller.unref();
 }
 
-export function stopWorker(): void {
+/**
+ * Stop taking new work, and wait for any poll already in progress to finish.
+ * The wait is the point: a claim that lands after the shutdown released this
+ * worker's claims would be held by nobody until its lease ran out.
+ */
+export async function stopWorker(): Promise<void> {
   stopped = true;
+  clearInterval(poller);
+  await Promise.allSettled([...inFlightTicks]);
+}
+
+/**
+ * Hand every article this process holds back to the queue, for a shutdown.
+ *
+ * Guarded on the claim - only rows whose `claimed_by` is one of this worker's
+ * claim identities - so nothing another instance holds is touched. The runs
+ * still in flight here find their claim gone at their next write or renewal
+ * and stop without writing (runner.ts `updateArticle`), which is what keeps an
+ * abandoned run from landing on top of the row the next claim is working.
+ *
+ * Not counted against MAX_LEASE_REQUEUES: a shutdown that let go properly is
+ * the platform's own doing, not a sign the stage is taking the instance down.
+ */
+export async function releaseHeldClaims(holder: string = workerId): Promise<number> {
+  const released = await q<{ id: string; stage: Stage }>(
+    `UPDATE articles SET status = 'queued', ${CLAIM_CLEARED}
+     WHERE status = 'running' AND starts_with(claimed_by, $1 || '/')
+     RETURNING id, stage`,
+    [holder],
+  );
+  if (released.length === 0) return 0;
+  await q(
+    `UPDATE agent_sessions SET status = 'failed', error = $2, ended_at = now()
+     WHERE status = 'running' AND article_id = ANY($1)`,
+    [released.map((r) => r.id), SHUTDOWN_RELEASED_MESSAGE],
+  );
+  log.warn('released claims at shutdown', {
+    worker_id: holder,
+    articles: released.map((r) => `${r.id} (${r.stage})`),
+  });
+  return released.length;
 }
 
 /**
  * Recover work stranded in 'running' by a previous crashed process.
  *
- * Boot behaviour, and deliberately a re-queue rather than a timeout: a process
- * that died never got to spend the stage's budget, so the honest thing is to
- * let the stage run. It keys on the lease rather than a hardcoded 30-minute
- * window on `claimed_at` - a live claim on another instance renews its lease
- * and is left alone, and an abandoned one is recoverable the moment its lease
- * lapses instead of at a fixed half hour.
+ * Boot behaviour, and the same rule as the tick reaper - the same selection,
+ * the same re-queue and the same cap - so a lapsed claim ends up in the same
+ * state whichever of the two finds it first. A live claim on another instance
+ * renews its lease and is left alone.
  */
 export async function recoverStranded(): Promise<void> {
-  const rows = await q<{ id: string }>(
-    `UPDATE articles
-     SET status = 'queued', claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL,
-         lease_expires_at = NULL, updated_at = now()
-     WHERE status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at < now())
-     RETURNING id`,
-  );
-  if (rows.length > 0) {
-    console.log(`[worker] re-queued ${rows.length} stranded article(s)`);
-    await q(
-      `UPDATE agent_sessions SET status = 'failed', error = $2, ended_at = now()
-       WHERE status = 'running' AND article_id = ANY($1)`,
-      [rows.map((r) => r.id), 'process restarted mid-run; stage re-queued'],
-    );
-  }
+  const recovered = await reapExpiredLeases();
+  if (recovered > 0) console.log(`[worker] recovered ${recovered} stranded article(s)`);
   // A session left open on an article that is no longer running - reaped,
   // cancelled, or recovered by another instance - can never be closed by the
   // process that opened it, so it would show as a live run forever.
