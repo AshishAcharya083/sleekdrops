@@ -129,11 +129,12 @@ and the Secret Manager wiring for `DATABASE_URL`, `ADMIN_TOKEN`,
 
 When an instance stops mid-stage anyway (a rollout, a memory kill, a host
 move), nothing is lost: on SIGTERM the agent hands the articles it holds back
-to the queue before the 10-second grace period ends, and a claim whose worker
-died without that is re-queued once its lease lapses. The same article is
-re-queued at most twice per attempt; the third lapse fails the card with a
-plain message, draft kept, and **Retry from this stage** starts the count
-again. Stages stopped by their own time budget still end as timed out.
+to the queue before the 10-second grace period ends (the image runs `node`
+as PID 1 rather than `pnpm start`, because pnpm does not pass the signal on),
+and a claim whose worker died without that is re-queued once its lease
+lapses. The same article is re-queued at most twice per attempt; the third
+lapse fails the card with a plain message, draft kept, and **Retry from this
+stage** starts the count again. Stages stopped by their own time budget still end as timed out.
 
 ### Connecting the Facebook Page
 

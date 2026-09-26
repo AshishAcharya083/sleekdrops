@@ -1,5 +1,6 @@
 // SleekDrops agent platform entrypoint: wait for db → migrate → recover → serve + work,
 // and on SIGTERM/SIGINT hand held work back to the queue before exiting.
+import { constants } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { migrate } from './db/migrate.js';
 import { databaseConnectionHint, isDatabaseConnectionError, waitForDatabase } from './db/pool.js';
@@ -30,8 +31,21 @@ const SHUTDOWN_DEADLINE_MS = 9_000;
 const POLL_DRAIN_MS = 4_000;
 
 let shuttingDown = false;
+let working = false;
+
+async function releaseClaims(): Promise<void> {
+  try {
+    const released = await releaseHeldClaims();
+    console.log(`[agent] released ${released} claimed article(s) back to the queue`);
+  } catch (err) {
+    // The leases still lapse on their own, and the next reaper re-queues them.
+    console.error('[agent] could not release claims at shutdown:', err);
+  }
+}
 
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  // Still booting, so nothing is claimed yet and there is nothing to hand back.
+  if (!working) process.exit(128 + constants.signals[signal]);
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[agent] ${signal} received: ${workerId} is releasing its claims and exiting`);
@@ -43,13 +57,14 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   stopScoutWorker();
   stopDistributionWorker();
   stopInsightsCollector();
-  await Promise.race([stopWorker(), delay(POLL_DRAIN_MS)]);
-  try {
-    const released = await releaseHeldClaims();
-    console.log(`[agent] released ${released} claimed article(s) back to the queue`);
-  } catch (err) {
-    // The leases still lapse on their own, and the next reaper re-queues them.
-    console.error('[agent] could not release claims at shutdown:', err);
+  const polls = stopWorker();
+  const drained = await Promise.race([polls.then(() => true), delay(POLL_DRAIN_MS, false)]);
+  await releaseClaims();
+  // A poll that outlived the drain window can still land a claim after the
+  // release above; it is this process's, so wait for it and hand it back too.
+  if (!drained) {
+    await polls;
+    await releaseClaims();
   }
   process.exit(0);
 }
@@ -72,12 +87,14 @@ async function main(): Promise<void> {
   // Its own interval, so a network that is slow to answer for insights cannot
   // hold up the queue that is trying to post.
   startInsightsCollector();
-  // Only once there is work to hand back: before this the default - exit at
-  // once - is right, and a shutdown that waited on a database still being
-  // dialled would only delay it.
-  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-    process.once(signal, () => void shutdown(signal));
-  }
+  working = true;
+}
+
+// Bound before boot, not after it: in the container this process is PID 1,
+// and the kernel ignores a signal PID 1 has no handler for - so a SIGTERM
+// during a slow database wait would otherwise be ignored until the SIGKILL.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => void shutdown(signal));
 }
 
 main().catch((err) => {

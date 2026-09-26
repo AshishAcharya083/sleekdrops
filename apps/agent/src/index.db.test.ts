@@ -1,19 +1,36 @@
-// The container's CMD is `pnpm --filter @sleekdrops/agent start`, i.e. this
-// entrypoint - so the boot contract is tested the way the container runs it:
-// spawn the real process and watch what it does. `pnpm migrate` is the other
-// process that connects before anything else, and is spawned the same way.
+// The container's CMD runs this entrypoint - so the boot contract is tested the
+// way the container runs it: spawn the real process and watch what it does.
+// `pnpm migrate` is the other process that connects before anything else, and
+// is spawned the same way.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import net from 'node:net';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const ENTRYPOINT = join(PACKAGE_ROOT, 'src', 'index.ts');
 const MIGRATE_CLI = join(PACKAGE_ROOT, 'src', 'db', 'migrate.ts');
+const REPO_ROOT = dirname(dirname(PACKAGE_ROOT));
+
+/**
+ * The Dockerfile's CMD and the WORKDIR it runs in, mapped from the image's
+ * /app onto this checkout. Cloud Run signals that exact process and nothing
+ * under it, so the shutdown contract is only proven by booting what it names.
+ */
+function containerCommand(): { argv: string[]; cwd: string } {
+  const dockerfile = readFileSync(join(REPO_ROOT, 'Dockerfile'), 'utf8');
+  const workdirs = [...dockerfile.matchAll(/^WORKDIR\s+(\S+)/gm)].map((m) => m[1]);
+  const cmd = /^CMD\s+(\[.*\])\s*$/m.exec(dockerfile);
+  assert.ok(cmd, 'the Dockerfile has an exec-form CMD');
+  const workdir = workdirs.at(-1) ?? '/app';
+  assert.ok(workdir.startsWith('/app'), `WORKDIR ${workdir} is outside the copied repo`);
+  return { argv: JSON.parse(cmd[1]) as string[], cwd: join(REPO_ROOT, relative('/app', workdir)) };
+}
 
 /** The live database this sandbox/CI provides, or nothing. */
 const liveUrl = process.env.DATABASE_URL ?? '';
@@ -107,6 +124,8 @@ const skip: string | false = skipLive
 
 interface Booted {
   child: ChildProcess;
+  /** SIGKILL the process and everything it started. */
+  killAll: () => void;
   output: () => string;
   waitFor: (pattern: RegExp, timeoutMs?: number) => Promise<void>;
   exited: Promise<number | null>;
@@ -117,12 +136,14 @@ interface BootOptions {
   script?: string;
   /** An extra ESM module loaded before it, as a path or `data:` URL. */
   preload?: string;
+  /** Run this command line in `cwd` instead of `node --import tsx <script>`. */
+  command?: { argv: string[]; cwd: string };
 }
 
 /** Spawn the process with `overrides` applied to its env; an undefined value unsets. */
 function bootAgent(
   overrides: Record<string, string | undefined>,
-  { script = ENTRYPOINT, preload }: BootOptions = {},
+  { script = ENTRYPOINT, preload, command }: BootOptions = {},
 ): Booted {
   // PORT 0 by default keeps a booting agent off a port another suite may want.
   const env: NodeJS.ProcessEnv = { ...process.env, PORT: '0', ...overrides };
@@ -130,10 +151,13 @@ function bootAgent(
     if (value === undefined) delete env[key];
   }
   const preloads = preload ? ['--import', preload] : [];
-  const child = spawn(process.execPath, ['--import', 'tsx', ...preloads, script], {
-    cwd: PACKAGE_ROOT,
+  const [file, ...args] = command?.argv ?? [process.execPath, '--import', 'tsx', ...preloads, script];
+  const child = spawn(file, args, {
+    cwd: command?.cwd ?? PACKAGE_ROOT,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
+    // Its own process group, so cleanup can reach anything a wrapper orphans.
+    detached: true,
   });
   let output = '';
   const waiters: Array<() => void> = [];
@@ -147,6 +171,13 @@ function bootAgent(
   const exited = new Promise<number | null>((resolve) => child.on('exit', resolve));
   return {
     child,
+    killAll: () => {
+      try {
+        process.kill(-child.pid!, 'SIGKILL');
+      } catch {
+        // The group is already gone.
+      }
+    },
     output: () => output,
     exited,
     waitFor: (pattern, timeoutMs = 30_000) =>
@@ -245,6 +276,23 @@ test(
     }
   },
 );
+
+// As PID 1 in the container the kernel drops any signal the process has no
+// handler for, so a redeploy landing while boot still waits on Postgres would
+// sit out the whole grace period and end in a SIGKILL.
+test('SIGTERM while boot is still waiting for the database exits at once', { timeout: 60_000 }, async () => {
+  const agent = bootAgent({ DATABASE_URL: 'postgres://unused:unused@127.0.0.1:1/unreachable' });
+  try {
+    await agent.waitFor(/database not reachable yet, retrying/);
+    const signalledAt = Date.now();
+    agent.child.kill('SIGTERM');
+    assert.equal(await agent.exited, 143, 'exits with the SIGTERM status from its own handler');
+    assert.ok(Date.now() - signalledAt < 2_000, 'waited on the database instead of exiting');
+  } finally {
+    agent.child.kill('SIGKILL');
+    await agent.exited;
+  }
+});
 
 // The demo ordering itself: the app starts first and the database only answers
 // seconds later. A TCP proxy stands in for the database container - it refuses
@@ -391,13 +439,19 @@ test(
 // seconds later. Before SLE-132 nothing handled it: every article the process
 // held stayed 'running' under a claim nobody would renew, the next instance
 // booted straight past it, and five minutes later the reaper stopped it.
+// Booted with the Dockerfile's own CMD and signalled at that process only, as
+// Cloud Run does: under `pnpm start` pnpm took the signal and exited, and the
+// agent under it never heard it.
 test(
-  'SIGTERM hands every claim this process holds back to the queue and exits inside the grace period',
+  'SIGTERM to the container CMD hands every claim back to the queue inside the grace period',
   { skip: skipLive, timeout: 90_000 },
   async () => {
     const scratch = await scratchDatabase();
     const revision = 'sleekdrops-agent-00132-sig';
-    const agent = bootAgent({ DATABASE_URL: scratch.url.href, K_REVISION: revision });
+    const agent = bootAgent(
+      { DATABASE_URL: scratch.url.href, K_REVISION: revision },
+      { command: containerCommand() },
+    );
     const db = new pg.Pool({ connectionString: scratch.url.href, max: 1 });
     try {
       await agent.waitFor(/post insights polling/);
@@ -455,7 +509,7 @@ test(
       assert.equal(session.rows[0].status, 'failed');
       assert.match(session.rows[0].error, /shut down mid-stage; stage re-queued/);
     } finally {
-      agent.child.kill('SIGKILL');
+      agent.killAll();
       await agent.exited;
       await db.end();
       await scratch.drop();
