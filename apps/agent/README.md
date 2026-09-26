@@ -51,10 +51,20 @@ whatever it had already written as a draft, with a message naming the agent,
 the stage, the limit, how long it ran and the last LLM call it was waiting on
 (scrubbed of any credential the process holds). A claim also carries a lease
 the worker renews while it works, and the worker reaps lapsed leases on its own
-poll (`REAPER_EVERY_TICKS`), so a run whose process died is stopped while the
-platform is up rather than at the next restart. A run that discovers its lease
-is gone - reaped, or cancelled from the panel - abandons the stage and writes
-nothing, leaving the outcome whoever took the article away recorded.
+poll (`REAPER_EVERY_TICKS`) and at boot, so a run whose process died is dealt
+with while the platform is up rather than at the next restart. A lapsed lease
+means the worker stopped, not that the stage ran long, so the article goes
+back to `queued` at the same stage with its draft kept - at most
+`MAX_LEASE_REQUEUES` (2) times per attempt, tracked in
+`articles.lease_requeues`; the next lapse fails it with a plain message, and
+an operator retry resets the count. On SIGTERM/SIGINT the process stops
+claiming, hands the articles it holds back to the queue (not counted against
+that cap) and exits inside Cloud Run's 10-second grace period. The worker id
+carries `K_REVISION`, and a heartbeat that fires more than twice its interval
+late is logged as `heartbeat_late` with the lag - the trace a throttled or
+frozen instance leaves. A run that discovers its lease is gone - reaped,
+released at shutdown, or cancelled from the panel - abandons the stage and
+writes nothing, leaving the outcome whoever took the article away recorded.
 Every agent prompt is grounded with today's date (Australia/Sydney) so years
 in titles/copy come from the calendar, not stale training data.
 

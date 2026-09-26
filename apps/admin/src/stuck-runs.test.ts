@@ -76,7 +76,7 @@ test('the Overview surfaces stuck runs above the stat row', () => {
   );
   assert.match(
     overview,
-    /\$\{timedOutSentence\(budget\)\}\$\{stopped\}/,
+    /\$\{timedOutSentence\(budget, \{ error: run\.error, elapsedSeconds: run\.elapsed_seconds \}\)\}\$\{stopped\}/,
     'and a run whose session has aged out even of that says when it stopped',
   );
   assert.doesNotMatch(overview, /data\.stuck/, 'never off a section the agent does not send');
@@ -201,7 +201,11 @@ test('a timed-out run is never dressed as a failure', () => {
 
 test('a stopped run explains itself in one sentence, with the budget as text', () => {
   assert.match(pipeline, /article\.status === 'timed_out'/);
-  assert.match(pipeline, /timedOutSentence\(budgetSeconds\)/, 'the agreed sentence, not a paraphrase');
+  assert.match(
+    pipeline,
+    /timedOutSentence\(budgetSeconds, \{\s*error: timedOutSession\?\.error \?\? article\.error,\s*\}\)/,
+    'the agreed sentence, not a paraphrase - told what stopped the run',
+  );
   assert.match(pipeline, /<BudgetLine budgetSeconds=\{budgetSeconds\} \/>/);
   assert.match(
     pipeline,

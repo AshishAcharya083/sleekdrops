@@ -36,6 +36,7 @@ import {
   stoppedSession,
   STAGE_AGENT,
   stuckRuns,
+  timedOutCause,
   timedOutSentence,
   untestableStageHint,
   type StageSession,
@@ -93,6 +94,42 @@ test('the operator copy is the agreed sentence, to the minute', () => {
     REVIEW_STALE_REASON,
     'seo_review must re-run before publish - the draft changed after the last review',
   );
+});
+
+// The lease-cause message the agent stored on rows it reaped before SLE-132.
+const REAPED =
+  'Stopped at the seo_review stage: the seo_review agent stopped reporting progress and its claim was reaped after 6m 3s (the limit for this agent is 60m).';
+const BUDGET =
+  'Stopped at the seo_review stage: the seo_review agent ran past its 60m budget (the limit for this agent).';
+
+test('a run the budget stopped keeps the budget sentence, whatever else is known about it', () => {
+  const budgetSentence =
+    'Stopped after 60 minutes (the limit for this agent). Any partial output has been saved as a draft.';
+  assert.equal(timedOutCause(BUDGET), 'budget');
+  assert.equal(timedOutCause(null), 'budget', 'no stored reason reads as the budget, as it always did');
+  assert.equal(timedOutSentence(HOUR, { error: BUDGET }), budgetSentence);
+  assert.equal(timedOutSentence(HOUR, { error: BUDGET, elapsedSeconds: 3601 }), budgetSentence);
+  assert.equal(timedOutSentence(HOUR, { error: null }), budgetSentence);
+});
+
+test('a run whose worker stopped says how long it actually ran, not the budget', () => {
+  assert.equal(timedOutCause(REAPED), 'lease');
+  assert.equal(
+    timedOutSentence(HOUR, { error: REAPED }),
+    'The worker running this agent stopped after 6m 3s, before its 60 minute limit. Any partial output has been saved as a draft.',
+    'read off the stored message when the panel has no clock for it',
+  );
+  assert.equal(
+    timedOutSentence(HOUR, { error: REAPED, elapsedSeconds: 372 }),
+    'The worker running this agent stopped after 6m 12s, before its 60 minute limit. Any partial output has been saved as a draft.',
+    'the session clock, when there is one, is the figure',
+  );
+  assert.equal(
+    timedOutSentence(HOUR, { error: 'its claim was reaped' }),
+    'The worker running this agent stopped before its 60 minute limit. Any partial output has been saved as a draft.',
+    'no figure at all rather than the budget standing in for one',
+  );
+  assert.doesNotMatch(timedOutSentence(HOUR, { error: REAPED }), /Stopped after 60 minutes/);
 });
 
 test('the stage order is the one the agent and the panel both hardcode', () => {
@@ -425,6 +462,20 @@ test('a claim whose lease has lapsed is surfaced before it is past any bound', (
   );
   assert.equal(run.lease_expired, true, 'nothing is renewing it - it is wedged, not slow');
   assert.equal(elapsedBand(run.elapsed_seconds ?? 0, run.budget_seconds), 'normal');
+});
+
+test('the triage row carries the stored reason, so it can say what stopped the run', () => {
+  const [run] = stuckRuns(
+    [article({ status: 'timed_out', error: REAPED, updated_at: ago(5) })],
+    [],
+    null,
+    NOW,
+  );
+  assert.equal(run.error, REAPED);
+  assert.match(
+    timedOutSentence(run.budget_seconds, { error: run.error, elapsedSeconds: run.elapsed_seconds }),
+    /^The worker running this agent stopped after 6m 3s/,
+  );
 });
 
 test('a healthy pipeline produces an empty surface, not a hidden one', () => {

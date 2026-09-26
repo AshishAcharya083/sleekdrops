@@ -222,7 +222,7 @@ export async function distributionTick(deps: DistributionDeps = {}): Promise<Ite
   if (providers.length === 0) return [];
 
   const outcomes: ItemOutcome[] = [];
-  for (let n = 0; n < MAX_ITEMS_PER_TICK; n++) {
+  for (let n = 0; n < MAX_ITEMS_PER_TICK && !stopped; n++) {
     const item = await claimNextItem(providers);
     if (!item) break;
     outcomes.push(await processItem(item, deps));

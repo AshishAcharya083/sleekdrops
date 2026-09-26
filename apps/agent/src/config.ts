@@ -140,6 +140,12 @@ export const config = {
   port: Number(env('PORT', '8787')),
   workerConcurrency: Number(env('WORKER_CONCURRENCY', '2')),
   pollMs: Number(env('POLL_MS', '5000')),
+  /**
+   * The Cloud Run revision this process belongs to, set by Cloud Run itself.
+   * Part of the worker id, so a claim that lapsed names the deploy it was lost
+   * on. Empty anywhere else.
+   */
+  revision: env('K_REVISION'),
 
   /**
    * Wall-clock budget for one stage run. Clamped to MAX_STAGE_TIMEOUT_SECONDS

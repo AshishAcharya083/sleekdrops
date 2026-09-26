@@ -28,4 +28,8 @@ COPY apps/admin/dist apps/admin/dist
 
 ENV NODE_ENV=production
 EXPOSE 8787
-CMD ["pnpm", "--filter", "@sleekdrops/agent", "start"]
+# node itself is PID 1, not pnpm: Cloud Run sends SIGTERM to PID 1 only, and
+# pnpm answers it by exiting without passing it on, which kills the agent
+# before its shutdown handler can hand its claims back to the queue.
+WORKDIR /app/apps/agent
+CMD ["node", "--import", "tsx", "src/index.ts"]

@@ -342,8 +342,11 @@ export async function collectItemInsights(
   return flag ? 'flagged' : 'recorded';
 }
 
+let stopped = false;
+
 /** One poll: read back every posted item whose next checkpoint has arrived. */
 export async function insightsTick(deps: InsightsDeps = {}): Promise<InsightOutcome[]> {
+  if (stopped) return [];
   // The same switch that stops the posting worker. An operator who turns
   // distribution off means "make no calls to these networks as this Page";
   // readings resume on their own if it is back on inside the item's window.
@@ -372,6 +375,7 @@ export async function insightsTick(deps: InsightsDeps = {}): Promise<InsightOutc
 }
 
 export function startInsightsCollector(): void {
+  stopped = false;
   // Same shape as the posting worker: one tick at a time, so a slow network
   // cannot have two polls claiming overlapping work.
   let ticking = false;
@@ -389,6 +393,11 @@ export function startInsightsCollector(): void {
     `[distribution] post insights polling every ${config.distribution.insightsPollMs}ms ` +
       `(checkpoints at ${INSIGHT_CHECKPOINT_SECONDS.map((s) => `${s / 3_600}h`).join(', ')} after a post)`,
   );
+}
+
+/** Claim no more readings - the shutdown path. A reading in flight finishes on its own lease. */
+export function stopInsightsCollector(): void {
+  stopped = true;
 }
 
 /** How one placement is doing, across every post that used it. */
