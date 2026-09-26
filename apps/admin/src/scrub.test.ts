@@ -24,6 +24,20 @@ test('drops every credential the panel handles', () => {
   assert.deepEqual(out, {});
 });
 
+test('keeps the channel dimensions and drops the channel credential', () => {
+  const out = scrubProps({
+    action: 'connect',
+    provider: 'facebook',
+    placement: 'in_body',
+    value_present: true,
+    token: 'EAAGm0PX4ZCpsBAnever-ship-a-page-token',
+    tokenRef: 'facebook-page-token',
+    access_token: 'EAAGm0PX4ZCpsBAnever-ship-a-page-token',
+    externalAccountId: '104857600123',
+  });
+  assert.deepEqual(out, { action: 'connect', provider: 'facebook', placement: 'in_body', value_present: true });
+});
+
 test('drops operator-authored free text', () => {
   const out = scrubProps({
     title: 'Best budget standing desks for small apartments (2026)',

@@ -14,8 +14,8 @@ process.env.ADMIN_TOKEN = 'test-admin-token';
 process.env.SITE_URL = 'https://sleekdrops.com';
 
 const TOKEN = 'EAAG-page-token-4f21c9d7';
-const TOKEN_REF = 'test-facebook-page-token';
-process.env.TEST_FACEBOOK_PAGE_TOKEN = TOKEN;
+const TOKEN_REF = 'facebook-test-page-token';
+process.env.FACEBOOK_TEST_PAGE_TOKEN = TOKEN;
 
 const { pool, q, getSetting, setSetting } = await import('../../db/pool.js');
 const { migrate } = await import('../../db/migrate.js');

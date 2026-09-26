@@ -21,6 +21,7 @@ import {
   type DistributionQueueRow,
   type DistributionStatus,
   type HeroImageSource,
+  type HoldReason,
   type LinkPlacement,
   type RenderedPayload,
 } from './types.js';
@@ -166,6 +167,37 @@ export async function storeRenderedPayload(id: string, payload: RenderedPayload)
   );
 }
 
+/**
+ * The settings key holding one network's default placement:
+ * `facebook` → `facebook_link_placement`.
+ */
+export function placementSettingKey(provider: string): string {
+  return `${provider}_link_placement`;
+}
+
+/** The network-agnostic default, read when a network has no setting of its own. */
+export const DEFAULT_PLACEMENT_SETTING = 'distribution_link_placement';
+
+/**
+ * The placement a new item for `provider` is queued with, and which setting
+ * said so. The network's own setting wins, because the body-link budget that
+ * makes the choice matter is a per-network rule; the global default covers a
+ * network nobody has configured yet, and 'first_comment' - which never depends
+ * on a budget - covers a value no provider implements.
+ */
+export async function configuredPlacement(
+  provider: string,
+): Promise<{ placement: LinkPlacement; setting: string }> {
+  const key = placementSettingKey(provider);
+  const own = await getSetting<unknown>(key, null);
+  if (isLinkPlacement(own)) return { placement: own, setting: key };
+  const fallback = await getSetting<unknown>(DEFAULT_PLACEMENT_SETTING, 'first_comment');
+  return {
+    placement: isLinkPlacement(fallback) ? fallback : 'first_comment',
+    setting: DEFAULT_PLACEMENT_SETTING,
+  };
+}
+
 /** What one publish pass did to the queue. */
 export interface EnqueueOutcome {
   created: number;
@@ -203,12 +235,19 @@ export async function enqueuePublishedArticle(
   const connections = await activeConnections();
   if (connections.length === 0) return { ...none, skipped: 'no-channels' };
 
-  const configured = await getSetting<string>('distribution_link_placement', 'first_comment');
-  const placement: LinkPlacement = isLinkPlacement(configured) ? configured : 'first_comment';
+  const providers = [...new Set(connections.map((connection) => connection.provider))];
+  const placements = new Map(
+    await Promise.all(
+      providers.map(
+        async (provider) => [provider, (await configuredPlacement(provider)).placement] as const,
+      ),
+    ),
+  );
 
   let created = 0;
   let disconnected = 0;
   for (const connection of connections) {
+    const placement = placements.get(connection.provider)!;
     const payload = renderPayload(article, connection.provider, placement);
     let rows: Array<{ id: string }>;
     try {
@@ -380,13 +419,17 @@ export async function markPosted(id: string, remotePostId: string, note?: string
  * pass already spent stays spent; a held item is moved by a person, not by a
  * backoff.
  */
-export async function holdItem(id: string, reason: string): Promise<void> {
+export async function holdItem(
+  id: string,
+  reason: string,
+  holdReason: HoldReason | null = null,
+): Promise<void> {
   await q(
     `UPDATE distribution_queue
-     SET status = 'held', last_error = $2, claimed_by = NULL, claimed_at = NULL,
+     SET status = 'held', last_error = $2, hold_reason = $3, claimed_by = NULL, claimed_at = NULL,
          updated_at = now()
      WHERE id = $1`,
-    [id, reason],
+    [id, reason, holdReason === 'site_not_ready' ? null : holdReason],
   );
 }
 

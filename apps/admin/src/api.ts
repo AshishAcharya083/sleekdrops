@@ -413,8 +413,103 @@ export interface Settings {
     prose_engine?: 'claude' | 'gemini';
   };
   scout_interval_hours: number;
+  /** Whether a published article is queued for its connected channels at all. */
+  distribution_enabled?: boolean;
   /** Derived server-side, read-only — the API ignores it on save. */
   engines?: { claude: EngineReadiness; gemini: EngineReadiness };
+  /**
+   * Where the destination link goes: `distribution_link_placement` is the
+   * network-agnostic default, and `<provider>_link_placement` (seeded as
+   * `facebook_link_placement`) overrides it for one network.
+   */
+  [placementSetting: `${string}_link_placement`]: LinkPlacement | undefined;
+}
+
+// ── Distribution: channels and the post queue ──────────────────────────────
+
+export type LinkPlacement = 'first_comment' | 'in_body';
+
+export type ChannelStatus = 'active' | 'disabled' | 'needs_reauth';
+
+/** The staleness ladder, calmest first. Computed by the agent, never here. */
+export type TokenTier = 'ok' | 'notice' | 'warning' | 'critical' | 'expired';
+
+export type QueueFilter = 'all' | 'pending' | 'held' | 'failed' | 'posted';
+
+export type DistributionStatus = 'pending' | 'posting' | 'posted' | 'failed' | 'held';
+
+export type HoldReason = 'no_safe_image' | 'link_budget_exhausted' | 'site_not_ready';
+
+/**
+ * One connected account, as GET /api/distribution reports it. There is no
+ * token field on purpose: the agent reports whether the secret is present and
+ * where it came from, never the value.
+ */
+export interface Channel {
+  id: string;
+  provider: string;
+  externalAccountId: string;
+  displayName: string | null;
+  tokenRef: string;
+  status: ChannelStatus;
+  statusSince: string;
+  token: { expiresAt: string | null; expired: boolean; stale: boolean; hoursRemaining: number | null };
+  tokenTier: TokenTier;
+  adapterInstalled: boolean;
+  credential: { stored: boolean; source: 'panel' | 'environment' | null };
+  placement: { value: LinkPlacement; setting: string };
+  linkBudget: { used: number; cap: number; exhausted: boolean } | null;
+  counts: Record<QueueFilter, number>;
+}
+
+export interface DistributionOverview {
+  channels: Channel[];
+  providers: string[];
+  connectable: Array<{ provider: string; defaultTokenRef: string }>;
+}
+
+/** One queue row, as the Channels queue table and drawer read it. */
+export interface QueueItem {
+  id: string;
+  articleId: string | null;
+  title: string | null;
+  slug: string;
+  channelConnectionId: string;
+  provider: string;
+  placement: LinkPlacement;
+  status: DistributionStatus;
+  holdReason: HoldReason | null;
+  attempts: number;
+  lastError: string | null;
+  remotePostId: string | null;
+  remoteUrl: string | null;
+  scheduledAt: string;
+  postedAt: string | null;
+  updatedAt: string;
+  payload: {
+    caption: string;
+    url: string;
+    placement: LinkPlacement;
+    imageUrl: string | null;
+    imageSource: 'generated' | 'found' | 'operator' | null;
+    renderedAt?: string;
+  };
+}
+
+export interface QueueItemDetail {
+  item: QueueItem;
+  metrics: Array<{
+    fetched_at: string;
+    impressions: number | null;
+    clicks: number | null;
+    reactions: number | null;
+  }>;
+}
+
+/** What a retry or release did to a selection: moved, or not eligible any more. */
+export interface RecoveryOutcome {
+  updated: string[];
+  skipped: string[];
 }
 
 export function getToken(): string {

@@ -17,7 +17,9 @@ const {
   retryDelaySeconds,
   taggedUrl,
 } = await import('./queue.js');
-const { credentialEnvName, tokenStaleness, TOKEN_STALE_WINDOW_MS } = await import('./channels.js');
+const { credentialEnvName, isChannelTokenRef, tokenStaleness, TOKEN_STALE_WINDOW_MS } = await import(
+  './channels.js'
+);
 
 import type { DistributableArticle } from './types.js';
 
@@ -171,4 +173,18 @@ test('a secret reference names an env var without carrying a value', () => {
   assert.equal(credentialEnvName('facebook-page-token'), 'FACEBOOK_PAGE_TOKEN');
   assert.equal(credentialEnvName('bluesky.app.password'), 'BLUESKY_APP_PASSWORD');
   assert.equal(credentialEnvName('  threads token  '), 'THREADS_TOKEN');
+});
+
+test("a channel's secret name can only name a channel secret", () => {
+  assert.equal(isChannelTokenRef('facebook-page-token', 'facebook'), true);
+  assert.equal(isChannelTokenRef('FACEBOOK_PAGE_TOKEN', 'facebook'), true);
+  assert.equal(isChannelTokenRef('channel-sleekdrops-page', 'facebook'), true);
+  // The agent's own configuration, even under the network's prefix.
+  assert.equal(isChannelTokenRef('facebook-app-secret', 'facebook'), false);
+  assert.equal(isChannelTokenRef('FACEBOOK_GRAPH_VERSION', 'facebook'), false);
+  for (const platform of ['ADMIN_TOKEN', 'database-url', 'ANTHROPIC_API_KEY', 'github-token']) {
+    assert.equal(isChannelTokenRef(platform, 'facebook'), false, platform);
+  }
+  assert.equal(isChannelTokenRef('facebook', 'facebook'), false, 'a bare prefix names nothing');
+  assert.equal(isChannelTokenRef('bluesky-app-password', 'facebook'), false, "another network's secret");
 });

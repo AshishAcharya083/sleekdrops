@@ -12,10 +12,32 @@ import { CATEGORIES, POST_TYPES, slugify, todayInSydney } from '../content/contr
 import { offerCoverage, validateOfferInput } from '../content/offers.js';
 import { deleteOffer, offerRevisionsForArticle, offersForArticle, saveOffer } from '../db/offers.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
-import { listConnections, tokenStaleness } from '../distribution/channels.js';
+import {
+  ChannelAdminError,
+  channelQueue,
+  channelViews,
+  connectChannel,
+  disconnectChannel,
+  isQueueFilter,
+  isUuid,
+  overridePlacement,
+  queueItemDetail,
+  releaseHeldItems,
+  replaceCredential,
+  retryFailedItems,
+  type RecoveryOutcome,
+} from '../distribution/admin.js';
+import { getConnection, listConnections } from '../distribution/channels.js';
 import { placementPerformance } from '../distribution/insights.js';
-import { registeredProviders } from '../distribution/providers.js';
-import { itemsForArticle, queueCounts, recentItems } from '../distribution/queue.js';
+import { getProvider, registeredProviders } from '../distribution/providers.js';
+import {
+  DEFAULT_PLACEMENT_SETTING,
+  getItem,
+  itemsForArticle,
+  placementSettingKey,
+  queueCounts,
+  recentItems,
+} from '../distribution/queue.js';
 import { isLinkPlacement } from '../distribution/types.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
@@ -143,6 +165,47 @@ function settingsPayload(rows: Array<{ key: string; value: unknown }>): Record<s
   return Object.fromEntries(
     rows.filter((row) => !CREDENTIAL_SETTINGS.has(row.key)).map((row) => [row.key, row.value]),
   );
+}
+
+/**
+ * The placement settings a PUT may write: the network-agnostic default, and
+ * one per network the platform can post to or is connected to. Derived rather
+ * than listed so a second network's setting is writable the moment its adapter
+ * is registered, without this file learning its name.
+ */
+async function placementSettingKeys(): Promise<Set<string>> {
+  const providers = new Set(registeredProviders());
+  for (const connection of await listConnections()) providers.add(connection.provider);
+  return new Set([DEFAULT_PLACEMENT_SETTING, ...[...providers].map(placementSettingKey)]);
+}
+
+/** Map an operator-correctable refusal to its status; anything else is a 500. */
+function channelAdminFailure(c: Context<TraceEnv>, err: unknown): Response {
+  if (err instanceof ChannelAdminError) return c.json({ error: err.message }, err.status);
+  throw err;
+}
+
+/** A manual retry/release answered for one item: 404, 409 or the refreshed row. */
+async function singleRecovery(
+  c: Context<TraceEnv>,
+  id: string,
+  outcome: RecoveryOutcome,
+  wanted: 'failed' | 'held',
+): Promise<Response> {
+  const item = isUuid(id) ? await getItem(id) : null;
+  if (!item) return c.json({ error: 'no queue item with that id' }, 404);
+  if (outcome.updated.length === 0) {
+    return c.json(
+      {
+        error:
+          wanted === 'failed'
+            ? `only a failed item can be retried - this one is ${item.status}`
+            : `only a held item can be released - this one is ${item.status}`,
+      },
+      409,
+    );
+  }
+  return c.json({ ok: true, item });
 }
 
 /** What an approval reads off the topic to seed the article it creates. */
@@ -1139,30 +1202,132 @@ export function createApp(): Hono<TraceEnv> {
   // connection reports the *name* of the secret it reads, never the secret.
   app.get('/api/distribution', async (c) => {
     const limit = Number(c.req.query('limit'));
-    const [connections, counts, items, placements] = await Promise.all([
-      listConnections(),
+    const [channels, counts, items, placements] = await Promise.all([
+      channelViews(),
       queueCounts(),
       recentItems(Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50),
       placementPerformance(),
     ]);
     return c.json({
-      channels: connections.map((connection) => ({
-        id: connection.id,
-        provider: connection.provider,
-        externalAccountId: connection.external_account_id,
-        displayName: connection.display_name,
-        tokenRef: connection.token_ref,
-        status: connection.status,
-        token: tokenStaleness(connection.expires_at),
-        adapterInstalled: registeredProviders().includes(connection.provider),
-      })),
+      channels,
       providers: registeredProviders(),
+      // What the Connect drawer offers: every network with an adapter, and the
+      // secret name a pasted token is stored under unless the operator names one.
+      connectable: registeredProviders().map((provider) => ({
+        provider,
+        defaultTokenRef: getProvider(provider)?.defaultTokenRef ?? `${provider}-token`,
+      })),
       counts,
       items,
       // What each placement actually earned, from this site's own posts -
       // the evidence the first_comment default is meant to be revisited on.
       placements,
     });
+  });
+
+  // One channel's queue, filtered the way the panel's chips are.
+  app.get('/api/distribution/channels/:id/queue', async (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id) || !(await getConnection(id))) {
+      return c.json({ error: 'no channel with that id' }, 404);
+    }
+    const status = c.req.query('status') ?? 'all';
+    if (!isQueueFilter(status)) {
+      return c.json({ error: 'status must be all | pending | held | failed | posted' }, 400);
+    }
+    const limit = Number(c.req.query('limit'));
+    const items = await channelQueue(
+      id,
+      status,
+      Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 100,
+    );
+    return c.json({ items });
+  });
+
+  // Connect a channel from a pasted token (or a secret the deployment mounts).
+  // The answer is the channel as the list renders it - presence of the
+  // credential, never the credential.
+  app.post('/api/distribution/channels', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    try {
+      return c.json({ channel: await connectChannel(body) }, 201);
+    } catch (err) {
+      return channelAdminFailure(c, err);
+    }
+  });
+
+  app.put('/api/distribution/channels/:id/credential', async (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id)) return c.json({ error: 'no channel with that id' }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { token?: unknown };
+    try {
+      return c.json({ channel: await replaceCredential(id, body.token) });
+    } catch (err) {
+      return channelAdminFailure(c, err);
+    }
+  });
+
+  app.delete('/api/distribution/channels/:id', async (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id)) return c.json({ error: 'no channel with that id' }, 404);
+    try {
+      return c.json({ ok: true, ...(await disconnectChannel(id)) });
+    } catch (err) {
+      return channelAdminFailure(c, err);
+    }
+  });
+
+  app.get('/api/distribution/items/:id', async (c) => {
+    const id = c.req.param('id');
+    const detail = isUuid(id) ? await queueItemDetail(id) : null;
+    if (!detail) return c.json({ error: 'no queue item with that id' }, 404);
+    return c.json(detail);
+  });
+
+  app.post('/api/distribution/items/:id/retry', async (c) => {
+    const id = c.req.param('id');
+    return singleRecovery(c, id, await retryFailedItems([id]), 'failed');
+  });
+
+  app.post('/api/distribution/items/:id/release', async (c) => {
+    const id = c.req.param('id');
+    return singleRecovery(c, id, await releaseHeldItems([id]), 'held');
+  });
+
+  // The bulk bar: retry every failed item, or release every held one, among
+  // the ids the operator selected. An id in the wrong state is skipped and
+  // reported rather than failing the whole batch.
+  app.post('/api/distribution/items/bulk', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { action?: unknown; ids?: unknown };
+    if (body.action !== 'retry' && body.action !== 'release') {
+      return c.json({ error: 'action must be retry | release' }, 400);
+    }
+    if (
+      !Array.isArray(body.ids) ||
+      body.ids.length === 0 ||
+      body.ids.length > 200 ||
+      !body.ids.every((id) => typeof id === 'string')
+    ) {
+      return c.json({ error: 'ids must be a list of 1-200 queue item ids' }, 400);
+    }
+    const ids = body.ids as string[];
+    const outcome =
+      body.action === 'retry' ? await retryFailedItems(ids) : await releaseHeldItems(ids);
+    return c.json({ ok: true, action: body.action, ...outcome });
+  });
+
+  app.put('/api/distribution/items/:id/placement', async (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id)) return c.json({ error: 'no queue item with that id' }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { placement?: unknown };
+    if (!isLinkPlacement(body.placement)) {
+      return c.json({ error: 'placement must be first_comment | in_body' }, 400);
+    }
+    try {
+      return c.json({ ok: true, item: await overridePlacement(id, body.placement) });
+    } catch (err) {
+      return channelAdminFailure(c, err);
+    }
   });
 
   // ── Sessions & usage ─────────────────────────────────────────────────────
@@ -1215,6 +1380,14 @@ export function createApp(): Hono<TraceEnv> {
 
   app.put('/api/settings', async (c) => {
     const body = (await c.req.json()) as Record<string, unknown>;
+    const placementKeys = await placementSettingKeys();
+    // Checked before anything is written, so a bad placement cannot land half
+    // a save.
+    for (const key of placementKeys) {
+      if (key in body && !isLinkPlacement(body[key])) {
+        return c.json({ error: `${key} must be first_comment | in_body` }, 400);
+      }
+    }
     const allowed = [
       'models',
       'publish_mode',
@@ -1223,15 +1396,12 @@ export function createApp(): Hono<TraceEnv> {
       'llm',
       'scout_interval_hours',
       'distribution_enabled',
-      'distribution_link_placement',
+      ...placementKeys,
     ];
     for (const key of allowed) {
       if (!(key in body)) continue;
       if (key === 'publish_mode' && !['approval', 'auto', 'draft'].includes(String(body[key]))) {
         return c.json({ error: 'publish_mode must be approval | auto | draft' }, 400);
-      }
-      if (key === 'distribution_link_placement' && !isLinkPlacement(body[key])) {
-        return c.json({ error: 'distribution_link_placement must be first_comment | in_body' }, 400);
       }
       await setSetting(key, body[key]);
     }

@@ -52,6 +52,7 @@ import {
   type DistributableArticle,
   type DistributionItem,
   type InsightSnapshot,
+  type LinkBudget,
   type LinkPlacement,
   type PostReceipt,
   type ProviderInsightsContext,
@@ -279,11 +280,21 @@ async function bodyLinksUsed(pageId: string): Promise<number> {
   return row?.used ?? 0;
 }
 
+/**
+ * This Page's body-link allowance for the month, as the panel shows it and as
+ * the ladder checks it: spent once the count reaches the cap, or once Meta
+ * itself refused a link this month, whichever came first.
+ */
+async function bodyLinkBudget(pageId: string, now: Date): Promise<LinkBudget> {
+  const state = await getSetting<BudgetState>(BODY_LINK_BUDGET_SETTING, {});
+  const used = await bodyLinksUsed(pageId);
+  const cap = config.facebook.bodyLinkCap;
+  return { used, cap, exhausted: state[pageId]?.month === monthKey(now) || used >= cap };
+}
+
 /** Whether a body link may still go out for this Page this month. */
 async function bodyLinkAvailable(pageId: string, now: Date): Promise<boolean> {
-  const state = await getSetting<BudgetState>(BODY_LINK_BUDGET_SETTING, {});
-  if (state[pageId]?.month === monthKey(now)) return false;
-  return (await bodyLinksUsed(pageId)) < config.facebook.bodyLinkCap;
+  return !(await bodyLinkBudget(pageId, now)).exhausted;
 }
 
 /**
@@ -598,13 +609,21 @@ async function postLinkInBody(
  * alternative, a link post that Meta will reject, spends an attempt to learn
  * something we already know.
  */
-async function toFirstComment(item: DistributionItem, rt: Runtime): Promise<RenderedPayload> {
+async function toFirstComment(
+  item: DistributionItem,
+  requested: LinkPlacement,
+  rt: Runtime,
+): Promise<RenderedPayload> {
   const rerendered = await rt.renderer.forPlacement(item, 'first_comment');
   if (rerendered?.placement === 'first_comment') return rerendered;
+  // Both are true by now - no image we may upload and no body link left - so
+  // the reason is named after the one that took away what this item asked
+  // for: a first-comment post lost its image, a body-link post its budget.
   throw new ProviderHoldError(
     'the Page has spent its body links for this month and this post has no image we may upload ' +
       'natively, so there is nowhere left to put the link - held rather than posted without one. ' +
       'Add a hero image to the article in the panel, or release this next month.',
+    requested === 'first_comment' ? 'no_safe_image' : 'link_budget_exhausted',
   );
 }
 
@@ -613,6 +632,7 @@ async function post(ctx: ProviderPostContext, rt: Runtime): Promise<PostReceipt>
   const connection = connectionOf(await getConnection(item.channelConnectionId));
   await syncToken(connection, ctx.accessToken, rt);
 
+  const requested = item.placement;
   let payload = await rt.renderer.forItem(item);
 
   // Checked before the call, not learned from it: a rejection here would cost
@@ -623,7 +643,7 @@ async function post(ctx: ProviderPostContext, rt: Runtime): Promise<PostReceipt>
       slug: item.slug,
       cap: config.facebook.bodyLinkCap,
     });
-    payload = await toFirstComment(item, rt);
+    payload = await toFirstComment(item, requested, rt);
   }
 
   if (payload.placement === 'first_comment') {
@@ -644,7 +664,7 @@ async function post(ctx: ProviderPostContext, rt: Runtime): Promise<PostReceipt>
       slug: item.slug,
       reason: redactToken(err instanceof GraphCallError ? err.detail : String(err), ctx.accessToken),
     });
-    return postWithFirstComment(await toFirstComment(item, rt), ctx, connection, rt);
+    return postWithFirstComment(await toFirstComment(item, requested, rt), ctx, connection, rt);
   }
 }
 
@@ -845,6 +865,11 @@ export function createFacebookProvider(deps: FacebookDeps = {}): SocialProvider 
     refreshToken: (token) => refreshToken(token, rt),
     post: (ctx) => post(ctx, rt),
     fetchInsights: (ctx) => fetchInsights(ctx, rt),
+    // The secret name the root README tells an operator to create.
+    defaultTokenRef: 'facebook-page-token',
+    // A Page post id is `{page}_{post}`, which facebook.com resolves directly.
+    postUrl: (remotePostId) => `https://www.facebook.com/${encodeURIComponent(remotePostId)}`,
+    linkBudget: (pageId) => bodyLinkBudget(pageId, rt.now()),
   };
 }
 

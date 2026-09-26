@@ -286,7 +286,12 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
 - **Credentials.** A connection stores a `token_ref` - the *name* of a secret -
   resolved at post time from the `channel_credentials` settings row, else from
   the environment variable that name maps to (`facebook-page-token` →
-  `FACEBOOK_PAGE_TOKEN`), which is how Secret Manager arrives on Cloud Run. No
+  `FACEBOOK_PAGE_TOKEN`), which is how Secret Manager arrives on Cloud Run.
+  Only names reserved for channel secrets resolve from the environment: the
+  env form must start with the network's own name (`FACEBOOK_`) or `CHANNEL_`,
+  and must not be a variable the agent reads as its own configuration
+  (`FACEBOOK_APP_SECRET`, `ADMIN_TOKEN`, `DATABASE_URL`, ...), so a `token_ref`
+  can never forward a platform secret to a network. No
   token value is stored in Postgres by this code, written to `last_error` or
   logged, and `/api/settings` never returns the credentials row. Token expiry
   staleness is derived in `distribution/channels.ts` and reported by
@@ -353,6 +358,38 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
   deliberately not idempotent - the copy call runs warm and a rights-unsafe
   hero buys a fresh card - so a retry that re-rendered would say something
   other than what an operator saw, and would buy a second image to say it with.
+- **The admin Channels surface.** `distribution/admin.ts` is everything the
+  panel's Channels tab reads and does, behind the same bearer as the rest of
+  the API. `GET /api/distribution` lists every connection with its token tier
+  (`ok`, `notice` inside 30 days, `warning` inside 7, `critical` inside 1,
+  `expired`), a presence-only credential readback (stored or not, pasted in the
+  panel or mounted by the deployment - never the value), its placement and the
+  setting that decided it, the network's body-link budget where it rations one,
+  and per-filter queue counts. `GET /api/distribution/channels/:id/queue?status=`
+  filters one channel's queue (`held` includes an item waiting at the readiness
+  gate, which retries by itself). `POST /api/distribution/channels` connects from
+  a pasted token (checked with the network's `authenticate` before anything is
+  stored, then kept in `channel_credentials` under the adapter's
+  `defaultTokenRef`) or from the name of a secret the deployment already mounts
+  (a secret name another account's connection already uses is refused rather
+  than overwritten);
+  `PUT .../channels/:id/credential` replaces a token and refuses one for a
+  different account; `DELETE .../channels/:id` disables rather than deletes, so
+  the queue's history and insights survive, and forgets a pasted token. Manual
+  recovery is `POST /api/distribution/items/:id/retry` (failed only),
+  `.../release` (held only), `POST /api/distribution/items/bulk` for the bulk
+  bar, and `PUT .../items/:id/placement`, which resets the payload to the
+  baseline for the new placement so the next attempt composes it afresh. Retry
+  and release grant a fresh round of attempts and a fresh readiness window: a
+  person deciding to try again is a new decision, not the next backoff. A held
+  row carries `hold_reason` (`no_safe_image` or `link_budget_exhausted`,
+  migration 016), set from `ProviderHoldError`'s optional reason, so the panel
+  can lead with the fix rather than the provider's sentence.
+- **Placement is per network.** A new item's placement is read from
+  `<provider>_link_placement` (seeded as `facebook_link_placement` from the
+  existing default) and falls back to `distribution_link_placement`, so the
+  body-link rule that makes the choice matter can differ by network. `PUT
+  /api/settings` accepts the setting for any registered or connected network.
 
 - **Reading a post back.** A separate scheduled job (`distribution/insights.ts`,
   its own interval so it can never hold up the queue that is posting) pulls the

@@ -64,6 +64,23 @@ export function isInsightsFlag(value: unknown): value is InsightsFlag {
  */
 export type DistributionStatus = 'pending' | 'posting' | 'posted' | 'failed' | 'held';
 
+/**
+ * Why an item is not going out, in the terms an operator acts on.
+ *
+ * The first two are stored on a held row (`distribution_queue.hold_reason`) by
+ * the provider ladder that parked it. 'site_not_ready' is derived rather than
+ * stored: that item is pending at the readiness gate and retries by itself, so
+ * the panel shows it beside the held ones without an operator having to move
+ * it.
+ */
+export type HoldReason = 'no_safe_image' | 'link_budget_exhausted' | 'site_not_ready';
+
+export const STORED_HOLD_REASONS: readonly HoldReason[] = ['no_safe_image', 'link_budget_exhausted'];
+
+export function isStoredHoldReason(value: unknown): value is HoldReason {
+  return typeof value === 'string' && (STORED_HOLD_REASONS as readonly string[]).includes(value);
+}
+
 export type ChannelStatus = 'active' | 'disabled' | 'needs_reauth';
 
 /** A connected account, as the database holds it. Never a token value. */
@@ -157,8 +174,27 @@ export interface DistributionItem {
    * of a comment link the network rendered as unclickable plain text.
    */
   insightsFlag: InsightsFlag | null;
+  /** Why this item is not going out, or null when nothing is holding it. */
+  holdReason: HoldReason | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * The reason an item is waiting, read off the row: the stored one for a held
+ * item, the readiness gate for a pending item that has been checked against
+ * the live page and found not serving yet. A pending item with no readiness
+ * clock is simply queued (or backing off after a failed attempt, which
+ * `startPostAttempt` marks by clearing that clock).
+ */
+export function holdReasonOf(row: {
+  status: DistributionStatus;
+  hold_reason?: string | null;
+  readiness_started_at: string | null;
+}): HoldReason | null {
+  if (row.status === 'held') return isStoredHoldReason(row.hold_reason) ? row.hold_reason : null;
+  if (row.status === 'pending' && row.readiness_started_at) return 'site_not_ready';
+  return null;
 }
 
 /** A `distribution_queue` row as `pg` returns it. */
@@ -182,6 +218,7 @@ export interface DistributionQueueRow {
   insights_next_at: string | null;
   insights_done: boolean;
   insights_flag: string | null;
+  hold_reason?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -207,6 +244,7 @@ export function toDistributionItem(row: DistributionQueueRow): DistributionItem 
     // Like the placement above: a conclusion this version does not know reads
     // as nothing to report rather than as a value with no meaning attached.
     insightsFlag: isInsightsFlag(row.insights_flag) ? row.insights_flag : null,
+    holdReason: holdReasonOf(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -261,6 +299,17 @@ export interface PostReceipt {
   note?: string;
 }
 
+/**
+ * A network's monthly allowance of posts with a link in the body, as it stands
+ * for one account. `exhausted` is true once `used` reaches `cap` or the network
+ * itself refused a link this month, whichever came first.
+ */
+export interface LinkBudget {
+  used: number;
+  cap: number;
+  exhausted: boolean;
+}
+
 /** One aggregate reading. Null is "the provider did not report it", not zero. */
 export interface InsightSnapshot {
   impressions: number | null;
@@ -290,6 +339,19 @@ export interface SocialProvider {
   refreshToken(refreshToken: string): Promise<AuthTokenDetails>;
   post(context: ProviderPostContext): Promise<PostReceipt>;
   fetchInsights(context: ProviderInsightsContext): Promise<InsightSnapshot>;
+  /**
+   * The secret name a connection made from the admin panel stores its token
+   * under, when the operator names none. Optional: without it the panel uses
+   * `<provider>-token`.
+   */
+  readonly defaultTokenRef?: string;
+  /** Where a post lives on the network, for the panel's link. Optional. */
+  postUrl?(remotePostId: string): string;
+  /**
+   * The body-link allowance for one account this month, for a network that
+   * rations it. Absent on a network that does not.
+   */
+  linkBudget?(externalAccountId: string): Promise<LinkBudget>;
 }
 
 /**
@@ -311,9 +373,13 @@ export class PermanentProviderError extends Error {
  * the admin panel shows it until an operator or the next month moves it.
  */
 export class ProviderHoldError extends Error {
-  constructor(message: string) {
+  /** What the panel leads the held row with. Null when the provider named none. */
+  readonly reason: HoldReason | null;
+
+  constructor(message: string, reason: HoldReason | null = null) {
     super(message);
     this.name = 'ProviderHoldError';
+    this.reason = reason;
   }
 }
 

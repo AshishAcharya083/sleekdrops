@@ -135,7 +135,10 @@ The token is never an env var this repo names. Store it as the Secret Manager
 secret `facebook-page-token` and point the channel's `token_ref` at that name.
 The adapter resolves the name at post time, from the `channel_credentials`
 settings row first and then from the `FACEBOOK_PAGE_TOKEN` env var that name
-maps to. Adding the secret to the service is a `gcloud run services update
+maps to. The admin **Channels** tab connects the Page from either: paste the
+token (it is checked with Meta, then stored by reference and never shown
+again), or leave the token empty and name `facebook-page-token` to use the
+mounted secret. Adding the secret to the service is a `gcloud run services update
 --update-secrets` call, for the same reason as above: `--set-env-vars` in the
 workflow would replace the whole set.
 
@@ -149,7 +152,7 @@ long-lived one. Posting is identical without them.
 design and both of which only move the default: whether the monthly link cap is
 live for Australian Pages at all, and whether a deals/reviews Page counts as an
 exempt publisher Page. Until they are answered the default placement is
-`first_comment` (admin Settings → `distribution_link_placement`), which never
+`first_comment` (admin Channels tab or Settings → `facebook_link_placement`), which never
 depends on the cap.
 
 The hosted admin panel is pre-pointed at the Cloud Run URL (baked in at build

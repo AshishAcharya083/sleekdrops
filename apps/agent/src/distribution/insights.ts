@@ -269,7 +269,7 @@ export async function collectItemInsights(
 
   const provider = resolveProvider(item.provider);
   const connection = provider ? await getConnection(item.channelConnectionId) : null;
-  const accessToken = connection ? await resolveCredential(connection.token_ref) : null;
+  const accessToken = connection ? await resolveCredential(connection.token_ref, connection.provider) : null;
   if (!provider || !connection || !accessToken) {
     // Nothing to read this post with. Not a failure of the network and not
     // something a reading can fix, so it waits out the same retry the
