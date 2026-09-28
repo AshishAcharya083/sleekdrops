@@ -2,13 +2,14 @@
  * Analytics - the single entry point for product tracking, and the wiring that
  * gates it behind the visitor's consent choice.
  *
- * A configured non-production build starts anonymous analytics automatically;
- * production keeps the DevTeam sink disabled and analytics off by default.
- * `boot()` reads the decision in force - the stored record, or the deployment
- * default when there is none - and applies it without opening a prompt. Every
- * event is queued in an in-memory buffer until that has happened; on grant the
- * buffer flushes and subsequent events send live, while a stored opt-out or a
- * GPC/DNT signal drops the buffer and sends nothing. Every outgoing payload -
+ * Anonymous analytics is on by default on every deployment and can be switched
+ * off from the footer's Privacy preferences; production keeps the DevTeam sink
+ * disabled and reports to GA4 alone. `boot()` reads the decision in force - the
+ * stored record, or the site default when there is none - and applies it
+ * without opening a prompt. Every event is queued in an in-memory buffer until
+ * that has happened; on grant the buffer flushes and subsequent events send
+ * live, while a stored opt-out or a GPC/DNT signal drops the buffer and sends
+ * nothing. Every outgoing payload -
  * buffered or live - runs through the central PII scrub() first. A withdrawal
  * arriving after a grant - the footer's preferences control makes that reachable on
  * any page - stops both sinks and the A/B testing SDK where they stand and clears
@@ -554,10 +555,9 @@ export function denyConsent(): void {
 }
 
 /**
- * Resolve the decision in force on page load - the stored record, the deployment
- * default when there is none, or a blanket denial for a GPC/DNT signal - and
- * apply it. A configured preview defaults to granted; production and an
- * unconfigured preview default to denied. The page-view event and any funnel
+ * Resolve the decision in force on page load - the stored record, the site
+ * default (analytics on) when there is none, or a blanket denial for a GPC/DNT
+ * signal - and apply it. The page-view event and any funnel
  * events are dispatched by chrome.ts through the same buffered, consent-gated
  * track() pipeline, so they flush on a grant and are dropped on any denial
  * regardless of which script ran first. Nothing is shown to the visitor.

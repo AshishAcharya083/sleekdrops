@@ -1,7 +1,8 @@
 /**
  * The build-time configuration of the DevTeam analytics sink: the ingest key and
  * the host to send to, plus the deployment policy that keeps the sink out of
- * production.
+ * production - and the one analytics decision that applies before a visitor has
+ * made any: on.
  *
  * It is a module of its own because it is the one part of `./analytics` that
  * cannot exist outside a Vite build - `import.meta.env` is inlined at build time
@@ -39,7 +40,22 @@ export interface AnalyticsEnv {
    * `true`, which is also the SDK's own default.
    */
   feedback: boolean;
-  /** The no-record analytics decision for this build. */
+  /**
+   * The analytics decision in force when the visitor has recorded none.
+   *
+   * Always `granted`, on every deployment. Anonymous, aggregate analytics runs
+   * by default - the site is Australian, where first-party analytics does not
+   * need a prior opt-in - and the footer's Privacy preferences is the opt-out. A
+   * stored opt-out and a GPC/DNT signal still win, in `./analytics`.
+   *
+   * It is a field rather than a constant because it once was not: between
+   * 2026-09-12 and this change production resolved it to `denied`, which meant
+   * gtag.js loaded only for the handful of visitors who opened the footer
+   * dialog and switched analytics on. The GA4 property read as receiving no data
+   * from that day, while every build looked healthy. Which sinks a build has is
+   * separate configuration (the key above, `PUBLIC_GA4_ID`); an unconfigured
+   * build with analytics "on" simply sends nothing anywhere.
+   */
   defaultConsent: ConsentStatus;
 }
 
@@ -54,9 +70,9 @@ const LOCAL_HOST = 'http://localhost:6080';
 /**
  * Resolve the DevTeam sink configuration for one deployment.
  *
- * Production refuses the sink even if a key is supplied accidentally. A
- * configured preview starts anonymous analytics without prompting; an explicit
- * stored opt-out and browser privacy signals are still enforced by analytics.ts.
+ * Production refuses the sink even if a key is supplied accidentally. The
+ * analytics default is granted on every deployment; an explicit stored opt-out
+ * and browser privacy signals are still enforced by analytics.ts.
  */
 export function resolveAnalyticsEnv(
   deployment: SiteDeployment,
@@ -68,7 +84,7 @@ export function resolveAnalyticsEnv(
     key: enabled ? configuredKey : '',
     host: enabled ? input.host?.trim() || LOCAL_HOST : '',
     feedback: enabled && input.feedback === 'true',
-    defaultConsent: enabled ? 'granted' : 'denied',
+    defaultConsent: 'granted',
   };
 }
 
