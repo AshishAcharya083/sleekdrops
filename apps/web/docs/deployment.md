@@ -143,7 +143,7 @@ The names are DevTeam's canonical ones, so the platform, this repo's settings, a
 
 If a value is ever missing, re-run the publish from the DevTeam project's **Config** tab (**Sync to GitHub**) rather than pasting one in — a hand-entered key goes stale the next time the project re-provisions.
 
-The develop workflow passes the DevTeam key and host into its non-production build. A configured develop build starts anonymous analytics without a prompt, while a stored opt-out or GPC/DNT signal still disables it.
+Anonymous analytics runs by default on every deployment (see the GA4 section below); the develop workflow additionally passes the DevTeam key and host into its non-production build, so on develop the same events also reach the DevTeam sink. A stored opt-out or a GPC/DNT signal still disables everything.
 The production workflow passes literal empty values, and `src/lib/analytics-env.ts` independently discards a key from any build marked `PUBLIC_SITE_ENV=production`. The live `sleekdrops.com` build therefore cannot initialise the DevTeam SDK even if someone later wires a production secret into the workflow by mistake.
 
 | Repo setting                                | Kind         | What it is                                                                          |
@@ -176,8 +176,10 @@ That is deliberate — a developer's laptop and a preview deploy must not be abl
 Anything that is not a `G-` measurement id reads as unset and is refused with that same warning rather than tagging the document with it.
 A Universal Analytics property (`UA-…`), a Tag Manager container (`GTM-…`) or a lowercase paste names no property gtag.js can report into, so loading the tag for one can only produce a page that looks healthy while Google discards every hit.
 
-GA4 loads only for a visitor who accepted analytics — the tag is not requested before consent, which is stricter than Google Consent Mode (that loads the tag and asks it to restrict itself), so no Consent Mode signal is sent or needed.
-A withdrawal sets the tag's own `ga-disable-<id>` flag and deletes its `_ga` cookies in the same page load.
+**Analytics is on by default.** gtag.js loads on every page view unless the visitor has switched analytics off under **Privacy preferences** in the footer or their browser sends a Global Privacy Control / Do-Not-Track signal. The site is Australian, where first-party aggregate analytics does not need a prior opt-in, and the default is the site's policy rather than a per-deployment setting (`defaultConsent` in `src/lib/analytics-env.ts`, pinned by a regression test).
+The tag declares a Consent Mode v2 default of `analytics_storage: granted` before it loads and nothing about advertising - the ad partner's consent platform owns those signals. A withdrawal pushes `analytics_storage: denied`, sets the tag's own `ga-disable-<id>` flag and deletes its `_ga` cookies in the same page load.
+
+This matters because it was not always so. From 2026-09-12 (PR #55) to 2026-09-28 production resolved the default to `denied`, so GA4 counted only visitors who had opened the footer dialog and switched analytics on: the property read "No data received" for a fortnight while every deploy was green and the measurement id was correctly inlined. The Mediavine application reads its sessions from that property. See [`mediavine-readiness-2026-09.md`](./mediavine-readiness-2026-09.md).
 
 ### DevTeam A/B Testing (required for experiments to run)
 
@@ -199,75 +201,57 @@ A `http://` host on the (https) deployed site is refused with a single console w
 
 Leaving either unset is a supported state: the build ships with experiments disabled and every feature renders its code-side default.
 
-### Google AdSense (required for ads to serve)
+### Journey by Mediavine (required for ads to serve)
 
-Both deploy workflows pass these into the web build as `PUBLIC_ADSENSE_CLIENT` and one `PUBLIC_ADSENSE_SLOT_*` per placement.
-All five are **variables**, not secrets: they are `PUBLIC_`-prefixed Astro values that ship in the markup every visitor downloads, and AdSense treats them as public identifiers.
+The site's advertising partner is **Journey by Mediavine**, which requires exclusivity: no other programmatic network's tag, and no other seller's line in `ads.txt`. Everything AdSense-specific was removed on 2026-09-28; the readiness write-up is [`mediavine-readiness-2026-09.md`](./mediavine-readiness-2026-09.md).
 
-| Repo setting                | Kind         | What it is                                                                              |
-| --------------------------- | ------------ | ----------------------------------------------------------------------------------------- |
-| `ADSENSE_CLIENT`            | **variable** | The publisher id for this environment, `ca-pub-…`, from AdSense → Account → Settings.   |
-| `ADSENSE_SLOT_ARTICLE_MID`  | **variable** | Slot id of the mid-article unit, from AdSense → Ads → By ad unit.                        |
-| `ADSENSE_SLOT_ARTICLE_END`  | **variable** | Slot id of the end-of-article unit.                                                      |
-| `ADSENSE_SLOT_SIDEBAR`      | **variable** | Slot id of the sticky sidebar unit (desktop only).                                       |
-| `ADSENSE_SLOT_FEED`         | **variable** | Slot id of the in-feed card unit.                                                        |
+The production workflow passes one value into the web build as `PUBLIC_MEDIAVINE_SITE_ID`, and reads one more at build time.
 
-Set them under **Settings → Environments → `production` → Environment variables**.
+| Repo setting          | Kind         | What it is                                                                                                   |
+| --------------------- | ------------ | ------------------------------------------------------------------------------------------------------------ |
+| `MEDIAVINE_SITE_ID`   | **variable** | This site's id: the `<id>` in the script wrapper `//scripts.scriptwrapper.com/tags/<id>.js`, from the Journey dashboard → Settings → Ad Setup, issued once the site is approved. |
+| `ADS_TXT_URL`         | **variable** | Optional. A URL the build fetches the authorised-sellers file from instead of publishing the committed copy at `apps/web/ads/ads.txt`. Leave unset for Journey, which issues a file to download. |
 
-**Develop carries no publisher id, and cannot be given one by a variable.** `deploy-develop.yml` pins `PUBLIC_ADSENSE_CLIENT: ''` outright rather than reading `vars.ADSENSE_CLIENT`, which is the one place this differs from every other setting in this document.
+Set both under **Settings → Environments → `production` → Environment variables**. They are `PUBLIC_`/build values that ship in the markup, not secrets.
 
-The reason is inheritance. GitHub resolves `vars.X` as environment → repository → organization, so a repo-level `ADSENSE_CLIENT` would silently apply to develop as well — and adding one is the natural mistake, because the publisher id genuinely *is* the same for the whole account, so scoping it per environment looks redundant until you know why it is not.
+**Develop carries no site id, and cannot be given one by a variable.** `deploy-develop.yml` pins `PUBLIC_MEDIAVINE_SITE_ID: ''` outright rather than reading `vars.MEDIAVINE_SITE_ID`, for the reason the AdSense publisher id was pinned: GitHub resolves `vars.X` as environment → repository → organization, so a repo-level value would silently reach develop - and the wrapper is issued for `sleekdrops.com` and, in Mediavine's words, only works on the site it was generated for. `src/lib/ads-env.ts` independently discards the id unless `PUBLIC_SITE_ENV=production`, and `generate-ads-txt.mjs` applies the same gate, so a leaked or inherited value cannot make `sleekdrops.pages.dev` serve ads or publish a seller record. Tests in [`src/lib/ads-env.test.ts`](../src/lib/ads-env.test.ts) hold every half of this.
 
-Why it is not: `sleekdrops.pages.dev` is a different domain from `sleekdrops.com` and is not in the AdSense account's Sites list. A publisher id there publishes an `/ads.txt` and a `google-adsense-account` tag on an unlisted domain claiming the account, which is the shape of a review failure — and since develop tracks `main` closely, that one line is the entire difference between the two environments. An empty value disables the units, `ads.txt` and the verification tag together, which is what a preview deploy should publish: nothing.
+#### What the integration is
 
-Two tests in [`src/lib/ads-env.test.ts`](../src/lib/ads-env.test.ts) hold both halves — develop pinned empty, production still reading its variable — and `src/lib/ads-env.ts` independently discards the publisher id unless `PUBLIC_SITE_ENV=production`. `generate-ads-txt.mjs` applies the same production gate. A leaked or inherited variable therefore cannot publish the tag, account meta, ad units or seller record on a preview.
+One script tag, on every page, in the head, emitted by [`src/components/ads/MediavineScript.astro`](../src/components/ads/MediavineScript.astro) from `BaseLayout` - the only component in the site that emits ad markup:
 
-#### What each slot renders
+```html
+<script type="text/javascript" async="async" data-noptimize="1" data-cfasync="false" src="https://scripts.scriptwrapper.com/tags/<id>.js"></script>
+```
 
-Create four ad units in **AdSense → Ads → By ad unit** and paste each one's slot id into the matching variable. Every unit is rendered by [`src/components/ads/AdUnit.astro`](../src/components/ads/AdUnit.astro), which is the only component in the site that emits ad markup — a page asks for a *placement*, never a network or a slot id.
+Mediavine's wrapper does everything else: it places, sizes and refreshes the in-content units, the sticky sidebar unit and the mobile adhesion unit, keeps the density inside Coalition for Better Ads limits, and shows its own consent notice in the EEA, UK and Switzerland. The site has **no ad units, slot ids or placement rules of its own**; there is nothing per-placement to configure. The `data-noptimize` / `data-cfasync` attributes must stay - they stop minifiers and Cloudflare's Rocket Loader from rewriting the tag, which Mediavine's installation check would read as "script not found".
 
-| Placement     | Where it renders                                                                   | Suggested AdSense unit                       |
-| ------------- | ------------------------------------------------------------------------------------ | -------------------------------------------- |
-| `articleMid`  | Inside a blog post body, on the section break nearest the middle of the article.     | Display, responsive                          |
-| `articleEnd`  | Below the article body, after the affiliate disclosure.                              | Display, responsive                          |
-| `sidebar`     | The sticky rail on a blog post, beneath the table of contents. **Desktop only** — the rail collapses below 1000px and the unit is neither shown nor requested there. | Display, vertical / half-page (300×600)      |
-| `feed`        | One cell of a post grid, opening the second row (after the third card).              | Display, responsive (or an In-feed unit)     |
+Two landmarks in the markup tell the wrapper where the content is, because a custom-built site has no theme structure it recognises:
 
-An empty slot id disables that one placement and leaves the others running, so the units can be switched on one at a time.
+| Landmark          | Where                                                          | Requirement it meets                                                                      |
+| ----------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `journey-content` | The article body wrapper in [`ArticleBody.astro`](../src/components/article/ArticleBody.astro) - the element whose *immediate* children are the paragraphs and headings. | In-content units are inserted between those children. Must be on the direct parent, and once per page. |
+| `journey-sidebar` | The article rail in [`blog/[slug].astro`](../src/pages/blog/[slug].astro).   | Sidebar unit. The rail is 300px wide (the floor, excluding padding), `position: static` (the wrapper drives the unit's stickiness itself) and visible from a 1001px viewport up. |
 
-Two rules decide whether a slot is used at all, and both live in the pure [`src/lib/ad-placement.ts`](../src/lib/ad-placement.ts): a post shorter than 8 top-level blocks gets no mid-article unit, and a grid of fewer than 4 cards gives no cell away. Thin content beside ads is the shape of an AdSense policy action, and a unit in a three-card grid reads as an ad-first listing.
+Article pages are the only pages with both landmarks; listings carry neither, and Mediavine decides for itself whether a listing gets a unit. After approval, Mediavine's **Dashboard Error Form** has to be submitted once to enable the custom-site page-load listeners, and `?test=placeholders` on any article forces placeholder units wherever the wrapper would place them - the check that the landmarks are being found. If they are not, the same selectors go into Journey's Settings → Ad Settings → Ad Placement Selectors (`.journey-content`, `.journey-sidebar`).
 
-Production loads the publisher tag in the document head so Google's certified CMP can run before any ad slot is requested (see [`GoogleConsent.astro`](../src/components/ads/GoogleConsent.astro)). The message itself is eligible only in the EEA, UK and Switzerland. Ad Consent Mode defaults are granted for visitors elsewhere and denied in those regions until the CMP supplies the visitor's choice; analytics remains denied everywhere until the separate SleekDrops analytics opt-in. Units ship `hidden`, are requested only once they come within 300px of the viewport, and collapse on `data-ad-status="unfilled"`, so an unsold slot leaves no hole in the page.
+#### ads.txt
 
-Use the Google CMP's **three-choice** first layer: **Consent**, **Do not consent**, and **Manage options**. In AdSense, enable Consent Mode for advertising purposes so those CMP choices update `ad_storage`, `ad_user_data`, and `ad_personalization`; leave its analytics-purpose option off because SleekDrops collects analytics consent separately. Google controls the message's geolocation. Do not add client-side IP or country detection.
+`public/ads.txt` is generated during `prebuild` by [`scripts/generate-ads-txt.mjs`](../scripts/generate-ads-txt.mjs) and is gitignored like `_redirects` and `robots.txt`. Its source is the file Journey issues in the dashboard, committed at [`apps/web/ads/ads.txt`](../ads/README.md), or `ADS_TXT_URL` fetched at build time when that is set. Production only: any other build removes the generated file, because a seller record on a domain the partner has not approved authorises sellers for a site that does not exist.
 
-The `Content-Security-Policy` in [`public/_headers`](../public/_headers) already allowlists the partner's script and frame hosts. A **new** ad host would be blocked by it — add it to `script-src` / `frame-src` there, or the units silently stay empty.
+The content is validated - at least one `domain, seller id, DIRECT|RESELLER` record - and an invalid source fails the build rather than publishing a 404 page under the name. When the Journey dashboard's ads.txt health check turns yellow or red, download the new file, replace the committed copy, merge to `main`, and press the dashboard's refresh once the deploy is live. **Never add another network's lines**: that is what violates Journey's exclusivity.
 
-#### Site verification, and why one tag is not consent-gated
+#### Privacy policy and consent
 
-Setting `ADSENSE_CLIENT` also emits `<meta name="google-adsense-account">` on every page (from [`SEOHead.astro`](../src/components/seo/SEOHead.astro)), alongside the `/ads.txt` the same value generates. Those two are what AdSense verifies the site with.
+Journey requires its "Mediavine Advertising Privacy Notice v. 1.2" verbatim on the privacy policy, linked from the homepage. It is in [`privacy.astro`](../src/pages/privacy.astro) under *Advertising partners*, and the footer links the policy from every page. The consent notice itself, and the "Update Privacy Settings" / "Do Not Sell or Share My Information" footer controls it refers to, are rendered by Mediavine's wrapper where the law requires them; the site's own **Privacy preferences** dialog decides analytics only, so there are never two controls for the same advertising purpose. The Journey dashboard's *Privacy Notice Location* setting should point at the footer.
 
-The meta tag is also a stable ownership signal if the partner script is blocked by a browser extension or network policy. Google publishes it specifically as a supported site-verification method.
-
-That tag is the one part of the ad integration deliberately outside the consent gate, and it is allowed to be because it costs the visitor nothing: an inert `<meta>` carrying an account id that already ships publicly in `/ads.txt`. No script, no cookie, no device storage, no request — so ePrivacy Art. 5(3), the rule the gate exists to satisfy, does not reach it. Everything that *does* set storage stays behind the opt-in.
-
-Both signals appear only on a build that has a publisher id, so an unconfigured environment still claims nothing.
-
-Leaving `ADSENSE_CLIENT` unset is a supported state, and is how this ships until the ids are issued.
-The build then disables ads everywhere after a single `[ads]` console warning: no partner script is requested, and `public/ads.txt` - generated from that same value by `scripts/generate-ads-txt.mjs` during `prebuild` - is not written at all.
-An `ads.txt` naming no seller is worse than none, because that is the file a crawler reads as a domain that has revoked every seller it had.
-
-Note that `ads.txt` publishes the publisher id **without** the `ca-` prefix the ad tag carries: `ca-pub-123` in the repo setting becomes `google.com, pub-123, DIRECT, …` in the file. The generator does that conversion; nothing needs entering twice.
-It also validates the value first - anything that is not `ca-pub-<digits>` fails the build, because every line of that file authorises somebody to sell this domain's inventory and a stray character would publish a record naming the wrong seller.
-The site build applies the same check to the same value (`publisherId()` in `src/lib/ads-env.ts`): a publisher id the generator refuses is one the page will not ask the partner to serve against either, so the two halves of the setting cannot disagree.
-
-In the EEA, UK and Switzerland, the Google CMP owns the advertising decision and transmits it through IAB TCF plus Consent Mode. Outside those regions, no European message is shown and the production tag uses the granted advertising defaults. The site's own privacy preferences continue to own analytics only, avoiding two overlapping controls for the same advertising purpose.
+Leaving `MEDIAVINE_SITE_ID` unset is a supported state, and is how this ships until Journey issues the id: no partner script is requested and no ads.txt is published.
 
 ### Response headers
 
 `apps/web/public/_headers` sets the response headers for every route Cloudflare Pages serves - a Content-Security-Policy, plus `X-Content-Type-Options`, `Referrer-Policy` and `Strict-Transport-Security` - and Astro copies the file to the site root like the rest of `public/`.
-It exists because the ad tag is the first third-party script this site executes: the `script-src` allowlist is what keeps a hijacked tag from pulling further code in from anywhere it likes.
-Adding a third-party script (a new analytics tool, another ad network) or an embed (a video, a map) means adding its origin there in the same change - the browser blocks anything not listed, and the feature then silently does nothing.
+The policy is hygiene rather than an allowlist: `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'self'`, `form-action 'self'` and `upgrade-insecure-requests`, with script, frame, image and connection sources open to any https origin.
+It used to allowlist the ad hosts by name, and that is exactly what Mediavine says not to do: programmatic advertising runs auctions across dozens of exchanges, the winning bidder serves from a domain the last impression did not use, and every host missing from the list is an ad that silently fails to render. Their guidance is a nonce-based `strict-dynamic` policy or `upgrade-insecure-requests`; a static host cannot mint a per-response nonce, so this is the latter. Do not add a domain allowlist back "to be safe" - it goes stale and adds nothing.
 
 ### Cloudflare R2 (only if you've enabled R2 for images)
 
