@@ -25,16 +25,12 @@ interface ImportMetaEnv {
   readonly PUBLIC_DEVTEAM_FLAGS_HOST?: string;
   /** DevTeam A/B Testing per-environment client key. Empty disables experiments. */
   readonly PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY?: string;
-  /** Google AdSense publisher id (ca-pub-...). Empty disables ads everywhere. */
-  readonly PUBLIC_ADSENSE_CLIENT?: string;
-  /** Slot id of the mid-article unit. Empty disables that placement only. */
-  readonly PUBLIC_ADSENSE_SLOT_ARTICLE_MID?: string;
-  /** Slot id of the end-of-article unit. Empty disables that placement only. */
-  readonly PUBLIC_ADSENSE_SLOT_ARTICLE_END?: string;
-  /** Slot id of the sticky sidebar unit. Empty disables that placement only. */
-  readonly PUBLIC_ADSENSE_SLOT_SIDEBAR?: string;
-  /** Slot id of the in-feed card unit. Empty disables that placement only. */
-  readonly PUBLIC_ADSENSE_SLOT_FEED?: string;
+  /**
+   * Journey by Mediavine site id - the `<id>` in the script wrapper
+   * `https://scripts.scriptwrapper.com/tags/<id>.js`. Empty, or any build that
+   * is not production, serves no ads and loads no partner script.
+   */
+  readonly PUBLIC_MEDIAVINE_SITE_ID?: string;
 }
 
 interface ImportMeta {

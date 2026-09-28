@@ -1,0 +1,31 @@
+---
+import { adsEnv } from '@lib/ads-env';
+
+/**
+ * The ad partner's script wrapper - Journey by Mediavine - and the only place
+ * in the site that emits ad markup.
+ *
+ * One tag in the head of every page is the whole integration: Mediavine's
+ * wrapper finds the article body and the sidebar by the `journey-content` and
+ * `journey-sidebar` landmarks (ArticleBody.astro, blog/[slug].astro), places and
+ * refreshes the units itself, and shows its own consent notice where the law
+ * requires one. Nothing here is consent-gated by the site, because the partner
+ * owns that decision end to end; the site's Privacy preferences dialog decides
+ * analytics only.
+ *
+ * It sits in the head, as Mediavine asks, and ahead of the analytics bundle:
+ * the wrapper is what loads the consent platform, so it has to be on the page
+ * before Google Analytics reads a Consent Mode signal from it.
+ *
+ * The attributes are the ones Mediavine issues and must not be optimised away:
+ * `data-noptimize` and `data-cfasync` tell minifiers and Cloudflare's Rocket
+ * Loader to leave the tag alone, and their crawler checks for the tag as issued.
+ *
+ * Renders nothing on a build without a site id - every preview, every local
+ * `pnpm dev` - so an unconfigured build claims nothing (see `@lib/ads-env`).
+ */
+const { scriptSrc } = adsEnv();
+---
+{scriptSrc && (
+  <script is:inline type="text/javascript" async="async" data-noptimize="1" data-cfasync="false" src={scriptSrc}></script>
+)}

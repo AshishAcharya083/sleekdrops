@@ -6,7 +6,7 @@
  *  - **A preview that indexes itself.** `develop` is held at the same code level
  *    as `main` and renders the same pages from the same live editorial content,
  *    so an indexable preview is a complete second copy of the site competing
- *    with the real one for its own rankings - and, to an AdSense reviewer,
+ *    with the real one for its own rankings - and, to an ad network's reviewer,
  *    duplicated content on a domain the account does not own.
  *  - **Production noindexing itself.** Strictly worse, and invisible for weeks:
  *    the site keeps building and deploying while dropping out of the index.

@@ -96,7 +96,7 @@ test('a descendant rule scoped to the modifier itself is not the modifier', () =
 });
 
 test('a base that wins with the value the modifier wanted is not a defect', () => {
-  // AdUnit's pre-consent rule, in miniature: both say `display: none`, so the
+  // A hidden-until-ready rule, in miniature: both say `display: none`, so the
   // modifier losing changes nothing a reader could see.
   const source = style(
     `.ad-unit[hidden] { display: none; }

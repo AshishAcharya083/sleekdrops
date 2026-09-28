@@ -13,9 +13,11 @@
  *
  * Four properties this module has to guarantee:
  *
- *  1. **Consent first, and only for as long as it lasts.** gtag.js is not
- *     requested until `startGa` is called, and `./analytics` calls it only from
- *     the grant path. `stopGa` is the other half, and it cannot merely stop
+ *  1. **The visitor's decision first, and only for as long as it lasts.**
+ *     gtag.js is not requested until `startGa` is called, and `./analytics`
+ *     calls it only from the grant path - which, since analytics is on by
+ *     default, is every page load without a stored opt-out or a GPC/DNT
+ *     signal. `stopGa` is the other half, and it cannot merely stop
  *     calling the tag: the script stays in the DOM and goes on emitting on its
  *     own (a `user_engagement` on every visibility change and unload, plus
  *     whatever enhanced measurement the property has switched on), so the
@@ -58,15 +60,37 @@ interface TagWindow {
   gtag?: (...args: unknown[]) => void;
 }
 
-/** Keep GA4's Consent Mode v2 state aligned with the site's analytics choice. */
-function updateGaConsent(granted: boolean): void {
+/** The command queue gtag.js drains, created on first use so a signal pushed before the tag loads is still read by it. */
+function gtagQueue(): ((...args: unknown[]) => void) | null {
   const w = tagWindow();
-  if (!w) return;
+  if (!w) return null;
   w.dataLayer = w.dataLayer || [];
   w.gtag = w.gtag || function gtag(): void {
     w.dataLayer!.push(arguments);
   };
-  w.gtag('consent', 'update', {
+  return w.gtag;
+}
+
+/**
+ * The Consent Mode v2 state the tag starts from: analytics storage granted,
+ * which is the site's default (anonymous analytics is opt-out - see
+ * `./analytics-env`). Pushed once, ahead of the tag, because gtag.js reads its
+ * defaults from the queue before its first hit and treats an `update` with no
+ * `default` before it as a misconfiguration.
+ *
+ * Only the analytics signal is declared. The advertising signals (`ad_storage`,
+ * `ad_user_data`, `ad_personalization`) are the ad partner's to set: its
+ * consent platform shows the notice where the law requires one and pushes the
+ * visitor's answer onto this same queue, and a default declared here would be
+ * the site speaking over it.
+ */
+function setGaConsentDefault(): void {
+  gtagQueue()?.('consent', 'default', { analytics_storage: 'granted' });
+}
+
+/** Keep GA4's Consent Mode v2 state aligned with the site's analytics choice. */
+function updateGaConsent(granted: boolean): void {
+  gtagQueue()?.('consent', 'update', {
     analytics_storage: granted ? 'granted' : 'denied',
   });
 }
@@ -311,8 +335,9 @@ export function stopGa(): void {
  * Load and configure gtag.js for this build's property. Returns whether the tag
  * was requested, so the caller can hold its one-per-document guard.
  *
- * Callers must have the analytics category granted: this requests a third-party
- * script that writes identifier cookies as soon as it runs.
+ * Callers must have the analytics category granted - by the visitor or by the
+ * site default: this requests a third-party script that writes identifier
+ * cookies as soon as it runs.
  */
 export function startGa(log: GaLog): boolean {
   const w = tagWindow();
@@ -322,6 +347,7 @@ export function startGa(log: GaLog): boolean {
     log('warn', 'GA4 NOT configured - PUBLIC_GA4_ID is empty or not a G- measurement id');
     return false;
   }
+  setGaConsentDefault();
   updateGaConsent(true);
   const tag = document.createElement('script');
   tag.async = true;

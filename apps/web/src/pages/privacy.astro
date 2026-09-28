@@ -20,7 +20,6 @@ const meta = buildMeta({
   {...meta}
   schema={buildCategorySchema('Privacy policy', '/privacy', meta.description)}
   screen="privacy"
-  allowAdvertising={false}
 >
   <LegalLayout
     eyebrow="Legal"
@@ -47,7 +46,7 @@ const meta = buildMeta({
   >
     <div class="summary" id="summary">
       <strong>Plain summary</strong>
-      We host on Cloudflare and keep browser storage to a minimum. Anonymous, aggregate analytics is on by default, and you can switch it off at any time under <strong>Privacy preferences</strong> in the footer. Google manages advertising consent through its certified consent platform where required. Most outbound product links are affiliate links, which may earn us a small commission at no extra cost to you.
+      We host on Cloudflare and keep browser storage to a minimum. Anonymous, aggregate analytics is on by default, and you can switch it off at any time under <strong>Privacy preferences</strong> in the footer. Our advertising partner, Mediavine, manages advertising consent through its own consent notice where the law requires one. Most outbound product links are affiliate links, which may earn us a small commission at no extra cost to you.
     </div>
 
     <h2 id="scope">Scope of this <em>policy</em></h2>
@@ -72,7 +71,7 @@ const meta = buildMeta({
       <li>Respond to messages sent to our published email addresses;</li>
       <li>Comply with legal obligations and prevent fraud or abuse.</li>
     </ul>
-    <p>We do not use your data for automated decision-making, sell it to data brokers or train AI models on it. Google may personalise ads only when the advertising consent choices managed through its certified platform permit that use; see <a href="#ads">Advertising partners</a>.</p>
+    <p>We do not use your data for automated decision-making, sell it to data brokers or train AI models on it. Our advertising partner may personalise ads only where your consent choices permit it; see <a href="#ads">Advertising partners</a>.</p>
 
     <h2 id="cookies">Cookies &amp; <em>tracking</em></h2>
     <p>We use cookies and similar technologies, including local and session storage on your device. With analytics switched off we store only two first-party items besides your privacy choice (below), and neither of them is a cookie:</p>
@@ -87,7 +86,7 @@ const meta = buildMeta({
       <li><code>sd-exp</code> in browser local storage, which records only which version of a page layout or wording you were shown so we can compare them in aggregate.</li>
     </ul>
     <p>These items exist only to make the anonymous analytics countable and are not used for advertising or cross-site tracking. Switching analytics off under <strong>Privacy preferences</strong> deletes <code>sd_sid</code>, <code>sd-exp</code> and Google Analytics' <code>_ga</code> cookies immediately, sends an updated denied signal through Google Consent Mode v2 and stops further measurement.</p>
-    <p>Amazon may set its own cookies on <strong>the destination retailer's domain</strong> after you follow an affiliate link. Google AdSense uses its own certified consent platform to collect and honour advertising choices where required. Its message provides controls for personalised advertising, non-personalised advertising and consent withdrawal.</p>
+    <p>Amazon may set its own cookies on <strong>the destination retailer's domain</strong> after you follow an affiliate link. Our advertising partner, Mediavine, sets cookies and similar technologies of its own to serve and measure advertising, and shows a consent notice where the law requires one; what it collects and how to opt out is set out under <a href="#ads">Advertising partners</a>.</p>
 
     <h2 id="affiliate">Affiliate <em>disclosure</em></h2>
     <p>In accordance with the United States Federal Trade Commission's 16 CFR Part 255 ("Guides Concerning the Use of Endorsements and Testimonials in Advertising"), we disclose the following:</p>
@@ -98,11 +97,79 @@ const meta = buildMeta({
     <p>For full details on how we choose what to link to, how we research, and how affiliate links are labelled, see the <a href="/disclaimer">Affiliate disclaimer</a>.</p>
 
     <h2 id="ads">Advertising <em>partners</em></h2>
-    <p>SleekDrops uses Google AdSense as its advertising partner. The Google-certified consent message controls advertising choices in the EEA, UK and Switzerland, and we will update this policy before adding another network:</p>
-    <ul>
-      <li><strong>Google AdSense</strong> (USA / global) — uses cookies and similar technologies to serve, measure and protect advertising. Depending on your consent choices, ads may be personalised or non-personalised. You can review Google's practices in its <a href="https://policies.google.com/privacy" rel="noopener nofollow" target="_blank">privacy policy</a> and manage personalisation in <a href="https://myadcenter.google.com/" rel="noopener nofollow" target="_blank">My Ad Center</a>.</li>
-    </ul>
-    <p>The publisher tag is present so Google's consent platform can display before an ad request. Google then applies the consent choices to storage and ad serving. The privacy-policy page itself contains no AdSense publisher tag or consent-message tag.</p>
+    <p>SleekDrops works with <strong>Journey by Mediavine</strong> to serve the display advertising on this site, and with no other programmatic advertising network. Mediavine's own notice follows, reproduced as it requires. The consent notice it describes is shown where the law requires one, and the "Update Privacy Settings" and "Do Not Sell or Share My Information" controls it refers to are added to the foot of the page by Mediavine where they apply.</p>
+
+    <div class="mediavine-privacy-notice">
+      <h2>Mediavine Advertising Privacy Notice v. 1.2</h2>
+
+      <p>Mediavine works with this site to support the delivery of ads that align with your interests. It collects information about your online activities and browsing information, including websites you visit, pages you view, search terms, the apps you use, the language and device you use, location, and emails from newsletter sign ups. This information is then passed to partners to enable them to display interest based advertising to you.</p>
+
+      <p>This Notice is specific to Mediavine and explains how Mediavine collects, uses, shares, or sells your personal information when you visit this site or sign up for a newsletter managed by Mediavine. This website must disclose any collection, use, sharing or sale of personal data beyond the services provided by Mediavine in its own privacy notice (above) and comply with relevant privacy laws.</p>
+
+      <h3>What personal data does Mediavine collect?</h3>
+      <p>Mediavine may collect:</p>
+      <ul>
+        <li>IP Address (unique address that identifies your computer or phone on the internet)</li>
+        <li>Location (country, city, state)</li>
+        <li>Operating System (e.g., Windows or Mac)</li>
+        <li>Device Information (hardware, platform, location and carrier data)</li>
+        <li>Language of the Website or Browser</li>
+        <li>Web Browser Type (e.g., Chrome, Firefox or Safari)</li>
+        <li>Email address</li>
+      </ul>
+
+      <p>When you visit this site, Mediavine uses cookies and similar technologies, such as pixels and tags, to collect your information about your behavior on this site and other websites you visit, across your devices. These tools track preferences, website visits and activities, interactions with emails and ads, and evaluate effectiveness of emails and ads and record which ads have been shown to you to enable the delivery of interest based ads on this site. To learn more, please visit <a href="https://www.allaboutcookies.org" target="_blank" rel="noopener">allaboutcookies.org</a>; <a href="https://ico.org.uk/for-the-public/online/cookies/" target="_blank" rel="noopener">ICO - What are cookies and similar technologies</a>; <a href="https://learnwebanalytics.com/whats-the-difference-between-a-cookie-a-pixel-and-a-tag" target="_blank" rel="noopener">learnwebanalytics.com</a>.</p>
+
+      <p>In some cases, Mediavine may manage a site's newsletter. Mediavine collects your email directly from you through the newsletter sign up form, and will request your consent to use your email for interest based advertising. Your email will be converted into hashed format – a unique set of numbers and letters representing your email – before being sent to partners. If you no longer wish to receive this newsletter, you may unsubscribe at any time using the "Unsubscribe" button.</p>
+
+      <h3>Does Mediavine share or sell my personal information for interest based advertising?</h3>
+      <p>Yes, Mediavine will use, share, license, sell or otherwise disclose your personal information to our partners to enable interest based advertising to be displayed to you on this site. Through the bidstream, an online marketplace, Mediavine shares data, such as ad location, site content, and your personal information with advertisers. Using this information, advertisers bid for ad space, and the winning bidder gets to display their ad to you on this site.</p>
+
+      <p>Mediavine may share your personal data with partners to create a universal (unique) identifier linked to your online behavior and preferences. This identifier is added to the bid request to improve the targeting of interest based ads. Mediavine and its partners may also combine your personal data collected from your interaction with this site with your data that they have collected from other sources to create a profile of your interests and behaviors to provide interest based advertising across your online experience, including devices, browsers, and applications. Mediavine could also license your personal data from its partners to enrich the information in its bid request to advertisers.</p>
+
+      <p>To learn more about Mediavine partners, visit <a href="https://www.mediavine.com/ad-partners" target="_blank" rel="noopener">mediavine.com/ad-partners</a>.</p>
+
+      <h3>How can I opt out of interest based advertising?</h3>
+      <p>To opt out of interest based advertising on this site, you may take the following actions:</p>
+
+      <h4>Cookie Consent – For EU/UK visitors</h4>
+      <p>On first visit to the site, you may reject the use of cookies through the cookie consent banner, shown only where legally required. If you initially accept the use of cookies, but change your mind, you can access the banner by clicking "Update Privacy Settings" at the bottom of the home page to change your preferences at any time.</p>
+
+      <h4>Disabling Cookies</h4>
+      <p>To learn more about cookies and how to disable them for interest based advertising, visit <a href="https://www.allaboutcookies.org" target="_blank" rel="noopener">All About Cookies</a>. Most browsers provide options in their menu to stop accepting new cookies, alert you to new cookies, disable cookies, and clear your browser's cache or storage. Be aware that blocking cookies may affect your site experience, and essential cookies cannot be disabled as these are necessary for the website to function.</p>
+
+      <h4>Opting Out Using Other Tools</h4>
+      <p>Use the following tools to opt out of receiving interest-based advertising:</p>
+      <ul>
+        <li>Digital Advertising Alliance (DAA) WebChoice Tool: <a href="https://optout.aboutads.info" target="_blank" rel="noopener">optout.aboutads.info</a></li>
+        <li>Network Advertising Initiative (NAI): <a href="https://thenai.org/opt-out" target="_blank" rel="noopener">thenai.org/opt-out</a></li>
+        <li>Ad Choices (EDAA): <a href="https://www.youronlinechoices.com" target="_blank" rel="noopener">youronlinechoices.com</a></li>
+        <li>Ad Choices (DAAC): <a href="https://youradchoices.ca/en/tools" target="_blank" rel="noopener">youradchoices.ca/en/tools</a></li>
+        <li>AppChoices (Mobile Device): <a href="https://youradchoices.ca/en/tools" target="_blank" rel="noopener">youradchoices.ca/en/tools</a></li>
+        <li>Global Privacy Control (GPC): <a href="https://globalprivacycontrol.org" target="_blank" rel="noopener">globalprivacycontrol.org</a></li>
+      </ul>
+
+      <h4>Opt-Out Rights in Certain US States</h4>
+      <p>If you reside in certain US states, you have the right to opt out of the sale or sharing of your personal data. A "Do Not Sell or Share My Information" button can be found at the bottom of the home page, where required.</p>
+
+      <h4>Seeing Ads After Opting Out or Disabling Ads</h4>
+      <p>Disabling cookies or opting out of the sales or sharing of personal data for advertising does not mean you won't see ads on this website. It means the ads you see will not be personalized to your online behavior and interests.</p>
+
+      <h3>What are my data protection rights?</h3>
+      <p>Under data protection laws in the EU, UK and certain US states, you may have the right to delete, access, request a copy, and correct your personal information. If you'd like to exercise these rights related to the services we provide to this website, please contact Mediavine at <a href="mailto:privacy@mediavine.com">privacy@mediavine.com</a>.</p>
+
+      <h3>Will Mediavine transfer my personal data to the US?</h3>
+      <p>Yes. Mediavine transfers your data to the US for processing and storage. To safeguard this transfer, Mediavine enters into agreements known as Standard Contractual Clauses with our vendors and partners to ensure your data is protected according to EU or UK privacy standards.</p>
+
+      <h3>How does Mediavine protect my personal information?</h3>
+      <p>Mediavine has implemented technical and organizational security measures appropriate to the risk to the personal data. Despite our safeguards and efforts, no internet transmission can be 100% secure.</p>
+
+      <h3>How long does Mediavine keep my personal information?</h3>
+      <p>Where Mediavine processes personal data to enable interest based advertising, we will continue to process until you ask us to stop.</p>
+
+      <h3>How can I contact Mediavine if I have questions about this notice or its services to this website?</h3>
+      <p>Please contact us at <a href="mailto:Privacy@mediavine.com">Privacy@mediavine.com</a>, or you may write to us at: 159 W. 25th St., Suite #427, New York, NY 10001.</p>
+    </div>
 
     <h2 id="third-parties">Third-party <em>services</em></h2>
     <p>The following services may process limited data on our behalf:</p>
@@ -111,6 +178,7 @@ const meta = buildMeta({
       {devteamSink && <li><strong>DevTeam Analytics</strong> - anonymous product analytics for the non-production preview. The live sleekdrops.com build blocks this sink.</li>}
       <li><strong>Google Analytics 4</strong> (USA / global) — aggregate traffic measurement, on by default and switched off under <strong>Privacy preferences</strong>. We send page paths rather than full URLs so query strings never reach Google. Privacy policy: <a href="https://policies.google.com/privacy" rel="noopener nofollow" target="_blank">policies.google.com/privacy</a>.</li>
       <li><strong>Amazon Associates</strong> — an affiliate network and independent controller that may receive limited information, such as a referring URL and cookie ID, after you follow an affiliate link to Amazon.</li>
+      <li><strong>Mediavine</strong> (USA / global) — our advertising partner, which serves and measures the display advertising on this site and is an independent controller of what it collects; see <a href="#ads">Advertising partners</a> for its notice, its partners and the opt-out tools it provides.</li>
     </ul>
 
     <h2 id="retention">Data <em>retention</em></h2>
@@ -153,7 +221,7 @@ const meta = buildMeta({
     <p>We do not sell personal information in the traditional sense. See <a href="#do-not-sell">Do Not Sell or Share</a> below for details on what constitutes a "sale" under the CPRA and how to opt out.</p>
 
     <h2 id="do-not-sell">Do Not Sell or Share My <em>Personal Information</em></h2>
-    <p>SleekDrops does not sell your personal information for monetary consideration. Some laws may treat personalised-advertising data as a “share.” You can decline personalised advertising in Google's consent message or My Ad Center, and you can disable our separate analytics category under <strong>Privacy preferences</strong>.</p>
+    <p>SleekDrops does not sell your personal information for monetary consideration. Some laws may treat personalised-advertising data as a “share.” You can decline personalised advertising through Mediavine's consent notice where it is shown, through the opt-out tools listed in its notice above, or with a Global Privacy Control signal; and you can switch off our separate analytics category under <strong>Privacy preferences</strong>.</p>
     <p>To opt out of any such sharing, or to exercise any other privacy right, email <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a> with the subject line "Privacy Request." We honour the Global Privacy Control (GPC) signal where technically feasible.</p>
 
     <h2 id="changes">Changes to this <em>policy</em></h2>

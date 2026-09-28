@@ -12,7 +12,7 @@
  * the *same* live editorial content. Left indexable, that is a complete second
  * copy of the site on a host Google has no reason to prefer - which splits the
  * ranking signals of every page against itself, and to a reviewer looking at an
- * AdSense application reads as scraped or duplicated content on a domain the
+ * ad network application reads as scraped or duplicated content on a domain the
  * account does not own.
  *
  * Fail-safe direction: **only an explicit `production` is indexable.** An unset,
