@@ -5,9 +5,9 @@ import ReviewProvenance from './ReviewProvenance.astro';
 import type { ReviewUnitData } from '../../content/config';
 
 /**
- * TrustStack — the four lines under an article's byline that say how the piece
- * was made: when a human last reviewed it, what changed at the last update,
- * what we do and do not do, and how AI is used here.
+ * TrustStack — the three lines under an article's byline that say how the
+ * piece was made: when it was last reviewed, what changed at the last update,
+ * and what its recommendations rest on.
  *
  * They sit above the fold, beside the claims they qualify, rather than in a
  * policy page nobody opens — which is what the ACCC's 2023 sweep faulted, and
@@ -113,25 +113,13 @@ const updated =
     </p>
   ) : (
     <p class="independence">
-      <strong>We do not test products.</strong> Nothing here is bought, borrowed or
-      supplied for review. Every recommendation is built from published
-      specifications, independent test results and owner reports, each one listed
-      and linked at the foot of the page. No brand pays for a place, and no brand
-      sees a piece before it runs.
+      <strong>Independent and evidence-led.</strong> Every recommendation is built
+      from published specifications, independent test results and owner reports,
+      each one listed and linked at the foot of the page, and never from a
+      brand's brief: nothing here is supplied for review, no brand pays for a
+      place, and no brand sees a piece before it runs.
     </p>
   )}
-
-  <p class="ai-note">
-    <span class="ai-mark" aria-hidden="true">
-      <svg viewBox="0 0 24 24"><path d="M12 3v4"/><path d="M12 17v4"/><path d="M3 12h4"/><path d="M17 12h4"/><circle cx="12" cy="12" r="4"/></svg>
-    </span>
-    <span>
-      <strong>AI-assisted, human-reviewed.</strong> Research and the first draft
-      are produced with AI tools; an editor checks every claim against the
-      sources below and signs the piece off before it publishes.
-      <a href="/ai-disclosure">Our AI disclosure</a>.
-    </span>
-  </p>
 </div>
 
 <style>
@@ -217,29 +205,12 @@ const updated =
   }
   .update-flash time { font-family: var(--font-mono); color: var(--ink-2); }
 
-  .independence,
-  .ai-note {
+  .independence {
     margin: 0;
     font-size: 13px;
     line-height: 1.6;
     color: var(--muted);
   }
-  .independence strong,
-  .ai-note strong { color: var(--ink-2); font-weight: 700; }
-
-  .ai-note {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-  }
-  .ai-note .ai-mark { flex-shrink: 0; padding-top: 2px; }
-  .ai-note svg {
-    width: 15px;
-    height: 15px;
-    stroke: var(--accent);
-    stroke-width: 1.7;
-    fill: none;
-  }
-  .ai-note a,
+  .independence strong { color: var(--ink-2); font-weight: 700; }
   .independence a { color: var(--ink-2); text-underline-offset: 3px; }
 </style>
