@@ -6,7 +6,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { AUTHORS, authorById, BYLINE_NAME, bylineFor, frontmatterSchema } from './contract.js';
+import {
+  AUTHORS,
+  authorById,
+  BYLINE_NAME,
+  bylineFor,
+  claimSchema,
+  frontmatterSchema,
+  isWebUrl,
+  launchSchema,
+  sourceSchema,
+} from './contract.js';
 import { beats, EDITORIAL_TEAM, listBeats } from '../../../web/src/data/authors.ts';
 
 test('the site publishes under one byline, and the beat is a tag on it', () => {
@@ -35,4 +45,30 @@ test('a beat id the site cannot render never reaches frontmatter', () => {
   // assembly: a byline nobody chose would ship without anyone noticing.
   assert.equal(frontmatterSchema.shape.author.safeParse('home').success, true);
   assert.equal(frontmatterSchema.shape.author.safeParse('home-desk').success, false);
+});
+
+test('a URL the browser would execute rather than follow never reaches frontmatter', () => {
+  // `z.string().url()` accepts `javascript:` and `data:`, so the field that
+  // ends up in an `href` on the published page has to check the scheme
+  // itself. The assembler drops such a link before it gets here; this is the
+  // contract saying so, for the values that arrive any other way - an
+  // operator edit, a re-assembly over prior frontmatter, a hand-written post.
+  const hostile = ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', 'file:///etc/passwd'];
+  for (const url of hostile) {
+    assert.equal(launchSchema.safeParse({ product: 'iPhone 18 Pro', releaseDate: '2026-09-11', sourceUrl: url }).success, false, url);
+    assert.equal(sourceSchema.safeParse({ url }).success, false, url);
+    const claim = { subject: 'iPhone 18 Pro', metric: 'Peak brightness', tier: 'manufacturer' as const, value: '3,000 nits', attribution: 'Apple' };
+    assert.equal(claimSchema.safeParse({ ...claim, sourceUrl: url }).success, false, url);
+    assert.equal(
+      claimSchema.safeParse({ ...claim, claimed: { value: '3,000 nits', by: 'Apple', sourceUrl: url } }).success,
+      false,
+      url,
+    );
+    assert.equal(isWebUrl(url), false, url);
+  }
+  assert.equal(
+    launchSchema.safeParse({ product: 'iPhone 18 Pro', releaseDate: '2026-09-11', sourceUrl: 'https://www.apple.com/au/newsroom/' }).success,
+    true,
+  );
+  assert.equal(sourceSchema.safeParse({ url: 'http://www.gsmarena.com/x' }).success, true, 'plain http still opens');
 });

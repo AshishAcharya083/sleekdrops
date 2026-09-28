@@ -103,7 +103,37 @@ export function displayUrl(url: string): string {
   return url.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
 }
 
-function hostLabel(url: string): string {
+/**
+ * The marketplaces this site holds an affiliate relationship with. Mirrors the
+ * `AMAZON` storefront map in functions/_lib/affiliates.mjs, which cannot be
+ * imported here: it sits outside the app's tsconfig and is loaded by the
+ * Cloudflare runtime rather than by the build.
+ */
+const MONETISED_HOSTS = ['amazon.com', 'amazon.com.au'];
+
+/**
+ * The `rel` on a citation link.
+ *
+ * Every outbound citation is `nofollow` - we are pointing at evidence, not
+ * passing a vote. The few that land on a storefront this site earns from carry
+ * `sponsored` as well, even though a citation is never tagged and earns
+ * nothing itself: the destination is one we are paid on elsewhere, Google asks
+ * for the label on that class of link, and marking it is what leaves the
+ * promise on the disclosure - that a commission never decides a
+ * recommendation - checkable from the markup rather than taken on trust.
+ */
+export function citationRel(url: string): string {
+  return isMonetisedHost(url) ? 'noopener sponsored nofollow' : 'noopener nofollow';
+}
+
+/** True when a URL points at a storefront this site earns a commission from. */
+export function isMonetisedHost(url: string): boolean {
+  const host = hostLabel(url).toLowerCase();
+  return MONETISED_HOSTS.some((earned) => host === earned || host.endsWith(`.${earned}`));
+}
+
+/** The publisher a bare URL stands in for: its host, minus the noise. */
+export function hostLabel(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, '');
   } catch {

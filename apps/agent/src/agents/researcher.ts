@@ -15,9 +15,22 @@
 // tool is what the model uses on top of it to check the specifics that matter.
 import { chatJson, requireKeys, type ShapeCheck, UsageTracker } from '../llm/index.js';
 import { formatSearches, type SearchHit, tavilySearchMany } from '../tools/tavily.js';
-import { assertEvidenceSufficient, describeBar, normaliseDossier } from '../content/evidence.js';
+import {
+  assertEvidenceSufficient,
+  checkEvidence,
+  describeBar,
+  LAUNCH_WINDOW_DAYS,
+  normaliseDossier,
+  STRATUM_FIX,
+} from '../content/evidence.js';
+import { COVERS_RULE } from '../content/claims.js';
 import { operatorBrief, siteContext, SOURCE_DISCIPLINE, VERIFICATION_RULES } from './context.js';
-import type { ArticleRow, ResearchDossier, TopicRow } from '../pipeline/types.js';
+import type {
+  ArticleRow,
+  EvidenceShortfall,
+  ResearchDossier,
+  TopicRow,
+} from '../pipeline/types.js';
 
 /**
  * The five strata, planned and searched separately.
@@ -36,8 +49,10 @@ export const STRATA = [
   {
     key: 'expert',
     label: 'INDEPENDENT EXPERT REVIEWS',
-    brief:
-      'reviewers who measured something themselves - Choice lab tests, RTINGS, teardowns, standards testing',
+    // Generated from the gate's own accept-list: the outlets the prompt is
+    // told to search and the outlets the gate's advice names have to be one
+    // list, or the stage fails a bar nobody mentioned.
+    brief: STRATUM_FIX.expert,
   },
   {
     key: 'owner',
@@ -70,7 +85,7 @@ function fallbackQuery(key: StratumKey, title: string): string {
     case 'primary':
       return `${title} specifications official site`;
     case 'expert':
-      return `${title} review tested`;
+      return `${title} review tested measured gsmarena notebookcheck`;
     case 'owner':
       return `${title} problems after 6 months owner reviews productreview.com.au`;
     case 'price':
@@ -134,6 +149,180 @@ export function groupEvidence(
         formatSearches(stratum.queries.map((query) => byQuery.get(query) ?? { query, results: [] })),
     )
     .join('\n\n');
+}
+
+/**
+ * The queries a second sweep runs for one thin stratum.
+ *
+ * Derived from the stratum rather than from the plan the first pass wrote,
+ * which is the point: the first plan is the thing that came up short, so
+ * re-running its phrasing buys another set of the same results. These name
+ * the sources the stratum is actually gathered from - the protocol-publishing
+ * outlets for expert, the owner corpora for owner - because a stratum comes up
+ * thin far more often from asking the wrong question than from the evidence
+ * not existing.
+ */
+export function resweepQueries(stratum: string, title: string): string[] {
+  switch (stratum) {
+    case 'primary':
+      return [`${title} official specifications press release`, `${title} RRP australia official announcement`];
+    case 'expert':
+      return [
+        `${title} gsmarena review battery test screen brightness`,
+        `${title} notebookcheck OR dxomark OR displaymate OR ifixit measured`,
+      ];
+    case 'owner':
+      return [`${title} problems reddit owners`, `${title} productreview.com.au reviews complaints`];
+    case 'price':
+      return [`${title} price australia jb hi-fi officeworks`, `${title} australia launch price rrp`];
+    case 'competing':
+      return [`best ${title} australia`, `${title} review comparison which to buy`];
+    default:
+      return [`${title} ${stratum}`];
+  }
+}
+
+/**
+ * The second sweep's plan: one entry per thin stratum, and nothing else.
+ *
+ * Scoped deliberately. A shortfall in the expert stratum is not a reason to
+ * pay for another price sweep, and a re-sweep that re-gathers everything is a
+ * second full research pass wearing a remediation's clothes.
+ */
+export function resweepPlan(
+  shortfalls: readonly EvidenceShortfall[],
+  title: string,
+): PlannedStratum[] {
+  const thin = new Set(shortfalls.map((s) => s.stratum));
+  return STRATA.filter((stratum) => thin.has(stratum.key)).map((stratum) => ({
+    ...stratum,
+    queries: resweepQueries(stratum.key, title),
+  }));
+}
+
+/** Which dossier arrays a stratum owns - what a re-sweep of it may add to. */
+const STRATUM_FIELDS: Record<string, ReadonlyArray<keyof ResearchDossier>> = {
+  primary: ['facts'],
+  expert: ['facts', 'testedClaims', 'claims'],
+  owner: ['facts', 'failureModes', 'ownerComplaints', 'whoShouldNotBuy'],
+  price: ['priceObservations'],
+  competing: [],
+};
+
+/**
+ * The identity of an entry, for deciding whether a second sweep re-filed it.
+ *
+ * Every row shape a stratum owns contributes the fields that actually name it.
+ * A `claims` row is the one that names itself in fields nothing else uses -
+ * `subject` and `measuredSourceUrl` - and without them a whole roundup's
+ * claims collapse onto their metric, so a re-sweep's figure for the second
+ * product is dropped as a duplicate of the first product's. The expert stratum
+ * is the one a re-sweep is usually run for; silently discarding what it found
+ * would make the second sweep pointless.
+ */
+function entryKey(entry: unknown): string {
+  const e = entry as Record<string, unknown>;
+  const parts = [
+    e.fact,
+    e.claim,
+    e.failure,
+    e.complaint,
+    e.audience,
+    e.subject,
+    e.metric,
+    e.retailer,
+    e.product,
+    e.sourceUrl,
+    e.measuredSourceUrl,
+  ]
+    .filter((part) => typeof part === 'string' && part.trim() !== '')
+    .map((part) => (part as string).trim().toLowerCase());
+  return parts.join('|');
+}
+
+/**
+ * The first dossier with a second sweep's findings folded in.
+ *
+ * Additive and deduplicated: the first pass's evidence is not replaced, and an
+ * entry the second pass re-filed from the same page does not get counted
+ * twice. Only the strata that came up thin are touched, so a re-sweep cannot
+ * quietly rewrite the summary, the product list or the keywords the rest of
+ * the pipeline is already built on.
+ */
+export function mergeDossier(
+  base: ResearchDossier,
+  addition: Partial<ResearchDossier>,
+  shortfalls: readonly EvidenceShortfall[],
+): ResearchDossier {
+  const strata = new Set(shortfalls.map((s) => s.stratum));
+  const merged: ResearchDossier = { ...base };
+  const fields = new Set([...strata].flatMap((stratum) => STRATUM_FIELDS[stratum] ?? []));
+
+  for (const field of fields) {
+    const existing = (base[field] ?? []) as unknown[];
+    const found = (addition[field] ?? []) as unknown[];
+    if (!Array.isArray(found) || found.length === 0) continue;
+    const seen = new Set(existing.map(entryKey));
+    const extra = found.filter((entry) => {
+      const key = entryKey(entry);
+      if (key === '' || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    (merged as unknown as Record<string, unknown>)[field] = [...existing, ...extra];
+  }
+
+  // The competing-coverage read is a single piece of prose, not a list: a
+  // second sweep either produced a fuller one or it did not.
+  if (strata.has('competing')) {
+    const found = (addition.competitorNotes ?? '').trim();
+    if (found.length > (base.competitorNotes ?? '').trim().length) merged.competitorNotes = found;
+  }
+  // The launch record is deliberately not merged. It is the one field that
+  // moves the bar rather than meeting it - it drops the tested-claim floor -
+  // and the second count is terminal, so a `launch` arriving out of the
+  // re-sweep would let the sweep clear the gate with a field it was never
+  // asked for and `resweepShape` never offered it. Whether the product is
+  // newly released is the first pass's finding, made before the gate ran.
+
+  return merged;
+}
+
+/**
+ * The gate, with one bounded remediation in front of it.
+ *
+ * Research used to be one shot: plan, synthesise, count, die. One thin
+ * stratum - the iPhone 18 piece failed on expert facts 1 of 2, for a product
+ * with hundreds of published articles behind it - was a terminal card. That is
+ * the same wrong shape the missing-product-list path had: a narrow, recoverable
+ * fault treated as a verdict.
+ *
+ * So a shortfall buys one more sweep, scoped to the strata that were actually
+ * thin, and the gate runs again on the merged dossier. One attempt, by
+ * construction rather than by a counter: the second verdict is asserted, so a
+ * piece that is still short after a targeted re-sweep genuinely has nothing to
+ * be written from and stops here.
+ *
+ * A fault inside the re-sweep is not caught. `EvidenceGateError` has to keep
+ * meaning one thing - the second sweep ran and the counts were still short -
+ * because that is what makes it terminal. A timeout, a 429 or a truncated JSON
+ * reply is none of those: nothing was counted a second time, and converting it
+ * into a gate error would report a verdict the gate never reached and burn the
+ * stage retry that fault was owed.
+ */
+export async function sweepUntilSufficient(
+  dossier: ResearchDossier,
+  article: ArticleRow,
+  resweep: (shortfalls: EvidenceShortfall[]) => Promise<Partial<ResearchDossier>>,
+): Promise<ResearchDossier> {
+  const first = checkEvidence(dossier, article.post_type, article.category);
+  if (first.pass) {
+    dossier.sufficiency = first;
+    return dossier;
+  }
+  const addition = await resweep(first.shortfalls);
+  const widened = mergeDossier(dossier, normaliseDossier(addition), first.shortfalls);
+  return assertEvidenceSufficient(widened, article.post_type, article.category);
 }
 
 export async function runResearcher(
@@ -229,6 +418,26 @@ STRICT RULES:
   ratings ("delivery was fast") are not product evidence at all. For Health
   topics there is no strong Australian owner corpus - say the sample is small
   rather than inflating it.
+- WIDEN THE EXPERT STRATUM TO ANYONE WHO PUBLISHES A PROTOCOL. ${STRATUM_FIX.expert}.
+- NEW RELEASES: fill "launch" when the piece is about a product that went on
+  sale in roughly the last ${LAUNCH_WINDOW_DAYS} days, or goes on sale in the next
+  ${LAUNCH_WINDOW_DAYS}, with the release date and the http(s) page you read that date
+  on. The link is not optional here: a release date nobody can check relaxes
+  nothing, because it is the one field that lowers the bar rather than meeting
+  it. Inside that window no Australian lab result exists yet, and the gate
+  stops asking for one - but it still asks for expert coverage, which inside
+  the window means the protocol-publishing outlets above and dated hands-on
+  where something was measured.
+- LABEL EVERY HEADLINE NUMBER IN "claims". One row per figure that matters,
+  carrying both halves where they disagree: the maker's claimedValue with
+  claimedBy and claimedSourceUrl, and the measuredValue with measuredBy, the
+  conditions it was measured under and the date. Never drop the maker's figure
+  - the reader has already seen it on the box, and the gap between the two is
+  the most useful thing on the page - and never restate it as if it were a
+  measurement. A metric nobody has measured yet is still a row: claimedValue
+  filled, measuredValue null. Set ownTest only if WE ran the test, which today
+  we do not.
+- A COHORT RATER'S FIGURE ALWAYS STATES ITS COVERAGE. ${COVERS_RULE}
 - amazonUrl: an Amazon PRODUCT page URL (amazon.com.au or amazon.com, containing
   /dp/ or /gp/product/) that you have actually seen in the evidence or in a
   search result — else null. A retailer or news site URL is NEVER an amazonUrl,
@@ -296,6 +505,20 @@ Return JSON:
  "testedClaims": [{"claim": string (what was measured, with the figure),
                    "source": string (who tested it, named), "year": number|null,
                    "sourceUrl": string}],
+ "claims": [{"subject": string (the product this figure is about),
+             "metric": string ("Battery life, screen-on", "Peak brightness"),
+             "claimedValue": string|null, "claimedBy": string|null (the brand),
+             "claimedSourceUrl": string|null,
+             "claimedConditions": string|null (the conditions the maker states),
+             "measuredValue": string|null, "measuredBy": string|null (the outlet),
+             "conditions": string|null (the protocol it was measured under),
+             "measuredOn": string|null (YYYY / YYYY-MM / YYYY-MM-DD),
+             "measuredSourceUrl": string|null,
+             "withdrawnValue": string|null (a figure the tester has since corrected away from),
+             "ownTest": false,
+             "covers": string|null (what the source's result actually covers)}],
+ "launch": {"product": string, "releaseDate": string (YYYY-MM-DD it went on sale),
+            "sourceUrl": string}|null,
  "keywords": {"primary": string, "secondary": string[]},
  "competitorNotes": string (what competing pages cover + the gap we can win),
  "faqIdeas": [{"question": string, "answerHint": string}] (3-6)}`,
@@ -307,12 +530,137 @@ Return JSON:
   // Normalize defensively - downstream link integrity, tiering and the
   // evidence gate all depend on this shape being real rather than claimed.
   //
-  // Then the gate, in code, on the normalised dossier: a piece that cannot
-  // clear its stratum minimums stops here rather than spending the outline,
-  // write, review and edit stages producing spec recitation. The throw is the
-  // route to `failed` — runStage's catch writes the status, the message and
-  // releases the claim already, so there is no second failure path to keep.
-  return assertEvidenceSufficient(normaliseDossier(dossier), article.post_type, article.category);
+  // Then the gate, in code, on the normalised dossier - with one targeted
+  // re-sweep in front of it, so a single thin stratum buys a second look
+  // rather than a dead card. A piece still short after that stops here rather
+  // than spending the outline, write, review and edit stages producing spec
+  // recitation. The throw is the route to `failed` - runStage's catch writes
+  // the status, the message and releases the claim already, so there is no
+  // second failure path to keep.
+  const normalised = normaliseDossier(dossier);
+  return sweepUntilSufficient(normalised, article, (shortfalls) =>
+    runTargetedResweep(article, topic, normalised, shortfalls, model, tracker),
+  );
+}
+
+/**
+ * One more sweep, over the thin strata only.
+ *
+ * It is given what the first pass already filed, so the model is adding to a
+ * dossier rather than writing a second one: duplicates are dropped in
+ * `mergeDossier` anyway, but a model that can see the existing rows spends its
+ * pass on the gap instead of re-finding the same three pages. It returns only
+ * the strata that were short - everything else on the dossier is already
+ * settled and a re-sweep has no business rewriting it.
+ */
+export async function runTargetedResweep(
+  article: ArticleRow,
+  topic: TopicRow | null,
+  dossier: ResearchDossier,
+  shortfalls: readonly EvidenceShortfall[],
+  model: string,
+  tracker: UsageTracker,
+): Promise<Partial<ResearchDossier>> {
+  const planned = resweepPlan(shortfalls, article.title);
+  if (planned.length === 0) return {};
+
+  const searches = await tavilySearchMany([...new Set(planned.flatMap((s) => s.queries))], 5);
+  const evidence = groupEvidence(planned, searches);
+  const brief = operatorBrief(topic);
+  const gaps = shortfalls
+    .map((s) => `- ${s.label}: ${s.have} of ${s.need} (${s.stratum}) - ${s.fix}`)
+    .join('\n');
+  // The coverage rule only matters where the sweep may return claim rows, and
+  // that is where the first pass's brief and the check contradicted each other.
+  const returnsClaims = planned.some((stratum) =>
+    (STRATUM_FIELDS[stratum.key] ?? []).includes('claims'),
+  );
+  const already = planned
+    .map((stratum) => {
+      const rows = existingRows(dossier, stratum.key);
+      return `${stratum.label}: ${rows.length === 0 ? 'nothing filed' : rows.join(' | ')}`;
+    })
+    .join('\n');
+
+  return chatJson<Partial<ResearchDossier>>(
+    {
+      model,
+      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}\n\n${VERIFICATION_RULES}`,
+      temperature: 0.3,
+      maxTokens: 6000,
+      search: true,
+      prompt: `The research dossier for "${article.title}" (${article.post_type}, ${article.category}) came up short in ${planned.length === 1 ? 'one stratum' : `${planned.length} strata`}. This is a second, targeted sweep over ${planned.length === 1 ? 'that stratum' : 'those strata'} and nothing else.
+${brief ? `\n${brief}\n` : ''}
+WHAT IS MISSING:
+${gaps}
+
+WHAT THE FIRST PASS ALREADY FILED (do not repeat these - find what is not here):
+${already}
+
+RULES:
+- Return ONLY the fields listed below. Everything else in the dossier is
+  settled, and a second sweep that rewrites the summary, the product list or
+  the keywords would undo a pass that already succeeded.
+- Same discipline as the first pass: tier and date every fact, name the
+  publisher, verify before you file, and never carry a spec or a URL over from
+  memory.
+- ${STRATUM_FIX.expert}.${returnsClaims ? `\n- ${COVERS_RULE}` : ''}
+- Return an empty array for anything you looked for and did not find. Padding
+  a count here is worse than failing the piece: the gate is the last thing
+  between a thin dossier and a page of spec recitation.
+
+Search evidence for the thin ${planned.length === 1 ? 'stratum' : 'strata'}:
+${evidence}
+
+Return JSON with only these keys:
+{${resweepShape(planned.map((p) => p.key))}}`,
+    },
+    tracker,
+  );
+}
+
+/** What the first pass filed in a stratum, short enough to put in a prompt. */
+function existingRows(dossier: ResearchDossier, stratum: string): string[] {
+  switch (stratum) {
+    case 'primary':
+      return (dossier.facts ?? []).filter((f) => f.tier === 'primary').map((f) => f.fact);
+    case 'expert':
+      return [
+        ...(dossier.facts ?? []).filter((f) => f.tier === 'expert').map((f) => f.fact),
+        ...(dossier.testedClaims ?? []).map((t) => `${t.claim} (${t.source})`),
+      ];
+    case 'owner':
+      return [
+        ...(dossier.facts ?? []).filter((f) => f.tier === 'owner').map((f) => f.fact),
+        ...(dossier.ownerComplaints ?? []).map((c) => c.complaint),
+        ...(dossier.failureModes ?? []).map((f) => f.failure),
+      ];
+    case 'price':
+      return (dossier.priceObservations ?? []).map((o) => `${o.retailer} ${o.value}`);
+    case 'competing':
+      return dossier.competitorNotes ? [dossier.competitorNotes.slice(0, 200)] : [];
+    default:
+      return [];
+  }
+}
+
+/** The JSON keys a re-sweep of these strata may return, and nothing else. */
+function resweepShape(strata: readonly string[]): string {
+  const shapes: Record<string, string> = {
+    facts: `"facts": [{"fact": string, "sourceUrl": string, "tier": "primary"|"expert"|"owner"|"aggregator"|"unknown", "date": string|null, "publisher": string|null}]`,
+    testedClaims: `"testedClaims": [{"claim": string, "source": string, "year": number|null, "sourceUrl": string}]`,
+    claims: `"claims": [{"subject": string, "metric": string, "claimedValue": string|null, "claimedBy": string|null, "claimedSourceUrl": string|null, "claimedConditions": string|null, "measuredValue": string|null, "measuredBy": string|null, "conditions": string|null, "measuredOn": string|null, "measuredSourceUrl": string|null, "withdrawnValue": string|null, "ownTest": false, "covers": string|null}]`,
+    failureModes: `"failureModes": [{"product": string, "failure": string, "timeframe": string, "sourceUrl": string, "tier": "owner"|"expert"|"primary"|"aggregator"|"unknown"}]`,
+    ownerComplaints: `"ownerComplaints": [{"product": string, "complaint": string, "volume": "isolated"|"recurring"|"widespread"|"unknown", "recency": string|null, "denominator": string|null, "kind": "quoted"|"aggregate", "sourceUrl": string}]`,
+    whoShouldNotBuy: `"whoShouldNotBuy": [{"audience": string, "reason": string, "sourceUrl": string}]`,
+    priceObservations: `"priceObservations": [{"product": string, "value": number, "currency": string, "retailer": string, "dateChecked": string, "sourceUrl": string}]`,
+  };
+  const fields = [...new Set(strata.flatMap((stratum) => STRATUM_FIELDS[stratum] ?? []))];
+  const lines = fields.map((field) => shapes[field]).filter(Boolean);
+  if (strata.includes('competing')) {
+    lines.push(`"competitorNotes": string (what the top pages cover and where they are thin)`);
+  }
+  return lines.join(',\n ');
 }
 
 /**

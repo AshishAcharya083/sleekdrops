@@ -24,12 +24,14 @@ test('a configured preview enables DevTeam analytics without a prompt', () => {
   );
 });
 
-test('an unconfigured preview keeps analytics off', () => {
+test('an unconfigured preview has no DevTeam sink, and analytics still defaults on', () => {
+  // GA4 is configured separately (PUBLIC_GA4_ID); a preview without a DevTeam
+  // key must not read as a preview without analytics.
   assert.deepEqual(resolveAnalyticsEnv('preview', { host: 'https://ingest.test', feedback: 'true' }), {
     key: '',
     host: '',
     feedback: false,
-    defaultConsent: 'denied',
+    defaultConsent: 'granted',
   });
 });
 
@@ -44,9 +46,21 @@ test('production refuses a DevTeam key and feedback even when supplied', () => {
       key: '',
       host: '',
       feedback: false,
-      defaultConsent: 'denied',
+      defaultConsent: 'granted',
     },
   );
+});
+
+test('REGRESSION: production defaults analytics on, so GA4 counts every visit', () => {
+  // From 2026-09-12 to 2026-09-28 production resolved this to `denied`, which
+  // loaded gtag.js only for a visitor who opened the footer dialog and switched
+  // analytics on. The GA4 property reported "No data received" for the whole
+  // period while every deploy was green, and the Mediavine application - which
+  // reads sessions from that property - could not qualify. The default is the
+  // site's policy (opt-out, Australian publisher), not a per-deployment
+  // convenience, so it is asserted on the deployment that matters.
+  assert.equal(resolveAnalyticsEnv('production', {}).defaultConsent, 'granted');
+  assert.equal(resolveAnalyticsEnv('preview', {}).defaultConsent, 'granted');
 });
 
 test('the develop workflow supplies the configured analytics environment', () => {

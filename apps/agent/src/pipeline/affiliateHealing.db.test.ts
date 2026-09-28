@@ -227,6 +227,6 @@ test('what the keyword stage rediscovers resolves as a dossier product', { skip 
   assert.equal(assembled.research?.facts.length, 1);
   assert.deepEqual(assembled.frontmatter?.picks, [
     { name: 'Samsung Galaxy Z Fold 8', brand: 'Samsung', price: 'about A$2,899',
-      goSlug: 'samsung-galaxy-z-fold-8' },
+      goSlug: 'samsung-galaxy-z-fold-8', evidence: 'researched' },
   ]);
 });

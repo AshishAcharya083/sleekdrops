@@ -367,10 +367,9 @@ function siteDetails(siteUrl) {
     'Written for Australian shoppers: prices are in AUD and availability is checked on the',
     'date shown on each page. SleekDrops does not test products: a pick is an editorial',
     'synthesis of independent test results, manufacturer specs and owner reports, and each',
-    `article lists those sources with their publisher and date (${siteUrl}/how-we-research).`,
-    `Articles are AI-assisted and human-reviewed (${siteUrl}/ai-disclosure), and carry the`,
-    'date an editor last checked them. Pages carry affiliate links, disclosed on the page; a',
-    `commission never decides a recommendation (${siteUrl}/disclaimer).`,
+    `article lists those sources with their publisher and date (${siteUrl}/how-we-research)`,
+    'and carries the date it was last checked against them. Pages carry affiliate links,',
+    `disclosed on the page; a commission never decides a recommendation (${siteUrl}/disclaimer).`,
   ];
 }
 
@@ -465,7 +464,6 @@ export function buildLlmsTxt({
     '',
     linkLine('About', `${site}/about`, 'who writes this site and how a pick is made'),
     linkLine('How we research', `${site}/how-we-research`, 'the evidence standard behind every recommendation, and what we do not do'),
-    linkLine('AI disclosure', `${site}/ai-disclosure`, 'which parts of an article are AI-assisted, and what an editor checks'),
     linkLine('Affiliate disclaimer', `${site}/disclaimer`, 'how the site is funded and how links are labelled'),
     linkLine('Privacy', `${site}/privacy`, 'what is collected and what is not'),
     linkLine('RSS feed', `${site}/rss.xml`, 'new articles as they publish'),

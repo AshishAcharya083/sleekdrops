@@ -30,8 +30,41 @@ per post type (a guide carries the full owner set, a trend article is held to
 sourcing depth) and eases for categories with no Australian owner corpus.
 Widen the topic brief or re-run research; there is nothing to fix in the draft,
 because there is no draft.
+
+Every other stage failure is **classified before the card is failed** (`pipeline/failures.ts`).
+A transient fault - malformed JSON out of the model, a shape complaint, a hung or timed-out engine, a dropped socket, a provider on 429/5xx - costs a retry with exponential backoff (3 attempts) instead of the card, and structured stages get two JSON reprompts before that, not one.
+A genuine failure - a contract violation, the evidence gate, a validation error - goes straight to `failed` on the first attempt, because another run reaches the same verdict.
+The card carries both the class and the attempt count, so the board says whether a failure needs a person or just another run.
+
 With `publish_mode = approval` (default) the article parks at
 `waiting_approval` until you hit **Approve & publish** in the admin panel.
+
+Every stage runs under a wall-clock budget - `AGENT_RUN_TIMEOUT_SECONDS`
+(default 3600s), capped by a hard ceiling in code that no configuration can
+raise, with an optional per-stage override in `STAGE_TIMEOUT_SECONDS`
+(`pipeline/budgets.ts`, read beside the stage map in `pipeline/runner.ts`). It
+is deliberately not an admin setting: a timeout is a safety guard, and what an
+operator acts on is the outcome. A
+stage that outlives its budget stops at `status = 'timed_out'` - a distinct
+terminal state from `failed`, because nothing reported an error - keeping
+whatever it had already written as a draft, with a message naming the agent,
+the stage, the limit, how long it ran and the last LLM call it was waiting on
+(scrubbed of any credential the process holds). A claim also carries a lease
+the worker renews while it works, and the worker reaps lapsed leases on its own
+poll (`REAPER_EVERY_TICKS`) and at boot, so a run whose process died is dealt
+with while the platform is up rather than at the next restart. A lapsed lease
+means the worker stopped, not that the stage ran long, so the article goes
+back to `queued` at the same stage with its draft kept - at most
+`MAX_LEASE_REQUEUES` (2) times per attempt, tracked in
+`articles.lease_requeues`; the next lapse fails it with a plain message, and
+an operator retry resets the count. On SIGTERM/SIGINT the process stops
+claiming, hands the articles it holds back to the queue (not counted against
+that cap) and exits inside Cloud Run's 10-second grace period. The worker id
+carries `K_REVISION`, and a heartbeat that fires more than twice its interval
+late is logged as `heartbeat_late` with the lag - the trace a throttled or
+frozen instance leaves. A run that discovers its lease is gone - reaped,
+released at shutdown, or cancelled from the panel - abandons the stage and
+writes nothing, leaving the outcome whoever took the article away recorded.
 Every agent prompt is grounded with today's date (Australia/Sydney) so years
 in titles/copy come from the calendar, not stale training data.
 
@@ -232,17 +265,189 @@ stopped.
 - **Publishing**: gated on your approval by default (`publish_mode=approval`);
   flip to `auto` for hands-off publishing or `draft` to stage in D1 only.
 
+## Social distribution
+
+Publishing an article queues it for every connected social channel instead of
+posting inline. Publish is re-entered by `/api/articles/:id/republish`, by a
+retry-from-stage and by the editorial feedback loop, so an inline post would
+fire again for the same slug every time; `distribution_queue` is unique on
+`(slug, channel_connection_id)`, which makes the second pass and every pass
+after it a no-op. A piece parked in D1 as a draft enqueues nothing, on the same
+reading of `publish_mode` that keeps the rebuild dispatch from firing.
+
+- **Readiness gate.** An item is handed to a provider only once
+  `SITE_URL/blog/<slug>` returns 200 and serves the `og:title` and `og:image`
+  the post was rendered against. The site is a static build: for about 90
+  seconds after publish that URL is a 404 or the previous piece, and the link
+  preview a network fetches first is the one it caches. The gate re-checks
+  every 15s and gives up after 10 minutes, which fails the item rather than
+  posting it.
+- **Retries.** Bounded at five provider calls with exponential backoff (60s
+  doubling to an hour) and a terminal `failed` state. An attempt is spent
+  immediately before the call, so a worker that dies mid-post cannot spend the
+  same one twice. A provider may throw `PermanentProviderError` to fail now.
+- **Providers.** A network is one file implementing `SocialProvider`
+  (`authenticate`, `refreshToken`, `post`, `fetchInsights`), bound to its name
+  in the registry (`distribution/providers.ts`) at boot in `index.ts` - out
+  loud rather than by an import side effect, because the registry is what the
+  worker's claim filter reads. Nothing in the queue, the worker or the schema
+  names a network, and the worker only claims work for a provider that is
+  actually registered.
+- **Credentials.** A connection stores a `token_ref` - the *name* of a secret -
+  resolved at post time from the `channel_credentials` settings row, else from
+  the environment variable that name maps to (`facebook-page-token` →
+  `FACEBOOK_PAGE_TOKEN`), which is how Secret Manager arrives on Cloud Run.
+  Only names reserved for channel secrets resolve from the environment: the
+  env form must start with the network's own name (`FACEBOOK_`) or `CHANNEL_`,
+  and must not be a variable the agent reads as its own configuration
+  (`FACEBOOK_APP_SECRET`, `ADMIN_TOKEN`, `DATABASE_URL`, ...), so a `token_ref`
+  can never forward a platform secret to a network. No
+  token value is stored in Postgres by this code, written to `last_error` or
+  logged, and `/api/settings` never returns the credentials row. Token expiry
+  staleness is derived in `distribution/channels.ts` and reported by
+  `GET /api/distribution`.
+- **Hero provenance.** `articles.hero_image_source` records `operator`, `found`
+  or `generated` at all three hero paths. Only a hero we generated is offered
+  to a provider for native upload: uploading grants the network a sublicensable
+  licence, which is not ours to grant in a photograph the image agent found.
+- **Per-channel rendering.** `distribution/render` composes the post a
+  provider sends - it never writes copy of its own. The caption is headline,
+  then the first-comment cue when that is the placement, then the affiliate
+  disclosure when the keyword plan's intent is a monetised one; the cue and the
+  disclosure are registered house text (`SOCIAL_HOUSE_BLOCKS`), so the
+  repetition metrics skip them and they are never what a caption limit cuts.
+  The generated headline is scored by `detectSlop()` - a trip buys the model
+  one regeneration with the hits handed back, and a second trip falls back to
+  the dek deterministically. Copy is rendered per channel against that
+  channel's caption limit (`render/channels.ts`), so a 300-character network is
+  one more entry rather than a rewrite.
+- **Image ladder.** A hero we generated is uploaded as it is; a `found` or
+  `operator` hero is replaced by a fresh 1200x630 social card through the same
+  `generateImage` path the image agent uses; if that fails there is no image
+  and the placement resolves to `in_body`, where the link preview carries the
+  post instead. The destination URL is UTM-tagged with the placement that was
+  actually used.
+- **The Facebook Page adapter.** `distribution/providers/facebook.ts` is the
+  only Facebook-aware module in the platform; everything else addresses the
+  Page through `SocialProvider`. It posts on Standard Access with a Page token
+  the operator mints, scoped for `pages_manage_posts`, `pages_read_engagement`
+  and `pages_manage_engagement` (the third is the first comment - see the root
+  README for the setup). `first_comment` uploads the payload's image to
+  `/{page}/photos` and then posts the URL on the post's `comments` edge;
+  `in_body` posts to `/{page}/feed` with `link` set so Meta scrapes the card off
+  our own page. Every call reads the token back through `debug_token` and writes
+  the expiry onto the connection; a token Meta has stopped honouring sets
+  `needs_reauth` instead of failing silently, and no error message or log line
+  carries a token - calls are authorised with a bearer header rather than a
+  query parameter, and everything the adapter writes down is scrubbed of it.
+- **The body-link budget.** Meta caps a non-subscribing Page at roughly two
+  organic link posts a month (`FACEBOOK_BODY_LINK_CAP`, default 2), so a body
+  link is a counted resource. The count is derived from the posted `in_body`
+  rows for that Page this month rather than kept in a counter, so it cannot
+  drift from what actually went out; when it is spent the item is re-composed
+  with the link in the first comment rather than spent on a rejection. A genuine
+  quota error from the API beats the local count and is remembered for the rest
+  of the month (`facebook_body_link_budget`), because the cap's rollout is a
+  test and the rows can be behind it.
+- **The ladder, and what a hold is.** A hero we generated is uploaded natively;
+  a `found` or `operator` hero is replaced by the payload's generated social
+  card; no image we may upload falls back to `in_body`, which still earns the
+  card; and no image *plus* a spent budget parks the item in `held`, where the
+  panel shows it, rather than posting a caption with no link anywhere. A
+  provider asks for that by throwing `ProviderHoldError`, which the worker
+  treats as neither a success nor a failure.
+- **A degraded post.** The first comment is a second write that can fail on its
+  own, and a post that is live with no link is worse than either placement. A
+  comment that will not go up after its retries is answered by appending the URL
+  to the caption through the post edit endpoint, and the row is marked
+  `degraded` with what happened. Nothing after the post is created ever throws:
+  a retry there would put the same article on the Page twice.
+- **Rendered once, then kept.** An adapter renders at post time through
+  `renderForItem`, which writes the result back onto the queue row (payload and
+  placement together) and reads it back on every later attempt. Rendering is
+  deliberately not idempotent - the copy call runs warm and a rights-unsafe
+  hero buys a fresh card - so a retry that re-rendered would say something
+  other than what an operator saw, and would buy a second image to say it with.
+- **The admin Channels surface.** `distribution/admin.ts` is everything the
+  panel's Channels tab reads and does, behind the same bearer as the rest of
+  the API. `GET /api/distribution` lists every connection with its token tier
+  (`ok`, `notice` inside 30 days, `warning` inside 7, `critical` inside 1,
+  `expired`), a presence-only credential readback (stored or not, pasted in the
+  panel or mounted by the deployment - never the value), its placement and the
+  setting that decided it, the network's body-link budget where it rations one,
+  and per-filter queue counts. `GET /api/distribution/channels/:id/queue?status=`
+  filters one channel's queue (`held` includes an item waiting at the readiness
+  gate, which retries by itself). `POST /api/distribution/channels` connects from
+  a pasted token (checked with the network's `authenticate` before anything is
+  stored, then kept in `channel_credentials` under the adapter's
+  `defaultTokenRef`) or from the name of a secret the deployment already mounts
+  (a secret name another account's connection already uses is refused rather
+  than overwritten);
+  `PUT .../channels/:id/credential` replaces a token and refuses one for a
+  different account; `DELETE .../channels/:id` disables rather than deletes, so
+  the queue's history and insights survive, and forgets a pasted token. Manual
+  recovery is `POST /api/distribution/items/:id/retry` (failed only),
+  `.../release` (held only), `POST /api/distribution/items/bulk` for the bulk
+  bar, and `PUT .../items/:id/placement`, which resets the payload to the
+  baseline for the new placement so the next attempt composes it afresh. Retry
+  and release grant a fresh round of attempts and a fresh readiness window: a
+  person deciding to try again is a new decision, not the next backoff. A held
+  row carries `hold_reason` (`no_safe_image` or `link_budget_exhausted`,
+  migration 016), set from `ProviderHoldError`'s optional reason, so the panel
+  can lead with the fix rather than the provider's sentence.
+- **Placement is per network.** A new item's placement is read from
+  `<provider>_link_placement` (seeded as `facebook_link_placement` from the
+  existing default) and falls back to `distribution_link_placement`, so the
+  body-link rule that makes the choice matter can differ by network. `PUT
+  /api/settings` accepts the setting for any registered or connected network.
+
+- **Reading a post back.** A separate scheduled job (`distribution/insights.ts`,
+  its own interval so it can never hold up the queue that is posting) pulls the
+  aggregate impressions, clicks and reactions for each posted item at a widening
+  cadence - an hour, six, a day, three days, a week after the post - and then
+  stops. Readings land in `distribution_metrics` keyed by queue item, and
+  placement is joined from the queue row rather than copied onto the reading, so
+  `GET /api/distribution` can report what each placement actually earned. A
+  fetch that fails is logged and retried every 15 minutes until the window
+  closes; it never touches the row's `last_error`, which is the account of the
+  *post*.
+- **The flag.** A `first_comment` item accumulating impressions with near-zero
+  clicks sets `distribution_queue.insights_flag`. That is the signature of the
+  one failure the API cannot report - a comment link the network rendered as
+  unclickable plain text, where the comment posts fine and returns an id and the
+  only symptom is referrals that never arrive. The flag is recomputed rather
+  than latched, so a post whose clicks arrive late clears it - but from every
+  counter the network has reported, not from the last reading alone. The
+  counters are lifetime totals, so each is read at the highest it has reached,
+  and a reading the network answered with nothing (stored as NULL, which is not
+  zero) neither raises a flag nor withdraws one. That is also how the placement
+  comparison adds a post up, so one empty response cannot drop a post's real
+  impressions and clicks out of its placement. Only `first_comment` can carry
+  the flag. Note the click side of the corroborating first-party analytics is
+  consent-gated (`apps/web/src/lib/analytics.ts`), so referral counts are a
+  floor, not a total.
+
 ## State model (PostgreSQL)
 
 - `topics` — scout suggestions; `suggested → approved/rejected` (unique on
   normalized title = the "never repeat a topic" guard, alongside the D1 check)
 - `articles` — the work unit ("card"): stage, status, dossier/keyword plan/
-  brief/draft/review/frontmatter JSONB, revision round, error
+  brief/draft/review/frontmatter JSONB, revision round, error, failure class
+  (`transient`/`genuine`) and the attempts the last stage run took
 - `agent_sessions` — one row per agent run: model, tokens in/out, cost USD,
   duration, summary/error
 - `settings` — publish_mode, per-agent models, revision cap, worker toggle
 - `scout_runs` — durable topic-search jobs (`queued → running → done/failed`);
   heartbeat recovery re-queues work abandoned by a recycled instance
+- `channel_connections` — one connected social account per row: provider,
+  external account id, secret *references*, expiry, status
+- `distribution_queue` — one item per (published slug, channel), carrying the
+  rendered payload, placement, schedule, attempts and the remote post id;
+  unique on `(slug, channel_connection_id)`
+- `distribution_metrics` — aggregate impressions/clicks/reactions per posted
+  item, joined back to the placement its row used; filled on a widening
+  schedule (`insights_next_at`/`insights_done` on the queue row) that stops
+  eight days after the post
 
 The workers claim queued articles and topic searches atomically, run the
 corresponding agent, record the session, and route the work onward. Stranded
@@ -262,6 +467,14 @@ Required env: `GEMINI_API_KEY` (or Vertex on GCP) and `TAVILY_API_KEY`; add
 `GITHUB_TOKEN` (repo dispatch). Optional: `ADMIN_TOKEN` to protect the API —
 required in practice when the API is deployed on Cloud Run.
 
+`DATABASE_URL` has no built-in default. Left unset, the `pg` driver resolves
+the connection from `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` and
+falls back to `localhost:5432` - the standard port a sidecar or service-container
+Postgres listens on. Port 5544 is only the host-side mapping `pnpm db:up`
+publishes on a laptop, so it is never right inside a container. Boot - and
+`pnpm db:migrate` - waits up to 30s for the database to answer before giving up,
+so the agent may start before Postgres does.
+
 ## Tests
 
 ```bash
@@ -276,7 +489,20 @@ working query), while `usage.db.test.ts` and `overview.db.test.ts` need a live
 one - SQL that reads fine in review still only fails on a server, and a
 partially failing overview only exists there - and skip themselves when no
 `DATABASE_URL` answers.
-Give it one with `pnpm db:up` (then
+The boot suites are the slow ones - about a minute of wall clock, most of it
+one deliberate 30s wait - and the only ones that start real processes:
+`index.db.test.ts` spawns the agent entrypoint and the `pnpm migrate` CLI the
+way the container does, and `db/boot.db.test.ts` puts a TCP proxy in front of
+Postgres to make it arrive late.
+The cases that only need an unreachable database run anywhere; the ones that
+have to reach a real one - late-arriving database, booting on `PG*` with no
+`DATABASE_URL`, a rejected connection - skip themselves when no `DATABASE_URL`
+answers, and each gives its spawned agent a throwaway database of its own,
+because that child boots the whole pipeline and would otherwise recover and
+claim the rows other suites are asserting on.
+`db/pool.noDatabaseUrl.test.ts` covers what an unset `DATABASE_URL` resolves to
+without connecting at all, so it runs everywhere.
+Give it a live database with `pnpm db:up` (then
 `DATABASE_URL=postgres://sleekdrops:sleekdrops@localhost:5544/sleekdrops_agent`);
 CI runs it against a Postgres service container.
 

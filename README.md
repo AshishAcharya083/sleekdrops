@@ -52,6 +52,15 @@ The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archive
   dossiers, usage aggregation) — Cloud SQL in the cloud, Docker locally.
 - **Cloudflare D1** stays the publish target — the website's build reads it,
   so the existing deploy flow is untouched (~90s from publish to live).
+- **Launch-window offers are attached by hand.** A SKU announced today is in no
+  affiliate feed and cannot be read through Amazon's Product Advertising API, so
+  the admin panel's offer screens let an editor attach the commissionable link
+  and the price they can see, with the day they saw it. The assembler resolves
+  that record ahead of a verified ASIN and ahead of the healed search link, the
+  page quotes the figure as a dated RRP with a "check current price" link rather
+  than as a live price, and a pre-order says when it ships and that the reader is
+  charged on dispatch. A feed overwrites the record once the SKU appears; every
+  version is kept.
 
 ## Quickstart (local)
 
@@ -103,11 +112,66 @@ key in the repo. The provider is pinned to this repository, and
 `github-deployer@sleekdrops.iam.gserviceaccount.com` may only push to Artifact
 Registry, deploy Cloud Run, and act as the agent's runtime service account.
 
-Deploying by image alone leaves the rest of the service untouched — runtime
-service account, min-instances, and the Secret Manager wiring for
-`DATABASE_URL`, `ADMIN_TOKEN`, `TAVILY_API_KEY`, `CLOUDFLARE_D1_TOKEN` and
-`GITHUB_TOKEN`. Change those with `gcloud run services update`, never with
-`--set-env-vars` in the workflow (that flag replaces the whole set).
+Each deploy also pins the instance shape the worker needs, because it is a
+background loop rather than a request handler: `--no-cpu-throttling` (CPU
+always on, so heartbeats keep renewing a stage's claim between requests),
+`--min-instances 1 --max-instances 1` (one worker per revision, never scaled
+to zero or out to a second one; during a rollout the old revision's instance
+is the one that gets SIGTERM) and `--memory` (default `2Gi`, overridable with
+the `AGENT_MEMORY` repository variable). A setting changed by hand in the
+console is put back by the next deploy - change it in the workflow instead.
+
+Everything else about the service is left untouched - runtime service account
+and the Secret Manager wiring for `DATABASE_URL`, `ADMIN_TOKEN`,
+`TAVILY_API_KEY`, `CLOUDFLARE_D1_TOKEN` and `GITHUB_TOKEN`. Change those with
+`gcloud run services update`, never with `--set-env-vars` in the workflow
+(that flag replaces the whole set).
+
+When an instance stops mid-stage anyway (a rollout, a memory kill, a host
+move), nothing is lost: on SIGTERM the agent hands the articles it holds back
+to the queue before the 10-second grace period ends (the image runs `node`
+as PID 1 rather than `pnpm start`, because pnpm does not pass the signal on),
+and a claim whose worker died without that is re-queued once its lease
+lapses. The same article is re-queued at most twice per attempt; the third
+lapse fails the card with a plain message, draft kept, and **Retry from this
+stage** starts the count again. Stages stopped by their own time budget still end as timed out.
+
+### Connecting the Facebook Page
+
+The Page adapter runs on **Standard Access**: a token for a Page the operator
+already administers, so no App Review and no Business Verification. Mint it in
+Graph API Explorer (or, better, for a Business Manager System User, whose Page
+token does not expire) with all three of:
+
+| Permission                 | What it is for                                   |
+| -------------------------- | ------------------------------------------------ |
+| `pages_manage_posts`       | creating the photo post and the link post         |
+| `pages_read_engagement`    | reading the Page and its post insights            |
+| `pages_manage_engagement`  | writing the first comment that carries the link   |
+
+The token is never an env var this repo names. Store it as the Secret Manager
+secret `facebook-page-token` and point the channel's `token_ref` at that name.
+The adapter resolves the name at post time, from the `channel_credentials`
+settings row first and then from the `FACEBOOK_PAGE_TOKEN` env var that name
+maps to. The admin **Channels** tab connects the Page from either: paste the
+token (it is checked with Meta, then stored by reference and never shown
+again), or leave the token empty and name `facebook-page-token` to use the
+mounted secret. Adding the secret to the service is a `gcloud run services update
+--update-secrets` call, for the same reason as above: `--set-env-vars` in the
+workflow would replace the whole set.
+
+Two optional deployment knobs, both with working defaults:
+`FACEBOOK_BODY_LINK_CAP` (organic link posts Meta allows the Page per calendar
+month, default 2) and `FACEBOOK_APP_ID`/`FACEBOOK_APP_SECRET`, which only let
+the adapter read a token's real expiry and exchange a short-lived token for a
+long-lived one. Posting is identical without them.
+
+**Two things to check with the first real posts**, neither of which changes the
+design and both of which only move the default: whether the monthly link cap is
+live for Australian Pages at all, and whether a deals/reviews Page counts as an
+exempt publisher Page. Until they are answered the default placement is
+`first_comment` (admin Channels tab or Settings → `facebook_link_placement`), which never
+depends on the cap.
 
 The hosted admin panel is pre-pointed at the Cloud Run URL (baked in at build
 time via `VITE_API_BASE`); paste the admin token (Secret Manager `admin-token`)
@@ -136,7 +200,8 @@ docker buildx build --platform linux/amd64 \
 
 gcloud run deploy sleekdrops-agent \
   --image us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent:vN \
-  --region us-central1 --project sleekdrops
+  --region us-central1 --project sleekdrops \
+  --no-cpu-throttling --min-instances 1 --max-instances 1 --memory 2Gi
 ```
 
 The admin token for the hosted panel:

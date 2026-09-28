@@ -6,7 +6,8 @@
 // researcher gathers and synthesises; this file decides what the synthesis is
 // actually worth, in code, the same way every time. Nothing here calls an LLM
 // or the network, which is also what makes it testable.
-import { parseAmazonUrl, slugify } from './contract.js';
+import { claimTier, isUs } from './claims.js';
+import { isWebUrl, parseAmazonUrl, slugify } from './contract.js';
 import type {
   BuyerExclusion,
   ComplaintKind,
@@ -15,16 +16,79 @@ import type {
   EvidenceShortfall,
   EvidenceSufficiency,
   FailureMode,
+  LaunchRelease,
+  MeasuredClaim,
   OwnerComplaint,
   PriceObservation,
   ResearchDossier,
+  ReviewUnit,
   SourceTier,
   TestedClaim,
 } from '../pipeline/types.js';
 
 const KNOWN_TIERS: readonly string[] = ['primary', 'expert', 'owner', 'aggregator'];
+const KNOWN_ACQUISITIONS: readonly string[] = ['retail', 'loan', 'none'];
 const KNOWN_VOLUMES: readonly string[] = ['isolated', 'recurring', 'widespread'];
 const KNOWN_COMPLAINT_KINDS: readonly string[] = ['quoted', 'aggregate'];
+
+/**
+ * The outlets that qualify as expert evidence, and the protocol each one
+ * publishes.
+ *
+ * Publishing a protocol is the whole qualification. A number is expert
+ * evidence when a reader can see the rig it came off - the brightness the
+ * screen was held at, the instrument on the panel, the load the machine was
+ * under - because that is what makes it checkable and what separates it from
+ * a restated spec sheet. It is deliberately not an Australian list: CHOICE
+ * runs smartphone tests through ICRT labs in Europe and publishes weeks to
+ * months after an Australian launch, Canstar Blue is a brand-level
+ * satisfaction survey, and ProductReview is owner reviews - so inside the
+ * first eight weeks of a release there is no local lab result to find, by
+ * design rather than by oversight.
+ */
+export const PROTOCOL_OUTLETS: ReadonlyArray<{ outlet: string; protocol: string }> = [
+  { outlet: 'GSMArena', protocol: 'Battery Life Test 2.0 at a fixed 200 nits, and measured peak brightness' },
+  { outlet: 'Notebookcheck', protocol: 'spectrophotometer display measurements and sustained-load runs' },
+  { outlet: 'DXOMARK', protocol: 'published phone and laptop scoring protocols' },
+  { outlet: 'DisplayMate', protocol: 'display shoot-outs with the instrument and screen settings named' },
+  { outlet: 'iFixit', protocol: 'teardowns - what is actually inside, measured and photographed' },
+  { outlet: 'RTINGS', protocol: 'bench tests with the rig and settings published beside the result' },
+  { outlet: 'CHOICE', protocol: 'ICRT lab tests - real, but published weeks to months after launch' },
+];
+
+/**
+ * How a benchmark run counts, and how it does not.
+ *
+ * A Geekbench or 3DMark figure is evidence that a named machine on a named
+ * build scored a number on a named run. It is not a verdict on the product,
+ * and a page that treats it as one has restated a leaderboard.
+ */
+export const BENCHMARK_RULE =
+  'benchmark runs (Geekbench, 3DMark) count only when the device name and the build are cited ' +
+  'with the score, and never as a quality verdict';
+
+/**
+ * The category where the launch window has no honest answer.
+ *
+ * Nobody publishes wearable sensor accuracy inside the window: the validation
+ * work is peer-reviewed and runs against a platform, months to years behind a
+ * model. A validation study of a previous generation of the same sensor
+ * platform is citable - as evidence about the platform, attributed as such,
+ * and never as a measurement of the model on the page.
+ */
+export const WEARABLE_WEAK_CASE =
+  'wearables are the weak case: no lab publishes sensor accuracy inside the launch window. ' +
+  'Peer-reviewed validation of a prior generation of the same sensor platform is citable as ' +
+  'platform-level evidence, attributed to the platform and the study - never as a model-level ' +
+  'accuracy figure for the device this piece is about';
+
+const expertFix = (): string =>
+  'reviewers who publish a test protocol, so the number can be checked - ' +
+  PROTOCOL_OUTLETS.map((o) => `${o.outlet} (${o.protocol})`).join('; ') +
+  '; plus dated hands-on coverage where something was actually measured. ' +
+  `${BENCHMARK_RULE}. ` +
+  'Canstar Blue is a paid-panel brand survey, not a test: file it as an aggregator, never as a ' +
+  `tested claim. ${WEARABLE_WEAK_CASE}`;
 
 /**
  * How each stratum is gathered - printed in the gate's message when it is thin.
@@ -35,13 +99,16 @@ const KNOWN_COMPLAINT_KINDS: readonly string[] = ['quoted', 'aggregate'];
  * so it is never an owner source and never a tested claim; retailer review
  * corpora are syndicated across markets and openly incentivised, so they only
  * count once filtered down to verified, unincentivised local purchasers.
+ *
+ * The expert entry is generated from PROTOCOL_OUTLETS rather than written out
+ * beside it, for the same reason describeBar() is generated from EVIDENCE_BAR:
+ * the list the prompt is given and the list the gate's advice names have to be
+ * one list.
  */
-const STRATUM_FIX: Record<string, string> = {
+export const STRATUM_FIX: Record<string, string> = {
   primary:
     "the maker's own spec page or the retailer's product listing - search the model number plus \"specifications\"",
-  expert:
-    'independent reviewers who measured something themselves - Choice lab tests, RTINGS, teardowns. ' +
-    'Canstar Blue is a paid-panel brand survey, not a test: file it as an aggregator, never as a tested claim',
+  expert: expertFix(),
   owner:
     'ProductReview.com.au, Choice member reliability surveys (brand-level, owner-assessed, sample size published), ' +
     'Whirlpool Forums and OzBargain for tech, Bunnings verified-purchase reviews for home. Retailer reviews ' +
@@ -140,22 +207,98 @@ export const EVIDENCE_BAR: Record<string, EvidenceBar> = {
 const THIN_OWNER_BAR = { ownerFacts: 1, failureModes: 1, attributedOwnerComplaints: 1 };
 
 /**
+ * How long after release a product counts as newly launched - eight weeks.
+ *
+ * It is the interval in which no protocol-publishing outlet has necessarily
+ * reported yet, so a tested-claim floor inside it is not a bar the piece can
+ * clear by looking harder. It is a real number rather than a feeling: CHOICE's
+ * smartphone results come back from ICRT weeks to months after launch.
+ */
+export const LAUNCH_WINDOW_DAYS = 56;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The bar entries the launch window relaxes, and what it relaxes them to. */
+const LAUNCH_WINDOW_BAR = { testedClaims: 0 };
+
+/**
+ * How old the product this piece is about is, in days - or null when the piece
+ * names no release date, which is every piece that is not about a new release.
+ */
+export function daysSinceRelease(
+  launch: LaunchRelease | null | undefined,
+  now: Date = new Date(),
+): number | null {
+  const released = normaliseDate(launch?.releaseDate);
+  if (released === null) return null;
+  const [year, month = '01', day = '01'] = released.split('-');
+  const at = Date.UTC(Number(year), Number(month) - 1, Number(day));
+  if (Number.isNaN(at)) return null;
+  return Math.floor((now.getTime() - at) / DAY_MS);
+}
+
+/**
+ * How far ahead of release a piece still counts as a launch piece.
+ *
+ * A release date in the future counts: a pre-order piece has even less
+ * independent evidence available to it than a week-old one. What does not
+ * count is a date years out - that is a rumour, not a launch - and an
+ * unbounded future side means any date at all opens the window.
+ */
+export const PRE_RELEASE_WINDOW_DAYS = 56;
+
+/**
+ * Whether this piece is being written inside a product's launch window.
+ *
+ * The launch record is the only field in a dossier that lowers the bar instead
+ * of meeting it, so it is held to the standard the rest of this path is held
+ * to: derived or checkable, never taken on the model's word. `ownTest` is
+ * forced to false unless we are the tester, a claim's tier is derived from who
+ * measured it - and a release date only relaxes anything when it carries a
+ * link to where it was published. A launch record with nothing to check it
+ * against is an assertion, and this is the one place an assertion would switch
+ * a floor off.
+ */
+export function inLaunchWindow(
+  launch: LaunchRelease | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!isWebUrl(typeof launch?.sourceUrl === 'string' ? launch.sourceUrl.trim() : '')) return false;
+  const days = daysSinceRelease(launch, now);
+  return days !== null && days >= -PRE_RELEASE_WINDOW_DAYS && days <= LAUNCH_WINDOW_DAYS;
+}
+
+/**
  * The bar this piece is held to. An unrecognised post type is held to the
  * article bar, never to nothing; a category with no owner corpus keeps a
  * floor rather than the full owner set, so the honest answer there is a small
  * sample disclosed, not a fabricated one.
+ *
+ * Inside the launch window the tested-claim floor drops, and only that floor.
+ * The expert-fact floor stays where it is: dated hands-on where something was
+ * measured clears it, and a launch piece with no independent expert coverage
+ * at all is a piece built on a spec sheet - which is the reading Google's
+ * reviews guidance demotes and the impression the ACCC holds a site liable
+ * for. The relaxation says "no lab has run this yet", not "nobody has looked".
  */
-export function barFor(postType: string, category?: string): EvidenceBar {
-  const bar = EVIDENCE_BAR[postType] ?? EVIDENCE_BAR.article;
-  if (category === undefined || !THIN_OWNER_CORPUS.has(category)) return bar;
+export function barFor(postType: string, category?: string, launchWindow = false): EvidenceBar {
+  const base = EVIDENCE_BAR[postType] ?? EVIDENCE_BAR.article;
+  const bar =
+    category !== undefined && THIN_OWNER_CORPUS.has(category)
+      ? {
+          ...base,
+          ownerFacts: Math.min(base.ownerFacts, THIN_OWNER_BAR.ownerFacts),
+          failureModes: Math.min(base.failureModes, THIN_OWNER_BAR.failureModes),
+          attributedOwnerComplaints: Math.min(
+            base.attributedOwnerComplaints,
+            THIN_OWNER_BAR.attributedOwnerComplaints,
+          ),
+        }
+      : base;
+  if (!launchWindow) return bar;
   return {
     ...bar,
-    ownerFacts: Math.min(bar.ownerFacts, THIN_OWNER_BAR.ownerFacts),
-    failureModes: Math.min(bar.failureModes, THIN_OWNER_BAR.failureModes),
-    attributedOwnerComplaints: Math.min(
-      bar.attributedOwnerComplaints,
-      THIN_OWNER_BAR.attributedOwnerComplaints,
-    ),
+    testedClaims: Math.min(bar.testedClaims, LAUNCH_WINDOW_BAR.testedClaims),
   };
 }
 
@@ -361,6 +504,68 @@ export function normaliseDossier(raw: unknown): ResearchDossier {
     })
     .filter((t) => t.claim !== '' && t.source !== '');
 
+  const claims: MeasuredClaim[] = asArray(d.claims)
+    .map((entry) => {
+      const c = asRecord(entry);
+      const measuredBy = text(c.measuredBy) || null;
+      return {
+        subject: text(c.subject),
+        metric: text(c.metric),
+        claimedValue: text(c.claimedValue) || null,
+        claimedBy: text(c.claimedBy) || null,
+        claimedSourceUrl: text(c.claimedSourceUrl) || null,
+        claimedConditions: text(c.claimedConditions) || null,
+        measuredValue: text(c.measuredValue) || null,
+        measuredBy,
+        conditions: text(c.conditions) || null,
+        measuredOn: normaliseDate(c.measuredOn),
+        measuredSourceUrl: text(c.measuredSourceUrl) || null,
+        withdrawnValue: text(c.withdrawnValue) || null,
+        // Tier 1 is ours to claim and nobody else's to assert for us: it is
+        // true only when we ran the test, so a model that sets the flag on
+        // someone else's measurement does not get to promote it.
+        ownTest: c.ownTest === true && isUs(measuredBy),
+        covers: text(c.covers) || null,
+      };
+    })
+    // A claim with no figure on either side describes nothing. A metric with
+    // only a maker's number is kept - that is exactly the tier 3 case the page
+    // has to label rather than drop.
+    .filter(
+      (c) => c.subject !== '' && c.metric !== '' && (c.claimedValue !== null || c.measuredValue !== null),
+    );
+
+  const launchRaw = asRecord(d.launch);
+  // A full date or nothing. "2026" is not a release date a reader can be told
+  // a product went on sale on, and it cannot decide whether the launch window
+  // is still open - so a partial one is no launch record at all rather than a
+  // record the page then has to hedge around.
+  const releaseDate = normaliseDate(launchRaw.releaseDate);
+  // The page links this one, so the scheme is checked here rather than
+  // trusted: the value is model output over search-result text, and a
+  // `javascript:` href on a published page is the whole of the damage. The
+  // date is the record; the link is the part that is allowed to be missing.
+  const launchSource = text(launchRaw.sourceUrl);
+  const launch: LaunchRelease | null =
+    releaseDate === null || !/^\d{4}-\d{2}-\d{2}$/.test(releaseDate)
+      ? null
+      : {
+          product: text(launchRaw.product),
+          releaseDate,
+          sourceUrl: isWebUrl(launchSource) ? launchSource : '',
+        };
+
+  const unitRaw = asRecord(d.reviewUnit);
+  const acquisition = text(unitRaw.acquisition).toLowerCase();
+  const reviewUnit: ReviewUnit | null = KNOWN_ACQUISITIONS.includes(acquisition)
+    ? {
+        acquisition: acquisition as ReviewUnit['acquisition'],
+        supplier: text(unitRaw.supplier) || null,
+        paid: text(unitRaw.paid) || null,
+        returned: normaliseDate(unitRaw.returned),
+      }
+    : null;
+
   const keywords = asRecord(d.keywords);
   return {
     summary: text(d.summary),
@@ -371,6 +576,9 @@ export function normaliseDossier(raw: unknown): ResearchDossier {
     ownerComplaints,
     priceObservations,
     testedClaims,
+    claims,
+    launch,
+    reviewUnit,
     keywords: {
       primary: text(keywords.primary),
       secondary: asArray(keywords.secondary).map(text).filter(Boolean),
@@ -473,6 +681,7 @@ export function countEvidence(dossier: ResearchDossier): Record<string, number> 
   const priceObservations = dossier.priceObservations ?? [];
   const ownerComplaints = dossier.ownerComplaints ?? [];
   const exclusions = dossier.whoShouldNotBuy ?? [];
+  const claims = dossier.claims ?? [];
   return {
     facts: facts.length,
     primaryFacts: byTier('primary'),
@@ -491,6 +700,12 @@ export function countEvidence(dossier: ResearchDossier): Record<string, number> 
     priceObservations: priceObservations.length,
     datedPriceObservations: priceObservations.filter((o) => dated(o.dateChecked)).length,
     testedClaims: (dossier.testedClaims ?? []).length,
+    // What the page will be able to label, and at which tier. A launch piece
+    // whose claims are all tier 3 is publishable and honestly labelled, but an
+    // operator reading the card should be able to see that at a glance.
+    measuredClaims: claims.filter((c) => claimTier(c) === 'measured').length,
+    independentlyMeasuredClaims: claims.filter((c) => claimTier(c) === 'independent').length,
+    manufacturerClaims: claims.filter((c) => claimTier(c) === 'manufacturer').length,
     competingCoverage:
       (dossier.competitorNotes ?? '').trim().length >= MEANINGFUL_NOTES_CHARS ? 1 : 0,
   };
@@ -510,8 +725,13 @@ export function checkEvidence(
   dossier: ResearchDossier,
   postType: string,
   category?: string,
+  now: Date = new Date(),
 ): EvidenceSufficiency {
-  const bar = barFor(postType, category);
+  // Read off the dossier rather than passed in, so every caller - the gate,
+  // the re-sweep and the operator API alike - applies the same window to the
+  // same piece without having to remember to.
+  const launchWindow = inLaunchWindow(dossier.launch, now);
+  const bar = barFor(postType, category, launchWindow);
   const counts = countEvidence(dossier);
 
   const shortfalls: EvidenceShortfall[] = (
@@ -533,7 +753,7 @@ export function checkEvidence(
     postType,
     counts,
     shortfalls,
-    message: describe(postType, counts, shortfalls),
+    message: describe(postType, counts, shortfalls, launchWindow),
     checkedAt: new Date().toISOString(),
   };
 }
@@ -548,16 +768,20 @@ function describe(
   postType: string,
   counts: Record<string, number>,
   shortfalls: EvidenceShortfall[],
+  launchWindow: boolean,
 ): string {
+  const window = launchWindow
+    ? ` Inside the ${LAUNCH_WINDOW_DAYS}-day launch window, so the tested-claim floor is relaxed - no protocol-publishing outlet has necessarily reported yet.`
+    : '';
   if (shortfalls.length === 0) {
-    return `Evidence sufficient for a ${postType}: ${counts.primaryFacts} primary, ${counts.expertFacts} expert and ${counts.ownerFacts} owner facts, ${counts.attributedOwnerComplaints} attributed owner complaint(s), ${counts.failureModes} failure mode(s), ${counts.datedPriceObservations} dated price observation(s).`;
+    return `Evidence sufficient for a ${postType}: ${counts.primaryFacts} primary, ${counts.expertFacts} expert and ${counts.ownerFacts} owner facts, ${counts.attributedOwnerComplaints} attributed owner complaint(s), ${counts.failureModes} failure mode(s), ${counts.datedPriceObservations} dated price observation(s).${window}`;
   }
   const missing = shortfalls.map((s) => `${s.label} ${s.have}/${s.need}`).join(', ');
   const byStratum = [...new Set(shortfalls.map((s) => s.stratum))]
     .map((stratum) => `  - ${stratum}: ${STRATUM_FIX[stratum]}`)
     .join('\n');
   return [
-    `Evidence is too thin to write a ${postType} from - ${missing}.`,
+    `Evidence is too thin to write a ${postType} from - ${missing}.${window}`,
     `Written from this the piece could only recite specs, which is the reading that got the site flagged, so it stops here instead of spending the writing stages on it.`,
     `Re-run research after widening these strata (or add the missing evidence to the topic brief by hand):`,
     byStratum,
@@ -578,12 +802,24 @@ export function describeBar(postType: string, category?: string): string {
   const needs = (Object.entries(bar) as Array<[keyof EvidenceBar, number]>)
     .filter(([, need]) => need > 0)
     .map(([measure, need]) => `${STRATUM_OF[measure].label} (${need})`);
+  const relaxed = (Object.keys(LAUNCH_WINDOW_BAR) as Array<keyof EvidenceBar>)
+    .filter((measure) => bar[measure] > LAUNCH_WINDOW_BAR[measure as 'testedClaims'])
+    .map((measure) => STRATUM_OF[measure].label);
   const a = /^[aeiou]/i.test(postType) ? 'An' : 'A';
   return (
     `A deterministic gate counts your reply before anything is written from it. ` +
     `${a} ${postType}${category ? ` in ${category}` : ''} needs at least: ${needs.join(', ')}. ` +
     `One published fault rate (kind "aggregate", with its sample size and field window) ` +
-    `stands in for the individual owner complaints. Meet the bar with evidence you actually ` +
+    `stands in for the individual owner complaints. ` +
+    (relaxed.length > 0
+      ? `If the product went on sale within the last ${LAUNCH_WINDOW_DAYS} days (or goes on sale within the ` +
+        `next ${PRE_RELEASE_WINDOW_DAYS}), fill "launch" with its release date AND the http(s) page you read ` +
+        `that date on, and the gate drops the ${relaxed.join(' and ')} floor - no lab has run it yet, and ` +
+        `no amount of searching will produce a result that does not exist. A release date with no link to ` +
+        `where it was announced relaxes nothing: the gate cannot check it, so it does not act on it. ` +
+        `The expert-fact floor stays: ${STRATUM_FIX.expert}. `
+      : '') +
+    `Meet the bar with evidence you actually ` +
     `found - a padded count fails a reader where it would only have failed a counter.`
   );
 }

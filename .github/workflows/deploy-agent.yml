@@ -41,6 +41,8 @@ env:
   GCP_REGION: us-central1
   SERVICE: sleekdrops-agent
   IMAGE: us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent
+  # Instance memory for the agent. A repo variable overrides it without an edit.
+  AGENT_MEMORY: ${{ vars.AGENT_MEMORY || '2Gi' }}
   # Public identifiers, not secrets — the provider's own attribute condition is
   # what restricts who may use it.
   WIF_PROVIDER: projects/705604429631/locations/global/workloadIdentityPools/github/providers/github
@@ -113,17 +115,28 @@ jobs:
           docker push "$IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:latest"
 
-      # Deploying by image alone: every other setting on the service — the
-      # runtime service account, min-instances, and the Secret Manager wiring
+      # Deploying by image plus the instance shape. Every other setting on the
+      # service (the runtime service account and the Secret Manager wiring
       # for DATABASE_URL / ADMIN_TOKEN / TAVILY_API_KEY / CLOUDFLARE_D1_TOKEN /
-      # GITHUB_TOKEN — is left exactly as it is. Never add --set-env-vars here;
+      # GITHUB_TOKEN) is left exactly as it is. Never add --set-env-vars here;
       # that flag replaces the whole set rather than adding to it.
+      #
+      # The instance shape is pinned because the worker is a background loop,
+      # not a request handler: with CPU throttled between requests its
+      # heartbeats stop and every in-flight stage loses its claim; scaling to
+      # zero stops the worker outright, and every scale-in of a second instance
+      # is one more stop mid-stage. So: CPU always on, exactly one instance,
+      # and enough memory that a stage is not killed mid-run.
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE:$GITHUB_SHA" \
             --region "$GCP_REGION" \
             --project "$GCP_PROJECT" \
+            --no-cpu-throttling \
+            --min-instances 1 \
+            --max-instances 1 \
+            --memory "$AGENT_MEMORY" \
             --quiet
 
       # The container migrates the database on boot, so a green health check

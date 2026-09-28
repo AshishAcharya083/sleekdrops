@@ -8,15 +8,69 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { config } from '../config.js';
-import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
+import { CATEGORIES, POST_TYPES, slugify, todayInSydney } from '../content/contract.js';
+import { offerCoverage, validateOfferInput } from '../content/offers.js';
+import { deleteOffer, offerRevisionsForArticle, offersForArticle, saveOffer } from '../db/offers.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
+import {
+  ChannelAdminError,
+  channelQueue,
+  channelViews,
+  connectChannel,
+  disconnectChannel,
+  isQueueFilter,
+  isUuid,
+  overridePlacement,
+  queueItemDetail,
+  releaseHeldItems,
+  replaceCredential,
+  retryFailedItems,
+  type RecoveryOutcome,
+} from '../distribution/admin.js';
+import { getConnection, listConnections } from '../distribution/channels.js';
+import { placementPerformance } from '../distribution/insights.js';
+import { getProvider, registeredProviders } from '../distribution/providers.js';
+import {
+  DEFAULT_PLACEMENT_SETTING,
+  getItem,
+  itemsForArticle,
+  placementSettingKey,
+  queueCounts,
+  recentItems,
+} from '../distribution/queue.js';
+import { isLinkPlacement } from '../distribution/types.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
+import { MAX_STAGE_TIMEOUT_SECONDS, stageBudgetSeconds } from '../pipeline/budgets.js';
+import {
+  cancelArticle,
+  groupAttempts,
+  isReviewStale,
+  outOfDateStages,
+  parseStageParam,
+  requeueInPlace,
+  rerunAll,
+  retryFromStage,
+  reviewStaleSql,
+  REVIEW_STALE_PUBLISH_ERROR,
+  REVIEW_STALE_REASON,
+  type SessionAttemptRow,
+} from '../pipeline/retry.js';
 import {
   enqueueScoutRun,
   scoutQueueStatus,
 } from '../pipeline/scout.js';
-import type { ReferenceMaterial } from '../pipeline/types.js';
+import { scrubSecrets } from '../pipeline/stageTimeout.js';
+import { parseTestStageParam, runTestStage } from '../pipeline/testStage.js';
+import {
+  STAGE_ORDER,
+  type AffiliateLinkRow,
+  type ArticleRow,
+  type ProductOfferRevision,
+  type ReferenceMaterial,
+  type ResearchDossier,
+  type Stage,
+} from '../pipeline/types.js';
 import { deleteD1Post, getD1PostHero, listD1Posts, setD1PostHero } from '../tools/d1.js';
 import { gcsConfigured } from '../tools/gcs.js';
 import { dispatchContentUpdated } from '../tools/github.js';
@@ -36,6 +90,123 @@ const MAX_REFERENCES = 5;
 const MAX_REFERENCE_BYTES = 2 * 1024 * 1024;
 
 type Validated<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** The card as the offer routes read it - enough to say what a reader gets. */
+interface OfferArticle {
+  id: string;
+  title: string;
+  slug: string | null;
+  stage: string;
+  status: string;
+  draft_md: string | null;
+  research: ResearchDossier | null;
+  affiliate_links: AffiliateLinkRow[] | null;
+  frontmatter: Record<string, unknown> | null;
+}
+
+/**
+ * Today in the publication's own terms - the day an "as at" stamp means, in
+ * the audience's timezone rather than the server's.
+ *
+ * The drawer takes the date input's `max` and its pre-filled "Price seen on"
+ * from this, and both validators compare against it, so a UTC day would spend
+ * the ten hours between Sydney midnight and 10:00 AEST refusing the day an
+ * editor is actually standing in as "the future".
+ */
+function today(): string {
+  return todayInSydney();
+}
+
+/**
+ * Everything the offer screens render: the coverage of one card, and every
+ * version of every offer on it grouped by slug, so the editor drawer can show
+ * a record's history without a second round trip.
+ */
+async function offerCoverageResponse(article: OfferArticle): Promise<{
+  article: Pick<OfferArticle, 'id' | 'title' | 'slug' | 'stage' | 'status'>;
+  coverage: ReturnType<typeof offerCoverage>;
+  history: Record<string, ProductOfferRevision[]>;
+  today: string;
+}> {
+  const [offers, revisions] = await Promise.all([
+    offersForArticle(article.id),
+    offerRevisionsForArticle(article.id),
+  ]);
+  const history: Record<string, ProductOfferRevision[]> = {};
+  for (const revision of revisions) {
+    (history[revision.go_slug] ??= []).push(revision);
+  }
+  return {
+    article: {
+      id: article.id,
+      title: article.title,
+      slug: article.slug,
+      stage: article.stage,
+      status: article.status,
+    },
+    coverage: offerCoverage(article, offers, today()),
+    history,
+    today: today(),
+  };
+}
+
+/**
+ * Settings rows that hold a credential rather than a preference, and are
+ * therefore never returned by /api/settings - which the panel polls, so
+ * everything in it reaches a browser. `channel_credentials` maps a secret
+ * reference to a secret value; the panel gets the references it needs from
+ * /api/distribution, which reports names only. Nothing writes this row through
+ * the API either: it is absent from the PUT allowlist below.
+ */
+const CREDENTIAL_SETTINGS = new Set(['channel_credentials']);
+
+/** The settings map the panel sees. */
+function settingsPayload(rows: Array<{ key: string; value: unknown }>): Record<string, unknown> {
+  return Object.fromEntries(
+    rows.filter((row) => !CREDENTIAL_SETTINGS.has(row.key)).map((row) => [row.key, row.value]),
+  );
+}
+
+/**
+ * The placement settings a PUT may write: the network-agnostic default, and
+ * one per network the platform can post to or is connected to. Derived rather
+ * than listed so a second network's setting is writable the moment its adapter
+ * is registered, without this file learning its name.
+ */
+async function placementSettingKeys(): Promise<Set<string>> {
+  const providers = new Set(registeredProviders());
+  for (const connection of await listConnections()) providers.add(connection.provider);
+  return new Set([DEFAULT_PLACEMENT_SETTING, ...[...providers].map(placementSettingKey)]);
+}
+
+/** Map an operator-correctable refusal to its status; anything else is a 500. */
+function channelAdminFailure(c: Context<TraceEnv>, err: unknown): Response {
+  if (err instanceof ChannelAdminError) return c.json({ error: err.message }, err.status);
+  throw err;
+}
+
+/** A manual retry/release answered for one item: 404, 409 or the refreshed row. */
+async function singleRecovery(
+  c: Context<TraceEnv>,
+  id: string,
+  outcome: RecoveryOutcome,
+  wanted: 'failed' | 'held',
+): Promise<Response> {
+  const item = isUuid(id) ? await getItem(id) : null;
+  if (!item) return c.json({ error: 'no queue item with that id' }, 404);
+  if (outcome.updated.length === 0) {
+    return c.json(
+      {
+        error:
+          wanted === 'failed'
+            ? `only a failed item can be retried - this one is ${item.status}`
+            : `only a held item can be released - this one is ${item.status}`,
+      },
+      409,
+    );
+  }
+  return c.json({ ok: true, item });
+}
 
 /** What an approval reads off the topic to seed the article it creates. */
 interface ApprovedTopic {
@@ -128,6 +299,10 @@ async function readHeroImageBody(c: Context<TraceEnv>): Promise<HeroImageParse> 
  * Mirror a live post's new hero onto the pipeline article that wrote it, when
  * there is one. Without this, re-publishing that article (or one more editor
  * pass) would quietly restore the image the operator just replaced.
+ *
+ * The provenance moves with it: an image swapped in on a live post is the
+ * operator's, and a row still saying 'generated' would offer someone else's
+ * file to a social network for native upload.
  */
 async function syncArticleHero(
   slug: string,
@@ -139,14 +314,15 @@ async function syncArticleHero(
     : null;
   await q(
     `UPDATE articles
-        SET hero_image_url = $2,
-            hero_alt       = $3,
-            frontmatter    = CASE
-                               WHEN frontmatter IS NULL THEN NULL
-                               WHEN $4::jsonb IS NULL THEN frontmatter - 'heroImage' - 'heroAlt'
-                               ELSE (frontmatter - 'heroAlt') || $4::jsonb
-                             END,
-            updated_at     = now()
+        SET hero_image_url    = $2,
+            hero_alt          = $3,
+            hero_image_source = CASE WHEN $2::text IS NULL THEN NULL ELSE 'operator' END,
+            frontmatter       = CASE
+                                  WHEN frontmatter IS NULL THEN NULL
+                                  WHEN $4::jsonb IS NULL THEN frontmatter - 'heroImage' - 'heroAlt'
+                                  ELSE (frontmatter - 'heroAlt') || $4::jsonb
+                                END,
+            updated_at        = now()
       WHERE slug = $1`,
     [slug, heroImage, heroAlt, patch],
   );
@@ -170,6 +346,34 @@ async function requestRebuild(): Promise<{
       logged: { dispatched: false },
     };
   }
+}
+
+/**
+ * Every stage's wall-clock budget, for the panel that turns "running for 52
+ * minutes" into slow or stuck. Resolved per request rather than at module load
+ * so a redeployed AGENT_RUN_TIMEOUT_SECONDS shows up on the next poll, and
+ * resolved here rather than in the panel so one number governs the runner, the
+ * reaper and the surface an operator reads it off.
+ */
+function stageBudgets(): Record<Stage, number> {
+  return Object.fromEntries(
+    STAGE_ORDER.map((stage) => [stage, stageBudgetSeconds(stage)]),
+  ) as Record<Stage, number>;
+}
+
+/**
+ * The same numbers in the shape the panel reads them in - a default plus the
+ * per-stage values - so a client that asks "what is this stage allowed?" gets
+ * the answer whichever of the two field names it was written against. Both are
+ * served because both were pinned: the flat map is what this card's contract
+ * names, `budgets` is what apps/admin reads, and a panel that finds neither
+ * falls back to a hardcoded hour and prints a limit no stage is running under.
+ */
+function budgets(): { default_seconds: number; per_stage: Record<Stage, number> } {
+  return {
+    default_seconds: Math.min(config.agentRunTimeoutSeconds, MAX_STAGE_TIMEOUT_SECONDS),
+    per_stage: stageBudgets(),
+  };
 }
 
 const ADMIN_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../../admin/dist');
@@ -304,7 +508,7 @@ export function createApp(): Hono<TraceEnv> {
           q(
             `SELECT s.id, s.agent, s.model, s.status, s.summary, s.error, s.cost_usd,
                     s.tokens_input, s.tokens_output, s.started_at, s.ended_at,
-                    s.article_id, s.scout_run_id, a.title article_title
+                    s.article_id, s.scout_run_id, s.attempt, s.kind, a.title article_title
              FROM agent_sessions s LEFT JOIN articles a ON a.id = s.article_id
              ORDER BY s.started_at DESC LIMIT 12`,
           ),
@@ -528,55 +732,161 @@ export function createApp(): Hono<TraceEnv> {
   });
 
   // ── Articles (the pipeline board) ────────────────────────────────────────
+  // attempt / stale_from_stage / review_stale ride along on the list because
+  // the panel renders "attempt 2", "out of date" and a disabled publish
+  // control straight off a row - none of that is re-derived client-side. The
+  // lease columns and `stageBudgets` are there for the same reason: how long a
+  // claim has left, and how long its stage was allowed, are what decide
+  // whether a running article is slow or stuck.
   app.get('/api/articles', async (c) => {
     const rows = await q(
-      `SELECT id, topic_id, title, slug, category, post_type, stage, status,
-              revision_round, error, published_at, created_at, updated_at,
-              hero_image_url, (seo_review ->> 'score') seo_score
-       FROM articles ORDER BY updated_at DESC LIMIT 200`,
+      `SELECT a.id, a.topic_id, a.title, a.slug, a.category, a.post_type, a.stage, a.status,
+              a.revision_round, a.error, a.failure_class, a.stage_attempts,
+              a.published_at, a.created_at, a.updated_at,
+              a.hero_image_url, (a.seo_review ->> 'score') seo_score,
+              a.attempt, a.stale_from_stage, a.claimed_at, a.heartbeat_at, a.lease_expires_at,
+              ${reviewStaleSql('a')} AS review_stale
+       FROM articles a ORDER BY a.updated_at DESC LIMIT 200`,
     );
-    return c.json({ articles: rows });
+    return c.json({ articles: rows, stageBudgets: stageBudgets(), budgets: budgets() });
   });
 
   app.get('/api/articles/:id', async (c) => {
-    const [article] = await q('SELECT * FROM articles WHERE id = $1', [c.req.param('id')]);
+    const [article] = await q<ArticleRow & { review_stale: boolean }>(
+      `SELECT a.*, ${reviewStaleSql('a')} AS review_stale FROM articles a WHERE a.id = $1`,
+      [c.req.param('id')],
+    );
     if (!article) return c.json({ error: 'not found' }, 404);
-    const sessions = await q(
+    const sessions = await q<SessionAttemptRow>(
       'SELECT * FROM agent_sessions WHERE article_id = $1 ORDER BY started_at ASC',
       [article.id],
     );
-    return c.json({ article, sessions });
+    const reviewStale = article.review_stale === true;
+    return c.json({
+      article,
+      sessions,
+      // One article, one history: every attempt at every stage, grouped the
+      // way the pipeline ran them rather than as a flat session log.
+      attempts: groupAttempts(sessions),
+      outOfDateStages: outOfDateStages(article.stale_from_stage, article.stage),
+      stageBudgets: stageBudgets(),
+      budgets: budgets(),
+      reviewStale,
+      reviewStaleReason: reviewStale ? REVIEW_STALE_REASON : null,
+      // What publishing this piece queued for social, and what became of it.
+      distribution: await itemsForArticle(article.id),
+    });
   });
 
+  // Re-queue where it stands. The retry-forward action below is the one that
+  // picks a stage; this stays the cheap "run that again" lever, and goes
+  // through the same engine so it carries the same bookkeeping - the claim of
+  // the run that stopped is released, and the re-run is its own attempt.
   app.post('/api/articles/:id/retry', async (c) => {
-    const rows = await q(
-      `UPDATE articles SET status = 'queued', error = NULL, updated_at = now()
-       WHERE id = $1 AND status IN ('failed', 'cancelled') RETURNING id`,
-      [c.req.param('id')],
-    );
-    if (rows.length === 0) return c.json({ error: 'not retryable' }, 409);
-    log.info('article re-queued for retry', { article_id: rows[0].id });
+    const id = c.req.param('id');
+    const result = await requeueInPlace(id);
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    log.info('article re-queued for retry', { article_id: id, attempt: result.article.attempt });
+    return c.json({ ok: true });
+  });
+
+  // Retry forward: re-run one stage against the article's stored upstream
+  // columns and carry on through the rest of the run. Everything after the
+  // retried stage is marked out of date and regenerated as the run passes
+  // through it again.
+  app.post('/api/articles/:id/retry-stage', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { stage?: unknown } | null;
+    const parsed = parseStageParam(body?.stage);
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+
+    const id = c.req.param('id');
+    const result = await retryFromStage(id, parsed.stage);
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    log.info('article retried from a stage', {
+      article_id: id,
+      stage: parsed.stage,
+      attempt: result.article.attempt,
+    });
+    return c.json({ ok: true, article: result.article });
+  });
+
+  // Run one stage in isolation: same agent, same stored input, no writes to
+  // the article and never the publisher. The session is recorded as a test so
+  // the tokens it spends still show up in /api/usage.
+  app.post('/api/articles/:id/test-stage', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { stage?: unknown } | null;
+    const parsed = parseTestStageParam(body?.stage);
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+
+    const id = c.req.param('id');
+    const [article] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [id]);
+    if (!article) return c.json({ error: 'not found' }, 404);
+    if (article.status === 'running') {
+      return c.json({ error: 'the article is mid-stage - try again when it finishes' }, 409);
+    }
+
+    try {
+      const result = await runTestStage(article, parsed.stage);
+      log.info('stage tested in isolation', {
+        article_id: id,
+        stage: parsed.stage,
+        session_id: result.sessionId,
+        cost_usd: result.costUsd,
+      });
+      return c.json(result);
+    } catch (err) {
+      // Scrubbed again at the boundary that serves it: the panel renders this
+      // sentence verbatim, and redaction is this side's job.
+      const message = scrubSecrets(err instanceof Error ? err.message : String(err));
+      log.error('stage test failed', { article_id: id, stage: parsed.stage, error: message });
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  // Back to research — for when the source inputs themselves were wrong and
+  // even the stored research has to be paid for again.
+  app.post('/api/articles/:id/rerun-all', async (c) => {
+    const id = c.req.param('id');
+    const result = await rerunAll(id);
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    log.info('article re-queued from research', { article_id: id, attempt: result.article.attempt });
     return c.json({ ok: true });
   });
 
   app.post('/api/articles/:id/approve-publish', async (c) => {
-    const rows = await q(
-      `UPDATE articles SET status = 'queued', updated_at = now()
-       WHERE id = $1 AND stage = 'publish' AND status = 'waiting_approval' RETURNING id`,
-      [c.req.param('id')],
+    const id = c.req.param('id');
+    // The staleness guard is part of the same statement: a draft regenerated
+    // after the review that approved it must not become a published,
+    // review-branded piece, and the panel's disabled button is only the first
+    // line of that.
+    const rows = await q<{ id: string }>(
+      `UPDATE articles a SET status = 'queued', updated_at = now()
+       WHERE a.id = $1 AND a.stage = 'publish' AND a.status = 'waiting_approval'
+         AND NOT ${reviewStaleSql('a')}
+       RETURNING a.id`,
+      [id],
     );
-    if (rows.length === 0) return c.json({ error: 'not awaiting approval' }, 409);
+    if (rows.length === 0) {
+      const [article] = await q<{ review_stale: boolean }>(
+        `SELECT ${reviewStaleSql('a')} AS review_stale FROM articles a WHERE a.id = $1`,
+        [id],
+      );
+      if (article?.review_stale) return c.json({ error: REVIEW_STALE_PUBLISH_ERROR }, 409);
+      return c.json({ error: 'not awaiting approval' }, 409);
+    }
     log.info('article publish approved', { article_id: rows[0].id });
     return c.json({ ok: true });
   });
 
+  // Cancel, including a running article: the lease is expired in the same
+  // statement, so the worker running the stage unwinds at its next heartbeat
+  // instead of the row staying wedged in 'running' with no operator lever.
   app.post('/api/articles/:id/cancel', async (c) => {
-    const rows = await q(
-      `UPDATE articles SET status = 'cancelled', updated_at = now()
-       WHERE id = $1 AND status IN ('queued', 'failed', 'waiting_approval') RETURNING id`,
-      [c.req.param('id')],
-    );
-    return rows.length > 0 ? c.json({ ok: true }) : c.json({ error: 'not cancellable' }, 409);
+    const id = c.req.param('id');
+    const result = await cancelArticle(id);
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    log.info('article cancelled', { article_id: id, pending: result.pending });
+    return c.json({ ok: true, pending: result.pending });
   });
 
   // Admin feedback → one editor pass. Requires a draft to edit; works on done
@@ -634,13 +944,20 @@ export function createApp(): Hono<TraceEnv> {
     // frontmatter write clobbered by a stale read-modify-write here. heroAlt is
     // dropped before the merge because a JSON null would fail the site's
     // frontmatter schema, where the key is optional-but-string.
+    //
+    // `hero_image_source` moves with the image. The image stage may already
+    // have recorded a hero it generated, and leaving that behind would leave
+    // the row claiming an operator's file as ours - which is the one thing
+    // that column is read for, since only an image we made may be uploaded
+    // natively to a social network.
     const [updated] = await q(
       `UPDATE articles
-          SET hero_image_url = $2,
-              hero_alt       = $3,
-              frontmatter    = CASE WHEN frontmatter IS NULL THEN NULL
-                                    ELSE (frontmatter - 'heroAlt') || $4::jsonb END,
-              updated_at     = now()
+          SET hero_image_url    = $2,
+              hero_alt          = $3,
+              hero_image_source = 'operator',
+              frontmatter       = CASE WHEN frontmatter IS NULL THEN NULL
+                                       ELSE (frontmatter - 'heroAlt') || $4::jsonb END,
+              updated_at        = now()
         WHERE id = $1 AND status <> 'running'
         RETURNING id, hero_image_url, hero_alt, stage, status, published_at`,
       [id, url, alt, JSON.stringify({ heroImage: url, ...(alt ? { heroAlt: alt } : {}) })],
@@ -660,11 +977,12 @@ export function createApp(): Hono<TraceEnv> {
   app.delete('/api/articles/:id/hero-image', async (c) => {
     const [updated] = await q<{ id: string }>(
       `UPDATE articles
-          SET hero_image_url = NULL,
-              hero_alt       = NULL,
-              frontmatter    = CASE WHEN frontmatter IS NULL THEN NULL
-                                    ELSE frontmatter - 'heroImage' - 'heroAlt' END,
-              updated_at     = now()
+          SET hero_image_url    = NULL,
+              hero_alt          = NULL,
+              hero_image_source = NULL,
+              frontmatter       = CASE WHEN frontmatter IS NULL THEN NULL
+                                       ELSE frontmatter - 'heroImage' - 'heroAlt' END,
+              updated_at        = now()
         WHERE id = $1 AND status <> 'running'
         RETURNING id`,
       [c.req.param('id')],
@@ -679,17 +997,122 @@ export function createApp(): Hono<TraceEnv> {
   // dropped after publication out to the live site (unlike the feedback loop,
   // which pays for an editor pass).
   app.post('/api/articles/:id/republish', async (c) => {
+    const id = c.req.param('id');
+    // The staleness guard rides in the statement the same way it does on the
+    // approval path: this queues a publish, and a draft the reviewer has never
+    // seen must not reach the live site through the cheap door either. The
+    // publisher refuses it too, but a 409 here tells the operator at the click
+    // rather than through a failed run.
     const rows = await q<{ id: string }>(
-      `UPDATE articles SET stage = 'publish', status = 'queued', error = NULL, updated_at = now()
-       WHERE id = $1 AND stage = 'done' AND status = 'done'
-         AND slug IS NOT NULL AND draft_md IS NOT NULL AND frontmatter IS NOT NULL
+      `UPDATE articles a SET stage = 'publish', status = 'queued', error = NULL, updated_at = now()
+       WHERE a.id = $1 AND a.stage = 'done' AND a.status = 'done'
+         AND a.slug IS NOT NULL AND a.draft_md IS NOT NULL AND a.frontmatter IS NOT NULL
+         AND NOT ${reviewStaleSql('a')}
+       RETURNING a.id`,
+      [id],
+    );
+    if (rows.length === 0) {
+      if (await isReviewStale(id)) return c.json({ error: REVIEW_STALE_PUBLISH_ERROR }, 409);
+      return c.json({ error: 'only a finished, published article can be republished' }, 409);
+    }
+    log.info('article re-queued for publish', { article_id: rows[0].id });
+    return c.json({ ok: true });
+  });
+
+  // ── Per-offer records (launch-window links and dated prices) ─────────────
+  // A launch-window SKU is in no feed and cannot be polled through the Product
+  // Advertising API, so these are the only routes by which a real destination
+  // and a real price reach a page on announcement day.
+  app.get('/api/articles/:id/offers', async (c) => {
+    const [article] = await q<OfferArticle>(
+      `SELECT id, title, slug, stage, status, draft_md, research, affiliate_links, frontmatter
+         FROM articles WHERE id = $1`,
+      [c.req.param('id')],
+    );
+    if (!article) return c.json({ error: 'not found' }, 404);
+    return c.json(await offerCoverageResponse(article));
+  });
+
+  // Attach (or replace) one product's offer. PUT because the record is keyed
+  // by (article, /go/ slug): saving the same slug twice is one record with two
+  // versions, not two records.
+  app.put('/api/articles/:id/offers/:slug', async (c) => {
+    const id = c.req.param('id');
+    const [article] = await q<OfferArticle>(
+      `SELECT id, title, slug, stage, status, draft_md, research, affiliate_links, frontmatter
+         FROM articles WHERE id = $1`,
+      [id],
+    );
+    if (!article) return c.json({ error: 'not found' }, 404);
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'expected a JSON body' }, 400);
+    }
+    // `source` is fixed rather than read off the body: this route is the
+    // editor surface, and a record that claims to have come from a feed is a
+    // claim about how much the price can be trusted. A feed sync writes its
+    // own records through saveOffer().
+    const parsed = validateOfferInput(
+      { ...(body as Record<string, unknown>), goSlug: c.req.param('slug'), source: 'editor' },
+      today(),
+    );
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+
+    await saveOffer(id, parsed.value);
+    log.info('offer attached to article', {
+      article_id: id,
+      go_slug: parsed.value.goSlug,
+      source: parsed.value.source,
+      preorder: parsed.value.preorder,
+    });
+    return c.json(await offerCoverageResponse(article));
+  });
+
+  // Detach. The revisions stay: what a reader was shown, and on whose
+  // authority, outlives the record.
+  app.delete('/api/articles/:id/offers/:slug', async (c) => {
+    const id = c.req.param('id');
+    const removed = await deleteOffer(id, c.req.param('slug'));
+    if (!removed) return c.json({ error: 'no offer attached to that slug' }, 404);
+    const [article] = await q<OfferArticle>(
+      `SELECT id, title, slug, stage, status, draft_md, research, affiliate_links, frontmatter
+         FROM articles WHERE id = $1`,
+      [id],
+    );
+    if (!article) return c.json({ error: 'not found' }, 404);
+    log.info('offer detached from article', { article_id: id, go_slug: c.req.param('slug') });
+    return c.json(await offerCoverageResponse(article));
+  });
+
+  // Rebuild the page from the offers now attached. Assembly is deterministic
+  // and LLM-free, so this costs nothing but the pass itself — and it is the
+  // only way an offer attached after the card was assembled reaches the
+  // reader, which is why the panel asks for it explicitly rather than
+  // re-queueing a card behind the operator's back.
+  //
+  // Only a card that has already been assembled once: sending a piece still in
+  // review forward to assemble would skip the stages it has not had yet, and a
+  // card that has never been assembled will pick the offers up on its first
+  // pass anyway. In approval mode the rebuilt card comes back to the gate.
+  app.post('/api/articles/:id/reassemble', async (c) => {
+    const rows = await q<{ id: string }>(
+      `UPDATE articles SET stage = 'assemble', status = 'queued', error = NULL, updated_at = now()
+       WHERE id = $1 AND status <> 'running'
+         AND stage IN ('assemble', 'image', 'publish', 'done')
+         AND draft_md IS NOT NULL AND outline IS NOT NULL AND frontmatter IS NOT NULL
        RETURNING id`,
       [c.req.param('id')],
     );
     if (rows.length === 0) {
-      return c.json({ error: 'only a finished, published article can be republished' }, 409);
+      return c.json(
+        { error: 'only a card that has already been assembled can be rebuilt, and not mid-stage' },
+        409,
+      );
     }
-    log.info('article re-queued for publish', { article_id: rows[0].id });
+    log.info('article re-queued for assembly', { article_id: rows[0].id });
     return c.json({ ok: true });
   });
 
@@ -745,8 +1168,19 @@ export function createApp(): Hono<TraceEnv> {
   });
 
   app.delete('/api/published/:slug', async (c) => {
-    const result = await deleteD1Post(c.req.param('slug'));
+    const slug = c.req.param('slug');
+    const result = await deleteD1Post(slug);
     if (!result) return c.json({ error: 'not found' }, 404);
+    // The publisher skips the site rebuild when what it is about to push
+    // matches `published_digest`, the receipt of the last version pushed live.
+    // The post it describes has just been removed from D1, so the receipt has
+    // to go with it: leaving it would make the operator's usual
+    // delete-then-republish recovery compute the same digest, skip the
+    // dispatch, and leave the page missing from the live site. `pub_date`
+    // stays - restoring a post is not re-publishing it on a new date.
+    await q('UPDATE articles SET published_digest = NULL, updated_at = now() WHERE slug = $1', [
+      slug,
+    ]);
     // Rebuild so the site actually drops the page; deletion already succeeded,
     // so a dispatch failure is reported, not thrown.
     let dispatched = false;
@@ -758,6 +1192,142 @@ export function createApp(): Hono<TraceEnv> {
       dispatchError = err instanceof Error ? err.message : String(err);
     }
     return c.json({ ok: true, removedLinks: result.removedLinks, dispatched, dispatchError });
+  });
+
+  // ── Distribution (social channels + the post queue) ──────────────────────
+  // Read-only, and deliberately shaped around the two questions an operator
+  // has: can each channel still post (token staleness, computed in
+  // distribution/channels.ts so the worker and this panel cannot disagree),
+  // and what is the queue doing. No token value is reachable from here - a
+  // connection reports the *name* of the secret it reads, never the secret.
+  app.get('/api/distribution', async (c) => {
+    const limit = Number(c.req.query('limit'));
+    const [channels, counts, items, placements] = await Promise.all([
+      channelViews(),
+      queueCounts(),
+      recentItems(Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50),
+      placementPerformance(),
+    ]);
+    return c.json({
+      channels,
+      providers: registeredProviders(),
+      // What the Connect drawer offers: every network with an adapter, and the
+      // secret name a pasted token is stored under unless the operator names one.
+      connectable: registeredProviders().map((provider) => ({
+        provider,
+        defaultTokenRef: getProvider(provider)?.defaultTokenRef ?? `${provider}-token`,
+      })),
+      counts,
+      items,
+      // What each placement actually earned, from this site's own posts -
+      // the evidence the first_comment default is meant to be revisited on.
+      placements,
+    });
+  });
+
+  // One channel's queue, filtered the way the panel's chips are.
+  app.get('/api/distribution/channels/:id/queue', async (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id) || !(await getConnection(id))) {
+      return c.json({ error: 'no channel with that id' }, 404);
+    }
+    const status = c.req.query('status') ?? 'all';
+    if (!isQueueFilter(status)) {
+      return c.json({ error: 'status must be all | pending | held | failed | posted' }, 400);
+    }
+    const limit = Number(c.req.query('limit'));
+    const items = await channelQueue(
+      id,
+      status,
+      Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 100,
+    );
+    return c.json({ items });
+  });
+
+  // Connect a channel from a pasted token (or a secret the deployment mounts).
+  // The answer is the channel as the list renders it - presence of the
+  // credential, never the credential.
+  app.post('/api/distribution/channels', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    try {
+      return c.json({ channel: await connectChannel(body) }, 201);
+    } catch (err) {
+      return channelAdminFailure(c, err);
+    }
+  });
+
+  app.put('/api/distribution/channels/:id/credential', async (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id)) return c.json({ error: 'no channel with that id' }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { token?: unknown };
+    try {
+      return c.json({ channel: await replaceCredential(id, body.token) });
+    } catch (err) {
+      return channelAdminFailure(c, err);
+    }
+  });
+
+  app.delete('/api/distribution/channels/:id', async (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id)) return c.json({ error: 'no channel with that id' }, 404);
+    try {
+      return c.json({ ok: true, ...(await disconnectChannel(id)) });
+    } catch (err) {
+      return channelAdminFailure(c, err);
+    }
+  });
+
+  app.get('/api/distribution/items/:id', async (c) => {
+    const id = c.req.param('id');
+    const detail = isUuid(id) ? await queueItemDetail(id) : null;
+    if (!detail) return c.json({ error: 'no queue item with that id' }, 404);
+    return c.json(detail);
+  });
+
+  app.post('/api/distribution/items/:id/retry', async (c) => {
+    const id = c.req.param('id');
+    return singleRecovery(c, id, await retryFailedItems([id]), 'failed');
+  });
+
+  app.post('/api/distribution/items/:id/release', async (c) => {
+    const id = c.req.param('id');
+    return singleRecovery(c, id, await releaseHeldItems([id]), 'held');
+  });
+
+  // The bulk bar: retry every failed item, or release every held one, among
+  // the ids the operator selected. An id in the wrong state is skipped and
+  // reported rather than failing the whole batch.
+  app.post('/api/distribution/items/bulk', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { action?: unknown; ids?: unknown };
+    if (body.action !== 'retry' && body.action !== 'release') {
+      return c.json({ error: 'action must be retry | release' }, 400);
+    }
+    if (
+      !Array.isArray(body.ids) ||
+      body.ids.length === 0 ||
+      body.ids.length > 200 ||
+      !body.ids.every((id) => typeof id === 'string')
+    ) {
+      return c.json({ error: 'ids must be a list of 1-200 queue item ids' }, 400);
+    }
+    const ids = body.ids as string[];
+    const outcome =
+      body.action === 'retry' ? await retryFailedItems(ids) : await releaseHeldItems(ids);
+    return c.json({ ok: true, action: body.action, ...outcome });
+  });
+
+  app.put('/api/distribution/items/:id/placement', async (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id)) return c.json({ error: 'no queue item with that id' }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { placement?: unknown };
+    if (!isLinkPlacement(body.placement)) {
+      return c.json({ error: 'placement must be first_comment | in_body' }, 400);
+    }
+    try {
+      return c.json({ ok: true, item: await overridePlacement(id, body.placement) });
+    } catch (err) {
+      return channelAdminFailure(c, err);
+    }
   });
 
   // ── Sessions & usage ─────────────────────────────────────────────────────
@@ -805,11 +1375,19 @@ export function createApp(): Hono<TraceEnv> {
       q<{ key: string; value: unknown }>('SELECT key, value FROM settings'),
       engineStatus(),
     ]);
-    return c.json({ ...Object.fromEntries(rows.map((r) => [r.key, r.value])), engines });
+    return c.json({ ...settingsPayload(rows), engines });
   });
 
   app.put('/api/settings', async (c) => {
     const body = (await c.req.json()) as Record<string, unknown>;
+    const placementKeys = await placementSettingKeys();
+    // Checked before anything is written, so a bad placement cannot land half
+    // a save.
+    for (const key of placementKeys) {
+      if (key in body && !isLinkPlacement(body[key])) {
+        return c.json({ error: `${key} must be first_comment | in_body` }, 400);
+      }
+    }
     const allowed = [
       'models',
       'publish_mode',
@@ -817,6 +1395,8 @@ export function createApp(): Hono<TraceEnv> {
       'worker_enabled',
       'llm',
       'scout_interval_hours',
+      'distribution_enabled',
+      ...placementKeys,
     ];
     for (const key of allowed) {
       if (!(key in body)) continue;
@@ -832,7 +1412,7 @@ export function createApp(): Hono<TraceEnv> {
       q<{ key: string; value: unknown }>('SELECT key, value FROM settings'),
       engineStatus(),
     ]);
-    return c.json({ ...Object.fromEntries(rows.map((r) => [r.key, r.value])), engines });
+    return c.json({ ...settingsPayload(rows), engines });
   });
 
   // ── Admin SPA (built apps/admin) ─────────────────────────────────────────

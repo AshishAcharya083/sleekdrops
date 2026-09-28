@@ -9,23 +9,18 @@
  * sentinel lives here rather than on the page so it is always the last thing in
  * the body, whatever the page appends after the markdown.
  *
- * It carries the two in-article ad slots for the same reason: the body is the
- * only thing that knows where the content actually ends, and the mid-article
- * unit has to be positioned against the rendered blocks rather than against the
- * page's source. `<slot />` is markdown plus whatever the page appends, so the
- * mid unit is placed here on the client, where those blocks exist as elements —
- * the rule for *which* block it goes before is the pure `midArticleIndex` in
- * src/lib/ad-placement.ts, and a body too short to carry one loses it entirely.
- *
- * Both units render nothing at all unless the build has ids for them and the
- * visitor opted in to advertising; see src/components/ads/AdUnit.astro.
+ * It is also the ad partner's `journey-content` landmark: Mediavine's wrapper
+ * (see src/components/ads/MediavineScript.astro) looks for that class on the
+ * element whose *immediate* children are the article's paragraphs, headings and
+ * figures, and places its in-content units between them itself - which is why
+ * the class sits on this wrapper and not on the page's `<main>` or `<article>`,
+ * and why it must appear once per page. The site carries no ad units of its
+ * own; a body too short to hold one is the partner's call, made from the
+ * rendered blocks.
  */
-import AdUnit from '@components/ads/AdUnit.astro';
 ---
-<div class="article-body" data-article-body>
+<div class="article-body journey-content" data-article-body>
   <slot />
-  <AdUnit placement="articleMid" />
-  <AdUnit placement="articleEnd" />
   <div class="read-sentinel" data-read-sentinel aria-hidden="true" />
 </div>
 
@@ -247,44 +242,12 @@ import AdUnit from '@components/ads/AdUnit.astro';
     margin: 2.5em 0;
   }
 
-  /* The ad slots set their own rhythm, wider than the prose sibling rule's.
-     The attribute is carried purely to out-specify that rule (both are two
-     classes, so source order would otherwise decide it). */
-  .article-body :global(> .ad-unit[data-ad-unit]) { margin: 2.5em 0; }
 </style>
 
 <script>
-  import { midArticleIndex } from '@lib/ad-placement';
   import { TABLE_SCROLL_HINT, overflowsSideways } from '@lib/table-scroll';
 
-  /**
-   * Move the mid-article unit to the break it belongs on, or drop it if this
-   * body is too short to carry one.
-   *
-   * Done here rather than in the page source because `<slot />` is rendered
-   * markdown: the blocks the unit is positioned against only exist as elements
-   * once the document does. The unit ships at the end of the body and moves up,
-   * which is also why the order this runs in relative to AdUnit's own script does
-   * not matter - an IntersectionObserver watches the *element*, so a node moved
-   * before the callback fires is observed wherever it lands, and a node already
-   * removed for a visitor who declined is simply not found here.
-   */
   const body = document.querySelector<HTMLElement>('[data-article-body]');
-  const unit = body?.querySelector<HTMLElement>('[data-ad-placement="articleMid"]');
-
-  if (body && unit) {
-    // The editorial blocks only: not the two ad slots, not the read sentinel,
-    // not a table's scroll hint (chrome the body did not write).
-    const blocks = Array.from(body.children).filter(
-      (el) =>
-        !el.hasAttribute('data-ad-unit') &&
-        !el.hasAttribute('data-read-sentinel') &&
-        !el.hasAttribute('data-table-hint'),
-    );
-    const index = midArticleIndex(blocks.map((el) => el.tagName.toLowerCase()));
-    if (index === null) unit.remove();
-    else body.insertBefore(unit, blocks[index]);
-  }
 
   /**
    * Tell the reader a wide table can be swiped, on the tables where that is

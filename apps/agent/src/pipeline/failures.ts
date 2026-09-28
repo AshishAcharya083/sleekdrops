@@ -1,0 +1,138 @@
+// Stage failure taxonomy - why a stage failed, and whether running it again
+// could possibly help.
+//
+// Every stage failure used to look the same on the card: status 'failed', a
+// message, and a human to decide what it meant. Two kinds of failure were
+// hiding in there. A model that replies with malformed JSON twice, a socket
+// that resets, a provider that answers 429 - none of those say anything about
+// the article, and the card that died on one would very likely have passed on
+// the next run. A contract violation, an evidence shortfall or a validation
+// error says something true about the content: running it again spends a full
+// stage to reach the same verdict.
+//
+// So: `transient` is retried here with backoff, `genuine` goes straight to
+// failed. The default is `genuine` - transient is recognised only by an
+// explicit signature below, because mistaking a real content problem for a
+// hiccup burns three stage runs and still ends up failed, while mistaking a
+// hiccup for a content problem only costs what it costs today.
+import { EvidenceGateError } from '../content/evidence.js';
+import type { UnusableJsonError } from '../llm/index.js';
+
+export type FailureClass = 'transient' | 'genuine';
+
+export interface FailureVerdict {
+  readonly failureClass: FailureClass;
+  /** The signature that matched, for the pipeline log. Null when genuine. */
+  readonly signal: string | null;
+}
+
+/** Attempts one stage gets in a single run: the first plus two retries. */
+export const MAX_STAGE_ATTEMPTS = 3;
+
+const RETRY_BASE_MS = 2_000;
+
+/**
+ * How long to wait after `attempt` (1-based) failed transiently. Exponential,
+ * because the faults this covers - a rate limit, a provider wobbling on 5xx -
+ * are the ones that clear with time rather than with immediacy.
+ */
+export function stageRetryDelayMs(attempt: number): number {
+  return RETRY_BASE_MS * 2 ** (attempt - 1);
+}
+
+/**
+ * The faults that are the pipeline's, not the content's.
+ *
+ * Order does not matter; the first match names the failure in the log. Each
+ * entry is a signature we actually throw or actually receive - not a guess at
+ * what an error might say. Anything unrecognised is genuine by default, which
+ * is why new throws from other stages need no entry here to behave correctly.
+ */
+const TRANSIENT_SIGNATURES: ReadonlyArray<{ signal: string; pattern: RegExp }> = [
+  // A chatJson stage that runs out of reprompts throws UnusableJsonError and
+  // is recognised by name in classifyFailure; ShapeCheck complaints only ever
+  // reach the runner that way, so they need no entry here. This catches the
+  // JSON that is parsed outside chatJson (visionJson): extractJson's own two
+  // refusals, plus whatever JSON.parse says about a reply that is malformed
+  // rather than merely cut short ("Expected ',' or ']' after array element in
+  // JSON at position 2546" is the one that killed a card).
+  //
+  // Matched on JSON.parse's own phrasings rather than on the words "not valid
+  // JSON", which also appear in deliberate refusals to overwrite stored data.
+  {
+    signal: 'parse',
+    pattern:
+      /Truncated JSON|No JSON value in LLM response|\bin JSON at position\b|Unexpected (?:token|end of JSON input|non-whitespace character)/i,
+  },
+  // An engine that answered with nothing at all, stopped before it did, hung
+  // past its own deadline, or reported a failed run. `did not answer within`
+  // is how claude.ts and gemini.ts spell their 10-minute deadline: it says
+  // nothing about the article and is the most retryable fault there is, but it
+  // carries none of the words the timeout signature below looks for.
+  {
+    signal: 'engine',
+    pattern:
+      /returned an empty completion|ended without a result message|turn budget before answering|did not answer within|engine failed \(/i,
+  },
+  { signal: 'timeout', pattern: /\bETIMEDOUT\b|\bTimeoutError\b|\bAbortError\b|aborted|timed out|timeout/i },
+  {
+    signal: 'transport',
+    pattern: /\bECONNRESET\b|\bECONNREFUSED\b|\bENOTFOUND\b|\bEAI_AGAIN\b|\bEPIPE\b|fetch failed|socket hang up|network error/i,
+  },
+  // Provider 429/5xx. Matched through an HTTP-status spelling rather than a
+  // bare number, so an error quoting a price or a token count is not mistaken
+  // for a throttled provider.
+  {
+    signal: 'rate-limit',
+    pattern: /\bHTTP[ :/]?(?:429|5\d\d)\b|\bstatus (?:429|5\d\d)\b|rate.?limit|too many requests|overloaded|service unavailable/i,
+  },
+];
+
+/** Message, name and errno of the error and everything it was caused by. */
+function describe(err: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = err;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+    if (!(current instanceof Error)) {
+      parts.push(String(current));
+      break;
+    }
+    parts.push(current.name, current.message);
+    const code = (current as NodeJS.ErrnoException).code;
+    if (code) parts.push(code);
+    // `fetch failed` carries the real socket error here, and nowhere else.
+    current = current.cause;
+  }
+  return parts.join(' | ');
+}
+
+export function classifyFailure(err: unknown): FailureVerdict {
+  // The gate is a deterministic count of what the research stage gathered
+  // against a fixed bar. A stage-level retry re-runs that identical gather and
+  // hands the same check the same kind of dossier, with no guarantee of a
+  // different result - and a research pass is the most expensive stage there
+  // is. So it is terminal, whatever its message happens to say.
+  // The name is checked alongside the class because that is what the gate
+  // guarantees to keep; `instanceof` alone would quietly stop matching if the
+  // error ever crossed a second copy of the module.
+  if (err instanceof EvidenceGateError || (err instanceof Error && err.name === 'EvidenceGateError')) {
+    return { failureClass: 'genuine', signal: null };
+  }
+
+  // The model never produced usable JSON, however the complaint is worded.
+  // Checked by name for the same reason as the gate above.
+  if (err instanceof Error && err.name === 'UnusableJsonError') {
+    return { failureClass: 'transient', signal: (err as UnusableJsonError).reason };
+  }
+
+  const text = describe(err);
+  // A missing credential or a missing env var is the one failure that reads
+  // like a config problem and is one: no amount of retrying supplies it.
+  if (/not configured|no credential|is not set|env missing/i.test(text)) {
+    return { failureClass: 'genuine', signal: null };
+  }
+  const match = TRANSIENT_SIGNATURES.find((s) => s.pattern.test(text));
+  return match
+    ? { failureClass: 'transient', signal: match.signal }
+    : { failureClass: 'genuine', signal: null };
+}

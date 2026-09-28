@@ -65,21 +65,6 @@ async function noDevteamKey(body: () => Promise<void> | void): Promise<void> {
 }
 
 /**
- * The same for `./ads`, which is imported here for one thing only: the ad gate
- * reads the record this module writes, so what the consent dialog saves and what
- * the ad partner is loaded on are asserted end to end below rather than each
- * against its own idea of the record.
- */
-mock.module(new URL('./ads-env.ts', import.meta.url).href, {
-  namedExports: {
-    adsEnv: () => ({
-      client: 'ca-pub-1234567890123456',
-      slots: { articleMid: '1', articleEnd: '2', sidebar: '3', feed: '4' },
-    }),
-  },
-});
-
-/**
  * The GA4 property this build reports into. Substituted for the same reason the
  * two above are - `import.meta.env` does not exist under the bare runner - and
  * held in a mutable binding because "no measurement id" is a supported build
@@ -100,8 +85,6 @@ async function noGa4Property(body: () => Promise<void> | void): Promise<void> {
     ga4Property = 'G-TEST123456';
   }
 }
-
-const ads = await import('./ads.ts');
 
 type AnalyticsModule = typeof import('./analytics.ts');
 
@@ -188,19 +171,14 @@ const ingestInto =
 /** The `<script>` elements a page load appended to `document.head`. */
 type AppendedScript = { src?: string; async?: boolean };
 
-/** The two queues Google's tags read from this page: the ad tag's, and gtag's. */
+/** The queue gtag.js reads from this page. */
 interface GoogleTagWindow {
-  adsbygoogle?: { requestNonPersonalizedAds?: number };
   dataLayer?: unknown[];
 }
 
 /**
- * Every `gtag('consent', …)` command queued on this page. A Consent Mode signal
- * is inert until a Google tag library drains `dataLayer`, and this site loads one
- * only behind the analytics grant - so an ad-storage denial pushed there proves
- * nothing about what the ad partner was allowed to do. The ads gate has to hold
- * on which scripts it requested, and this is here to assert it never leaned on
- * the queue instead.
+ * Every `gtag('consent', …)` command queued on this page, in order: the Consent
+ * Mode v2 state the tag starts from and every change the visitor made after it.
  */
 function queuedConsentSignals(window: GoogleTagWindow): unknown[] {
   return gtagCommands(window).filter((args) => args[0] === 'consent');
@@ -337,9 +315,6 @@ const sdkKeys = (tab: Tab): string[] =>
 
 const ga4Tags = (scripts: AppendedScript[]): AppendedScript[] =>
   scripts.filter((script) => String(script.src).includes('googletagmanager.com'));
-
-const adPartnerTags = (scripts: AppendedScript[]): AppendedScript[] =>
-  scripts.filter((script) => String(script.src).includes('adsbygoogle.js'));
 
 /**
  * The measurement id the document's GA4 tag was actually loaded with, read off the
@@ -681,11 +656,12 @@ test('the preferences dialog reads back the decision in force, not the opt-in de
   assert.equal(banner.consentStatus(), 'granted');
 });
 
-test('the record the banner writes is the record the ads gate reads back', () => {
-  // The two categories live in one stored record written here and read by
-  // `./ads`, which never imports this module - so the shape they agree on is only
-  // asserted where both ends meet: what the real writer wrote, through the real
-  // parser the ads gate calls.
+test('the record the banner writes keeps both categories, as older readers expect', () => {
+  // The two categories live in one stored record. The advertising category has
+  // no runtime effect any more - the ad partner's consent platform owns that
+  // decision - but records that carry it are still read, so the shape is
+  // asserted where it is written: what the real writer wrote, through the real
+  // parser.
   const tab = openTab();
   loadPage(tab, '/');
 
@@ -713,50 +689,23 @@ test('the record the banner writes is the record the ads gate reads back', () =>
   assert.equal(chrome.consentStatus(), 'denied', 'an ads grant is not an analytics grant');
 });
 
-test('the ad partner is loaded only for a visitor who saved the advertising opt-in', () => {
-  // The consent dialog's own path, end to end: its Save writes through
-  // setConsent() here, and a page unit then asks `./ads` - which never imports
-  // this module - what it may show. Only an explicit advertising opt-in gets the
-  // partner script at all: the tag writes its own cookies and device storage as
-  // soon as it runs, so no other state may fetch it.
+test('Consent Mode v2 starts granted for analytics, and follows the visitor from there', () => {
+  // gtag.js reads its consent state from the queue in order: the default the
+  // tag starts from - analytics on, nothing about advertising, which the ad
+  // partner's platform decides - and then every change the visitor makes. The
+  // withdrawal path pushes the denial before it sets the opt-out flag, so the
+  // tag that is already running stops writing before it is told to stop sending.
   const tab = openTab();
   const first = loadPage(tab, '/');
-
-  // "Accept analytics" on the banner: an analytics opt-in is not an ads opt-in,
-  // so no ad tag is requested on this page - and the analytics grant, which is
-  // what loads gtag.js, does not turn one into the other.
-  chrome.grantConsent();
-  assert.equal(ads.isAdsGranted(), false);
-  assert.equal(ads.loadAds(), false);
-  assert.deepEqual(adPartnerTags(first.scripts), [], 'no ad tag on an analytics-only grant');
-  assert.equal(first.window.adsbygoogle?.requestNonPersonalizedAds, 1);
+  defaultConsent = 'granted';
+  chrome.boot();
   assert.deepEqual(queuedConsentSignals(first.window), [
+    ['consent', 'default', { analytics_storage: 'granted' }],
     ['consent', 'update', { analytics_storage: 'granted' }],
   ]);
 
-  // The dialog saved with the Advertising switch on, on the page after it.
-  const opted = loadPage(tab, '/deals');
-  chrome.setConsent({ analytics: 'granted', ads: 'granted' });
-  assert.equal(ads.isAdsGranted(), true);
-  assert.equal(ads.loadAds(), true);
-  assert.equal(adPartnerTags(opted.scripts).length, 1, 'the opt-in is what loads the partner');
-  assert.equal(opted.window.adsbygoogle?.requestNonPersonalizedAds, undefined);
-
-  // The dialog saved with the Advertising switch turned back off: an explicit
-  // decline written through the Save path rather than through Decline all.
-  const withdrawn = loadPage(tab, '/guides');
-  chrome.setConsent({ analytics: 'granted', ads: 'denied' });
-  assert.equal(ads.isAdsGranted(), false, 'a saved decline is a decline');
-  assert.equal(ads.loadAds(), false);
-  assert.deepEqual(adPartnerTags(withdrawn.scripts), [], 'the tag goes with the opt-in');
-  assert.equal(withdrawn.window.adsbygoogle?.requestNonPersonalizedAds, 1);
-
-  // "Decline all", on the page after that: no partner either way.
   const declined = loadPage(tab, '/about');
   banner.denyConsent();
-  assert.equal(ads.isAdsGranted(), false);
-  assert.equal(ads.loadAds(), false);
-  assert.deepEqual(adPartnerTags(declined.scripts), []);
   assert.deepEqual(queuedConsentSignals(declined.window), [
     ['consent', 'update', { analytics_storage: 'denied' }],
   ]);
@@ -775,7 +724,10 @@ test('a record written under the previous policy is honoured for what it decided
   await flush();
   assert.deepEqual(names(tab), [SESSION_START, PAGE_VIEW]);
   // The category that record never mentioned takes the default, which is off.
-  assert.equal(ads.isAdsGranted(), false);
+  assert.deepEqual(parseConsent(tab.local.get(CONSENT_KEY) ?? null)?.grants, {
+    analytics: 'granted',
+    ads: 'denied',
+  });
 });
 
 test('withdrawing on a later page load stops analytics and holds on the one after it', async () => {

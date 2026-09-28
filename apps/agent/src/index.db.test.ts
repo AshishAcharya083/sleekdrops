@@ -1,0 +1,536 @@
+// The container's CMD runs this entrypoint - so the boot contract is tested the
+// way the container runs it: spawn the real process and watch what it does.
+// `pnpm migrate` is the other process that connects before anything else, and
+// is spawned the same way.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import net from 'node:net';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import pg from 'pg';
+
+const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const ENTRYPOINT = join(PACKAGE_ROOT, 'src', 'index.ts');
+const MIGRATE_CLI = join(PACKAGE_ROOT, 'src', 'db', 'migrate.ts');
+const REPO_ROOT = dirname(dirname(PACKAGE_ROOT));
+
+/**
+ * The Dockerfile's CMD and the WORKDIR it runs in, mapped from the image's
+ * /app onto this checkout. Cloud Run signals that exact process and nothing
+ * under it, so the shutdown contract is only proven by booting what it names.
+ */
+function containerCommand(): { argv: string[]; cwd: string } {
+  const dockerfile = readFileSync(join(REPO_ROOT, 'Dockerfile'), 'utf8');
+  const workdirs = [...dockerfile.matchAll(/^WORKDIR\s+(\S+)/gm)].map((m) => m[1]);
+  const cmd = /^CMD\s+(\[.*\])\s*$/m.exec(dockerfile);
+  assert.ok(cmd, 'the Dockerfile has an exec-form CMD');
+  const workdir = workdirs.at(-1) ?? '/app';
+  assert.ok(workdir.startsWith('/app'), `WORKDIR ${workdir} is outside the copied repo`);
+  return { argv: JSON.parse(cmd[1]) as string[], cwd: join(REPO_ROOT, relative('/app', workdir)) };
+}
+
+/** The live database this sandbox/CI provides, or nothing. */
+const liveUrl = process.env.DATABASE_URL ?? '';
+
+async function probe(poolConfig: pg.PoolConfig): Promise<unknown> {
+  const probePool = new pg.Pool({ ...poolConfig, max: 1 });
+  const result = await probePool
+    .query('SELECT 1')
+    .then(() => undefined)
+    .catch((err: unknown) => err);
+  await probePool.end();
+  return result;
+}
+
+const reachable = liveUrl ? (await probe({ connectionString: liveUrl })) === undefined : false;
+
+async function migrationsRecorded(url: URL): Promise<boolean> {
+  const readPool = new pg.Pool({ connectionString: url.href, max: 1 });
+  try {
+    const { rows } = await readPool.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM schema_migrations',
+    );
+    return Number(rows[0].count) > 0;
+  } finally {
+    await readPool.end();
+  }
+}
+
+/**
+ * A database of this child's own. `src/index.ts` boots the entire platform,
+ * not just migrate + serve: recoverStranded() re-queues articles and fails
+ * agent sessions older than 30 minutes, and startScoutWorker() immediately
+ * recovers stale scout runs and claims the oldest queued one. Those are the
+ * very rows the other *.db.test.ts suites seed and assert on, and node runs
+ * test files in parallel - so a spawned agent must never be pointed at the
+ * shared test database.
+ */
+async function scratchDatabase(): Promise<{ url: URL; drop: () => Promise<void> }> {
+  const name = `agent_boot_${randomUUID().replaceAll('-', '')}`;
+  const url = new URL(liveUrl);
+  url.pathname = `/${name}`;
+  await onLiveServer(`CREATE DATABASE "${name}"`);
+  return { url, drop: () => onLiveServer(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`) };
+}
+
+/** Run one statement on the ambient database, which owns no test fixtures. */
+async function onLiveServer(sql: string): Promise<void> {
+  const admin = new pg.Pool({ connectionString: liveUrl, max: 1 });
+  try {
+    await admin.query(sql);
+  } finally {
+    await admin.end();
+  }
+}
+
+/** The PG* form of a connection, for a child that must run with no DATABASE_URL. */
+function pgEnvironment(url: URL): Record<string, string> {
+  return {
+    PGHOST: url.hostname,
+    PGPORT: url.port || '5432',
+    PGUSER: decodeURIComponent(url.username),
+    PGPASSWORD: decodeURIComponent(url.password),
+    PGDATABASE: decodeURIComponent(url.pathname.slice(1)),
+  };
+}
+
+async function freePort(): Promise<number> {
+  const probeServer = net.createServer();
+  await new Promise<void>((resolve) => probeServer.listen(0, '127.0.0.1', resolve));
+  const { port } = probeServer.address() as net.AddressInfo;
+  await new Promise<void>((resolve) => probeServer.close(() => resolve()));
+  return port;
+}
+
+/** A trust-auth server has no credential error to fail fast on. */
+async function rejectsWrongPassword(): Promise<boolean> {
+  const wrongPassword = new URL(liveUrl);
+  wrongPassword.password = 'definitely-not-the-password';
+  return (await probe({ connectionString: wrongPassword.href })) !== undefined;
+}
+
+const skipLive: string | false = reachable
+  ? false
+  : 'no reachable DATABASE_URL - start Postgres to run these';
+
+const skip: string | false = skipLive
+  ? skipLive
+  : (await rejectsWrongPassword())
+    ? false
+    : 'this Postgres accepts any password - no credential error to surface';
+
+interface Booted {
+  child: ChildProcess;
+  /** SIGKILL the process and everything it started. */
+  killAll: () => void;
+  output: () => string;
+  waitFor: (pattern: RegExp, timeoutMs?: number) => Promise<void>;
+  exited: Promise<number | null>;
+}
+
+interface BootOptions {
+  /** What to run: the agent entrypoint by default, or the standalone migrate CLI. */
+  script?: string;
+  /** An extra ESM module loaded before it, as a path or `data:` URL. */
+  preload?: string;
+  /** Run this command line in `cwd` instead of `node --import tsx <script>`. */
+  command?: { argv: string[]; cwd: string };
+}
+
+/** Spawn the process with `overrides` applied to its env; an undefined value unsets. */
+function bootAgent(
+  overrides: Record<string, string | undefined>,
+  { script = ENTRYPOINT, preload, command }: BootOptions = {},
+): Booted {
+  // PORT 0 by default keeps a booting agent off a port another suite may want.
+  const env: NodeJS.ProcessEnv = { ...process.env, PORT: '0', ...overrides };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) delete env[key];
+  }
+  const preloads = preload ? ['--import', preload] : [];
+  const [file, ...args] = command?.argv ?? [process.execPath, '--import', 'tsx', ...preloads, script];
+  const child = spawn(file, args, {
+    cwd: command?.cwd ?? PACKAGE_ROOT,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    // Its own process group, so cleanup can reach anything a wrapper orphans.
+    detached: true,
+  });
+  let output = '';
+  const waiters: Array<() => void> = [];
+  for (const stream of [child.stdout, child.stderr]) {
+    stream?.setEncoding('utf8');
+    stream?.on('data', (chunk: string) => {
+      output += chunk;
+      for (const notify of waiters.splice(0)) notify();
+    });
+  }
+  const exited = new Promise<number | null>((resolve) => child.on('exit', resolve));
+  return {
+    child,
+    killAll: () => {
+      try {
+        process.kill(-child.pid!, 'SIGKILL');
+      } catch {
+        // The group is already gone.
+      }
+    },
+    output: () => output,
+    exited,
+    waitFor: (pattern, timeoutMs = 30_000) =>
+      new Promise((resolve, reject) => {
+        const deadline = setTimeout(
+          () => reject(new Error(`never matched ${pattern}. Output:\n${output}`)),
+          timeoutMs,
+        );
+        const check = (): void => {
+          if (!pattern.test(output)) {
+            waiters.push(check);
+            return;
+          }
+          clearTimeout(deadline);
+          resolve();
+        };
+        check();
+        void exited.then(check);
+      }),
+  };
+}
+
+/** The boot wait window - `waitForDatabase`'s own default, spent before giving up. */
+const BOOT_WAIT_MS = 30_000;
+
+/**
+ * A host resolving to two addresses, the way a container resolves `localhost` -
+ * which is what the `pg` default and .env.example both dial. `net` then tries
+ * every address, and when they all fail `pg` rejects with an AggregateError
+ * whose own `code` is only the FIRST attempt's: for `::1` in a container with
+ * no usable IPv6 that is EADDRNOTAVAIL, hiding the ECONNREFUSED underneath.
+ * DNS is the only way to make one connection attempt fan out, so the stub is
+ * preloaded into the child rather than reaching into the app.
+ */
+const DUAL_STACK_HOST = 'dualstack.test';
+const DUAL_STACK_DNS_STUB = `data:text/javascript,${encodeURIComponent(`
+import dns from 'node:dns';
+const real = dns.lookup;
+dns.lookup = (hostname, options, callback) => {
+  if (hostname !== ${JSON.stringify(DUAL_STACK_HOST)}) return real(hostname, options, callback);
+  const done = typeof options === 'function' ? options : callback;
+  const all = typeof options === 'object' && options !== null && options.all;
+  const addresses = [{ address: '::1', family: 6 }, { address: '127.0.0.1', family: 4 }];
+  process.nextTick(() => (all ? done(null, addresses) : done(null, addresses[0].address, 6)));
+};
+`)}`;
+
+test(
+  'boot retries an unreachable database, then exits naming DATABASE_URL',
+  { timeout: 120_000 },
+  async () => {
+    // Port 1 is unbound, so every connection is refused - the shape of the
+    // failure that used to kill the process before the server ever listened.
+    const agent = bootAgent({ DATABASE_URL: 'postgres://unused:unused@127.0.0.1:1/unreachable' });
+    const startedAt = Date.now();
+    try {
+      await agent.waitFor(/database not reachable yet, retrying/);
+      await agent.waitFor(/"attempt":2/);
+      assert.equal(agent.child.exitCode, null, 'the agent exited instead of waiting for Postgres');
+
+      // Only when the whole window is spent does it give up - and what the
+      // operator reads then is the dialed target and the variable to set,
+      // rather than the bare ECONNREFUSED the demo failure produced.
+      assert.equal(await agent.exited, 1, 'boot did not exit 1 once the wait window ran out');
+      const elapsed = Date.now() - startedAt;
+      assert.ok(elapsed >= BOOT_WAIT_MS, `gave up after ${elapsed}ms, before the window was spent`);
+      assert.match(agent.output(), /no Postgres answering at 127\.0\.0\.1:1/);
+      assert.match(agent.output(), /Set DATABASE_URL to a reachable Postgres/);
+      assert.doesNotMatch(agent.output(), /listening/);
+    } finally {
+      agent.child.kill('SIGKILL');
+      await agent.exited;
+    }
+  },
+);
+
+// The same wait, when the failure arrives bundled. Judging such an aggregate by
+// its top-level code alone made boot treat a merely-late Postgres as fatal.
+test(
+  'boot waits through a dual-stack failure that arrives as an AggregateError',
+  { timeout: 60_000 },
+  async () => {
+    const agent = bootAgent(
+      { DATABASE_URL: `postgres://unused:unused@${DUAL_STACK_HOST}:1/unreachable` },
+      { preload: DUAL_STACK_DNS_STUB },
+    );
+    try {
+      await agent.waitFor(/database not reachable yet, retrying/);
+      await agent.waitFor(/"attempt":2/);
+      assert.match(agent.output(), new RegExp(`"target":"${DUAL_STACK_HOST}:1"`));
+      assert.equal(agent.child.exitCode, null, 'the agent exited instead of waiting for Postgres');
+      assert.doesNotMatch(agent.output(), /\[agent\] fatal/);
+    } finally {
+      agent.child.kill('SIGKILL');
+      await agent.exited;
+    }
+  },
+);
+
+// As PID 1 in the container the kernel drops any signal the process has no
+// handler for, so a redeploy landing while boot still waits on Postgres would
+// sit out the whole grace period and end in a SIGKILL.
+test('SIGTERM while boot is still waiting for the database exits at once', { timeout: 60_000 }, async () => {
+  const agent = bootAgent({ DATABASE_URL: 'postgres://unused:unused@127.0.0.1:1/unreachable' });
+  try {
+    await agent.waitFor(/database not reachable yet, retrying/);
+    const signalledAt = Date.now();
+    agent.child.kill('SIGTERM');
+    assert.equal(await agent.exited, 143, 'exits with the SIGTERM status from its own handler');
+    assert.ok(Date.now() - signalledAt < 2_000, 'waited on the database instead of exiting');
+  } finally {
+    agent.child.kill('SIGKILL');
+    await agent.exited;
+  }
+});
+
+// The demo ordering itself: the app starts first and the database only answers
+// seconds later. A TCP proxy stands in for the database container - it refuses
+// connections until it starts listening - so boot has to recover and go on to
+// migrate and serve instead of dying on the first refusal.
+test(
+  'boot recovers when the database only arrives after the app',
+  { skip: skipLive, timeout: 90_000 },
+  async () => {
+    const scratch = await scratchDatabase();
+    const upstream = scratch.url;
+    const proxyPort = await freePort();
+    const sockets = new Set<net.Socket>();
+    const proxy = net.createServer((client) => {
+      const server = net.connect(Number(upstream.port || 5432), upstream.hostname);
+      for (const socket of [client, server]) {
+        sockets.add(socket);
+        socket.on('close', () => sockets.delete(socket));
+        socket.on('error', () => {
+          client.destroy();
+          server.destroy();
+        });
+      }
+      client.pipe(server).pipe(client);
+    });
+    const proxyUrl = new URL(upstream.href);
+    proxyUrl.hostname = '127.0.0.1';
+    proxyUrl.port = String(proxyPort);
+
+    const port = await freePort();
+    const agent = bootAgent({ DATABASE_URL: proxyUrl.href, PORT: String(port) });
+    try {
+      await agent.waitFor(/database not reachable yet, retrying/);
+      proxy.listen(proxyPort, '127.0.0.1');
+
+      await agent.waitFor(/admin API \+ panel listening/);
+      const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { ok: true });
+      assert.doesNotMatch(agent.output(), /\[agent\] fatal/);
+    } finally {
+      agent.child.kill('SIGKILL');
+      await agent.exited;
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+      await scratch.drop();
+    }
+  },
+);
+
+test(
+  'boot fails fast on a credential error rather than waiting out the window',
+  { skip, timeout: 60_000 },
+  async () => {
+    const wrongPassword = new URL(liveUrl);
+    wrongPassword.password = 'definitely-not-the-password';
+    const agent = bootAgent({ DATABASE_URL: wrongPassword.href });
+    const startedAt = Date.now();
+    const exitCode = await agent.exited;
+
+    assert.equal(exitCode, 1);
+    assert.ok(
+      Date.now() - startedAt < 25_000,
+      'an authentication failure was retried instead of surfacing immediately',
+    );
+    assert.match(agent.output(), /\[agent\] fatal/);
+    assert.match(agent.output(), /password authentication failed/i);
+    assert.doesNotMatch(agent.output(), /retrying/);
+  },
+);
+
+// The demo failure exactly: nothing sets DATABASE_URL, so the old hardcoded
+// default dialed the compose-only :5544 and the process died before :8787 ever
+// listened. With no default the child resolves everything through PG* like any
+// container does - here at a database of its own, since it boots the whole
+// pipeline. That the empty case then lands on localhost:5432 rather than 5544
+// is asserted without a server in db/pool.noDatabaseUrl.test.ts.
+test(
+  'with no DATABASE_URL the agent boots on the PG* environment and serves health',
+  { skip: skipLive, timeout: 60_000 },
+  async () => {
+    const scratch = await scratchDatabase();
+    const port = await freePort();
+    const agent = bootAgent({
+      DATABASE_URL: undefined,
+      ...pgEnvironment(scratch.url),
+      PORT: String(port),
+      // config.ts loads dotenv, and a laptop running ./up.sh has an
+      // apps/agent/.env holding the compose URL. Point dotenv at a file that
+      // does not exist so the child really resolves from PG*.
+      DOTENV_CONFIG_PATH: join(PACKAGE_ROOT, '.env.does-not-exist'),
+      DOTENV_CONFIG_QUIET: 'true',
+    });
+    try {
+      await agent.waitFor(/admin API \+ panel listening/);
+
+      const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { ok: true });
+
+      // Migrations run before the server listens, so a 200 already implies
+      // they applied - the runner's own bookkeeping says so explicitly.
+      assert.ok(
+        await migrationsRecorded(scratch.url),
+        'the agent served health with no migrations recorded',
+      );
+      assert.doesNotMatch(agent.output(), /\[agent\] fatal/);
+    } finally {
+      agent.child.kill('SIGKILL');
+      await agent.exited;
+      await scratch.drop();
+    }
+  },
+);
+
+// The other half of having no DATABASE_URL: the target is reachable and turns
+// the agent away. PG* that does not match the sidecar - here a database that
+// does not exist, in a container just as often a missing PGUSER/PGPASSWORD -
+// fails with a Postgres error that never mentions DATABASE_URL, which is the
+// same unactionable crash the compose-only default produced.
+test(
+  'a rejected connection with no DATABASE_URL still names DATABASE_URL',
+  { skip: skipLive, timeout: 60_000 },
+  async () => {
+    const absent = new URL(liveUrl);
+    absent.pathname = '/agent_boot_no_such_database';
+    const agent = bootAgent({
+      DATABASE_URL: undefined,
+      ...pgEnvironment(absent),
+      DOTENV_CONFIG_PATH: join(PACKAGE_ROOT, '.env.does-not-exist'),
+      DOTENV_CONFIG_QUIET: 'true',
+    });
+
+    assert.equal(await agent.exited, 1);
+    assert.match(agent.output(), /DATABASE_URL is unset/);
+    assert.match(agent.output(), /PGHOST\/PGPORT\/PGUSER\/PGPASSWORD\/PGDATABASE/);
+    assert.match(agent.output(), new RegExp(`cannot open a database connection to ${absent.host}`));
+    // Nothing about this fixes itself, so it must not spend the wait window.
+    assert.doesNotMatch(agent.output(), /retrying/);
+  },
+);
+
+// Cloud Run sends SIGTERM on every redeploy and scale-in, and SIGKILLs ten
+// seconds later. Before SLE-132 nothing handled it: every article the process
+// held stayed 'running' under a claim nobody would renew, the next instance
+// booted straight past it, and five minutes later the reaper stopped it.
+// Booted with the Dockerfile's own CMD and signalled at that process only, as
+// Cloud Run does: under `pnpm start` pnpm took the signal and exited, and the
+// agent under it never heard it.
+test(
+  'SIGTERM to the container CMD hands every claim back to the queue inside the grace period',
+  { skip: skipLive, timeout: 90_000 },
+  async () => {
+    const scratch = await scratchDatabase();
+    const revision = 'sleekdrops-agent-00132-sig';
+    const agent = bootAgent(
+      { DATABASE_URL: scratch.url.href, K_REVISION: revision },
+      { command: containerCommand() },
+    );
+    const db = new pg.Pool({ connectionString: scratch.url.href, max: 1 });
+    try {
+      await agent.waitFor(/post insights polling/);
+      const workerId = /\[worker\] (worker-\S+) polling/.exec(agent.output())?.[1];
+      assert.ok(workerId?.startsWith(`worker-${revision}-`), 'the worker id names the revision');
+
+      const insert = (claimedBy: string) =>
+        db.query<{ id: string }>(
+          `INSERT INTO articles (title, category, post_type, stage, status, claimed_by, claimed_at,
+                                 heartbeat_at, lease_expires_at, draft_md)
+           VALUES ('Shutdown test card', 'Tech', 'guide', 'seo_review', 'running', $1, now(), now(),
+                   now() + interval '5 minutes', '## Half a draft')
+           RETURNING id`,
+          [claimedBy],
+        );
+      const mine = (await insert(`${workerId}/${randomUUID()}`)).rows[0].id;
+      const theirs = (await insert(`worker-another-instance/${randomUUID()}`)).rows[0].id;
+      await db.query(
+        "INSERT INTO agent_sessions (article_id, agent, status) VALUES ($1, 'seo_reviewer', 'running')",
+        [mine],
+      );
+
+      const signalledAt = Date.now();
+      agent.child.kill('SIGTERM');
+      assert.equal(await agent.exited, 0, 'a clean exit, not a kill');
+      const took = Date.now() - signalledAt;
+      assert.ok(took < 10_000, `exited ${took}ms after SIGTERM, past Cloud Run's 10 second grace`);
+      assert.match(agent.output(), /released 1 claimed article\(s\) back to the queue/);
+
+      const rows = await db.query<{
+        id: string;
+        status: string;
+        stage: string;
+        claimed_by: string | null;
+        lease_expires_at: string | null;
+        draft_md: string | null;
+        lease_requeues: number;
+      }>('SELECT * FROM articles WHERE id = ANY($1)', [[mine, theirs]]);
+      const released = rows.rows.find((r) => r.id === mine)!;
+      assert.equal(released.status, 'queued');
+      assert.equal(released.stage, 'seo_review', 'the same stage, for the next instance to claim');
+      assert.equal(released.draft_md, '## Half a draft');
+      assert.equal(released.claimed_by, null);
+      assert.equal(released.lease_expires_at, null);
+      assert.equal(released.lease_requeues, 0, 'a clean hand-back does not count against the cap');
+      assert.equal(
+        rows.rows.find((r) => r.id === theirs)!.status,
+        'running',
+        'another instance keeps its claim',
+      );
+      const session = await db.query<{ status: string; error: string }>(
+        'SELECT status, error FROM agent_sessions WHERE article_id = $1',
+        [mine],
+      );
+      assert.equal(session.rows[0].status, 'failed');
+      assert.match(session.rows[0].error, /shut down mid-stage; stage re-queued/);
+    } finally {
+      agent.killAll();
+      await agent.exited;
+      await db.end();
+      await scratch.drop();
+    }
+  },
+);
+
+// `pnpm db:up && pnpm db:migrate` runs this while the Postgres container is
+// still starting, so the standalone runner needs the same patience as boot.
+test('the migrate CLI waits for the database instead of failing on the first refusal', async () => {
+  const migration = bootAgent(
+    { DATABASE_URL: 'postgres://unused:unused@127.0.0.1:1/unreachable' },
+    { script: MIGRATE_CLI },
+  );
+  try {
+    await migration.waitFor(/database not reachable yet, retrying/);
+    await migration.waitFor(/"attempt":2/);
+    assert.equal(migration.child.exitCode, null, 'migrate exited instead of waiting for Postgres');
+    assert.doesNotMatch(migration.output(), /\[migrate\] failed/);
+  } finally {
+    migration.child.kill('SIGKILL');
+    await migration.exited;
+  }
+});

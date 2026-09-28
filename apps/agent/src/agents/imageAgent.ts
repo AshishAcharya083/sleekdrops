@@ -13,12 +13,21 @@
 import { generateImage, visionJson } from '../llm/genai.js';
 import { gcsConfigured, uploadPublicImage } from '../tools/gcs.js';
 import { tavilyImageSearch } from '../tools/tavily.js';
+import type { HeroImageSource } from '../distribution/types.js';
 import type { ArticleRow } from '../pipeline/types.js';
 
 export interface ImageResult {
   heroImage: string | null;
   heroAlt: string | null;
   summary: string;
+  /**
+   * Which of the two strategies produced the hero, as a value the pipeline can
+   * store rather than a phrase in `summary`. Null when neither did. It is read
+   * as a rights decision downstream - a found photograph is someone else's and
+   * may not be re-uploaded to a platform that takes a sublicensable licence in
+   * what it is given - so it must not be inferred from prose.
+   */
+  source: HeroImageSource | null;
 }
 
 interface VisionVerdict {
@@ -66,6 +75,7 @@ export async function runImageAgent(
       heroImage: null,
       heroAlt: null,
       summary: 'skipped — GCS_IMAGES_BUCKET not configured; cover fill will render instead',
+      source: null,
     };
   }
 
@@ -105,6 +115,7 @@ Return JSON:
             heroImage: url,
             heroAlt: verdict.alt || title,
             summary: `found web image (${hit.url}) → ${url}`,
+            source: 'found',
           };
         }
       } catch {
@@ -130,12 +141,14 @@ Absolutely NO text, NO logos, NO watermarks, NO people's faces.`,
       heroImage: url,
       heroAlt: `Illustrative image: ${title}`,
       summary: `no usable web image (checked ${checked}) — generated one → ${url}`,
+      source: 'generated',
     };
   } catch (err) {
     return {
       heroImage: null,
       heroAlt: null,
       summary: `no hero image: web search found nothing usable (checked ${checked}) and generation failed (${err instanceof Error ? err.message : err})`,
+      source: null,
     };
   }
 }

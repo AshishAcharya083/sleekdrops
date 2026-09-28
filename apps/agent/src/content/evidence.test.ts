@@ -8,10 +8,16 @@ import {
   barFor,
   checkEvidence,
   countEvidence,
+  daysSinceRelease,
   describeBar,
   EvidenceGateError,
+  inLaunchWindow,
+  LAUNCH_WINDOW_DAYS,
   normaliseDate,
   normaliseDossier,
+  PRE_RELEASE_WINDOW_DAYS,
+  PROTOCOL_OUTLETS,
+  STRATUM_FIX,
   withDiscoveredProducts,
 } from './evidence.js';
 import type { ResearchDossier } from '../pipeline/types.js';
@@ -559,4 +565,200 @@ test('a dossier that was never stored still comes back whole', () => {
   assert.deepEqual(repaired.testedClaims, []);
   assert.deepEqual(repaired.keywords, { primary: '', secondary: [] });
   assert.equal(repaired.products.length, 1);
+});
+
+// ── The launch window ────────────────────────────────────────────────────────
+// A product released last month has no Australian lab result behind it, by
+// design rather than by oversight: CHOICE tests phones through ICRT labs in
+// Europe and publishes weeks to months later, Canstar Blue surveys brands, and
+// ProductReview collects owner reviews from owners who do not exist yet. A
+// tested-claim floor inside that window is not a bar a piece can clear by
+// looking harder.
+
+/** Days back from today, as the dossier would carry it. */
+function daysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+test('the tested-claim floor is the only thing the launch window relaxes', () => {
+  const standing = barFor('guide');
+  const launching = barFor('guide', undefined, true);
+  assert.equal(standing.testedClaims, 2);
+  assert.equal(launching.testedClaims, 0);
+  assert.deepEqual(
+    { ...launching, testedClaims: standing.testedClaims },
+    standing,
+    'expert facts, owner evidence and price observations are untouched',
+  );
+});
+
+test('a piece about a product released last week clears on the evidence that exists', () => {
+  const launchPiece: ResearchDossier = {
+    ...sufficientGuide(),
+    testedClaims: [],
+    launch: { product: 'iPhone 18 Pro', releaseDate: daysAgo(9), sourceUrl: 'https://www.apple.com/au/' },
+  };
+  const verdict = checkEvidence(launchPiece, 'guide');
+  assert.equal(verdict.pass, true);
+  assert.match(verdict.message, /launch window/);
+});
+
+test('the same piece without a release date still fails on tested claims', () => {
+  const noLaunch: ResearchDossier = { ...sufficientGuide(), testedClaims: [] };
+  const verdict = checkEvidence(noLaunch, 'guide');
+  assert.equal(verdict.pass, false);
+  assert.deepEqual(verdict.shortfalls.map((s) => s.label), ['attributed tested claims']);
+});
+
+test('a release older than the window is not a launch piece any more', () => {
+  const stale: ResearchDossier = {
+    ...sufficientGuide(),
+    testedClaims: [],
+    launch: { product: 'iPhone 18 Pro', releaseDate: daysAgo(LAUNCH_WINDOW_DAYS + 1), sourceUrl: '' },
+  };
+  assert.equal(checkEvidence(stale, 'guide').pass, false);
+  assert.equal(inLaunchWindow(stale.launch), false);
+});
+
+test('a pre-order piece is inside the window too - it has even less to cite', () => {
+  const announced = 'https://www.apple.com/au/newsroom/';
+  assert.equal(inLaunchWindow({ product: 'x', releaseDate: daysAgo(-14), sourceUrl: announced }), true);
+  assert.equal(daysSinceRelease({ product: 'x', releaseDate: daysAgo(-14), sourceUrl: announced }), -14);
+  assert.equal(daysSinceRelease(null), null);
+  assert.equal(daysSinceRelease({ product: 'x', releaseDate: 'last month', sourceUrl: announced }), null);
+});
+
+test('a release date years out is a rumour, not a launch window', () => {
+  // Without a bound on the future side, any date at all opens the window and
+  // the tested-claim floor is off for a product nobody can buy.
+  const announced = 'https://www.apple.com/au/newsroom/';
+  assert.equal(
+    inLaunchWindow({ product: 'x', releaseDate: daysAgo(-PRE_RELEASE_WINDOW_DAYS), sourceUrl: announced }),
+    true,
+  );
+  assert.equal(
+    inLaunchWindow({ product: 'x', releaseDate: daysAgo(-PRE_RELEASE_WINDOW_DAYS - 1), sourceUrl: announced }),
+    false,
+  );
+  assert.equal(inLaunchWindow({ product: 'x', releaseDate: daysAgo(-900), sourceUrl: announced }), false);
+});
+
+test('a launch record with no link to check it against relaxes nothing', () => {
+  // It is the one field that lowers the bar instead of meeting it, and it is
+  // model output over search-result text. Unchecked, it is an assertion - and
+  // an assertion is not allowed to switch a floor off.
+  const unsourced: ResearchDossier = {
+    ...sufficientGuide(),
+    testedClaims: [],
+    launch: { product: 'iPhone 18 Pro', releaseDate: daysAgo(9), sourceUrl: '' },
+  };
+  assert.equal(inLaunchWindow(unsourced.launch), false);
+  const verdict = checkEvidence(unsourced, 'guide');
+  assert.equal(verdict.pass, false);
+  assert.deepEqual(verdict.shortfalls.map((s) => s.label), ['attributed tested claims']);
+  // The same date, with the announcement behind it, is a launch piece.
+  assert.equal(
+    checkEvidence(
+      { ...unsourced, launch: { ...unsourced.launch!, sourceUrl: 'https://www.apple.com/au/newsroom/' } },
+      'guide',
+    ).pass,
+    true,
+  );
+});
+
+test('the expert stratum names the outlets that publish a protocol, and the rules around them', () => {
+  // Generated from PROTOCOL_OUTLETS, so the list the prompt is handed and the
+  // list the gate's advice names cannot drift apart.
+  for (const { outlet } of PROTOCOL_OUTLETS) assert.match(STRATUM_FIX.expert, new RegExp(outlet));
+  assert.match(STRATUM_FIX.expert, /Battery Life Test 2\.0/);
+  assert.match(STRATUM_FIX.expert, /Geekbench/);
+  assert.match(STRATUM_FIX.expert, /never as a quality verdict/);
+  assert.match(STRATUM_FIX.expert, /Canstar Blue is a paid-panel brand survey/);
+  assert.match(STRATUM_FIX.expert, /platform-level evidence/);
+});
+
+test('the prompt states the launch-window rule the gate actually applies', () => {
+  const bar = describeBar('guide', 'Tech');
+  assert.match(bar, new RegExp(`within the last ${LAUNCH_WINDOW_DAYS} days`));
+  assert.match(bar, /attributed tested claims floor/);
+  assert.match(bar, /expert-fact floor stays/);
+  // An article has no tested-claim floor to relax, so it is not told about one.
+  assert.doesNotMatch(describeBar('article'), /launch/);
+});
+
+// ── Claims, launch and the review unit, normalised ───────────────────────────
+
+test('a claim keeps both halves, and the tier is never the model’s to declare', () => {
+  const dossier = normaliseDossier({
+    claims: [
+      {
+        subject: 'iPhone 18 Pro',
+        metric: 'Peak brightness',
+        claimedValue: '3,000 nits',
+        claimedBy: 'Apple',
+        measuredValue: '1,684 nits',
+        measuredBy: 'Notebookcheck',
+        conditions: 'spectrophotometer, APL 10%',
+        measuredOn: '2026-9-16',
+        ownTest: true,
+      },
+      { subject: 'x', metric: '', claimedValue: '1' },
+      { subject: 'x', metric: 'Weight' },
+    ],
+  });
+  assert.equal(dossier.claims?.length, 1);
+  assert.equal(dossier.claims?.[0].measuredOn, '2026-09-16', 'an unpadded date is padded, not dropped');
+  assert.equal(dossier.claims?.[0].ownTest, false, 'ownTest only survives on our own measurement');
+});
+
+test('a launch with no usable release date is no launch at all', () => {
+  assert.equal(normaliseDossier({ launch: { product: 'x', releaseDate: 'soon' } }).launch, null);
+  assert.equal(
+    normaliseDossier({ launch: { product: 'x', releaseDate: '2026-09-11' } }).launch?.releaseDate,
+    '2026-09-11',
+  );
+});
+
+test('an unrecognised acquisition is no review-unit record, not a guessed one', () => {
+  assert.equal(normaliseDossier({ reviewUnit: { acquisition: 'borrowed-ish' } }).reviewUnit, null);
+  assert.deepEqual(normaliseDossier({ reviewUnit: { acquisition: 'loan', supplier: 'Apple' } }).reviewUnit, {
+    acquisition: 'loan',
+    supplier: 'Apple',
+    paid: null,
+    returned: null,
+  });
+});
+
+test('a launch link the browser would not follow is dropped, the date is not', () => {
+  // The notice renders this one as an outbound link, and the value is model
+  // output over search-result text nobody controls - so a `javascript:` or
+  // `data:` URL would be a click-to-execute href on a published page.
+  for (const hostile of ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', 'not a url']) {
+    const launch = normaliseDossier({
+      launch: { product: 'iPhone 18 Pro', releaseDate: '2026-09-11', sourceUrl: hostile },
+    }).launch;
+    assert.equal(launch?.releaseDate, '2026-09-11', 'the release date is the record and survives');
+    assert.equal(launch?.sourceUrl, '', `${hostile} is not a link a reader can be given`);
+  }
+  assert.equal(
+    normaliseDossier({
+      launch: { product: 'iPhone 18 Pro', releaseDate: '2026-09-11', sourceUrl: ' https://www.apple.com/au/newsroom/ ' },
+    }).launch?.sourceUrl,
+    'https://www.apple.com/au/newsroom/',
+  );
+});
+
+test('a release date the source only gave to the year is no launch record', () => {
+  // The page tells a reader the day a product went on sale and counts the
+  // window from it; "2026" can do neither, and the frontmatter schema would
+  // refuse it - failing the whole article over one field.
+  assert.equal(normaliseDossier({ launch: { product: 'x', releaseDate: '2026' } }).launch, null);
+  assert.equal(normaliseDossier({ launch: { product: 'x', releaseDate: '2026-09' } }).launch, null);
+});
+
+test('a claim with no subject names nothing and is dropped', () => {
+  const dossier = normaliseDossier({
+    claims: [{ subject: '', metric: 'Peak brightness', claimedValue: '3,000 nits', claimedBy: 'Apple' }],
+  });
+  assert.deepEqual(dossier.claims, []);
 });

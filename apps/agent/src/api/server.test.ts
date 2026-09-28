@@ -247,3 +247,56 @@ test('a hero-image drop without a token is rejected like every other route', asy
 
   assert.equal(res.status, 401);
 });
+
+// ── Retry controls ──────────────────────────────────────────────────────────
+// The stage body param is validated before the route reaches the database,
+// which is what makes these assertable here - and what keeps a mistyped stage
+// from costing a query. The panel keys its copy off these exact strings.
+
+/** A retry action exactly as the panel sends it: POST, bearer, JSON body. */
+function retryCall(body?: unknown): RequestInit {
+  return {
+    method: 'POST',
+    headers: { ...AUTH, 'Content-Type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  };
+}
+
+test('a retry-stage call with no stage is refused before anything is queued', async () => {
+  const { res } = await call(`/api/articles/${ARTICLE_ID}/retry-stage`, retryCall());
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'stage required' });
+});
+
+test('a retry-stage call naming a stage that does not exist says which one', async () => {
+  const { res } = await call(`/api/articles/${ARTICLE_ID}/retry-stage`, retryCall({ stage: 'polish' }));
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'unknown stage "polish"' });
+});
+
+test('done is not something a run can be retried from', async () => {
+  const { res } = await call(`/api/articles/${ARTICLE_ID}/retry-stage`, retryCall({ stage: 'done' }));
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'done is not a runnable stage' });
+});
+
+test('the publisher cannot be reached through the isolated stage test', async () => {
+  const { res } = await call(`/api/articles/${ARTICLE_ID}/test-stage`, retryCall({ stage: 'publish' }));
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'the publish stage cannot be tested in isolation' });
+});
+
+test('the retry controls are behind the admin token like every other route', async () => {
+  for (const path of ['retry-stage', 'test-stage', 'rerun-all', 'cancel']) {
+    const { res } = await call(`/api/articles/${ARTICLE_ID}/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage: 'write' }),
+    });
+    assert.equal(res.status, 401, `${path} must require the token`);
+  }
+});

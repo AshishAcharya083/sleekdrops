@@ -5,15 +5,19 @@ import Breadcrumbs from '@components/seo/Breadcrumbs.astro';
 import Badge from '@components/ui/Badge.astro';
 import IconButton from '@components/ui/IconButton.astro';
 import ArticleBody from '@components/article/ArticleBody.astro';
+import ClaimTrail from '@components/article/ClaimTrail.astro';
+import EvidencePanel from '@components/article/EvidencePanel.astro';
 import EvidenceRail from '@components/article/EvidenceRail.astro';
+import LaunchNotice from '@components/article/LaunchNotice.astro';
 import Sources from '@components/article/Sources.astro';
 import TrustStack from '@components/article/TrustStack.astro';
 import Verdict from '@components/article/Verdict.astro';
 import TableOfContents from '@components/article/TableOfContents.astro';
-import AdUnit from '@components/ads/AdUnit.astro';
 import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro';
 import ProsConsList from '@components/affiliate/ProsConsList.astro';
+import PickEvidence from '@components/affiliate/PickEvidence.astro';
 import ProductCallout from '@components/affiliate/ProductCallout.astro';
+import OfferCallout from '@components/affiliate/OfferCallout.astro';
 import AuthorCard from '@components/blog/AuthorCard.astro';
 import RelatedPosts from '@components/blog/RelatedPosts.astro';
 import { getAllPosts, getRelatedPosts, type BlogPost } from '@lib/posts';
@@ -41,10 +45,28 @@ const product = post.data.product;
 const related = await getRelatedPosts(post, 3);
 const headlineHtml = emphasiseLastWord(post.data.title);
 const stampYear = new Date(post.data.pubDate).getFullYear();
+// The picks block renders its own /go/ CTAs, so it counts toward the
+// disclosure the same way a body link does - a page with a clickable affiliate
+// destination and no visible disclosure beside it is the exact gap the ACCC's
+// sweep faulted.
+const labelledPicks = (post.data.picks ?? []).filter(
+  (pick) => pick.evidence !== undefined || pick.badge !== undefined,
+);
+// Read by the provenance block, which otherwise states what follows from
+// having had no unit - and would contradict a figure labelled as ours.
+const measuredOurselves = (post.data.claims ?? []).some((claim) => claim.tier === 'measured');
 // The disclosure has to be visible alongside the links it disclosed, so it goes
 // under the byline on any page that carries one - which is every pipeline post,
 // and any hand-written one with a /go/ link in the body.
-const hasAffiliateLinks = product !== undefined || /\/go\//.test(post.body);
+// Picks carrying an attached offer: a launch-window product whose price
+// nothing is polling, so the page states the figure, the day it was seen and
+// (for a pre-order) when the reader is actually charged.
+const offerPicks = (post.data.picks ?? []).filter((pick) => pick.offer !== undefined);
+const hasAffiliateLinks =
+  product !== undefined ||
+  offerPicks.length > 0 ||
+  /\/go\//.test(post.body) ||
+  labelledPicks.length > 0;
 const highStakes = post.data.category === 'Health' || post.data.category === 'Finance';
 
 const meta = buildMeta({
@@ -137,7 +159,16 @@ const asideSummary = [
         lastReviewed={post.data.lastReviewed}
         category={post.data.category}
         reviewedBy={author.name}
+        reviewUnit={post.data.reviewUnit}
+        measuredOurselves={measuredOurselves}
       />
+
+      {/* Above the fold on a launch piece, because the fact it states - that
+          nobody has measured one yet - is what a reader needs before the first
+          number, not after the last one. */}
+      {post.data.launch && (
+        <LaunchNotice launch={post.data.launch} claims={post.data.claims} />
+      )}
 
       {hasAffiliateLinks && <AffiliateDisclosure variant="inline" />}
 
@@ -156,10 +187,18 @@ const asideSummary = [
         <ArticleBody>
           {product && <Verdict product={product} postSlug={post.slug} />}
           <Content />
+          {offerPicks.length > 0 && (
+            <section class="offer-block" aria-label="Where to buy">
+              {offerPicks.map((pick) => <OfferCallout pick={pick} />)}
+            </section>
+          )}
           {product && <ProductCallout product={product} postSlug={post.slug} />}
           {product && <ProsConsList pros={product.pros} cons={product.cons} />}
           {hasAffiliateLinks && <AffiliateDisclosure />}
         </ArticleBody>
+        <PickEvidence picks={labelledPicks} claims={post.data.claims} />
+        <ClaimTrail claims={post.data.claims} sources={post.data.sources} />
+        <EvidencePanel sources={post.data.sources} claims={post.data.claims} />
         <Sources
           sources={post.data.sources}
           highStakes={highStakes}
@@ -169,7 +208,11 @@ const asideSummary = [
         />
       </div>
 
-      <aside class="article-aside">
+      {/* `journey-sidebar` is the ad partner's landmark for the sidebar: its
+          wrapper appends the sticky sidebar unit to this column and drives the
+          stickiness itself, which is why the column is position: static below
+          and at least 300px wide. Unique per page by construction. */}
+      <aside class="article-aside journey-sidebar">
         {/* On phones and tablets the rail reflows above the prose, where a
             screenful of metadata otherwise sits between the headline and the
             first paragraph. It collapses into one row there, and the stylesheet
@@ -191,7 +234,6 @@ const asideSummary = [
             />
           </div>
         </details>
-        <AdUnit placement="sidebar" />
       </aside>
     </div>
 
@@ -311,8 +353,11 @@ const asideSummary = [
 
   .article-grid {
     display: grid;
-    grid-template-columns: 1fr 280px;
-    gap: 64px;
+    /* 300px is the ad partner's floor for a sidebar that can hold its sticky
+       unit (excluding padding), and the column has to stay visible from a
+       1100px viewport up - the single-column breakpoint below is 1000px. */
+    grid-template-columns: 1fr 300px;
+    gap: 56px;
     padding: 64px 0 0;
     align-items: start;
   }
@@ -337,7 +382,7 @@ const asideSummary = [
      permanently open sidebar from 1001px up. The element ships closed in the
      HTML and the wide layout opens it in CSS, so the desktop rail is complete
      at first paint - no script, and nothing appears late enough to push the
-     ad slot beneath it down the page. */
+     partner's sidebar unit beneath it down the page. */
   .aside-details { border-bottom: 1px solid var(--hairline); }
   .aside-details > summary {
     display: flex;
@@ -386,19 +431,17 @@ const asideSummary = [
     .aside-details[open] { border-bottom: 0; }
   }
 
+  /* Static, and the full height of the grid row, on purpose. The rail used to
+     be a sticky, viewport-bounded scroll container; the ad partner's wrapper
+     appends its sidebar unit to the end of this column and makes that unit
+     sticky itself once the reader scrolls past the rail's contents, and it
+     requires the container to be position: static for that to hold. A sticky
+     rail alongside would pin the jump list and the unit to the same top edge
+     and stack them. The jump list scrolls with the page instead; its active
+     entry still tracks the reading position while it is on screen. */
   .article-aside {
-    position: sticky;
-    top: 100px;
-    /* Bounded to the viewport and scrollable within it. A sticky rail taller
-       than the screen moves with the scroll, so its lower half is unreachable —
-       which for the ad slot beneath the contents means an impression that can
-       never be viewed, and for a long table of contents meant entries nobody
-       could reach. */
-    max-height: calc(100vh - 120px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    /* The rail is a scroll container now, so leave room for its scrollbar
-       rather than letting one crop the unit's right edge. */
-    scrollbar-gutter: stable;
+    position: static;
+    align-self: stretch;
+    min-width: 0;
   }
 </style>

@@ -15,14 +15,9 @@ const { author } = Astro.props;
     <h4>{author.name}</h4>
     <p>{author.bio}</p>
     {author.focus && <p class="focus">{author.beat} beat: {author.focus}</p>}
-    <p class="honesty">
-      Written with AI assistance and reviewed by a human editor before
-      publication. No SleekDrops article is written from hands-on testing.
-    </p>
     <div class="links">
       <a href={`/author/${author.id}`}>All posts by the editorial team →</a>
       <a href="/how-we-research">How we research</a>
-      <a href="/ai-disclosure">AI disclosure</a>
     </div>
   </div>
 </aside>
@@ -72,7 +67,6 @@ const { author } = Astro.props;
     margin: 0 0 12px;
   }
   .focus { font-size: 13px; }
-  .honesty { font-size: 13px; color: var(--muted); }
   .links {
     display: flex;
     gap: 20px;

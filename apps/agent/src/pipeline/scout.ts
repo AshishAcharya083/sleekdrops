@@ -8,7 +8,7 @@ import { UsageTracker } from '../llm/index.js';
 import { runTopicScout } from '../agents/topicScout.js';
 import { modelFor } from './runner.js';
 
-/** Matches the article worker's stranded-work threshold. */
+/** How long a sweep's heartbeat may go quiet before it stops holding the lock. */
 const STALE_MINUTES = 30;
 const HEARTBEAT_MS = 60_000;
 const FRESH_RUN = `heartbeat_at > now() - interval '${STALE_MINUTES} minutes'`;

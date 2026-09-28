@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { EVENTS, captureError, log, track } from '../analytics';
-import type { Settings } from '../api';
+import type { LinkPlacement, Settings } from '../api';
 import { api } from '../api';
+import { providerLabel } from '../channels';
 
 // Every agent that runs a prompt, and therefore has a model worth overriding.
 // `assembler` and `publisher` run deterministic code; `image_agent` is pinned
@@ -254,6 +255,45 @@ export function SettingsPage() {
       </div>
 
       <div className="section">
+        <h2>Distribution</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Social posting for published articles. Channels, their tokens and their queues are on the
+          Channels tab; these are the defaults a new queue item is created with. First comment keeps
+          the link out of the caption and needs an image we may upload; in body earns the link
+          preview card but spends the network's monthly body-link budget. A network's own setting
+          wins over the default.
+        </p>
+        <div className="settings-grid">
+          <label htmlFor="distribution-enabled">Distribution enabled</label>
+          <select
+            id="distribution-enabled"
+            value={String(settings.distribution_enabled ?? true)}
+            onChange={(e) =>
+              setSettings({ ...settings, distribution_enabled: e.target.value === 'true' })
+            }
+          >
+            <option value="true">yes - queue published articles for every connected channel</option>
+            <option value="false">no - queue nothing and post nothing</option>
+          </select>
+          <PlacementRow
+            id="distribution_link_placement"
+            label="Default link placement"
+            value={settings.distribution_link_placement}
+            onChange={(v) => setSettings({ ...settings, distribution_link_placement: v })}
+          />
+          {networkPlacementKeys(settings).map((key) => (
+            <PlacementRow
+              key={key}
+              id={key}
+              label={`${providerLabel(key.replace(/_link_placement$/, ''))} link placement`}
+              value={settings[key]}
+              onChange={(v) => setSettings({ ...settings, [key]: v })}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="section">
         <h2>Model per agent</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           Empty = the engine defaults above. Model ids route the engine too:
@@ -286,6 +326,38 @@ export function SettingsPage() {
         {saved && <span style={{ color: 'var(--green)' }}>Saved ✓</span>}
       </div>
     </div>
+  );
+}
+
+/** The per-network placement settings present, e.g. `facebook_link_placement`. */
+function networkPlacementKeys(settings: Settings): Array<`${string}_link_placement`> {
+  return Object.keys(settings)
+    .filter(
+      (key): key is `${string}_link_placement` =>
+        key.endsWith('_link_placement') && key !== 'distribution_link_placement',
+    )
+    .sort();
+}
+
+function PlacementRow({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: LinkPlacement | undefined;
+  onChange: (v: LinkPlacement) => void;
+}) {
+  return (
+    <>
+      <label htmlFor={id}>{label}</label>
+      <select id={id} value={value ?? 'first_comment'} onChange={(e) => onChange(e.target.value as LinkPlacement)}>
+        <option value="first_comment">first comment - no link in the caption (recommended)</option>
+        <option value="in_body">in body - link preview card, spends body-link budget</option>
+      </select>
+    </>
   );
 }
 

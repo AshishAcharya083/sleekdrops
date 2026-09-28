@@ -40,10 +40,14 @@ export const EVENTS = {
   scoutRunQueued: 'Scout Run Queued',
   manualTopicSaved: 'Manual Topic Saved',
   articleActioned: 'Article Actioned',
+  stuckRunOpened: 'Stuck Run Opened',
   articleFeedbackSubmitted: 'Article Feedback Submitted',
+  offerSaved: 'Offer Saved',
   publishedPostDeleted: 'Published Post Deleted',
   publishedHeroUpdated: 'Published Post Hero Updated',
   settingsSaved: 'Settings Saved',
+  channelActioned: 'Channel Actioned',
+  distributionItemActioned: 'Distribution Item Actioned',
   connectionSettingChanged: 'Connection Setting Changed',
 } as const;
 

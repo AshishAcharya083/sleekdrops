@@ -127,3 +127,177 @@ test('the indexes a body cites are reported in ascending order, deduped', () => 
 
   assert.deepEqual(citedSourceIndexes(body), [1, 3]);
 });
+
+// ── Measurements, carried through rather than rebuilt ────────────────────────
+// A protocol is what makes a figure checkable, so it travels with the figure.
+// The tier, the publisher and the date already rode through; what was being
+// thrown away was what the source actually measured.
+
+const measuredClaim = {
+  metric: 'Peak brightness',
+  measuredValue: '1,684 nits',
+  measuredBy: 'Notebookcheck',
+  conditions: 'spectrophotometer, 10% APL',
+  measuredOn: '2026-09-16',
+  measuredSourceUrl: 'https://www.notebookcheck.net/iphone-18-pro',
+  withdrawnValue: '2,140 nits',
+};
+
+test('a measurement lands on the source row the fact already carried', () => {
+  const [source] = articleSources(
+    [
+      {
+        fact: 'Measured 1,684 nits.',
+        sourceUrl: 'https://www.notebookcheck.net/iphone-18-pro',
+        tier: 'expert',
+        date: '2026-09-16',
+        publisher: 'Notebookcheck',
+      },
+    ],
+    [measuredClaim],
+  );
+  assert.equal(source.metric, 'Peak brightness');
+  assert.equal(source.measured, '1,684 nits');
+  assert.equal(source.conditions, 'spectrophotometer, 10% APL');
+  assert.equal(source.withdrawn, '2,140 nits', 'a withdrawn figure stays visible beside the corrected one');
+});
+
+test('a tester the facts never quoted is appended, never inserted', () => {
+  // The body's citation markers are numbered against the fact rows, so a new
+  // row among them would renumber every marker after it.
+  const sources = articleSources(
+    [
+      { fact: 'Apple states 3,000 nits.', sourceUrl: 'https://www.apple.com/au/iphone', tier: 'primary',
+        date: '2026-09-09', publisher: 'Apple' },
+    ],
+    [measuredClaim],
+  );
+  assert.deepEqual(sources.map((s) => s.publisher), ['Apple', 'Notebookcheck']);
+  assert.equal(sources[1].tier, 'expert', 'somebody who published a protocol is the expert stratum');
+  assert.equal(sources[1].date, '2026-09-16');
+});
+
+test('a claim nobody measured adds no source row', () => {
+  const sources = articleSources([], [{ ...measuredClaim, measuredValue: null, measuredSourceUrl: null }]);
+  assert.deepEqual(sources, []);
+});
+
+test('a post with no claims produces exactly the list it always did', () => {
+  const facts = [
+    { fact: 'a', sourceUrl: 'https://a.test/1', tier: 'primary' as const, date: '2026-01', publisher: 'A' },
+  ];
+  assert.deepEqual(articleSources(facts), articleSources(facts, []));
+});
+
+// ── Cohort raters, which are never a tested claim ────────────────────────────
+// A Canstar Blue star rating is a brand satisfaction panel and a CHOICE score
+// covers the cohort CHOICE tested. Either one filed as the expert stratum
+// would be shown to a reader under "Independent testing", beside a measured
+// figure, as evidence about a model neither of them measured.
+
+const canstarClaim = {
+  metric: 'Owner satisfaction',
+  measuredValue: '4 out of 5 stars',
+  measuredBy: 'Canstar Blue',
+  conditions: null,
+  measuredOn: '2026-06',
+  measuredSourceUrl: 'https://www.canstarblue.com.au/phones/mobile-phones',
+  withdrawnValue: null,
+};
+
+test('a cohort rater cited only in the claims is an aggregator row, carrying no measurement', () => {
+  const [source] = articleSources([], [canstarClaim]);
+
+  assert.equal(source.publisher, 'Canstar Blue');
+  assert.equal(source.tier, 'aggregator', 'a brand survey is never the expert stratum');
+  assert.equal(source.measured, undefined, 'a rating is not a measurement of the model on the page');
+  assert.equal(source.metric, undefined);
+});
+
+test('a cohort rater the facts already cite keeps its row and gains no measured figure', () => {
+  const [source] = articleSources(
+    [
+      {
+        fact: 'Rated 4 out of 5 for satisfaction.',
+        sourceUrl: 'https://www.canstarblue.com.au/phones/mobile-phones',
+        tier: 'aggregator' as const,
+        date: '2026-06',
+        publisher: 'Canstar Blue',
+      },
+    ],
+    [canstarClaim],
+  );
+
+  assert.equal(source.tier, 'aggregator');
+  assert.equal(source.measured, undefined);
+});
+
+test('a CHOICE lab result on this model is an expert row carrying its figure', () => {
+  // The other side of the same rule: the claim is labelled "independently
+  // measured" when CHOICE's own coverage names the model it bench-tested, so
+  // the source row has to say the same thing the label does.
+  const [source] = articleSources(
+    [],
+    [
+      {
+        ...canstarClaim,
+        subject: 'iPhone 18 Pro',
+        metric: 'Lab score',
+        measuredBy: 'CHOICE',
+        measuredSourceUrl: 'https://www.choice.com.au/phones/best-phones',
+        measuredValue: '78/100',
+        covers: 'the 14 handsets CHOICE lab-tested in August 2026, including the iPhone 18 Pro',
+      },
+    ],
+  );
+
+  assert.equal(source.tier, 'expert');
+  assert.equal(source.measured, '78/100');
+  assert.equal(source.metric, 'Lab score');
+});
+
+test('a CHOICE cohort score is an aggregator row, the same thing the claim is labelled', () => {
+  const [source] = articleSources(
+    [],
+    [
+      {
+        ...canstarClaim,
+        measuredBy: 'CHOICE',
+        measuredSourceUrl: 'https://www.choice.com.au/phones/best-phones',
+        measuredValue: '78/100',
+      },
+    ],
+  );
+
+  assert.equal(source.tier, 'aggregator');
+  assert.equal(source.measured, undefined);
+});
+
+test('a cohort rater with no figure extracted is still an aggregator row', () => {
+  // The claim tier answers "manufacturer" for any row without a measured
+  // value, before it ever looks at who published it - so a tier test alone
+  // filed this as the expert stratum, and the panel printed a canstarblue.com.au
+  // page under "Independent testing / published a protocol beside the number".
+  const [source] = articleSources([], [{ ...canstarClaim, measuredValue: null }]);
+
+  assert.equal(source.publisher, 'Canstar Blue');
+  assert.equal(source.tier, 'aggregator', 'a brand survey is never the expert stratum');
+  assert.equal(source.measured, undefined);
+});
+
+test('a cited page with no measurement behind it is placed as unknown, never promoted', () => {
+  const [source] = articleSources(
+    [],
+    [
+      {
+        ...canstarClaim,
+        measuredBy: 'Notebookcheck',
+        measuredSourceUrl: 'https://www.notebookcheck.net/iphone-18-pro',
+        measuredValue: null,
+      },
+    ],
+  );
+
+  assert.equal(source.tier, 'unknown', 'being cited is not the same as having published a figure');
+  assert.equal(source.measured, undefined);
+});

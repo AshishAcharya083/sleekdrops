@@ -39,7 +39,7 @@ DevTeam Analytics is initialised with `sendBeacon` transport so a click event st
 
 Every event is scrubbed **once** at the `send()` chokepoint in [`src/lib/analytics.ts`](../src/lib/analytics.ts) and handed to every configured sink from that one payload.
 DevTeam Analytics is configured only in the develop workflow and starts there without a prompt. The production workflow supplies no key, and `analytics-env.ts` also discards any key from a build marked `PUBLIC_SITE_ENV=production`.
-The sinks remain independently configurable: an empty `PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY` disables the DevTeam sink and leaves a consented GA4 property counting, and an empty `PUBLIC_GA4_ID` does the reverse.
+The sinks remain independently configurable: an empty `PUBLIC_DEVTEAM_ANALYTICS_INGEST_KEY` disables the DevTeam sink and leaves a configured GA4 property counting, and an empty `PUBLIC_GA4_ID` does the reverse.
 
 GA4 is reached through [`src/lib/ga.ts`](../src/lib/ga.ts), the only module in the site that touches gtag.js.
 Which property it reports into is per-environment build configuration ([`src/lib/ga-env.ts`](../src/lib/ga-env.ts) reading `PUBLIC_GA4_ID`), never a constant — develop and production have their own, and a local `pnpm dev` has none and so tags nothing. See [`docs/deployment.md`](./deployment.md).
@@ -130,7 +130,6 @@ Every page under `src/pages` passes a `screen`, so no `Page Viewed` arrives unna
 | `privacy` | `/privacy` |
 | `disclaimer` | `/disclaimer` |
 | `how-we-research` | `/how-we-research` |
-| `ai-disclosure` | `/ai-disclosure` |
 | `not-found` | the 404 page |
 
 The five names in use before this pass (`home`, `blog-listing`, `blog-post`, `deals-listing`, `deal-detail`) are unchanged, so their history is continuous.
@@ -390,7 +389,7 @@ A reporting failure is swallowed: it can never surface to the visitor or break r
 | `source` | string | Script filename, for an uncaught error. |
 | `lineno` / `colno` | number | Location, for an uncaught error. |
 | `handled` | boolean | `true` for a `captureError()` report, `false` for an unhandled rejection. |
-| `feature` | string | The operation that failed, for a handled report: `web-share`, `clipboard`, `lightbox`, `theme-storage`, `ads-loader`, `consent-storage`, `experiments-payload`, `experiments-refresh`, `experiments-init`, `experiments-read`, `experiments-apply`. |
+| `feature` | string | The operation that failed, for a handled report: `web-share`, `clipboard`, `lightbox`, `theme-storage`, `consent-storage`, `experiments-payload`, `experiments-refresh`, `experiments-init`, `experiments-read`, `experiments-apply`. |
 
 A share sheet the visitor dismisses rejects with `AbortError` and is **not** reported: it is a choice, not a fault, and reporting it would bury the real failures under it.
 

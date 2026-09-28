@@ -9,29 +9,52 @@
 // deleted: the words the writer put on the link - or the slug itself, which is
 // a product name kebab-cased - are that product's name, and a name is the
 // whole input a search destination needs.
+//
+// Ahead of both sits an offer record an editor attached (content/offers.ts).
+// On announcement day the SKU is in no feed and cannot be polled through the
+// Product Advertising API, so a hand-attached destination is the only one that
+// exists - and its price is the only one the page can quote, which it does as
+// a dated RRP rather than as a live figure.
 import {
   amazonSearchUrl,
   estimateReadTime,
   goLinkSearchTerms,
   goSlugsIn,
   HOME_CURRENCY,
+  isWebUrl,
   MONETISED_INTENTS,
   pickCover,
+  todayInSydney,
   validateArticle,
 } from '../content/contract.js';
+import { pageClaims, pickEvidence } from '../content/claims.js';
+import { offerLinkRow, pickOfferFrom } from '../content/offers.js';
 import { articleSources, stripUnresolvedCitations } from '../content/sources.js';
 import { productSearchTerm, verifyAmazonProductUrl } from '../tools/amazon.js';
-import type { AffiliateLinkRow, ArticleRow } from '../pipeline/types.js';
+import type { AffiliateLinkRow, ArticleRow, ProductOffer } from '../pipeline/types.js';
 
 export interface AssembledArticle {
   frontmatter: Record<string, unknown>;
   affiliateLinks: AffiliateLinkRow[];
   /** Body after stripping the /go/ links that could not be healed either. */
   body: string;
+  /** Slugs whose destination came from an attached offer record. */
+  offerSlugs: string[];
   /** Slugs linked to an Amazon search built from the draft's own words. */
   healedSlugs: string[];
   droppedSlugs: string[];
 }
+
+/**
+ * Categories whose subject is a physical thing somebody could have sent us.
+ *
+ * The review-unit disclosure only answers a question the piece raises. A
+ * savings-account explainer or a travel guide has no unit to have been lent,
+ * and "we were not sent a unit and did not buy one" under its byline answers
+ * nobody while displacing the line that piece does need - the one saying we do
+ * not test products.
+ */
+const PHYSICAL_GOODS_CATEGORIES = new Set(['Tech', 'Home', 'Fashion', 'Health']);
 
 function uniqueEntities(entities: string[]): string[] {
   const seen = new Set<string>();
@@ -42,12 +65,19 @@ function uniqueEntities(entities: string[]): string[] {
   return [...seen];
 }
 
-export async function runAssembler(article: ArticleRow): Promise<AssembledArticle> {
+export async function runAssembler(
+  article: ArticleRow,
+  offers: ProductOffer[] = [],
+): Promise<AssembledArticle> {
   const brief = article.outline!;
   let body = article.draft_md!;
   const slugsInBody = goSlugsIn(body);
   const products = article.research?.products ?? [];
-  const today = new Date().toISOString().slice(0, 10);
+  // The audience's day, not the server's: every date stamped below is a
+  // calendar day this publication states - the pubDate, the review stamp, and
+  // the day an offer's price is judged current against.
+  const today = todayInSydney();
+  const offerBySlug = new Map(offers.map((offer) => [offer.go_slug, offer]));
 
   // The deterministic parts never go through the LLM. A re-assembly (e.g. the
   // admin-feedback loop) keeps the original pubDate and any hero image already
@@ -91,9 +121,23 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
     if (heroAlt) frontmatter.heroAlt = heroAlt;
   }
 
-  // One affiliate row per /go/ slug in the body, straight from the dossier.
+  // The resolution order, in the order it resolves. An offer an editor
+  // attached outranks everything the pipeline can build for itself: it is the
+  // only destination that can exist on announcement day, when the SKU is in no
+  // feed and cannot be polled through the Product Advertising API. Then a
+  // liveness-verified ASIN, then the search link healed out of the draft.
   const bySlug = new Map<string, AffiliateLinkRow>();
+  const offerSlugs: string[] = [];
   for (const slug of slugsInBody) {
+    const offer = offerBySlug.get(slug);
+    if (!offer) continue;
+    bySlug.set(slug, offerLinkRow(offer, brief.slug));
+    offerSlugs.push(slug);
+  }
+
+  // One affiliate row per remaining /go/ slug in the body, from the dossier.
+  for (const slug of slugsInBody) {
+    if (bySlug.has(slug)) continue;
     const product = products.find((p) => p.goSlug === slug);
     if (!product) continue; // no dossier product behind this slug → stripped below
 
@@ -155,11 +199,17 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
       .replace(new RegExp(`/go/${slug}`, 'g'), '');
   }
 
+  // The tier-labelled figures the page prints. Built before the source list
+  // so a tester the facts never happened to quote still reaches it.
+  const claims = pageClaims(
+    article.research?.claims ?? [],
+    (subject) => products.find((p) => p.name.trim().toLowerCase() === subject.trim().toLowerCase())?.goSlug,
+  );
   // The sources the page shows, and the markers in the body that point at
   // them. A marker numbered past the end of the list has nothing to link to,
   // so it goes the same way an unresolvable /go/ link does — the sentence
   // survives, the broken reference does not.
-  const sources = articleSources(article.research?.facts ?? []);
+  const sources = articleSources(article.research?.facts ?? [], article.research?.claims ?? []);
   body = stripUnresolvedCitations(body, sources.length);
   frontmatter.readTime = estimateReadTime(body);
 
@@ -167,27 +217,86 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
   // the resolved affiliate rows, not the raw body, so every Offer URL the site
   // emits has a live /go/ destination behind it.
   const entities = uniqueEntities(article.keyword_plan?.entities ?? []);
+  const priorBadges = new Map(
+    (Array.isArray(prior.picks) ? (prior.picks as Array<Record<string, unknown>>) : [])
+      .filter((pick) => typeof pick.goSlug === 'string' && typeof pick.badge === 'string')
+      .map((pick) => [pick.goSlug as string, pick.badge as string]),
+  );
   const picks = [...bySlug.keys()].flatMap((slug) => {
     const product = products.find((p) => p.goSlug === slug);
-    if (!product) return [];
+    const offer = offerBySlug.get(slug);
+    // An attached offer names its own product, so a launch-window SKU the
+    // dossier never carried is still a pick - which is the point: it is the
+    // one the reader most needs the release date and the price stamp for.
+    const name = (product?.name ?? offer?.product_name ?? '').trim();
     // A nameless product is a broken dossier row, not a pick. Skipping it keeps
     // the article publishable — the affiliate link behind it still works.
-    const name = product.name.trim();
     if (!name) return [];
-    const brand = product.brand?.trim();
-    const price = product.approxPrice?.trim();
+    const brand = product?.brand?.trim();
+    // The offer's figure is a price somebody actually saw on a stated day; the
+    // dossier's is an approximation from the research. The dated one wins, and
+    // rides with the stamp that says what it is.
+    const pickOffer = offer ? pickOfferFrom(offer, today) : null;
+    const price = pickOffer?.price ?? product?.approxPrice?.trim();
+    // An award is editorial and survives a re-assembly: it was not the
+    // research's to give, and it is not the research's to take away. What it
+    // may not survive is the claim check below, which refuses a badge with
+    // nothing measured behind it however it got here.
+    const badge = priorBadges.get(slug);
     return [
       {
         name,
         ...(brand ? { brand } : {}),
         ...(price ? { price } : {}),
         goSlug: slug,
+        ...(badge ? { badge } : {}),
+        evidence: pickEvidence({ name, goSlug: slug }, claims),
+        ...(pickOffer ? { offer: pickOffer } : {}),
       },
     ];
   });
   if (sources.length > 0) frontmatter.sources = sources;
   if (entities.length > 0) frontmatter.entities = entities;
   if (picks.length > 0) frontmatter.picks = picks;
+  if (claims.length > 0) frontmatter.claims = claims;
+  // The launch window is a fact about the product, not about the piece, so it
+  // rides through every re-assembly untouched. The page reads the date and
+  // works out for itself whether the window is still open.
+  if (article.research?.launch?.releaseDate) {
+    const launch = article.research.launch;
+    frontmatter.launch = {
+      product: launch.product || (picks[0]?.name ?? brief.seoTitle),
+      releaseDate: launch.releaseDate,
+      // Re-checked rather than trusted: this dossier may have been filed
+      // before the researcher gated the scheme, and the notice renders it as
+      // an outbound link. A bad link is dropped; the release date stands.
+      ...(isWebUrl(launch.sourceUrl ?? '') ? { sourceUrl: launch.sourceUrl } : {}),
+    };
+  }
+  // Stated on every piece about a product, including - especially - the case
+  // where there was no unit. Silence is what the ACCC's reviews sweep found
+  // most often, and "we were not sent one" is the disclosure a reader of a
+  // no-sponsored-posts site is owed. A piece with no product in it is the one
+  // case where the sentence is noise rather than disclosure. Posts already in
+  // D1 carry none of this and render exactly as they did until they are next
+  // re-assembled.
+  const unit = article.research?.reviewUnit ?? null;
+  // A benefit actually received is disclosed wherever it lands: a loaned or
+  // bought unit is the disclosure the sweep is about, and the category it was
+  // filed under does not change that.
+  const aboutAProduct =
+    (unit !== null && unit.acquisition !== 'none') ||
+    picks.length > 0 ||
+    products.length > 0 ||
+    PHYSICAL_GOODS_CATEGORIES.has(article.category);
+  if (aboutAProduct) {
+    frontmatter.reviewUnit = {
+      acquisition: unit?.acquisition ?? 'none',
+      ...(unit?.supplier ? { supplier: unit.supplier } : {}),
+      ...(unit?.paid ? { paid: unit.paid } : {}),
+      ...(unit?.returned ? { returned: unit.returned } : {}),
+    };
+  }
   frontmatter.currency = HOME_CURRENCY;
 
   // Anything left is a genuine contract violation (schema, raw merchant URL,
@@ -213,5 +322,5 @@ export async function runAssembler(article: ArticleRow): Promise<AssembledArticl
     );
   }
 
-  return { frontmatter, affiliateLinks: finalLinks, body, healedSlugs, droppedSlugs };
+  return { frontmatter, affiliateLinks: finalLinks, body, offerSlugs, healedSlugs, droppedSlugs };
 }

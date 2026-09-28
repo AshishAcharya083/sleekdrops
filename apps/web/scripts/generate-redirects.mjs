@@ -62,6 +62,9 @@ const systemRewrites = [
   '/author/lina /author/desk 301',
   '/author/sam /author/desk 301',
   '/author/beatriz /author/desk 301',
+  // The standalone AI-assistance page was folded into the methodology page in
+  // September 2026; its URL was linked from every article, so it forwards.
+  '/ai-disclosure /how-we-research 301',
 ];
 
 // Validate every entry has a fallback destination. `default` is the safety net

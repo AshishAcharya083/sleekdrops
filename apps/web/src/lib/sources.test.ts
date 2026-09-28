@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 
 import {
   agoLabel,
+  citationRel,
   displayUrl,
   FAST_REVIEW_INTERVAL_DAYS,
   formatSourceDate,
@@ -225,4 +226,18 @@ test('the sources a reader sees are the sources the page cites in its markup', (
     toSourceEntries(post().data.sources).map((entry) => entry.url),
     cited,
   );
+});
+
+test('a citation never passes a vote, and one we earn from says so', () => {
+  // nofollow on every outbound citation: we are pointing at evidence, not
+  // endorsing a page. `sponsored` on top of it wherever the destination is a
+  // storefront this site earns from - Google asks for it on an affiliate
+  // destination, and it is what makes the "a commission never decides a
+  // recommendation" promise checkable from the markup.
+  assert.equal(citationRel('https://www.gsmarena.com/apple_iphone_18_pro-review.php'), 'noopener nofollow');
+  assert.equal(citationRel('https://www.amazon.com.au/dp/B0EXAMPLE'), 'noopener sponsored nofollow');
+  assert.equal(citationRel('https://smile.amazon.com/dp/B0EXAMPLE'), 'noopener sponsored nofollow');
+  // A host that merely ends in the same letters is not the storefront.
+  assert.equal(citationRel('https://notamazon.com/review'), 'noopener nofollow');
+  assert.equal(citationRel('https://amazon.com.au.example.net/review'), 'noopener nofollow');
 });

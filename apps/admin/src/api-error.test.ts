@@ -53,6 +53,24 @@ test('a 5xx says the server errored and carries the trace id to the agent logs',
   assert.match(message, /server errored/i);
   assert.match(message, new RegExp(TRACE_ID));
   assert.doesNotMatch(message, /unreachable/i);
+  assert.doesNotMatch(message, /internal server error/, 'the opaque message adds nothing');
+});
+
+test('a 5xx that explains itself says so, instead of only naming a trace id', async () => {
+  // POST /api/articles/:id/test-stage answers a failed isolated run with a
+  // scrubbed sentence of its own; the panel renders it rather than sending the
+  // operator to the logs for something the response already said.
+  const said =
+    'seo_reviewer is set to run on claude-opus-5. Claude engine not configured - paste a subscription token in admin Settings.';
+  const res = new Response(JSON.stringify({ error: said }), {
+    status: 500,
+    headers: { 'Content-Type': 'application/json', [TRACE_HEADER]: TRACE_ID },
+  });
+  const error = apiErrorFromResponse(res, await res.json(), TRACE_HEADER);
+
+  const message = describeApiError(error);
+  assert.match(message, new RegExp(said.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(message, new RegExp(TRACE_ID), 'and still names its log lines');
 });
 
 test('a failure with no body still picks the trace id off the echoed header', async () => {

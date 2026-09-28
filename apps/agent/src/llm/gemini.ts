@@ -17,7 +17,17 @@ import {
   stringifyContent,
 } from '@google/adk';
 import { config } from '../config.js';
+import { withDeadline } from '../lib/deadline.js';
 import type { ChatOptions, LlmResult, LlmSettings } from './index.js';
+
+/**
+ * Wall-clock allowance for one Gemini call, matching the Claude engine's.
+ * `runEphemeral` takes no abort signal (only `runAsync` does), so the bound
+ * has to be on consuming the stream: without it a grounded call that never
+ * yields another event is indistinguishable from one still thinking, and the
+ * stage waiting on it has no way to end.
+ */
+const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 
 function geminiModel(model: string, settings: LlmSettings): Gemini {
   const normalized = model.replace(/^google\//, '');
@@ -57,16 +67,30 @@ export async function geminiChat(opts: ChatOptions, settings: LlmSettings): Prom
   let text = '';
   let tokensInput = 0;
   let tokensOutput = 0;
-  for await (const event of runner.runEphemeral({
+  const events = runner.runEphemeral({
     userId: 'pipeline',
     newMessage: { role: 'user', parts: [{ text: opts.prompt }] },
-  })) {
-    if (event.usageMetadata) {
-      tokensInput = event.usageMetadata.promptTokenCount ?? tokensInput;
-      tokensOutput = event.usageMetadata.candidatesTokenCount ?? tokensOutput;
-    }
-    if (isFinalResponse(event)) text = stringifyContent(event);
-  }
+  });
+  await withDeadline(
+    REQUEST_TIMEOUT_MS,
+    async () => {
+      for await (const event of events) {
+        if (event.usageMetadata) {
+          tokensInput = event.usageMetadata.promptTokenCount ?? tokensInput;
+          tokensOutput = event.usageMetadata.candidatesTokenCount ?? tokensOutput;
+        }
+        if (isFinalResponse(event)) text = stringifyContent(event);
+      }
+    },
+    () => {
+      // Closing the generator releases the call; it is best effort because a
+      // stream that is not yielding may not accept a return either.
+      void events.return(undefined).catch(() => {});
+      return new Error(
+        `Gemini engine did not answer within ${REQUEST_TIMEOUT_MS / 60_000} minutes`,
+      );
+    },
+  );
   if (!text) throw new Error('Gemini engine returned an empty completion');
   return {
     text,

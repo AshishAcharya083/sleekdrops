@@ -20,13 +20,14 @@
 import { tmpdir } from 'node:os';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
+import { withDeadline } from '../lib/deadline.js';
 import { VERIFY_TOOLS, verificationServer } from './searchTools.js';
 import type { ChatOptions, LlmResult, LlmSettings } from './index.js';
 
 /**
  * Turn budget when search is on. Generous enough for a handful of searches and
- * the pages behind them, bounded so a model that keeps looking can't run the
- * stage into the worker's 30-minute stranded-claim recovery.
+ * the pages behind them, bounded so a model that keeps looking can't spend the
+ * whole of its stage's wall-clock budget on one call.
  */
 const SEARCH_MAX_TURNS = 24;
 
@@ -43,6 +44,18 @@ const SEARCH_MAX_TURNS = 24;
  */
 const SINGLE_SHOT_MAX_TURNS = 6;
 
+/**
+ * Wall-clock allowance for one call.
+ *
+ * This used to be `setTimeout(() => abort.abort(), TIMEOUT_MS)` and nothing
+ * else, which is not a timeout: aborting only asks the SDK to stop. If the
+ * for-await over its stream never yields again - the exact failure this exists
+ * for - the await never settles, the `finally` is never reached, and the call
+ * outlives its own abort with nothing left to stop it. The deadline now
+ * settles the promise the caller is waiting on, and the abort plus the timer
+ * cleanup happen on the timeout path itself rather than in a `finally` that
+ * may never run.
+ */
 const TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface ClaudeCredential {
@@ -111,40 +124,52 @@ export async function claudeChat(opts: ChatOptions, settings: LlmSettings): Prom
     : opts.prompt;
 
   const abort = new AbortController();
-  const timeout = setTimeout(() => abort.abort(), TIMEOUT_MS);
-  try {
-    const run = query({
-      prompt,
-      options: { ...queryOptions(opts, model, env), abortController: abort },
-    });
-    for await (const message of run) {
-      if (message.type !== 'result') continue;
-      if (message.subtype !== 'success') {
-        const budget = opts.search ? SEARCH_MAX_TURNS : SINGLE_SHOT_MAX_TURNS;
-        throw new Error(
-          message.subtype === 'error_max_turns'
-            ? `Claude engine hit its ${budget}-turn budget before answering`
-            : `Claude engine failed (${message.subtype})`,
-        );
+  const run = query({
+    prompt,
+    options: { ...queryOptions(opts, model, env), abortController: abort },
+  });
+
+  return withDeadline(
+    TIMEOUT_MS,
+    async () => {
+      for await (const message of run) {
+        if (message.type !== 'result') continue;
+        if (message.subtype !== 'success') {
+          const budget = opts.search ? SEARCH_MAX_TURNS : SINGLE_SHOT_MAX_TURNS;
+          throw new Error(
+            message.subtype === 'error_max_turns'
+              ? `Claude engine hit its ${budget}-turn budget before answering`
+              : `Claude engine failed (${message.subtype})`,
+          );
+        }
+        if (!message.result) throw new Error('Claude engine returned an empty completion');
+        const usage = message.usage;
+        return {
+          text: message.result,
+          model,
+          usage: {
+            tokensInput:
+              (usage.input_tokens ?? 0) +
+              (usage.cache_read_input_tokens ?? 0) +
+              (usage.cache_creation_input_tokens ?? 0),
+            tokensOutput: usage.output_tokens ?? 0,
+            // 0 on a subscription; real USD when the API-key fallback is active.
+            costUsd: message.total_cost_usd ?? 0,
+          },
+        };
       }
-      if (!message.result) throw new Error('Claude engine returned an empty completion');
-      const usage = message.usage;
-      return {
-        text: message.result,
-        model,
-        usage: {
-          tokensInput:
-            (usage.input_tokens ?? 0) +
-            (usage.cache_read_input_tokens ?? 0) +
-            (usage.cache_creation_input_tokens ?? 0),
-          tokensOutput: usage.output_tokens ?? 0,
-          // 0 on a subscription; real USD when the API-key fallback is active.
-          costUsd: message.total_cost_usd ?? 0,
-        },
-      };
-    }
-    throw new Error('Claude engine ended without a result message');
-  } finally {
-    clearTimeout(timeout);
-  }
+      throw new Error('Claude engine ended without a result message');
+    },
+    () => {
+      // Both of these on the timeout path, not in a `finally`: the abort tears
+      // down the CLI child process, and closing the stream releases the
+      // iterator the abort alone may never reach. Best effort - a stream that
+      // has stopped yielding may not accept a return either.
+      abort.abort();
+      void run.return(undefined).catch(() => {});
+      return new Error(
+        `Claude engine did not answer within ${TIMEOUT_MS / 60_000} minutes`,
+      );
+    },
+  );
 }
