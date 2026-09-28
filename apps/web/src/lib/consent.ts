@@ -7,18 +7,18 @@
  * privacy-signal boolean and acts on the result; `./ads` feeds it the same two
  * things for the advertising category.
  *
- * The model is deployment-aware for analytics. Advertising consent is collected
- * by Google's certified CMP and is not decided by this record:
+ * The model is opt-out for analytics. Advertising consent is collected by the
+ * advertising partner's consent platform and is not decided by this record:
  *
- *  - A configured non-production preview starts anonymous analytics silently.
- *    Production and an unconfigured preview keep it off until the visitor
- *    enables it from Privacy preferences.
+ *  - Anonymous analytics is ON by default, on every deployment. The site is
+ *    Australian, where the Privacy Act does not condition first-party,
+ *    aggregate analytics on a prior opt-in, and it can be switched off at any
+ *    time from the footer's Privacy preferences.
  *  - Withdrawal clears everything the grant stored and sends a Consent Mode v2
- *    denial to Google Analytics. A stored opt-out always overrides a deployment
- *    default.
+ *    denial to Google Analytics. A stored opt-out always overrides the default.
  *  - The legacy `ads` field stays readable so existing version-2 records migrate
- *    safely, but it is always denied here. AdSense and its certified CMP own the
- *    advertising decision independently.
+ *    safely, but it is always denied here. The advertising partner's consent
+ *    platform owns the advertising decision independently.
  *  - A Global Privacy Control / Do-Not-Track signal switches every category off,
  *    over the default and over a stored grant alike.
  */

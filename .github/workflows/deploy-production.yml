@@ -94,7 +94,7 @@ jobs:
           # name. Public: it ships in the JS bundle every visitor downloads, so
           # it is a repo/environment *variable* rather than a secret.
           #
-          # Per environment for the reason the AdSense ids are: one property
+          # Per environment for the reason the ad partner's id is: one property
           # receiving both sites means every figure production is judged on -
           # sessions, conversion rate, the affiliate click-through - is inflated
           # by preview traffic, and nothing in GA4 can separate the two after the
@@ -113,20 +113,21 @@ jobs:
           # back to its code-side default.
           PUBLIC_DEVTEAM_FLAGS_HOST: ${{ vars.DEVTEAM_FLAGS_HOST }}
           PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY: ${{ secrets.DEVTEAM_FLAGS_CLIENT_KEY }}
-          # Google AdSense - publisher id (ca-pub-...) + one slot id per placement.
-          # All public: they ship in the ad markup every visitor downloads, so they
-          # are repo *variables* rather than secrets. Held in repo settings for the
-          # same reason as the keys above - they are minted per environment in the
-          # AdSense console, and a value from the wrong environment reports its
-          # revenue against the wrong property while the page looks healthy.
+          # Journey by Mediavine - this site's id, the `<id>` in the script
+          # wrapper `//scripts.scriptwrapper.com/tags/<id>.js` issued in the
+          # Journey dashboard (Settings → Ad Setup) once the site is approved.
+          # Public: it ships in the markup every visitor downloads, so it is an
+          # environment *variable* rather than a secret.
           #
-          # An empty publisher id disables ads silently: no partner script, no
-          # ads.txt, nothing to consent to.
-          PUBLIC_ADSENSE_CLIENT: ${{ vars.ADSENSE_CLIENT }}
-          PUBLIC_ADSENSE_SLOT_ARTICLE_MID: ${{ vars.ADSENSE_SLOT_ARTICLE_MID }}
-          PUBLIC_ADSENSE_SLOT_ARTICLE_END: ${{ vars.ADSENSE_SLOT_ARTICLE_END }}
-          PUBLIC_ADSENSE_SLOT_SIDEBAR: ${{ vars.ADSENSE_SLOT_SIDEBAR }}
-          PUBLIC_ADSENSE_SLOT_FEED: ${{ vars.ADSENSE_SLOT_FEED }}
+          # Production only. The wrapper is issued for sleekdrops.com and works
+          # nowhere else; `src/lib/ads-env.ts` discards the id on any other
+          # deployment and deploy-develop.yml pins it empty. An empty value
+          # serves no ads and loads no partner script at all.
+          PUBLIC_MEDIAVINE_SITE_ID: ${{ vars.MEDIAVINE_SITE_ID }}
+          # Optional: fetch the partner's authorised-sellers file from this URL
+          # at build time instead of publishing the committed copy at
+          # apps/web/ads/ads.txt. Production only; see apps/web/ads/README.md.
+          ADS_TXT_URL: ${{ vars.ADS_TXT_URL }}
           # Used by apps/web/scripts/fetch-content.mjs to read posts +
           # affiliate links from Cloudflare D1 during the prebuild step. The
           # database id is not a secret; CLOUDFLARE_D1_TOKEN needs

@@ -12,7 +12,7 @@
  * breakpoint, because the width at which a table overflows is a property of the
  * table - a three-column table never needs the hint, a seven-column one needs it
  * well above phone widths. The measuring belongs to the DOM; the decision is
- * this pure rule, tested without one (the `./ad-placement` pattern).
+ * this pure rule, tested without one (the `./anchor-scroll` pattern).
  */
 
 /**
