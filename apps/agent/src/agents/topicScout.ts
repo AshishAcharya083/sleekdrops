@@ -37,6 +37,9 @@ export function scoutRequest(
 ): Pick<ChatOptions, 'system' | 'temperature' | 'search' | 'prompt'> {
   const { platform } = ctx;
   const market = editionMarket(ctx.edition);
+  // The reply schema leaves out eventStartsAt so a platform without
+  // event-bound posts keeps its prompt; one with them asks for it in its
+  // scout goal, and the parser below accepts it either way.
   return {
     system: withAgentGoal(
       ctx,

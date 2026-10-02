@@ -97,7 +97,6 @@ export function shapeRecord(shape: ShapeRecord & { description?: string }): Shap
   return record;
 }
 
-
 /**
  * The shapes this platform offers for a post type, in platform order. An
  * unrecognised post type still gets the platform's whole library rather than

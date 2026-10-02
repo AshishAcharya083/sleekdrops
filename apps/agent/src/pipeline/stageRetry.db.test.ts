@@ -105,6 +105,9 @@ async function insertPublishable(fields: Record<string, unknown> = {}): Promise<
     status: 'running',
     claimed_by: 'test-worker',
     claimed_at: new Date(),
+    // A running row with no live lease is lapsed to any other db test file's
+    // reaper, which would re-queue it before runStage's heartbeat starts.
+    lease_expires_at: new Date(Date.now() + 10 * 60_000),
     slug,
     draft_md: '# Best cordless stick vacuums\n\nA body.',
     frontmatter: JSON.stringify({ title: 'Best cordless stick vacuums', author: 'desk' }),

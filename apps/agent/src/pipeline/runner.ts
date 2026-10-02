@@ -53,7 +53,6 @@ import {
 import { scrubSecrets, stageTimeoutError } from './stageTimeout.js';
 import { StageTimeoutError } from './types.js';
 import type { ArticleRow, SeoReview, SessionStatus, Stage, TopicRow } from './types.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('pipeline');
 
@@ -443,7 +442,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
         }
         summary = image.summary;
       }
-      const publishMode = await getSetting<string>(SLEEKDROPS_PLATFORM_ID, 'publish_mode', 'approval');
+      const publishMode = await getSetting<string>(article.platform_id, 'publish_mode', 'approval');
       next =
         publishMode === 'approval'
           ? { stage: 'publish', status: 'waiting_approval' }
@@ -515,7 +514,7 @@ export async function runStage(
     await q(
       `INSERT INTO agent_sessions (article_id, platform_id, agent, status, summary, error, attempt, ended_at)
        VALUES ($1, $6, $2, 'failed', $3, $4, $5, now())`,
-      [article.id, agent, `${stage} could not start`, message, article.attempt ?? 1, SLEEKDROPS_PLATFORM_ID],
+      [article.id, agent, `${stage} could not start`, message, article.attempt ?? 1, article.platform_id],
     );
     await finishArticle(article, {
       status: 'failed',
@@ -578,7 +577,7 @@ export async function runStage(
         `INSERT INTO agent_sessions (article_id, platform_id, agent, model, attempt)
          VALUES ($1, $5, $2, $3, $4)
          RETURNING id`,
-        [article.id, agent, model, article.attempt ?? 1, SLEEKDROPS_PLATFORM_ID],
+        [article.id, agent, model, article.attempt ?? 1, article.platform_id],
       );
 
       // Only while this run's session is still open. A reaper or a boot

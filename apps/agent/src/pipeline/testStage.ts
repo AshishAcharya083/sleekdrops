@@ -24,7 +24,6 @@ import { parseStageParam, type StageParse } from './retry.js';
 import { modelFor, NO_LLM_AGENTS, STAGE_AGENT } from './runner.js';
 import { scrubSecrets, stageBudgetSeconds, stageTimeoutError } from './stageTimeout.js';
 import { StageTimeoutError, type ArticleRow, type Stage, type TopicRow } from './types.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 export interface TestStageResult {
   sessionId: string;
@@ -136,7 +135,7 @@ async function recordSession(
       tracker.tokensOutput,
       tracker.costUsd,
       tracker.llmCalls,
-      SLEEKDROPS_PLATFORM_ID,
+      article.platform_id,
     ],
   );
   return session.id;
