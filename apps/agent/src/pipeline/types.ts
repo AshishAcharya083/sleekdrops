@@ -116,6 +116,16 @@ export class StageTimeoutError extends Error {
 export interface ArticleRow {
   id: string;
   topic_id: string | null;
+  /** The platform (brand) this article is written for - see platform/registry.ts. */
+  platform_id: string;
+  /** The edition (audience) of that platform it is written for. */
+  edition_id: string;
+  /** When the event an event-bound piece previews starts; null for none. */
+  event_starts_at: Date | null;
+  /** When the prices an event-bound piece quotes were observed; null for none. */
+  odds_as_at: Date | null;
+  /** The platform_profile_versions row current at commissioning; null before versioning. */
+  profile_version: number | null;
   title: string;
   slug: string | null;
   category: string;
@@ -210,6 +220,10 @@ export interface ReferenceMaterial {
 
 export interface TopicRow {
   id: string;
+  platform_id: string;
+  edition_id: string;
+  event_starts_at: Date | null;
+  odds_as_at: Date | null;
   title: string;
   category: string;
   post_type: string;

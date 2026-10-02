@@ -100,7 +100,7 @@ test('a worker claims the oldest queued search and will not overlap a live one',
 test('a stranded search is re-queued and its abandoned session is closed', { skip }, async () => {
   const stale = await seed('running', 31, '1998-01-01T00:00:00Z');
   await q(
-    "INSERT INTO agent_sessions (scout_run_id, agent) VALUES ($1, 'topic_scout')",
+    "INSERT INTO agent_sessions (platform_id, scout_run_id, agent) VALUES ('sleekdrops', $1, 'topic_scout')",
     [stale],
   );
 

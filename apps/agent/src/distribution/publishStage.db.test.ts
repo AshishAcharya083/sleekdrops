@@ -70,8 +70,8 @@ function stubCloudflareAndGithub(): { dispatches: number } {
 
 async function connect(): Promise<string> {
   const [row] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref)
-     VALUES ($1, $2, 'stub-publish-token') RETURNING id`,
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref)
+     VALUES ('sleekdrops', $1, $2, 'stub-publish-token') RETURNING id`,
     [PROVIDER, `page-${randomUUID().slice(0, 8)}`],
   );
   connections.push(row.id);
@@ -80,9 +80,9 @@ async function connect(): Promise<string> {
 
 async function article(fields: { heroImageSource?: HeroImageSource } = {}): Promise<ArticleRow> {
   const [row] = await q<ArticleRow>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, draft_md,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, draft_md,
                            frontmatter, affiliate_links, hero_image_source)
-     VALUES ($1, $2, 'Tech', 'guide', 'publish', 'queued', 'The body.', $3::jsonb, '[]'::jsonb, $4)
+     VALUES ('sleekdrops', 'au', $1, $2, 'Tech', 'guide', 'publish', 'queued', 'The body.', $3::jsonb, '[]'::jsonb, $4)
      RETURNING *`,
     [
       TITLE,
@@ -233,9 +233,9 @@ test('the queued payload carries the hero provenance the publish stage stored', 
 
 test('the image stage records an operator hero as operator-supplied', { skip }, async () => {
   const [row] = await q<ArticleRow>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, frontmatter,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter,
                            hero_image_url, hero_alt)
-     VALUES ($1, $2, 'Tech', 'guide', 'image', 'queued', $3::jsonb, $4, 'A commuter train')
+     VALUES ('sleekdrops', 'au', $1, $2, 'Tech', 'guide', 'image', 'queued', $3::jsonb, $4, 'A commuter train')
      RETURNING *`,
     [
       TITLE,

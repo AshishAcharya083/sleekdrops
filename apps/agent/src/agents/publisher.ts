@@ -18,6 +18,7 @@ import { dispatchContentUpdated } from '../tools/github.js';
 import { claimHeld, LeaseLostError, updateClaimed } from '../pipeline/lease.js';
 import { isReviewStale, PUBLISHER_REVIEW_STALE_ERROR } from '../pipeline/retry.js';
 import type { ArticleRow } from '../pipeline/types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('publisher');
 
@@ -114,7 +115,7 @@ export async function runPublisher(
   };
   await abandonIfTaken();
 
-  const publishMode = options.publishMode ?? (await getSetting<string>('publish_mode', 'approval'));
+  const publishMode = options.publishMode ?? (await getSetting<string>(SLEEKDROPS_PLATFORM_ID, 'publish_mode', 'approval'));
   // "draft" mode parks the row in D1 unpublished; anything else goes live.
   const d1Status = publishMode === 'draft' ? 'draft' : 'published';
 

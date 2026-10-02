@@ -18,6 +18,7 @@ import {
   workerId,
 } from './pipeline/worker.js';
 import { startServer } from './api/server.js';
+import { seedPlatforms } from './platform/profiles.js';
 
 /**
  * Cloud Run sends SIGTERM and kills the container 10 seconds later - on every
@@ -74,6 +75,7 @@ async function main(): Promise<void> {
   // normal in a container, and used to kill the process on the first refusal.
   await waitForDatabase();
   await migrate();
+  await seedPlatforms();
   await recoverStranded();
   startServer();
   startWorker();

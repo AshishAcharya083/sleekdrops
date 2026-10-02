@@ -13,6 +13,7 @@ import type {
   Article,
   BreadcrumbList,
   CollectionPage,
+  CreativeWork,
   FAQPage,
   ItemList,
   Offer,
@@ -31,6 +32,7 @@ import type { Promo } from '@data/promos';
 import type { PickData, SourceData } from '../content/frontmatter';
 import type { BlogPost } from './posts';
 import { categories } from '../data/categories.ts';
+import { methodLabel, type MethodVersion } from './trust.ts';
 
 // Same defensive read as ads-env / analytics-env / flags-env: Vite inlines
 // `import.meta.env` at build time and the bare `node --test` runner has no such
@@ -273,6 +275,18 @@ function postUrl(post: BlogPost): string {
 }
 
 /**
+ * When a post was published and last revised. `dateModified` is distinct from
+ * `datePublished` whenever the post has been revised; a post that never has
+ * says so honestly rather than claiming freshness.
+ */
+function postDates(post: BlogPost): { datePublished: string; dateModified: string } {
+  return {
+    datePublished: post.data.pubDate.toISOString(),
+    dateModified: (post.data.updatedDate ?? post.data.pubDate).toISOString(),
+  };
+}
+
+/**
  * Publisher, site, page, byline and article as one linked graph.
  *
  * `mainEntityId` is the node the piece is really about when there is one — the
@@ -284,10 +298,7 @@ function postNodes(post: BlogPost, author: Author, mainEntityId?: string): Thing
   const entities = post.data.entities ?? [];
   const sources = post.data.sources ?? [];
   const words = countWords(post.body);
-  const datePublished = post.data.pubDate.toISOString();
-  // Distinct from datePublished whenever the post has been revised; a post
-  // that never has says so honestly rather than claiming freshness.
-  const dateModified = (post.data.updatedDate ?? post.data.pubDate).toISOString();
+  const { datePublished, dateModified } = postDates(post);
   const image = post.data.heroImage ?? defaultImage;
   const about = entities.slice(0, ABOUT_ENTITY_COUNT);
   const mentions = entities.slice(ABOUT_ENTITY_COUNT);
@@ -505,6 +516,23 @@ export function buildPostSchema(
 }
 
 /**
+ * The published scoring method a review's rating was given under, as the
+ * node the Review is based on. Its URL follows the `/how-we-rate` anchor
+ * convention for each method version (`1.0` -> `#method-v1-0`).
+ */
+function methodNode(version: MethodVersion): CreativeWork {
+  const url = absoluteUrl(`/how-we-rate#method-v${version.replace(/\./g, '-')}`);
+  return {
+    '@type': 'CreativeWork',
+    '@id': url,
+    name: methodLabel(version),
+    version,
+    url,
+    publisher: { '@id': ORGANIZATION_ID },
+  };
+}
+
+/**
  * Build Product + Review JSON-LD from a review post's embedded product data.
  *
  * Pre-condition: post.data.postType === 'review' AND post.data.product is set.
@@ -566,8 +594,13 @@ export function buildReviewSchema(post: BlogPost, author: Author): WithContext<T
     '@id': reviewId,
     name: post.data.title,
     reviewBody: post.data.dek,
-    author: { '@id': authorId(author) },
-    itemReviewed: { '@id': productId },
+    // Named as well as referenced, so the Review stands on its own for a
+    // consumer that does not resolve `@id`s across the graph. Untyped on
+    // purpose: the typed byline and Product nodes carry the same ids, and a
+    // typed stub reads to a validator as a second, incomplete Product.
+    author: { '@id': authorId(author), name: author.name },
+    ...postDates(post),
+    itemReviewed: { '@id': productId, name: product.name },
     reviewRating: {
       '@type': 'Rating',
       ratingValue: product.rating,
@@ -575,6 +608,9 @@ export function buildReviewSchema(post: BlogPost, author: Author): WithContext<T
       worstRating: 1,
     },
     publisher: { '@id': ORGANIZATION_ID },
+    // Only when the review recorded it: a legacy review carries no version,
+    // and stamping the current one on it would claim a method it never used.
+    ...(product.methodVersion ? { isBasedOn: methodNode(product.methodVersion) } : {}),
   };
 
   return graph([...postNodes(post, author, productId), reviewedProduct, review]);

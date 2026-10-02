@@ -8,6 +8,7 @@ import { formatSearches, tavilySearchMany } from '../tools/tavily.js';
 import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
 import { siteContext, SOURCE_DISCIPLINE, VERIFICATION_RULES } from './context.js';
 import type { TopicSuggestion } from '../pipeline/types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const SCOUT_QUERIES = [
   'trending products Australia this week',
@@ -85,11 +86,13 @@ Return JSON: {"topics": [{"title": string, "category": string, "postType": strin
     if (!topic?.title || !CATEGORIES.includes(topic.category as never)) continue;
     if (!POST_TYPES.includes(topic.postType as never)) topic.postType = 'article';
     const rows = await q(
-      `INSERT INTO topics (scout_run_id, title, norm_title, category, post_type, angle, keywords, why_trending, sources)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb)
-       ON CONFLICT (norm_title) DO NOTHING
+      `INSERT INTO topics (platform_id, edition_id, scout_run_id, title, norm_title, category, post_type, angle, keywords, why_trending, sources)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb)
+       ON CONFLICT (platform_id, norm_title) DO NOTHING
        RETURNING id`,
       [
+        SLEEKDROPS_PLATFORM_ID,
+        'au',
         scoutRunId,
         topic.title,
         normalizeTitle(topic.title),

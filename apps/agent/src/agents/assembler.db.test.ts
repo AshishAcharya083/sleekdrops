@@ -101,8 +101,8 @@ const draft =
 
 async function insertArticle(): Promise<ArticleRow> {
   const [inserted] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, research, outline, draft_md)
-     VALUES ($1, 'Home', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, research, outline, draft_md)
+     VALUES ('sleekdrops', 'au', $1, 'Home', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
     [brief.seoTitle, JSON.stringify(research), JSON.stringify(brief), draft],
   );
   return inserted;
@@ -214,8 +214,8 @@ const launchResearch = {
 
 test('claims, the launch date and the review unit survive both JSONB columns', { skip }, async () => {
   const [inserted] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, research, outline, draft_md)
-     VALUES ($1, 'Tech', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, research, outline, draft_md)
+     VALUES ('sleekdrops', 'au', $1, 'Tech', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
     [
       'iPhone 18 Pro, four days in',
       JSON.stringify(launchResearch),
@@ -267,8 +267,8 @@ test('a launch link that is not http(s) never reaches the stored frontmatter', {
   // link - so a `javascript:` URL that reached the page would be a
   // click-to-execute href. The date is the record and still publishes.
   const [inserted] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, research, outline, draft_md)
-     VALUES ($1, 'Tech', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, research, outline, draft_md)
+     VALUES ('sleekdrops', 'au', $1, 'Tech', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
     [
       'iPhone 18 Pro, four days in',
       JSON.stringify({

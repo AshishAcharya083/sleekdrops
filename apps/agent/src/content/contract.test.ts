@@ -9,15 +9,21 @@ import assert from 'node:assert/strict';
 import {
   AUTHORS,
   authorById,
+  BADGE_KINDS,
   BYLINE_NAME,
   bylineFor,
   claimSchema,
+  ENABLED_BADGE_KINDS,
   frontmatterSchema,
   isWebUrl,
   launchSchema,
+  METHOD_VERSIONS,
+  PROVENANCES,
   sourceSchema,
+  SUB_SCORE_TOLERANCE,
 } from './contract.js';
 import { beats, EDITORIAL_TEAM, listBeats } from '../../../web/src/data/authors.ts';
+import * as trust from '../../../web/src/lib/trust.ts';
 
 test('the site publishes under one byline, and the beat is a tag on it', () => {
   assert.equal(EDITORIAL_TEAM.name, BYLINE_NAME);
@@ -71,4 +77,15 @@ test('a URL the browser would execute rather than follow never reaches frontmatt
     true,
   );
   assert.equal(sourceSchema.safeParse({ url: 'http://www.gsmarena.com/x' }).success, true, 'plain http still opens');
+});
+
+test("the trust vocabulary mirrors the site's", () => {
+  assert.deepEqual([...METHOD_VERSIONS], trust.METHOD_VERSIONS.map((entry) => entry.version));
+  assert.deepEqual([...PROVENANCES], [...trust.PROVENANCES]);
+  assert.deepEqual([...BADGE_KINDS], [...trust.BADGE_KINDS]);
+  assert.deepEqual(
+    [...ENABLED_BADGE_KINDS],
+    trust.BADGE_KINDS.filter((kind) => trust.BADGE_REGISTRY[kind].enabled),
+  );
+  assert.equal(SUB_SCORE_TOLERANCE, trust.SUB_SCORE_TOLERANCE);
 });
