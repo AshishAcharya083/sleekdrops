@@ -15,7 +15,13 @@ process.env.CLOUDFLARE_D1_TOKEN = 'test-d1-token';
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
 const { clearPlatformCache, loadPlatform } = await import('../platform/registry.js');
+const { removeCredential, resolveCredential, storeCredential } = await import(
+  '../distribution/channels.js'
+);
+const { registerProvider, unregisterProvider } = await import('../distribution/providers.js');
 const { createApp } = await import('./server.js');
+
+import type { SocialProvider } from '../distribution/types.js';
 
 const reachable = await pool
   .query('SELECT 1')
@@ -60,6 +66,33 @@ const post = (platform: string, path: string, body: unknown) =>
   call(platform, path, { method: 'POST', body: JSON.stringify(body) });
 const put = (platform: string, path: string, body: unknown) =>
   call(platform, path, { method: 'PUT', body: JSON.stringify(body) });
+
+/** A network that signs each pasted token in as the account of the same name. */
+const NETWORK = `stub-platform-${randomUUID().slice(0, 8)}`;
+const network: SocialProvider = {
+  name: NETWORK,
+  defaultTokenRef: `${NETWORK}-page-token`,
+  authenticate: async ({ token }) => ({
+    externalAccountId: token ?? '',
+    displayName: `Page ${token}`,
+    accessToken: `exchanged-${token}`,
+    expiresIn: null,
+  }),
+  refreshToken: async () => {
+    throw new Error('not used here');
+  },
+  post: async () => {
+    throw new Error('not used here');
+  },
+  fetchInsights: async () => ({
+    impressions: null,
+    clicks: null,
+    reactions: null,
+    fetchedAt: new Date().toISOString(),
+  }),
+  postUrl: (remotePostId) => `https://social.example/${remotePostId}`,
+};
+const OTHER_PAGE_REF = `${NETWORK}-other-page`;
 
 let otherTopicId = '';
 let otherArticleId = '';
@@ -110,6 +143,13 @@ before(async () => {
     [OTHER, TAG],
   );
   otherChannelId = channel.id;
+  registerProvider(network);
+  await q(
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, display_name, token_ref)
+     VALUES ($1, $2, 'other-page', 'PeakOdds Page', $3)`,
+    [OTHER, NETWORK, OTHER_PAGE_REF],
+  );
+  await storeCredential(OTHER_PAGE_REF, 'other-page-credential');
   await q(
     `INSERT INTO agent_sessions (platform_id, agent, status, cost_usd) VALUES ($1, $2, 'done', '1.5')`,
     [OTHER, TAG],
@@ -122,7 +162,11 @@ after(async () => {
     await q('DELETE FROM agent_sessions WHERE platform_id = $1', [OTHER]);
     await q('DELETE FROM articles WHERE platform_id = $1', [OTHER]);
     await q('DELETE FROM topics WHERE platform_id = $1 OR title LIKE $2', [OTHER, `${TAG}%`]);
-    await q('DELETE FROM channel_connections WHERE platform_id = $1', [OTHER]);
+    await q('DELETE FROM channel_connections WHERE platform_id = $1 OR provider = $2', [
+      OTHER,
+      NETWORK,
+    ]);
+    for (const ref of [OTHER_PAGE_REF, `${NETWORK}-page-token`]) await removeCredential(ref);
     await q('DELETE FROM settings WHERE platform_id = $1', [OTHER]);
     await q('DELETE FROM editions WHERE platform_id = $1', [OTHER]);
     await q('UPDATE platforms SET profile_version = NULL WHERE id = $1', [OTHER]);
@@ -130,6 +174,7 @@ after(async () => {
     await q('DELETE FROM platforms WHERE id = $1', [OTHER]);
     clearPlatformCache();
   }
+  unregisterProvider(NETWORK);
   await pool.end();
 });
 
@@ -268,6 +313,49 @@ test("another platform's rows are absent from lists and 404 by id", { skip }, as
     [otherArticleId],
   );
   assert.deepEqual(article, { status: 'queued', stage: 'research' });
+});
+
+test("connecting an account another platform already has is refused and leaves its channel alone", { skip }, async () => {
+  const taken = await post(SLEEKDROPS, '/api/distribution/channels', {
+    provider: NETWORK,
+    token: 'other-page',
+  });
+  assert.equal(taken.status, 409);
+  assert.deepEqual(taken.body, {
+    error: `that ${NETWORK} account is already connected to another platform`,
+  });
+
+  const [row] = await q(
+    `SELECT platform_id, display_name, token_ref, status FROM channel_connections
+      WHERE provider = $1 AND external_account_id = 'other-page'`,
+    [NETWORK],
+  );
+  assert.deepEqual(row, {
+    platform_id: OTHER,
+    display_name: 'PeakOdds Page',
+    token_ref: OTHER_PAGE_REF,
+    status: 'active',
+  });
+  assert.equal(await resolveCredential(OTHER_PAGE_REF, NETWORK), 'other-page-credential');
+  const theirs = await call(OTHER, '/api/distribution');
+  assert.ok(theirs.body.channels.some((ch: { externalAccountId: string }) => ch.externalAccountId === 'other-page'));
+});
+
+test('a platform connects a new account as its own, and reconnects it', { skip }, async () => {
+  for (const attempt of ['connect', 'reconnect']) {
+    const res = await post(OTHER, '/api/distribution/channels', { provider: NETWORK, token: 'new-page' });
+    assert.equal(res.status, 201, attempt);
+    const [row] = await q<{ platform_id: string }>(
+      'SELECT platform_id FROM channel_connections WHERE id = $1',
+      [res.body.channel.id],
+    );
+    assert.equal(row.platform_id, OTHER, attempt);
+  }
+  const mine = await call(SLEEKDROPS, '/api/distribution');
+  assert.equal(
+    mine.body.channels.some((ch: { externalAccountId: string }) => ch.externalAccountId === 'new-page'),
+    false,
+  );
 });
 
 test("a live post carries the edition and event time of its own platform's article", { skip }, async () => {

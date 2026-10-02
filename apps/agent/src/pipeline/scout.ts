@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import { pool, q } from '../db/pool.js';
 import { UsageTracker } from '../llm/index.js';
 import { runTopicScout } from '../agents/topicScout.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 import { modelFor } from './runner.js';
 
 /** How long a sweep's heartbeat may go quiet before it stops holding the lock. */
@@ -24,7 +25,8 @@ export interface ScoutQueueStatus {
 /** Add a request to the durable queue. This never refuses because another run is active. */
 export async function enqueueScoutRun(): Promise<string> {
   const [run] = await q<{ id: string }>(
-    "INSERT INTO scout_runs (status) VALUES ('queued') RETURNING id",
+    "INSERT INTO scout_runs (platform_id, edition_id, status) VALUES ($1, 'au', 'queued') RETURNING id",
+    [SLEEKDROPS_PLATFORM_ID],
   );
   return run.id;
 }
@@ -133,9 +135,10 @@ async function runClaimedScout(id: string): Promise<void> {
   try {
     const model = await modelFor('topic_scout');
     [session] = await q<{ id: string }>(
-      `INSERT INTO agent_sessions (scout_run_id, agent, model)
-       VALUES ($1, 'topic_scout', $2) RETURNING id`,
-      [id, model],
+      `INSERT INTO agent_sessions (scout_run_id, platform_id, agent, model)
+       VALUES ($1, $3, 'topic_scout', $2)
+       RETURNING id`,
+      [id, model, SLEEKDROPS_PLATFORM_ID],
     );
     const topics = await runTopicScout(model, tracker, id);
     await q(
@@ -171,9 +174,9 @@ async function runClaimedScout(id: string): Promise<void> {
       );
     } else {
       await q(
-        `INSERT INTO agent_sessions (scout_run_id, agent, status, summary, error, ended_at)
-         VALUES ($1, 'topic_scout', 'failed', 'scout could not start', $2, now())`,
-        [id, message],
+        `INSERT INTO agent_sessions (scout_run_id, platform_id, agent, status, summary, error, ended_at)
+         VALUES ($1, $3, 'topic_scout', 'failed', 'scout could not start', $2, now())`,
+        [id, message, SLEEKDROPS_PLATFORM_ID],
       );
     }
     console.error(`[scout] run ${id} failed: ${message}`);

@@ -38,6 +38,18 @@ export function channelBelongs(platformId: string, id: string): Promise<boolean>
   ]);
 }
 
+/** The platform an account is already connected under, or null when it is not connected. */
+export async function channelAccountOwner(
+  provider: string,
+  externalAccountId: string,
+): Promise<string | null> {
+  const [row] = await q<{ platform_id: string }>(
+    'SELECT platform_id FROM channel_connections WHERE provider = $1 AND external_account_id = $2',
+    [provider, externalAccountId],
+  );
+  return row?.platform_id ?? null;
+}
+
 /** The ids of the platform's channels. */
 export async function platformChannelIds(platformId: string): Promise<Set<string>> {
   const rows = await q<{ id: string }>('SELECT id FROM channel_connections WHERE platform_id = $1', [

@@ -89,9 +89,9 @@ function brief(): ContentBrief {
 
 async function insertAtAssemble(): Promise<ArticleRow> {
   const [row] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, claimed_by, claimed_at,
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, claimed_by, claimed_at,
                            research, keyword_plan, outline, draft_md)
-     VALUES ($1, 'Tech', 'guide', 'assemble', 'running', 'test-worker', now(), $2, $3, $4, $5)
+     VALUES ('sleekdrops', 'au', $1, 'Tech', 'guide', 'assemble', 'running', 'test-worker', now(), $2, $3, $4, $5)
      RETURNING *`,
     [
       'Should you pre-order the Pixel 11 Pro?',
@@ -384,9 +384,9 @@ test('a card still in review cannot be pulled forward to assemble', { skip }, as
   // not had, and a card that has never assembled picks the offers up on its
   // first pass anyway.
   const [inReview] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, research, keyword_plan,
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, research, keyword_plan,
                            outline, draft_md)
-     VALUES ($1, 'Tech', 'guide', 'seo_review', 'queued', $2, $3, $4, $5)
+     VALUES ('sleekdrops', 'au', $1, 'Tech', 'guide', 'seo_review', 'queued', $2, $3, $4, $5)
      RETURNING *`,
     [
       'Should you pre-order the Pixel 11 Pro?',

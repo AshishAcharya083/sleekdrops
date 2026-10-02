@@ -88,8 +88,8 @@ function stub(
 
 async function connect(provider: string, tokenRef = TOKEN_REF): Promise<string> {
   const [row] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref)
-     VALUES ($1, $2, $3) RETURNING id`,
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref)
+     VALUES ('sleekdrops', $1, $2, $3) RETURNING id`,
     [provider, `page-${randomUUID().slice(0, 8)}`, tokenRef],
   );
   connections.push(row.id);
@@ -99,9 +99,9 @@ async function connect(provider: string, tokenRef = TOKEN_REF): Promise<string> 
 async function article(): Promise<DistributableArticle> {
   const frontmatter = { title: TITLE, dek: 'Four weeks on the 7:12, ranked.', heroImage: HERO };
   const [row] = await q<{ id: string; slug: string }>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, frontmatter,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter,
                            hero_image_source)
-     VALUES ($1, $2, 'Tech', 'guide', 'publish', 'queued', $3::jsonb, 'generated')
+     VALUES ('sleekdrops', 'au', $1, $2, 'Tech', 'guide', 'publish', 'queued', $3::jsonb, 'generated')
      RETURNING id, slug`,
     [TITLE, `quiet-commutes-${randomUUID().slice(0, 8)}`, JSON.stringify(frontmatter)],
   );

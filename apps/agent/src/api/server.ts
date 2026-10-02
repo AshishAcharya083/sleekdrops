@@ -26,6 +26,7 @@ import {
   retryFailedItems,
   type RecoveryOutcome,
 } from '../distribution/admin.js';
+import { isChannelTokenRef, redactToken, resolveCredential } from '../distribution/channels.js';
 import { getProvider, registeredProviders } from '../distribution/providers.js';
 import {
   DEFAULT_PLACEMENT_SETTING,
@@ -33,7 +34,7 @@ import {
   itemsForArticle,
   placementSettingKey,
 } from '../distribution/queue.js';
-import { isLinkPlacement } from '../distribution/types.js';
+import { isLinkPlacement, PermanentProviderError } from '../distribution/types.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
 import { MAX_STAGE_TIMEOUT_SECONDS, stageBudgetSeconds } from '../pipeline/budgets.js';
@@ -93,6 +94,7 @@ import {
 } from './platform.js';
 import {
   articleBelongs,
+  channelAccountOwner,
   channelBelongs,
   platformChannelIds,
   platformPlacementPerformance,
@@ -226,6 +228,39 @@ function platformSettings(platformId: string): Promise<Array<{ key: string; valu
   return q<{ key: string; value: unknown }>('SELECT key, value FROM settings WHERE platform_id = $1', [
     platformId,
   ]);
+}
+
+/** The secret names connectChannel() accepts. */
+const CHANNEL_TOKEN_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+/**
+ * The account a connect request's token signs in as, or null for a request
+ * connectChannel() refuses before it asks the network.
+ *
+ * connectChannel() upserts on (provider, account) whichever platform holds the
+ * row, and stores the token under that row's secret name, so whose account it
+ * is has to be settled before it runs. A refusal from the network is answered
+ * the way connectChannel() answers it.
+ */
+async function accountToConnect(
+  body: Record<string, unknown>,
+): Promise<{ provider: string; externalAccountId: string } | null> {
+  const provider = typeof body.provider === 'string' ? body.provider.trim() : '';
+  const adapter = provider ? getProvider(provider) : null;
+  if (!adapter) return null;
+  const pasted = typeof body.token === 'string' ? body.token.trim() : '';
+  const ref = typeof body.tokenRef === 'string' ? body.tokenRef.trim() : '';
+  if (ref && !(CHANNEL_TOKEN_REF_RE.test(ref) && isChannelTokenRef(ref, provider))) return null;
+  const token = pasted || (await resolveCredential(ref || null, provider));
+  if (!token) return null;
+  try {
+    const { externalAccountId } = await adapter.authenticate({ token });
+    return { provider, externalAccountId };
+  } catch (err) {
+    const message = redactToken(err instanceof Error ? err.message : String(err), token);
+    if (err instanceof PermanentProviderError) throw new ChannelAdminError(400, message);
+    throw new ChannelAdminError(502, `${provider} could not be reached to check that token: ${message}`);
+  }
 }
 
 /** Map an operator-correctable refusal to its status; anything else is a 500. */
@@ -1463,11 +1498,21 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
   // The answer is the channel as the list renders it - presence of the
   // credential, never the credential.
   //
-  // The channel belongs to the platform that connected it: connecting an
-  // account again from another platform hands it, and its queue, over.
+  // The channel belongs to the platform that connected it. An account another
+  // platform already posts through is refused, leaving that platform's row,
+  // credential and queue as they were.
   app.post('/api/distribution/channels', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     try {
+      const account = await accountToConnect(body);
+      const owner =
+        account && (await channelAccountOwner(account.provider, account.externalAccountId));
+      if (account && owner && owner !== c.get('platform').id) {
+        return c.json(
+          { error: `that ${account.provider} account is already connected to another platform` },
+          409,
+        );
+      }
       const channel = await connectChannel(body);
       await q('UPDATE channel_connections SET platform_id = $2 WHERE id = $1', [
         channel.id,

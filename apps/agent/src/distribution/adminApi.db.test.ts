@@ -50,8 +50,8 @@ interface ChannelView {
 
 async function connect(expiresAt: string | null): Promise<string> {
   const [row] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref, expires_at)
-     VALUES ($1, $2, 'channel-stub-admin-token-ref', $3) RETURNING id`,
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref, expires_at)
+     VALUES ('sleekdrops', $1, $2, 'channel-stub-admin-token-ref', $3) RETURNING id`,
     [PROVIDER, `page-${randomUUID().slice(0, 8)}`, expiresAt],
   );
   connections.push(row.id);
@@ -61,9 +61,9 @@ async function connect(expiresAt: string | null): Promise<string> {
 async function article(): Promise<DistributableArticle> {
   const frontmatter = { title: 'A quiet commute', dek: 'Ranked.', heroImage: 'https://x/y.png' };
   const [row] = await q<{ id: string; slug: string }>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, frontmatter,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter,
                            hero_image_source)
-     VALUES ('A quiet commute', $1, 'Tech', 'guide', 'publish', 'queued', $2::jsonb, 'generated')
+     VALUES ('sleekdrops', 'au', 'A quiet commute', $1, 'Tech', 'guide', 'publish', 'queued', $2::jsonb, 'generated')
      RETURNING id, slug`,
     [`admin-view-${randomUUID().slice(0, 8)}`, JSON.stringify(frontmatter)],
   );
@@ -182,9 +182,9 @@ test('an operator hero dropped after the image stage re-stamps the provenance', 
   // file to a network for native upload, which is the one thing the column is
   // read for.
   const [row] = await q<{ id: string }>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, frontmatter,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter,
                            hero_image_url, hero_image_source)
-     VALUES ('A quiet commute', $1, 'Tech', 'guide', 'image', 'queued', $2::jsonb, $3, 'generated')
+     VALUES ('sleekdrops', 'au', 'A quiet commute', $1, 'Tech', 'guide', 'image', 'queued', $2::jsonb, $3, 'generated')
      RETURNING id`,
     [
       `operator-swap-${randomUUID().slice(0, 8)}`,

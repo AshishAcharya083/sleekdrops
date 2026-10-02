@@ -25,6 +25,7 @@ import {
   type LinkPlacement,
   type RenderedPayload,
 } from './types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('distribution');
 
@@ -189,9 +190,9 @@ export async function configuredPlacement(
   provider: string,
 ): Promise<{ placement: LinkPlacement; setting: string }> {
   const key = placementSettingKey(provider);
-  const own = await getSetting<unknown>(key, null);
+  const own = await getSetting<unknown>(SLEEKDROPS_PLATFORM_ID, key, null);
   if (isLinkPlacement(own)) return { placement: own, setting: key };
-  const fallback = await getSetting<unknown>(DEFAULT_PLACEMENT_SETTING, 'first_comment');
+  const fallback = await getSetting<unknown>(SLEEKDROPS_PLATFORM_ID, DEFAULT_PLACEMENT_SETTING, 'first_comment');
   return {
     placement: isLinkPlacement(fallback) ? fallback : 'first_comment',
     setting: DEFAULT_PLACEMENT_SETTING,
@@ -228,7 +229,7 @@ export async function enqueuePublishedArticle(
   const none: EnqueueOutcome = { created: 0, alreadyQueued: 0, skipped: null };
   if (options.d1Status !== 'published') return { ...none, skipped: 'draft' };
   if (!article.slug) return { ...none, skipped: 'no-slug' };
-  if (!(await getSetting<boolean>('distribution_enabled', true))) {
+  if (!(await getSetting<boolean>(SLEEKDROPS_PLATFORM_ID, 'distribution_enabled', true))) {
     return { ...none, skipped: 'disabled' };
   }
 

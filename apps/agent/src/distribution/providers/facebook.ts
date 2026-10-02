@@ -60,6 +60,7 @@ import {
   type RenderedPayload,
   type SocialProvider,
 } from '../types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../../platform/sleekdrops/index.js';
 
 const log = createLogger('distribution');
 
@@ -286,7 +287,7 @@ async function bodyLinksUsed(pageId: string): Promise<number> {
  * itself refused a link this month, whichever came first.
  */
 async function bodyLinkBudget(pageId: string, now: Date): Promise<LinkBudget> {
-  const state = await getSetting<BudgetState>(BODY_LINK_BUDGET_SETTING, {});
+  const state = await getSetting<BudgetState>(SLEEKDROPS_PLATFORM_ID, BODY_LINK_BUDGET_SETTING, {});
   const used = await bodyLinksUsed(pageId);
   const cap = config.facebook.bodyLinkCap;
   return { used, cap, exhausted: state[pageId]?.month === monthKey(now) || used >= cap };
@@ -305,13 +306,13 @@ async function bodyLinkAvailable(pageId: string, now: Date): Promise<boolean> {
  */
 async function recordBudgetExhausted(pageId: string, now: Date): Promise<void> {
   const month = monthKey(now);
-  const state = await getSetting<BudgetState>(BODY_LINK_BUDGET_SETTING, {});
+  const state = await getSetting<BudgetState>(SLEEKDROPS_PLATFORM_ID, BODY_LINK_BUDGET_SETTING, {});
   const next: BudgetState = {};
   for (const [page, entry] of Object.entries(state ?? {})) {
     if (entry?.month === month) next[page] = entry;
   }
   next[pageId] = { month, exhaustedAt: now.toISOString() };
-  await setSetting(BODY_LINK_BUDGET_SETTING, next);
+  await setSetting(SLEEKDROPS_PLATFORM_ID, BODY_LINK_BUDGET_SETTING, next);
 }
 
 // ── What this adapter is allowed to post ────────────────────────────────────

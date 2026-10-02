@@ -27,6 +27,7 @@ const { normaliseAngle } = await import('../agents/angleEditor.js');
 const { editorialAngleBrief } = await import('../agents/context.js');
 
 import type { ArticleRow, EditorialAngle } from './types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const reachable = await pool
   .query('SELECT 1')
@@ -38,7 +39,7 @@ if (reachable) await migrate();
 
 /** The admin panel can store a Claude token too; if one is there, stand down. */
 const credentialled =
-  reachable && (await getSetting<{ claude_token?: string }>('llm', {})).claude_token;
+  reachable && (await getSetting<{ claude_token?: string }>(SLEEKDROPS_PLATFORM_ID, 'llm', {})).claude_token;
 const modelSkip = credentialled
   ? 'the database carries a Claude token - this test must not reach a live model'
   : skip;
@@ -75,6 +76,8 @@ function anAngle(): EditorialAngle {
 
 async function insertArticle(fields: Record<string, unknown> = {}): Promise<ArticleRow> {
   const row = {
+    platform_id: 'sleekdrops',
+    edition_id: 'au',
     title: `Best cordless stick vacuums ${randomUUID().slice(0, 8)}`,
     category: 'Home',
     post_type: 'guide',

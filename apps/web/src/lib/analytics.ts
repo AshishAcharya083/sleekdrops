@@ -122,6 +122,10 @@ export const EVENTS = {
   copyLinkClicked: 'Copy Link Clicked',
   lightboxOpened: 'Image Lightbox Opened',
   tocLinkClicked: 'TOC Link Clicked',
+  // Trust surfaces, dispatched by chrome.ts from DOM hooks via ./trust-analytics.
+  methodologyViewed: 'Methodology Viewed',
+  scoreExplainerExpanded: 'Score Explainer Expanded',
+  trustBadgeClicked: 'Trust Badge Clicked',
 } as const;
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];

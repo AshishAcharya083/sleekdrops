@@ -429,14 +429,36 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
 
 ## State model (PostgreSQL)
 
-- `topics` — scout suggestions; `suggested → approved/rejected` (unique on
-  normalized title = the "never repeat a topic" guard, alongside the D1 check)
+- `platforms` - one brand per row (SleekDrops is `sleekdrops`): byline,
+  brand text, audience, categories, post types, article shapes, editorial
+  rules, monetisation (`amazon` | `none`), blocked link domains and topic
+  classes, scout queries, per-agent goals, the profile version in force, and
+  its publish target as the *names* of the env variables holding the D1
+  database id, GitHub repo, site URL and rebuild hook (null = repository
+  dispatch)
+- `editions` - one audience of a platform (SleekDrops has `au`): time zone,
+  currency, locale, its own scout queries and a compliance footer. A new
+  edition is a row, not a code or schema change
+- `platform_profile_versions` - append-only history of every profile edit,
+  with author and timestamp; `articles.profile_version` records which one an
+  article was commissioned under
+- Every `topics`, `articles`, `scout_runs`, `agent_sessions`,
+  `product_offers`, `channel_connections` and `settings` row carries a
+  required `platform_id` (no default), and topics, articles and scout runs an
+  `edition_id`. SleekDrops is written by migration 018; any other platform in
+  `src/platform/profiles.ts` is seeded at boot if absent, and from then on the
+  database copy is the one that is edited. `src/platform/registry.ts` is the
+  only lookup, and an unknown or missing platform id throws
+- `topics` — scout suggestions; `suggested → approved/rejected` (unique per
+  platform on normalized title = the "never repeat a topic" guard, alongside
+  the D1 check)
 - `articles` — the work unit ("card"): stage, status, dossier/keyword plan/
   brief/draft/review/frontmatter JSONB, revision round, error, failure class
   (`transient`/`genuine`) and the attempts the last stage run took
 - `agent_sessions` — one row per agent run: model, tokens in/out, cost USD,
   duration, summary/error
-- `settings` — publish_mode, per-agent models, revision cap, worker toggle
+- `settings` — publish_mode, per-agent models, revision cap, worker toggle,
+  keyed by `(platform_id, key)`
 - `scout_runs` — durable topic-search jobs (`queued → running → done/failed`);
   heartbeat recovery re-queues work abandoned by a recycled instance
 - `channel_connections` — one connected social account per row: provider,
