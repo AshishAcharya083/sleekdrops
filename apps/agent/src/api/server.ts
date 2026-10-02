@@ -41,7 +41,6 @@ import {
 import { isLinkPlacement } from '../distribution/types.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 import { MAX_STAGE_TIMEOUT_SECONDS, stageBudgetSeconds } from '../pipeline/budgets.js';
 import {
   cancelArticle,
@@ -82,6 +81,7 @@ import {
   type HeroImageUpload,
 } from '../tools/heroImages.js';
 import { TRACE_HEADER, traceMiddleware, type TraceEnv } from './trace.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 import { d1TargetFor, publishTargetFor } from '../platform/publishTarget.js';
 
 const log = createLogger('api');

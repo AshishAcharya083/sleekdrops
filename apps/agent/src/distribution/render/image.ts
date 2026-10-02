@@ -17,7 +17,6 @@
 import { createLogger } from '../../lib/log.js';
 import { generateImage } from '../../llm/genai.js';
 import { gcsConfigured, uploadPublicImage } from '../../tools/gcs.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../../platform/sleekdrops/index.js';
 import type { DistributableArticle, HeroImageSource, LinkPlacement } from '../types.js';
 
 const log = createLogger('distribution');
@@ -109,7 +108,7 @@ export async function resolveImage(
     return { imageUrl: null, imageSource, strategy: 'none', placement: 'in_body' };
   }
 
-  const render = deps.renderCard ?? ((prompt: string) => generateImage(SLEEKDROPS_PLATFORM_ID, prompt));
+  const render = deps.renderCard ?? ((prompt: string) => generateImage(article.platform_id, prompt));
   const upload = deps.uploadCard ?? uploadPublicImage;
   try {
     const card = await render(cardPrompt(article));

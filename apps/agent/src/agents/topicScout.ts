@@ -13,13 +13,14 @@ import { getPostTypes } from '../content/catalogue.js';
 import {
   type PromptContext,
   editionMarket,
+  moneyExample,
   siteContext,
   SOURCE_DISCIPLINE,
   verificationRules,
   withAgentGoal,
 } from './context.js';
 import type { TopicSuggestion } from '../pipeline/types.js';
-import { d1TargetFor } from '../platform/publishTarget.js';
+import { resolveD1Target } from '../platform/publishTarget.js';
 
 function normalizeTitle(title: string): string {
   return slugify(title);
@@ -38,6 +39,7 @@ export function scoutRequest(
 ): Pick<ChatOptions, 'system' | 'temperature' | 'search' | 'prompt'> {
   const { platform } = ctx;
   const market = editionMarket(ctx.edition);
+  const budget = moneyExample(ctx.edition, 500, 'narrowSymbol');
   // The reply schema leaves out eventStartsAt so a platform without
   // event-bound posts keeps its prompt; one with them asks for it in its
   // scout goal, and the parser below accepts it either way.
@@ -59,7 +61,7 @@ Rules:
   confirm they are current, ${market ? `actually on sale in ${market.place}` : 'still available'}, and not a rerun of
   something that peaked last year. A topic built on a dead product wastes the
   whole pipeline behind it.
-- Specific beats generic: "Best budget robot vacuums under $500 (2026)" beats "robot vacuums".
+- Specific beats generic: "Best budget robot vacuums${budget ? ` under ${budget}` : ''} (2026)" beats "robot vacuums".
 - postType must be one of: ${getPostTypes(platform).map((type) => type.id).join(', ')}. category one of: ${platform.categories.join(', ')}.
 - Spread across at least 3 categories.
 - DO NOT suggest anything overlapping these already-covered or already-suggested topics:
@@ -87,7 +89,8 @@ export async function runTopicScout(
   // scout has ever suggested for this platform (approved, rejected or pending
   // alike).
   const [published, previous] = await Promise.all([
-    d1TargetFor(platform.id)
+    Promise.resolve(platform)
+      .then(resolveD1Target)
       .then(fetchPublishedPosts)
       .catch(() => [] as Array<{ slug: string; title: string }>),
     q<{ title: string }>(
