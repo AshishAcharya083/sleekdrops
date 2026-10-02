@@ -2,14 +2,15 @@
 // each item to whichever provider owns it.
 //
 // Same shape as pipeline/worker.ts and pipeline/scheduler.ts: an unref'd
-// setInterval, one `tick` that does the work, and a settings flag that stops
-// it without a redeploy. What is different is what a tick is allowed to do -
+// setInterval, one `tick` that does the work, and a per-platform settings flag
+// (the `distribution_enabled` gate) that stops a platform's posting without a
+// redeploy. What is different is what a tick is allowed to do -
 // every item it touches ends in a public post, so nothing here retries
 // forever, and nothing that fails writes what it was authenticating with.
 import { config } from '../config.js';
-import { getSetting } from '../db/pool.js';
 import { createLogger } from '../lib/log.js';
 import { isReapTick } from '../pipeline/worker.js';
+import { siteTargetFor } from '../platform/publishTarget.js';
 import {
   getConnection,
   redactToken,
@@ -29,6 +30,7 @@ import {
   retryDelaySeconds,
   startPostAttempt,
   startReadinessClock,
+  type SiteTarget,
 } from './queue.js';
 import {
   checkReadiness,
@@ -44,7 +46,6 @@ import {
   type DistributionItem,
   type SocialProvider,
 } from './types.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('distribution');
 
@@ -97,7 +98,11 @@ export async function processItem(
     return 'failed';
   }
 
-  const accessToken = await resolveCredential(connection.token_ref, connection.provider);
+  const accessToken = await resolveCredential(
+    connection.platform_id,
+    connection.token_ref,
+    connection.provider,
+  );
   if (!accessToken) {
     // The secret the connection names is configured nowhere. That is an
     // operator action, so the connection leaves the rotation and says why -
@@ -111,9 +116,19 @@ export async function processItem(
     return 'blocked';
   }
 
+  // The page is looked for on the channel's own platform's site. A target that
+  // is not configured is an operator fix, like the credential above.
+  let target: SiteTarget;
+  try {
+    target = await siteTargetFor(connection.platform_id);
+  } catch (err) {
+    await releaseItem(item.id, retryDelaySeconds(1), err instanceof Error ? err.message : String(err));
+    return 'blocked';
+  }
+
   const readinessStartedAt = await startReadinessClock(item.id);
   const readiness = await checkReadiness(
-    articleUrl(item.slug),
+    articleUrl(target, item.slug),
     item.payload.expected,
     deps.fetchPage ?? fetchPage,
   );
@@ -212,12 +227,11 @@ let stopped = false;
 export async function distributionTick(deps: DistributionDeps = {}): Promise<ItemOutcome[]> {
   if (stopped) return [];
   ticks += 1;
-  // Before the enable check, exactly as the pipeline worker reaps before it:
-  // an item stranded in 'posting' stays invisible for as long as nobody looks,
-  // whether or not the queue is currently allowed to take new work.
+  // Regardless of any platform's gate, exactly as the pipeline worker reaps
+  // before it checks anything: an item stranded in 'posting' stays invisible
+  // for as long as nobody looks, whether or not its platform is currently
+  // allowed to take new work. The gate itself is applied per item, by the claim.
   if (isReapTick(ticks)) await recoverStrandedItems();
-
-  if (!(await getSetting<boolean>(SLEEKDROPS_PLATFORM_ID, 'distribution_enabled', true))) return [];
 
   const providers = (deps.availableProviders ?? registeredProviders)();
   if (providers.length === 0) return [];

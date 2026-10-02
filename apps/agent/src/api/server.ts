@@ -82,6 +82,7 @@ import {
   type HeroImageUpload,
 } from '../tools/heroImages.js';
 import { TRACE_HEADER, traceMiddleware, type TraceEnv } from './trace.js';
+import { d1TargetFor, publishTargetFor } from '../platform/publishTarget.js';
 
 const log = createLogger('api');
 
@@ -176,7 +177,7 @@ function settingsPayload(rows: Array<{ key: string; value: unknown }>): Record<s
  */
 async function placementSettingKeys(): Promise<Set<string>> {
   const providers = new Set(registeredProviders());
-  for (const connection of await listConnections()) providers.add(connection.provider);
+  for (const connection of await listConnections(SLEEKDROPS_PLATFORM_ID)) providers.add(connection.provider);
   return new Set([DEFAULT_PLACEMENT_SETTING, ...[...providers].map(placementSettingKey)]);
 }
 
@@ -339,7 +340,7 @@ async function requestRebuild(): Promise<{
   logged: { dispatched: boolean };
 }> {
   try {
-    await dispatchContentUpdated();
+    await dispatchContentUpdated(await publishTargetFor(SLEEKDROPS_PLATFORM_ID));
     return { body: { dispatched: true, dispatchError: null }, logged: { dispatched: true } };
   } catch (err) {
     return {
@@ -746,13 +747,13 @@ export function createApp(): Hono<TraceEnv> {
 
   // ── Topic scout ───────────────────────────────────────────────────────────
   app.post('/api/scout', async (c) => {
-    const id = await enqueueScoutRun();
+    const id = await enqueueScoutRun(SLEEKDROPS_PLATFORM_ID, 'au');
     log.info('scout run queued', { scout_run_id: id });
     return c.json({ queued: id }, 202);
   });
 
   app.get('/api/scout/queue', async (c) => {
-    return c.json(await scoutQueueStatus());
+    return c.json(await scoutQueueStatus(SLEEKDROPS_PLATFORM_ID));
   });
 
   app.get('/api/scout-runs', async (c) => {
@@ -1147,7 +1148,7 @@ export function createApp(): Hono<TraceEnv> {
 
   // ── Published site content (Cloudflare D1 — what the website builds from) ─
   app.get('/api/published', async (c) => {
-    const posts = await listD1Posts();
+    const posts = await listD1Posts(await d1TargetFor(SLEEKDROPS_PLATFORM_ID));
     return c.json({ posts });
   });
 
@@ -1166,7 +1167,7 @@ export function createApp(): Hono<TraceEnv> {
     if (parsed.value.upload && !gcsConfigured()) return c.json({ error: NO_IMAGE_STORAGE }, 503);
 
     const slug = c.req.param('slug');
-    const current = await getD1PostHero(slug);
+    const current = await getD1PostHero(await d1TargetFor(SLEEKDROPS_PLATFORM_ID), slug);
     if (!current) return c.json({ error: 'no live post with that slug' }, 404);
 
     const heroImage = parsed.value.upload
@@ -1175,7 +1176,7 @@ export function createApp(): Hono<TraceEnv> {
     if (!heroImage) return c.json({ error: 'attach an image file first' }, 400);
     const heroAlt = parsed.value.alt;
 
-    await setD1PostHero(slug, { heroImage, heroAlt });
+    await setD1PostHero(await d1TargetFor(SLEEKDROPS_PLATFORM_ID), slug, { heroImage, heroAlt });
     await syncArticleHero(slug, heroImage, heroAlt);
     const rebuild = await requestRebuild();
     log.info('hero image set on a live post', {
@@ -1188,7 +1189,7 @@ export function createApp(): Hono<TraceEnv> {
 
   app.delete('/api/published/:slug/hero-image', async (c) => {
     const slug = c.req.param('slug');
-    const removed = await setD1PostHero(slug, { heroImage: null, heroAlt: null });
+    const removed = await setD1PostHero(await d1TargetFor(SLEEKDROPS_PLATFORM_ID), slug, { heroImage: null, heroAlt: null });
     if (!removed) return c.json({ error: 'no live post with that slug' }, 404);
     await syncArticleHero(slug, null, null);
     const rebuild = await requestRebuild();
@@ -1198,7 +1199,7 @@ export function createApp(): Hono<TraceEnv> {
 
   app.delete('/api/published/:slug', async (c) => {
     const slug = c.req.param('slug');
-    const result = await deleteD1Post(slug);
+    const result = await deleteD1Post(await d1TargetFor(SLEEKDROPS_PLATFORM_ID), slug);
     if (!result) return c.json({ error: 'not found' }, 404);
     // The publisher skips the site rebuild when what it is about to push
     // matches `published_digest`, the receipt of the last version pushed live.
@@ -1216,7 +1217,7 @@ export function createApp(): Hono<TraceEnv> {
     let dispatched = false;
     let dispatchError: string | null = null;
     try {
-      await dispatchContentUpdated();
+      await dispatchContentUpdated(await publishTargetFor(SLEEKDROPS_PLATFORM_ID));
       dispatched = true;
     } catch (err) {
       dispatchError = err instanceof Error ? err.message : String(err);
@@ -1233,10 +1234,10 @@ export function createApp(): Hono<TraceEnv> {
   app.get('/api/distribution', async (c) => {
     const limit = Number(c.req.query('limit'));
     const [channels, counts, items, placements] = await Promise.all([
-      channelViews(),
-      queueCounts(),
-      recentItems(Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50),
-      placementPerformance(),
+      channelViews(SLEEKDROPS_PLATFORM_ID),
+      queueCounts(SLEEKDROPS_PLATFORM_ID),
+      recentItems(SLEEKDROPS_PLATFORM_ID, Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50),
+      placementPerformance(SLEEKDROPS_PLATFORM_ID),
     ]);
     return c.json({
       channels,
@@ -1280,7 +1281,7 @@ export function createApp(): Hono<TraceEnv> {
   app.post('/api/distribution/channels', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     try {
-      return c.json({ channel: await connectChannel(body) }, 201);
+      return c.json({ channel: await connectChannel(SLEEKDROPS_PLATFORM_ID, body) }, 201);
     } catch (err) {
       return channelAdminFailure(c, err);
     }

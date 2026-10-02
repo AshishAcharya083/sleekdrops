@@ -19,6 +19,7 @@ import {
   withAgentGoal,
 } from './context.js';
 import type { TopicSuggestion } from '../pipeline/types.js';
+import { d1TargetFor } from '../platform/publishTarget.js';
 
 function normalizeTitle(title: string): string {
   return slugify(title);
@@ -86,7 +87,9 @@ export async function runTopicScout(
   // scout has ever suggested for this platform (approved, rejected or pending
   // alike).
   const [published, previous] = await Promise.all([
-    fetchPublishedPosts().catch(() => [] as Array<{ slug: string; title: string }>),
+    d1TargetFor(platform.id)
+      .then(fetchPublishedPosts)
+      .catch(() => [] as Array<{ slug: string; title: string }>),
     q<{ title: string }>(
       'SELECT title FROM topics WHERE platform_id = $1 ORDER BY created_at DESC LIMIT 200',
       [platform.id],
