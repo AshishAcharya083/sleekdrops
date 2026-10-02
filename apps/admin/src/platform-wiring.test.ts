@@ -20,6 +20,7 @@ const hooks = read('./hooks.ts');
 const app = read('./App.tsx');
 const topics = read('./pages/Topics.tsx');
 const published = read('./pages/Published.tsx');
+const channels = read('./pages/Channels.tsx');
 const pipeline = read('./pages/Pipeline.tsx');
 const drawer = read('./pages/ManualTopicDrawer.tsx');
 const settings = read('./pages/Settings.tsx');
@@ -95,6 +96,15 @@ test('Channels and Offers follow the selected platform', () => {
   assert.match(pipeline, /onOpenOffers=\{offersEnabled\(platform\) \? \(\) => setOffersFor\(openId\) : null\}/);
   assert.match(pipeline, /\{onOpenOffers && \(\s*<div className="section">\s*<h2>\s*Offer coverage/);
   assert.match(settings, /onSaved\?\.\(\);/, 'saving settings re-reads distribution_enabled');
+});
+
+test('a missing distribution_enabled row reads as off, as the Channels gate does', () => {
+  assert.match(settings, /value=\{String\(settings\.distribution_enabled \?\? false\)\}/);
+});
+
+test("Channels links a queued article to the selected platform's site", () => {
+  assert.match(channels, /siteArticleUrl\(platform\.id, item\.slug\)/);
+  assert.doesNotMatch(channels, /https:\/\/sleekdrops\.com/, 'a PeakOdds slug must not link to SleekDrops');
 });
 
 test("topic categories and post types are the selected platform's", () => {

@@ -288,7 +288,7 @@ function PipelineSettings({ onSaved }: { onSaved?: () => void }) {
           <label htmlFor="distribution-enabled">Distribution enabled</label>
           <select
             id="distribution-enabled"
-            value={String(settings.distribution_enabled ?? true)}
+            value={String(settings.distribution_enabled ?? false)}
             onChange={(e) =>
               setSettings({ ...settings, distribution_enabled: e.target.value === 'true' })
             }
