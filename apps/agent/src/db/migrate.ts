@@ -1,10 +1,8 @@
 // Tiny forward-only SQL migration runner: applies src/db/migrations/*.sql in
-// name order, recording each in schema_migrations, then seeds any platform
-// profile that has never been saved. Safe to re-run.
+// name order, recording each in schema_migrations. Safe to re-run.
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { seedPlatforms } from '../platform/registry.js';
 import {
   databaseConnectionHint,
   isDatabaseConnectionError,
@@ -44,7 +42,6 @@ export async function migrate(): Promise<void> {
       client.release();
     }
   }
-  await seedPlatforms();
 }
 
 // Allow `pnpm migrate` to run this standalone. It waits for the database like

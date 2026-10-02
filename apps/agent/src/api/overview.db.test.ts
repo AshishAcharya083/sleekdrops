@@ -53,7 +53,7 @@ before(async () => {
     [AGENT],
   );
   const [run] = await q<{ id: string }>(
-    "INSERT INTO scout_runs (platform_id, status, ended_at) VALUES ('sleekdrops', 'done', now()) RETURNING id",
+    "INSERT INTO scout_runs (platform_id, edition_id, status, ended_at) VALUES ('sleekdrops', 'au', 'done', now()) RETURNING id",
   );
   scoutRunId = run.id;
   await q(

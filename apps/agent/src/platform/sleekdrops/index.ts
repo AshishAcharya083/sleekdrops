@@ -1,14 +1,13 @@
-// SleekDrops' profile: the brand text, categories, formats, scout queries and
+// SleekDrops' seed: the brand text, categories, formats, scout queries and
 // editorial rules every SleekDrops prompt is built from, verbatim from the
-// prompts that carried them before there was more than one platform. It seeds
-// the `platforms` row once; after that the database copy is the one that is
-// edited and versioned.
+// prompts that carried them before there was more than one platform. Migration
+// 018 writes the same values to the `platforms` row; after that the database
+// copy is the one that is edited and versioned.
 import type { POST_TYPES } from '../../content/contract.js';
 import type { ArticleShape } from '../../pipeline/types.js';
-import type { PlatformProfile } from '../types.js';
+import type { PlatformSeed } from '../types.js';
 
 export const SLEEKDROPS_PLATFORM_ID = 'sleekdrops';
-export const SLEEKDROPS_AU_EDITION_ID = 'au';
 
 // Typed against the catalogues so a renamed or removed id fails the build
 // rather than a prompt.
@@ -23,17 +22,19 @@ const ARTICLE_SHAPE_IDS: ArticleShape[] = [
   'ranked-list',
 ];
 
-export const SLEEKDROPS_PROFILE: PlatformProfile = {
-  id: SLEEKDROPS_PLATFORM_ID,
-  name: 'SleekDrops',
-  brandText: `SleekDrops (sleekdrops.com) is an editorial affiliate blog: "exclusive deals
+export const sleekdropsSeed: PlatformSeed = {
+  platform: {
+    id: SLEEKDROPS_PLATFORM_ID,
+    name: 'SleekDrops',
+    bylineName: 'SleekDrops Editorial Team',
+    brandText: `SleekDrops (sleekdrops.com) is an editorial affiliate blog: "exclusive deals
 dropping daily".`,
-  audience: `Primary audience: Australian shoppers (prices in AUD, Amazon
+    audience: `Primary audience: Australian shoppers (prices in AUD, Amazon
 Australia availability matters); write in plain international English.`,
-  categories: ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel'],
-  postTypes: POST_TYPE_IDS,
-  articleShapes: ARTICLE_SHAPE_IDS,
-  editorialRules: `
+    categories: ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel'],
+    postTypes: POST_TYPE_IDS,
+    articleShapes: ARTICLE_SHAPE_IDS,
+    editorialRules: `
 Editorial rules (non-negotiable):
 - Honest, useful, specific. Every recommendation names real trade-offs; a cons
   list is never empty. Decimal ratings like 4.3 — never star spam.
@@ -62,30 +63,32 @@ Editorial rules (non-negotiable):
   under that shape's own heading. "How we picked" is not a section every
   article owes the reader.
 `.trim(),
-  monetisation: 'amazon',
-  blockedLinkDomains: [],
-  // Platform-level, in the order the scout has always run them. The
-  // Australia edition adds none of its own, so the combined list is unchanged.
-  scoutQueries: [
-    'trending products Australia this week',
-    'best selling gadgets this month',
-    'viral home products people are buying right now',
-    'trending health and wellness products this month',
-    'what products are trending on social media right now Australia',
-    'new product releases worth buying this month',
-  ],
-  // Each agent's goal is still the one its own prompt states.
-  agentGoals: {},
-  publishTarget: {
-    d1DatabaseIdEnv: 'D1_DATABASE_ID',
-    rebuildHookEnv: 'GITHUB_TOKEN',
-    siteUrlEnv: 'SITE_URL',
-    githubRepoEnv: 'GITHUB_REPO',
+    monetisation: 'amazon',
+    blockedLinkDomains: [],
+    blockedTopics: [],
+    // Platform-level, in the order the scout has always run them. The
+    // Australia edition adds none of its own, so the combined list is unchanged.
+    scoutQueries: [
+      'trending products Australia this week',
+      'best selling gadgets this month',
+      'viral home products people are buying right now',
+      'trending health and wellness products this month',
+      'what products are trending on social media right now Australia',
+      'new product releases worth buying this month',
+    ],
+    // Each agent's goal is still the one its own prompt states.
+    agentGoals: {},
+    publishTarget: {
+      d1DatabaseIdEnv: 'D1_DATABASE_ID',
+      githubRepoEnv: 'GITHUB_REPO',
+      siteUrlEnv: 'SITE_URL',
+      // The rebuild is a repository_dispatch to GITHUB_REPO, not a hook URL.
+      rebuildHookEnv: null,
+    },
   },
   editions: [
     {
-      platformId: SLEEKDROPS_PLATFORM_ID,
-      id: SLEEKDROPS_AU_EDITION_ID,
+      id: 'au',
       name: 'Australia',
       timeZone: 'Australia/Sydney',
       currency: 'AUD',

@@ -23,6 +23,7 @@ import { parseStageParam, type StageParse } from './retry.js';
 import { modelFor, NO_LLM_AGENTS, STAGE_AGENT } from './runner.js';
 import { scrubSecrets, stageBudgetSeconds, stageTimeoutError } from './stageTimeout.js';
 import { StageTimeoutError, type ArticleRow, type Stage, type TopicRow } from './types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 export interface TestStageResult {
   sessionId: string;
@@ -118,8 +119,7 @@ async function recordSession(
     `INSERT INTO agent_sessions
        (article_id, platform_id, agent, model, status, summary, error, kind, attempt,
         tokens_input, tokens_output, cost_usd, llm_calls, ended_at)
-     VALUES ($1, (SELECT platform_id FROM articles WHERE id = $1), $2, $3, $4, $5, $6, 'test', $7,
-             $8, $9, $10, $11, now())
+     VALUES ($1, $12, $2, $3, $4, $5, $6, 'test', $7, $8, $9, $10, $11, now())
      RETURNING id`,
     [
       article.id,
@@ -133,6 +133,7 @@ async function recordSession(
       tracker.tokensOutput,
       tracker.costUsd,
       tracker.llmCalls,
+      SLEEKDROPS_PLATFORM_ID,
     ],
   );
   return session.id;

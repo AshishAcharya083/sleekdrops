@@ -52,6 +52,7 @@ import {
 import { scrubSecrets, stageTimeoutError } from './stageTimeout.js';
 import { StageTimeoutError } from './types.js';
 import type { ArticleRow, SeoReview, SessionStatus, Stage, TopicRow } from './types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('pipeline');
 
@@ -112,7 +113,7 @@ const GEMINI_ONLY_AGENTS = new Set(['image_agent']);
 
 export async function modelFor(agent: string): Promise<string> {
   const settings = await llmSettings();
-  const overrides = await getSetting<Record<string, string>>('models', {});
+  const overrides = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'models', {});
   if (GEMINI_ONLY_AGENTS.has(agent)) return defaultGeminiModel(settings);
 
   const pick =
@@ -223,16 +224,14 @@ async function finishArticle(article: ArticleRow, fields: Record<string, unknown
   });
 }
 
-/** Ensure the brief's slug doesn't collide with another article of the same platform. */
+/** Ensure the brief's slug doesn't collide with another article. */
 async function uniqueSlug(articleId: string, want: string): Promise<string> {
   for (let n = 0; n < 20; n++) {
     const candidate = n === 0 ? want : `${want}-${n + 1}`;
-    const clash = await q(
-      `SELECT 1 FROM articles
-        WHERE slug = $1 AND id <> $2
-          AND platform_id = (SELECT platform_id FROM articles WHERE id = $2)`,
-      [candidate, articleId],
-    );
+    const clash = await q('SELECT 1 FROM articles WHERE slug = $1 AND id <> $2', [
+      candidate,
+      articleId,
+    ]);
     if (clash.length === 0) return candidate;
   }
   return `${want}-${articleId.slice(0, 8)}`;
@@ -356,7 +355,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
     }
     case 'seo_review': {
       const review = await runSeoReviewer(article, model!, tracker);
-      const maxRounds = await getSetting<number>('max_revision_rounds', 2);
+      const maxRounds = await getSetting<number>(SLEEKDROPS_PLATFORM_ID, 'max_revision_rounds', 2);
       if (!review.pass && article.revision_round >= maxRounds) {
         review.forcedThrough = true;
       }
@@ -435,7 +434,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
         }
         summary = image.summary;
       }
-      const publishMode = await getSetting<string>('publish_mode', 'approval');
+      const publishMode = await getSetting<string>(SLEEKDROPS_PLATFORM_ID, 'publish_mode', 'approval');
       next =
         publishMode === 'approval'
           ? { stage: 'publish', status: 'waiting_approval' }
@@ -500,8 +499,8 @@ export async function runStage(
     const message = scrubSecrets(err instanceof Error ? err.message : String(err));
     await q(
       `INSERT INTO agent_sessions (article_id, platform_id, agent, status, summary, error, attempt, ended_at)
-       VALUES ($1, (SELECT platform_id FROM articles WHERE id = $1), $2, 'failed', $3, $4, $5, now())`,
-      [article.id, agent, `${stage} could not start`, message, article.attempt ?? 1],
+       VALUES ($1, $6, $2, 'failed', $3, $4, $5, now())`,
+      [article.id, agent, `${stage} could not start`, message, article.attempt ?? 1, SLEEKDROPS_PLATFORM_ID],
     );
     await finishArticle(article, {
       status: 'failed',
@@ -562,9 +561,9 @@ export async function runStage(
 
       const [session] = await q<{ id: string }>(
         `INSERT INTO agent_sessions (article_id, platform_id, agent, model, attempt)
-         VALUES ($1, (SELECT platform_id FROM articles WHERE id = $1), $2, $3, $4)
+         VALUES ($1, $5, $2, $3, $4)
          RETURNING id`,
-        [article.id, agent, model, article.attempt ?? 1],
+        [article.id, agent, model, article.attempt ?? 1, SLEEKDROPS_PLATFORM_ID],
       );
 
       // Only while this run's session is still open. A reaper or a boot

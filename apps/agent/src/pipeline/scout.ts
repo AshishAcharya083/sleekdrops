@@ -25,7 +25,7 @@ export interface ScoutQueueStatus {
 /** Add a request to the durable queue. This never refuses because another run is active. */
 export async function enqueueScoutRun(): Promise<string> {
   const [run] = await q<{ id: string }>(
-    "INSERT INTO scout_runs (platform_id, status) VALUES ($1, 'queued') RETURNING id",
+    "INSERT INTO scout_runs (platform_id, edition_id, status) VALUES ($1, 'au', 'queued') RETURNING id",
     [SLEEKDROPS_PLATFORM_ID],
   );
   return run.id;
@@ -136,9 +136,9 @@ async function runClaimedScout(id: string): Promise<void> {
     const model = await modelFor('topic_scout');
     [session] = await q<{ id: string }>(
       `INSERT INTO agent_sessions (scout_run_id, platform_id, agent, model)
-       VALUES ($1, (SELECT platform_id FROM scout_runs WHERE id = $1), 'topic_scout', $2)
+       VALUES ($1, $3, 'topic_scout', $2)
        RETURNING id`,
-      [id, model],
+      [id, model, SLEEKDROPS_PLATFORM_ID],
     );
     const topics = await runTopicScout(model, tracker, id);
     await q(
@@ -175,9 +175,8 @@ async function runClaimedScout(id: string): Promise<void> {
     } else {
       await q(
         `INSERT INTO agent_sessions (scout_run_id, platform_id, agent, status, summary, error, ended_at)
-         VALUES ($1, (SELECT platform_id FROM scout_runs WHERE id = $1), 'topic_scout', 'failed',
-                 'scout could not start', $2, now())`,
-        [id, message],
+         VALUES ($1, $3, 'topic_scout', 'failed', 'scout could not start', $2, now())`,
+        [id, message, SLEEKDROPS_PLATFORM_ID],
       );
     }
     console.error(`[scout] run ${id} failed: ${message}`);

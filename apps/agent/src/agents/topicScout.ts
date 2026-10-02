@@ -8,9 +8,9 @@ import { formatSearches, tavilySearchMany } from '../tools/tavily.js';
 import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
 import { siteContext, SOURCE_DISCIPLINE, VERIFICATION_RULES } from './context.js';
 import type { TopicSuggestion } from '../pipeline/types.js';
-import { SLEEKDROPS_AU_EDITION_ID, SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
-export const SCOUT_QUERIES = [
+const SCOUT_QUERIES = [
   'trending products Australia this week',
   'best selling gadgets this month',
   'viral home products people are buying right now',
@@ -92,7 +92,7 @@ Return JSON: {"topics": [{"title": string, "category": string, "postType": strin
        RETURNING id`,
       [
         SLEEKDROPS_PLATFORM_ID,
-        SLEEKDROPS_AU_EDITION_ID,
+        'au',
         scoutRunId,
         topic.title,
         normalizeTitle(topic.title),

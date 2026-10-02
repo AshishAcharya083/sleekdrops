@@ -21,6 +21,7 @@ import { STAGE_LEASE_SECONDS } from './lease.js';
 import { STAGE_AGENT, runStage } from './runner.js';
 import { recoverStaleScoutRuns } from './scout.js';
 import type { ArticleRow, Stage } from './types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('worker');
 
@@ -212,7 +213,7 @@ async function tick(): Promise<void> {
   if (isReapTick(ticks)) await reapExpiredLeases();
 
   if (active >= config.workerConcurrency) return;
-  const enabled = await getSetting<boolean>('worker_enabled', true);
+  const enabled = await getSetting<boolean>(SLEEKDROPS_PLATFORM_ID, 'worker_enabled', true);
   if (!enabled) return;
 
   while (!stopped && active < config.workerConcurrency) {

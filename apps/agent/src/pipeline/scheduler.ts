@@ -3,6 +3,7 @@
 // (and approve publishes, unless publish_mode is switched to auto).
 import { getSetting, q } from '../db/pool.js';
 import { enqueueScoutRun, hasPendingScoutRuns, recoverStaleScoutRuns } from './scout.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 // Don't pile up suggestions nobody has triaged yet.
 const MAX_PENDING_SUGGESTIONS = 30;
@@ -11,7 +12,7 @@ async function tick(): Promise<void> {
   // A killed worker's request goes back onto the same durable queue.
   await recoverStaleScoutRuns();
 
-  const hours = await getSetting<number>('scout_interval_hours', 24);
+  const hours = await getSetting<number>(SLEEKDROPS_PLATFORM_ID, 'scout_interval_hours', 24);
   if (!hours || hours <= 0) return;
   if (await hasPendingScoutRuns()) return;
 

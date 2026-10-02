@@ -26,6 +26,7 @@ import type {
   DistributionQueueRow,
   SocialProvider,
 } from './types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const reachable = await pool
   .query('SELECT 1')
@@ -159,7 +160,7 @@ test('connecting stores the credential by reference and never echoes it', { skip
   assert.deepEqual(channel.credential, { stored: true, source: 'panel' });
   assert.equal(channel.tokenTier, 'notice', '20 days out is the calm 30-day rung');
 
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  const stored = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'channel_credentials', {});
   assert.equal(stored[channel.tokenRef], `exchanged-${pasted}`, 'the account token is what posts');
 
   for (const path of ['/api/distribution', '/api/settings']) {
@@ -262,7 +263,7 @@ test('a secret name another account already uses is refused, not overwritten', {
   const raw = await clash.text();
   assert.ok(!raw.includes(secondToken));
   assert.match(raw, /already used by .*First Page/);
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  const stored = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'channel_credentials', {});
   assert.equal(stored[first.tokenRef], `exchanged-${firstToken}`, "the first Page's token is untouched");
   const [row] = await q<{ n: number }>(
     'SELECT count(*)::int n FROM channel_connections WHERE provider = $1 AND external_account_id = $2',
@@ -299,7 +300,7 @@ test('a mounted secret connects by name without the panel storing a copy', { ski
   assert.equal(channel.tokenRef, ref);
   assert.deepEqual(channel.credential, { stored: true, source: 'environment' });
   assert.equal(channel.tokenTier, 'ok', 'a token that never expires needs no warning');
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  const stored = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'channel_credentials', {});
   assert.equal(ref in stored, false, 'nothing was copied out of the secret store');
 });
 
@@ -340,7 +341,7 @@ test('replacing a credential keeps the account, and refuses a different one', { 
   assert.equal(replaced.status, 'active', 'a working token takes the channel out of needs_reauth');
   assert.equal(replaced.tokenTier, 'ok');
   assert.equal(replaced.displayName, 'SleekDrops AU');
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  const stored = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'channel_credentials', {});
   assert.equal(stored[channel.tokenRef], `exchanged-${rotated}`);
 });
 
@@ -374,7 +375,7 @@ test('disconnecting disables the channel, keeps its history and forgets the toke
   const kept = await queueOf(channel.id, 'all');
   assert.ok(kept.some((item) => item.id === queued), 'the queue row survives the disconnect');
 
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  const stored = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'channel_credentials', {});
   assert.equal(channel.tokenRef in stored, false);
 
   // Reconnecting pastes a token through the replace route, which only accepts

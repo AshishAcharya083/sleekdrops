@@ -27,6 +27,7 @@ import { getSetting } from '../db/pool.js';
 import { noteLlmCall, noteLlmCallEnded } from './callTrace.js';
 import { geminiChat } from './gemini.js';
 import { claudeChat, CLAUDE_NOT_CONFIGURED, resolveClaudeCredential } from './claude.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 export { CLAUDE_NOT_CONFIGURED };
 
@@ -53,7 +54,7 @@ let llmCache: { value: LlmSettings; at: number } | null = null;
 /** Admin-settable LLM config, cached for 30s to spare the DB. */
 export async function llmSettings(): Promise<LlmSettings> {
   if (llmCache && Date.now() - llmCache.at < 30_000) return llmCache.value;
-  const value = await getSetting<LlmSettings>('llm', {});
+  const value = await getSetting<LlmSettings>(SLEEKDROPS_PLATFORM_ID, 'llm', {});
   llmCache = { value, at: Date.now() };
   return value;
 }

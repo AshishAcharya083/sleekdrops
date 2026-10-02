@@ -32,6 +32,7 @@ import {
   llmSettings,
 } from '../../llm/index.js';
 import type { ChannelSpec } from './channels.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../../platform/sleekdrops/index.js';
 
 const log = createLogger('distribution');
 
@@ -385,7 +386,7 @@ export function headlineBudget(spec: ChannelSpec, parts: Omit<CaptionParts, 'hea
  */
 export async function socialCopyModel(): Promise<string> {
   const settings = await llmSettings();
-  const overrides = await getSetting<Record<string, string>>('models', {});
+  const overrides = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'models', {});
   if (overrides.social) return overrides.social;
   return (settings.prose_engine ?? 'claude') === 'claude'
     ? defaultClaudeModel(settings)

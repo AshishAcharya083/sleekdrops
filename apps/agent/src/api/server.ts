@@ -81,7 +81,7 @@ import {
   type HeroImageUpload,
 } from '../tools/heroImages.js';
 import { TRACE_HEADER, traceMiddleware, type TraceEnv } from './trace.js';
-import { SLEEKDROPS_AU_EDITION_ID, SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('api');
 
@@ -217,29 +217,6 @@ interface ApprovedTopic {
   post_type: string;
   hero_image_url: string | null;
   hero_alt: string | null;
-}
-
-/**
- * Queue the article an approved topic becomes. Everything it is seeded with is
- * read off the topic row itself - its platform and edition among it - plus the
- * platform profile version current at commissioning.
- */
-async function createArticleFromTopic(
-  topicId: string,
-): Promise<{ id: string; title: string; stage: string; status: string }> {
-  const [article] = await q<{ id: string; title: string; stage: string; status: string }>(
-    `INSERT INTO articles
-       (topic_id, platform_id, edition_id, title, category, post_type, hero_image_url, hero_alt,
-        event_starts_at, odds_as_at, profile_version)
-     SELECT t.id, t.platform_id, t.edition_id, t.title, t.category, t.post_type, t.hero_image_url,
-            t.hero_alt, t.event_starts_at, t.odds_as_at,
-            (SELECT v.id FROM platform_profile_versions v
-              WHERE v.platform_id = t.platform_id ORDER BY v.version DESC LIMIT 1)
-       FROM topics t WHERE t.id = $1
-     RETURNING id, title, stage, status`,
-    [topicId],
-  );
-  return article;
 }
 
 function validateReferences(input: unknown): Validated<ReferenceMaterial[]> {
@@ -542,8 +519,8 @@ export function createApp(): Hono<TraceEnv> {
         'settings',
         async () => {
           const [publishMode, workerEnabled] = await Promise.all([
-            getSetting('publish_mode', 'approval'),
-            getSetting('worker_enabled', true),
+            getSetting(SLEEKDROPS_PLATFORM_ID, 'publish_mode', 'approval'),
+            getSetting(SLEEKDROPS_PLATFORM_ID, 'worker_enabled', true),
           ]);
           return { publishMode, workerEnabled };
         },
@@ -587,7 +564,20 @@ export function createApp(): Hono<TraceEnv> {
         [id],
       );
       if (!topic) continue;
-      const article = await createArticleFromTopic(topic.id);
+      const [article] = await q<{ id: string }>(
+        `INSERT INTO articles
+           (platform_id, edition_id, topic_id, title, category, post_type, hero_image_url, hero_alt)
+         VALUES ($7, 'au', $1, $2, $3, $4, $5, $6) RETURNING id, title, stage, status`,
+        [
+          topic.id,
+          topic.title,
+          topic.category,
+          topic.post_type,
+          topic.hero_image_url,
+          topic.hero_alt,
+          SLEEKDROPS_PLATFORM_ID,
+        ],
+      );
       // Pipeline work is picked up later by the worker's database poll, so the
       // entity ids logged here are what join those [pipeline] lines back to
       // this request's trace id.
@@ -665,7 +655,7 @@ export function createApp(): Hono<TraceEnv> {
           notes,
           heroAlt,
           SLEEKDROPS_PLATFORM_ID,
-          SLEEKDROPS_AU_EDITION_ID,
+          'au',
         ],
       );
       return c.json({ topic }, 201);
@@ -687,7 +677,20 @@ export function createApp(): Hono<TraceEnv> {
       [c.req.param('id')],
     );
     if (!topic) return c.json({ error: 'draft topic not found or already approved' }, 409);
-    const article = await createArticleFromTopic(topic.id);
+    const [article] = await q<{ id: string }>(
+      `INSERT INTO articles
+         (platform_id, edition_id, topic_id, title, category, post_type, hero_image_url, hero_alt)
+       VALUES ($7, 'au', $1, $2, $3, $4, $5, $6) RETURNING id, title, stage, status`,
+      [
+        topic.id,
+        topic.title,
+        topic.category,
+        topic.post_type,
+        topic.hero_image_url,
+        topic.hero_alt,
+        SLEEKDROPS_PLATFORM_ID,
+      ],
+    );
     log.info('article queued from manual topic approval', {
       topic_id: topic.id,
       article_id: article.id,
@@ -1432,7 +1435,7 @@ export function createApp(): Hono<TraceEnv> {
       if (key === 'publish_mode' && !['approval', 'auto', 'draft'].includes(String(body[key]))) {
         return c.json({ error: 'publish_mode must be approval | auto | draft' }, 400);
       }
-      await setSetting(key, body[key]);
+      await setSetting(SLEEKDROPS_PLATFORM_ID, key, body[key]);
     }
     clearLlmSettingsCache();
     // Same shape as the GET: saving a token must refresh the readiness the

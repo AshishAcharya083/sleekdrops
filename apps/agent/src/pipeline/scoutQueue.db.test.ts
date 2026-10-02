@@ -43,8 +43,8 @@ async function seed(
   startedAt = '2000-01-01T00:00:00Z',
 ): Promise<string> {
   const [run] = await q<{ id: string }>(
-    `INSERT INTO scout_runs (platform_id, status, started_at, claimed_at, heartbeat_at)
-     VALUES ('sleekdrops', $1, $2, CASE WHEN $1 = 'running' THEN now() ELSE NULL END,
+    `INSERT INTO scout_runs (platform_id, edition_id, status, started_at, claimed_at, heartbeat_at)
+     VALUES ('sleekdrops', 'au', $1, $2, CASE WHEN $1 = 'running' THEN now() ELSE NULL END,
              now() - make_interval(mins => $3))
      RETURNING id`,
     [status, startedAt, heartbeatMinutesAgo],

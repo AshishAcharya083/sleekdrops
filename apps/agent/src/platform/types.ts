@@ -1,67 +1,83 @@
 // The shape of a platform (one brand the pipeline writes for) and its editions
 // (the audiences it writes each piece for). The rows live in the `platforms`
-// and `editions` tables; src/platform/<id>/ holds each brand's seed profile.
-
-export const MONETISATION_MODES = ['amazon', 'none'] as const;
+// and `editions` tables; src/platform/<id>/ holds each brand's seed.
 
 /** 'amazon' earns through Amazon affiliate go-links; 'none' carries no offers or go-links at all. */
-export type MonetisationMode = (typeof MONETISATION_MODES)[number];
+export type MonetisationMode = 'amazon' | 'none';
+export const MONETISATION_MODES: readonly MonetisationMode[] = ['amazon', 'none'];
+
+/** Agent ids that may carry a goal: 'scout' plus every Stage except 'publish' | 'done'. */
+export type AgentId =
+  | 'scout'
+  | 'research'
+  | 'keyword'
+  | 'angle'
+  | 'outline'
+  | 'write'
+  | 'seo_review'
+  | 'edit'
+  | 'assemble'
+  | 'image';
+
+/** A class of topic a platform does not cover - see topicRules.ts. */
+export type TopicClass = 'racing';
 
 /**
  * Where a platform publishes, as the NAMES of the environment variables that
  * hold each value. A secret never enters the database: the publisher reads
  * the variable named here at publish time.
  */
-export interface PublishTarget {
+export interface PublishTargetRef {
   d1DatabaseIdEnv: string;
-  /** The credential that fires the site rebuild. */
-  rebuildHookEnv: string;
-  siteUrlEnv: string;
   githubRepoEnv: string;
+  siteUrlEnv: string;
+  /** null = repository_dispatch to the repo (SleekDrops today). */
+  rebuildHookEnv: string | null;
 }
 
 export interface Edition {
-  platformId: string;
   id: string;
+  platformId: string;
   name: string;
-  /** IANA zone the edition's dates and kick-off times are stated in. */
+  /** IANA, e.g. 'Australia/Sydney', 'UTC'. */
   timeZone: string;
-  /** ISO 4217 code, or null for an edition that quotes no currency amounts. */
+  /** ISO 4217, or null for an edition that quotes no currency amounts. */
   currency: string | null;
-  /** BCP 47 tag, e.g. "en-AU". */
+  /** BCP 47, e.g. 'en-AU', 'en-GB'. */
   locale: string;
-  /** Scout queries for this audience, run after the platform's own. */
-  scoutQueries: string[];
-  /** Appended to every article by code, never written by a model. Empty for none. */
+  /** Run after the platform's own scout queries. */
+  scoutQueries: readonly string[];
+  /** Markdown appended by the assembler, never written by a model; '' = none. */
   complianceFooter: string;
 }
 
-/** The editable profile: what a platform's prompts, formats and rules are built from. */
-export interface PlatformProfile {
+export interface Platform {
   id: string;
   name: string;
+  bylineName: string;
   brandText: string;
   audience: string;
-  categories: string[];
-  /** Ids from the post type catalogue this platform may produce. */
-  postTypes: string[];
-  /** Ids from the article shape catalogue this platform may be written in. */
-  articleShapes: string[];
+  categories: readonly string[];
+  /** Ids into the post type catalogue. */
+  postTypes: readonly string[];
+  /** Ids into the article shape catalogue. */
+  articleShapes: readonly string[];
   editorialRules: string;
   monetisation: MonetisationMode;
-  /** Domains no article may link to, subdomains included. */
-  blockedLinkDomains: string[];
-  scoutQueries: string[];
-  /** Goal text per agent name. An agent with no entry keeps its prompt's own goal. */
-  agentGoals: Record<string, string>;
-  publishTarget: PublishTarget;
-  editions: Edition[];
+  /** Bare hostnames; a subdomain of one is blocked too. */
+  blockedLinkDomains: readonly string[];
+  blockedTopics: readonly TopicClass[];
+  scoutQueries: readonly string[];
+  /** An agent with no entry keeps the goal its own prompt states. */
+  agentGoals: Readonly<Partial<Record<AgentId, string>>>;
+  publishTarget: PublishTargetRef;
+  /** platform_profile_versions.id currently in force. */
+  profileVersion: number;
+  editions: readonly Edition[];
 }
 
-export interface Platform extends PlatformProfile {
-  /**
-   * The platform_profile_versions row the profile above is, which an article
-   * records as its articles.profile_version. Null until a version is saved.
-   */
-  profileVersion: number | null;
+/** The in-code shape a platform seeds from (platform/<id>/ exports one). */
+export interface PlatformSeed {
+  platform: Omit<Platform, 'profileVersion' | 'editions'>;
+  editions: readonly Omit<Edition, 'platformId'>[];
 }

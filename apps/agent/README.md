@@ -429,23 +429,26 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
 
 ## State model (PostgreSQL)
 
-- `platforms` - one brand per row (SleekDrops is `sleekdrops`): brand text,
-  audience, categories, post types, article shapes, editorial rules,
-  monetisation (`amazon` | `none`), blocked link domains, scout queries,
-  per-agent goals, and its publish target as the *names* of the env variables
-  holding the D1 database id, rebuild credential, site URL and GitHub repo
+- `platforms` - one brand per row (SleekDrops is `sleekdrops`): byline,
+  brand text, audience, categories, post types, article shapes, editorial
+  rules, monetisation (`amazon` | `none`), blocked link domains and topic
+  classes, scout queries, per-agent goals, the profile version in force, and
+  its publish target as the *names* of the env variables holding the D1
+  database id, GitHub repo, site URL and rebuild hook (null = repository
+  dispatch)
 - `editions` - one audience of a platform (SleekDrops has `au`): time zone,
   currency, locale, its own scout queries and a compliance footer. A new
   edition is a row, not a code or schema change
 - `platform_profile_versions` - append-only history of every profile edit,
   with author and timestamp; `articles.profile_version` records which one an
   article was commissioned under
-- Every `topics`, `articles`, `scout_runs`, `agent_sessions`, offer, channel
-  and `settings` row carries a required `platform_id` (no default), and topics
-  and articles an `edition_id`. Each profile is seeded from
-  `src/platform/<id>/` after migrations run, once; from then on the database
-  copy is the one that is edited. `src/platform/registry.ts` is the only
-  lookup, and an unknown or missing platform id throws
+- Every `topics`, `articles`, `scout_runs`, `agent_sessions`,
+  `product_offers`, `channel_connections` and `settings` row carries a
+  required `platform_id` (no default), and topics, articles and scout runs an
+  `edition_id`. SleekDrops is written by migration 018; any other platform in
+  `src/platform/profiles.ts` is seeded at boot if absent, and from then on the
+  database copy is the one that is edited. `src/platform/registry.ts` is the
+  only lookup, and an unknown or missing platform id throws
 - `topics` — scout suggestions; `suggested → approved/rejected` (unique per
   platform on normalized title = the "never repeat a topic" guard, alongside
   the D1 check)

@@ -37,6 +37,7 @@ import type {
   RenderedPayload,
   SocialProvider,
 } from '../types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../../platform/sleekdrops/index.js';
 
 const reachable = await pool
   .query('SELECT 1')
@@ -417,7 +418,7 @@ test('a quota rejection beats the local count and corrects it', { skip }, async 
   assert.equal(receipt.remotePostId, `${pageId}_930`, 'the item still went out, in the other placement');
   assert.equal(calls.filter((call) => call.path.endsWith('/feed')).length, 1);
 
-  const state = await getSetting<Record<string, { month: string }>>(BODY_LINK_BUDGET_SETTING, {});
+  const state = await getSetting<Record<string, { month: string }>>(SLEEKDROPS_PLATFORM_ID, BODY_LINK_BUDGET_SETTING, {});
   assert.equal(state[pageId]?.month, new Date().toISOString().slice(0, 7));
 
   // And the correction sticks: the next item for this Page, whose rows still
@@ -434,7 +435,7 @@ test('a quota rejection beats the local count and corrects it', { skip }, async 
   ).post({ accessToken: TOKEN, externalAccountId: pageId, item: next.item });
   assert.equal(second.calls.some((call) => call.path.endsWith('/feed')), false);
 
-  await setSetting(BODY_LINK_BUDGET_SETTING, {});
+  await setSetting(SLEEKDROPS_PLATFORM_ID, BODY_LINK_BUDGET_SETTING, {});
 });
 
 // ── The ladder's last rung, through the worker ─────────────────────────────

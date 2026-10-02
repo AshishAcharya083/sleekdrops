@@ -67,7 +67,7 @@ export async function resolveCredential(
   provider: string,
 ): Promise<string | null> {
   if (!ref) return null;
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  const stored = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'channel_credentials', {});
   const fromSettings = stored[ref];
   if (typeof fromSettings === 'string' && fromSettings !== '') return fromSettings;
   return environmentCredential(ref, provider);
@@ -158,7 +158,7 @@ export async function credentialSource(
   provider: string,
 ): Promise<CredentialSource | null> {
   if (!ref) return null;
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  const stored = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'channel_credentials', {});
   if (typeof stored[ref] === 'string' && stored[ref] !== '') return 'panel';
   return environmentCredential(ref, provider) ? 'environment' : null;
 }
