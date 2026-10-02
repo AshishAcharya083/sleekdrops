@@ -27,6 +27,9 @@ Events are declared in the DOM and dispatched by [`src/scripts/chrome.ts`](../sr
   The rules live in the pure [`src/lib/outbound.ts`](../src/lib/outbound.ts); the Function on the other end reads them back with [`functions/_lib/click.mjs`](../functions/_lib/click.mjs).
 - **Server-side redirects** - the handler retains a tested telemetry seam, but the deployed `/go/<slug>` route passes no processor credentials. Server-side click telemetry remains disabled until the processor has public privacy, jurisdiction and retention terms.
 - **Read completion** - `ArticleBody.astro` ends with a `[data-read-sentinel]`; `chrome.ts` watches it with an `IntersectionObserver` and an active-time stopwatch, and fires `Article Read` once when both halves of the gate hold ([`src/lib/read-completion.ts`](../src/lib/read-completion.ts)).
+- **Trust surfaces** - the methodology page, the score explainer and the deal badges render only plain hooks (the page-view `screen`, `data-score-explainer`, `data-trust-badge`), never an event name.
+  `chrome.ts` hands the document to the pure [`src/lib/trust-analytics.ts`](../src/lib/trust-analytics.ts), which fires `Methodology Viewed`, `Score Explainer Expanded` and `Trust Badge Clicked` from them.
+  A page without a hook fires nothing and logs nothing.
 - **Newsletter signups** - not currently emitted. No newsletter surface ships until a real mailing-list provider exists; the event stays reserved for that future integration.
 - **Chrome UI interactions** - the dark-mode toggle, share button, copy-link button, copy-code button, image lightbox, and TOC nav links already have dedicated event listeners in `chrome.ts` for their own behaviour; each fires its analytics event directly from that handler rather than through a `data-track` attribute.
 - **Experiment copy** - an element carries `data-experiment-copy="<feature key>"`; its default copy renders in the static HTML and `chrome.ts` swaps it in place once the flag payload resolves, rewriting the enclosing `data-track` element's `cta` prop so the funnel event reports the label the visitor actually saw.
@@ -130,6 +133,7 @@ Every page under `src/pages` passes a `screen`, so no `Page Viewed` arrives unna
 | `privacy` | `/privacy` |
 | `disclaimer` | `/disclaimer` |
 | `how-we-research` | `/how-we-research` |
+| `how-we-rate` | `/how-we-rate` (the methodology page; also fires `Methodology Viewed`) |
 | `not-found` | the 404 page |
 
 The five names in use before this pass (`home`, `blog-listing`, `blog-post`, `deals-listing`, `deal-detail`) are unchanged, so their history is continuous.
@@ -351,6 +355,51 @@ A click on an in-article table-of-contents link.
 
 Owning component: `chrome.ts` (`[data-toc] a` handler).
 
+### Methodology Viewed
+
+A view of the `/how-we-rate` methodology page, so the share of readers who go and check how scores are given is measurable on its own rather than buried among page views.
+Fires once per document, after that page's `Page Viewed`, when the page view's `screen` is `how-we-rate`.
+The version is read from `trust.ts` through a dynamic import, so its validation code loads on this page only rather than in every page's script; if that chunk fails to load, the view is still sent without `method_version` and one `serverLog('warn', ...)` line is logged.
+
+| Property | Type | Notes |
+|---|---|---|
+| `method_version` | string | The current scoring-method version (`CURRENT_METHOD_VERSION` in [`src/lib/trust.ts`](../src/lib/trust.ts)), e.g. `1.0`. |
+
+Hook: `screen="how-we-rate"` on `BaseLayout`, rendered by `how-we-rate.astro`.
+Dispatch: `chrome.ts` via `wireTrustAnalytics()` in [`src/lib/trust-analytics.ts`](../src/lib/trust-analytics.ts).
+
+### Score Explainer Expanded
+
+A reader opened the "how we scored this" explainer beside a review's rating.
+Fires on the `toggle` of a `<details data-score-explainer>` that leaves it open, **at most once per explainer per page load** - closing and re-opening it is the same reader's interest, not a second expansion.
+The `<details>` must render closed: one parsed with `open` fires `toggle` on load and would count as an expansion nobody made.
+
+| Property | Type | Notes |
+|---|---|---|
+| `slug` | string | The review's post slug. |
+| `band` | string | The score band the rating sits in (`excellent`, `strong`, `decent`, `mixed`, `weak`). |
+
+Hook: `data-score-explainer` (no value) and `data-score-explainer-props='{"slug":"<post slug>","band":"<ScoreBandId>"}'` on the `<details>`, rendered by `ScoreExplainer.astro`.
+Malformed props JSON still sends the event, with no properties.
+Dispatch: `chrome.ts` via `wireTrustAnalytics()`.
+
+### Trust Badge Clicked
+
+A click on a deal badge's proof link - the link from a claim such as "4.4/5 in our review" to the evidence behind it.
+Fires on every click of an element carrying `data-trust-badge`.
+
+| Property | Type | Notes |
+|---|---|---|
+| `badge_kind` | string | The badge's registry kind (`review-score`, `skip-for-now`, ...), taken from the attribute and winning over any prop of the same name. |
+| `slug` | string | The deal or promo slug. |
+| `placement` | string | `deal-card`, `deals-index`, `deal-detail`, `promo-card`, `promo-detail` or `home`. |
+
+Hook: `data-trust-badge="<BadgeKind>"` and `data-trust-badge-props='{"slug":"<deal or promo slug>","placement":"<placement>"}'` on the proof `<a>`, rendered by `DealBadge.astro`.
+The proof link carries no `data-track`, so one click is one event; a badge printed as plain text inside an already-linked card carries no hook at all.
+A kind that is not in the badge registry is a rendering bug: the click is dropped with one `serverLog('warn', ...)` line, the same handling an unknown `data-track` name gets.
+Malformed props JSON still sends the event with `badge_kind`.
+Dispatch: `chrome.ts` via `wireTrustAnalytics()`.
+
 ### $experiment_viewed
 
 Platform event: the visitor was bucketed into a running experiment.
@@ -511,6 +560,9 @@ Every row additionally carries the `event_id` and `visit_id` keys and the `theme
 | `Copy Link Clicked` | `chrome.ts` `[data-copy-link]` click handler | `screen` (when known) |
 | `Image Lightbox Opened` | `chrome.ts` `[data-lightbox]` click/keydown handler | `screen` (when known) |
 | `TOC Link Clicked` | `chrome.ts` `[data-toc] a` click handler | `section` |
+| `Methodology Viewed` | `<body data-page-view>` with `screen: 'how-we-rate'`, via `wireTrustAnalytics()` | `method_version` |
+| `Score Explainer Expanded` | `details[data-score-explainer]` toggle handler, via `wireTrustAnalytics()` | `slug`, `band` |
+| `Trust Badge Clicked` | `[data-trust-badge]` click handler, via `wireTrustAnalytics()` | `badge_kind`, `slug`, `placement` |
 
 Suppression is enforced in one place (`track()` in `analytics.ts`): events are buffered while the decision is unknown, flushed when the deployment default or a stored choice grants analytics, dropped on denial, and `boot()` denies outright on a GPC/DNT signal.
 Withdrawal is reachable from every page: the **Privacy preferences** control in the footer dispatches the `consent:open-preferences` document event owned by [`src/lib/consent-preferences.ts`](../src/lib/consent-preferences.ts), which reopens the consent island's dialog pre-filled from `consentStatus()` - the decision in force - so a visitor can turn analytics back off long after the banner is gone.
