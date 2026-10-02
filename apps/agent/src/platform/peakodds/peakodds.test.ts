@@ -13,7 +13,7 @@ import {
   NZ_GAMBLING_HELPLINE,
 } from './footers.js';
 import { shapeById } from '../../content/shapes.js';
-import type { AgentId } from './contractTypes.js';
+import type { AgentId } from '../types.js';
 
 const { platform, editions } = peakoddsSeed;
 const RACING = /\b(?:horse|greyhound|harness|thoroughbred|trots?|pacing|race ?meeting|racing|melbourne cup|caulfield|cox plate)\b/i;

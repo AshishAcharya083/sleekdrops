@@ -10,7 +10,7 @@ import { PEAKODDS_PLATFORM_ID } from '../platform/peakodds/index.js';
 import { PICKS_TABLE_COLUMNS } from '../platform/peakodds/formats.js';
 import { PEAKODDS_PHRASE_RULES } from '../platform/peakodds/phrases.js';
 import type { PhraseRule, PhraseRules } from '../platform/peakodds/phrases.js';
-import type { Edition, Platform } from '../platform/peakodds/contractTypes.js';
+import type { Edition, Platform } from '../platform/types.js';
 
 /** The slice of a PromptContext the checks read. A full PromptContext satisfies it. */
 export interface ComplianceContext {
@@ -76,11 +76,31 @@ function isNegated(text: string, index: number): boolean {
   return GOVERNING_NEGATION.test(text.slice(Math.max(0, index - 60), index));
 }
 
+/**
+ * A contrast straight after the phrase that takes the hedge back: "not a sure
+ * thing, but close", "not a lock - but it's as near as you'll get". Not "but
+ * close games ..." or "but nearly every metric ...", where the word describes
+ * something else.
+ */
+const RESTORED_CERTAINTY = new RegExp(
+  "^[\\s,;:–—-]*(?:but|yet|though)\\s+" +
+    "(?:(?:it|it['’]s|it\\s+is|they['’]re|they\\s+are|this\\s+is|that['’]s|is|are|pretty|very|damn|mighty|about|as|a)\\s+){0,3}" +
+    '(?:clos(?:e|er|est)|near(?:ly|er|est)?|almost|virtually|practically|as\\s+good\\s+as|next\\s+best|not\\s+far\\s+off)\\b' +
+    '(?=\\s*(?:[.!?,;:)]|\\s[-–—]|$)|\\s+(?:enough|to|as|one|it)\\b)',
+  'i',
+);
+
+function isRestored(text: string, end: number): boolean {
+  return RESTORED_CERTAINTY.test(text.slice(end, end + 60));
+}
+
 function phraseHits(text: string, rules: readonly PhraseRule[]): string[] {
   const hits = new Set<string>();
   for (const rule of rules) {
     for (const match of text.matchAll(rule.pattern)) {
-      if (rule.negatable && isNegated(text, match.index)) continue;
+      if (rule.negatable && isNegated(text, match.index) && !isRestored(text, match.index + match[0].length)) {
+        continue;
+      }
       hits.add(`"${match[0]}" (${rule.label})`);
     }
   }
@@ -89,7 +109,7 @@ function phraseHits(text: string, rules: readonly PhraseRule[]): string[] {
 
 /** A money amount: "$20", "A$1.5m", "£500", "20 dollars", "USD 100". Not "pounds": that is a fighter's weight as often as a price. */
 const CURRENCY_AMOUNT =
-  /(?:\b(?:A|AU|US|NZ|C)\$|[$£€¥])\s?\d|\b\d[\d,.]*\s?(?:m|bn|k|million|billion)?\s?(?:AUD|USD|GBP|EUR|NZD|dollars?|euros?)\b|\b(?:AUD|USD|GBP|EUR|NZD)\s?\d/gi;
+  /(?:\b(?:A|AU|US|NZ|C)\$|[$£€¥])\s?\d(?:[\d,.]*\d)?(?:\s?(?:m|bn|k|million|billion)\b)?|\b\d[\d,.]*\s?(?:m|bn|k|million|billion)?\s?(?:AUD|USD|GBP|EUR|NZD|dollars?|euros?)\b|\b(?:AUD|USD|GBP|EUR|NZD)\s?\d(?:[\d,.]*\d)?/gi;
 
 // ------------------------------------------------------------------ picks table
 

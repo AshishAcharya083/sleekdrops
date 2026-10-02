@@ -11,7 +11,7 @@
 // the field; Same Game Multi builders push a high-risk bookmaker product.
 import { AU_FOOTER, GLOBAL_FOOTER } from './footers.js';
 import { PEAKODDS_SHAPES } from './formats.js';
-import type { PlatformSeed } from './contractTypes.js';
+import type { PlatformSeed } from '../types.js';
 
 export const PEAKODDS_PLATFORM_ID = 'peakodds';
 

@@ -198,6 +198,26 @@ test('every common certainty form is rejected, bare or in a phrase', () => {
   }
 });
 
+test('a hedge the same clause takes back is still certainty language', () => {
+  for (const body of [
+    'Not a sure thing, but close.',
+    "It's not a lock, but it's as near as you'll get.",
+    'Nothing is guaranteed to win - but this is almost.',
+    'Not a certainty, yet pretty close.',
+    'Not guaranteed to win, but close enough.',
+  ]) {
+    const problems = complianceProblems(body, peakodds('au'));
+    assert.equal(problems.length, 1, body);
+    assert.match(problems[0], /^certainty language: /, body);
+  }
+  for (const body of [
+    'Not a sure thing, but close games have suited the Swans.',
+    'Not a lock, but nearly every metric favours the Swans.',
+  ]) {
+    assert.deepEqual(complianceProblems(body, peakodds('au')), [], body);
+  }
+});
+
 test('hedge copy the rules ask for passes', () => {
   for (const body of [
     'No bet is ever a sure thing.',
@@ -293,8 +313,9 @@ test('the Global edition quotes no currency amount; Australia may', () => {
   const body = 'The winner takes home $3.6 million, and the runner-up £1m. Tickets cost 40 euros.';
   const problems = complianceProblems(body, peakodds('global'));
   assert.equal(problems.length, 1);
-  assert.match(problems[0], /edition with no currency: "\$3", "£1", "40 euros"/);
+  assert.match(problems[0], /edition with no currency: "\$3.6 million", "£1m", "40 euros"/);
   assert.deepEqual(complianceProblems(body, peakodds('au')), []);
+  assert.match(complianceProblems('A $50 bet returns $92.50.', peakodds('global'))[0], /"\$50", "\$92.50"$/);
   assert.deepEqual(complianceProblems('He fights at 155 pounds.', peakodds('global')), []);
 });
 
