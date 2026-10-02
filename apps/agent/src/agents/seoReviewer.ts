@@ -36,9 +36,11 @@ import {
   keywordPlanBrief,
   LINK_PLACEMENT_RULES,
   SEO_RULES,
+  type PromptContext,
   siteContext,
   SOURCE_DISCIPLINE,
   VERIFICATION_RULES,
+  withAgentGoal,
 } from './context.js';
 import type { ArticleRow, KeywordPlan, SeoReview } from '../pipeline/types.js';
 
@@ -230,6 +232,7 @@ function competitorBrief(competitors: KeywordPlan['competitors']): string {
  * failed for adding nothing to pages nobody recorded.
  */
 export async function auditCompetitorDelta(
+  ctx: PromptContext,
   article: ArticleRow,
   model: string,
   tracker: UsageTracker,
@@ -241,8 +244,9 @@ export async function auditCompetitorDelta(
   const gaps = (plan?.contentGaps ?? []).filter(Boolean);
   const reply = await chatJson<Record<string, unknown>>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}`,
+      system: withAgentGoal(ctx, 'seo_review', `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}`),
       temperature: 0.2,
       maxTokens: 4000,
       search: true,
@@ -295,14 +299,16 @@ ground competently, and it is the verdict most drafts earn. Do not soften it.`,
  * gathered is a number nobody reviewed.
  */
 export async function auditClaims(
+  ctx: PromptContext,
   article: ArticleRow,
   model: string,
   tracker: UsageTracker,
 ): Promise<ClaimAudit> {
   const reply = await chatJson<Record<string, unknown>>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}`,
+      system: withAgentGoal(ctx, 'seo_review', `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}`),
       temperature: 0,
       maxTokens: 8000,
       prompt: `Audit every specific in this draft against the research dossier. The dossier
@@ -383,6 +389,7 @@ ${parts.join('\n\n')}`
 }
 
 export async function runSeoReviewer(
+  ctx: PromptContext,
   article: ArticleRow,
   model: string,
   tracker: UsageTracker,
@@ -391,9 +398,9 @@ export async function runSeoReviewer(
   const plan = article.keyword_plan;
   const planBrief = keywordPlanBrief(plan);
   const angle = article.editorial_angle;
-  const angleBrief = editorialAngleBrief(angle);
+  const angleBrief = editorialAngleBrief(angle, ctx.platform);
   const shape = article.structure_shape ?? article.outline?.structureShape ?? null;
-  const shapeBrief = structureBrief(shape);
+  const shapeBrief = structureBrief(shape, ctx.platform);
 
   // Deterministic first, so the model reviews prose we have already measured.
   // The scan reads the published corpus too, so repetition is measured against
@@ -408,14 +415,19 @@ export async function runSeoReviewer(
   // The two graded passes are independent of each other and of the rubric, so
   // they run together and land in the scoring prompt as established facts.
   const [competitors, claims] = await Promise.all([
-    auditCompetitorDelta(article, model, tracker),
-    auditClaims(article, model, tracker),
+    auditCompetitorDelta(ctx, article, model, tracker),
+    auditClaims(ctx, article, model, tracker),
   ]);
 
   const review = await chatJson<SeoReview & { position?: unknown }>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}\n\n${LINK_PLACEMENT_RULES}\n\n${SEO_RULES}\n\n${GEO_RULES}\n\n${ANTI_SLOP_RULES}\n\n${VERIFICATION_RULES}`,
+      system: withAgentGoal(
+        ctx,
+        'seo_review',
+        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${LINK_PLACEMENT_RULES}\n\n${SEO_RULES}\n\n${GEO_RULES}\n\n${ANTI_SLOP_RULES}\n\n${VERIFICATION_RULES}`,
+      ),
       temperature: 0.2,
       maxTokens: 6000,
       search: true,

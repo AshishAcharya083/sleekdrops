@@ -28,14 +28,15 @@ import {
   ANTI_SLOP_RULES,
   authorVoiceBrief,
   editorialAngleBrief,
-  EDITORIAL_RULES,
   GEO_RULES,
   keywordPlanBrief,
   LINK_PLACEMENT_RULES,
   operatorBrief,
+  type PromptContext,
   SEO_RULES,
   siteContext,
   SOURCE_DISCIPLINE,
+  withAgentGoal,
 } from './context.js';
 import type { ArticleRow, TopicRow } from '../pipeline/types.js';
 
@@ -57,6 +58,7 @@ const LEGACY_STRUCTURE = `- Open with the answer. The first 100 words must conta
 - Close with a short honest conclusion that links each named pick once.`;
 
 export async function runWriter(
+  ctx: PromptContext,
   article: ArticleRow,
   topic: TopicRow | null,
   model: string,
@@ -66,7 +68,7 @@ export async function runWriter(
   const plan = article.keyword_plan;
   const planBrief = keywordPlanBrief(plan);
   const angle = article.editorial_angle;
-  const angleBrief = editorialAngleBrief(angle);
+  const angleBrief = editorialAngleBrief(angle, ctx.platform);
   // The shape the outliner recorded on the brief. Absent only for articles
   // outlined before the structure library existed.
   const shape = brief.structureShape ?? null;
@@ -85,22 +87,27 @@ export async function runWriter(
   const operator = operatorBrief(topic);
 
   const result = await chat({
+    platformId: ctx.platform.id,
     model,
-    system: [
-      siteContext(),
-      EDITORIAL_RULES,
-      SOURCE_DISCIPLINE,
-      ANTI_SLOP_RULES,
-      LINK_PLACEMENT_RULES,
-      SEO_RULES,
-      GEO_RULES,
-      authorVoiceBrief(author),
-    ].join('\n\n'),
+    system: withAgentGoal(
+      ctx,
+      'write',
+      [
+        siteContext(ctx),
+        ctx.platform.editorialRules,
+        SOURCE_DISCIPLINE,
+        ANTI_SLOP_RULES,
+        LINK_PLACEMENT_RULES,
+        SEO_RULES,
+        GEO_RULES,
+        authorVoiceBrief(author, ctx.platform),
+      ].join('\n\n'),
+    ),
     temperature: 0.7,
     prompt: `Write the complete article in Markdown. Body only — NO frontmatter,
 NO title H1 (the site renders the title separately). Start with the opening paragraph.
 ${operator ? `\n${operator}\n` : ''}${angleBrief ? `\n${angleBrief}\n` : ''}${planBrief ? `\n${planBrief}\n` : ''}
-${shape ? `${structureBrief(shape)}\n` : ''}
+${shape ? `${structureBrief(shape, ctx.platform)}\n` : ''}
 Brief:
 ${JSON.stringify(brief, null, 2)}
 
@@ -164,7 +171,7 @@ ${plan?.snippetTarget?.question ? `- The snippet target is "${plan.snippetTarget
 ${plan?.paaQuestions?.length ? `- Answer these directly, as headings or FAQ entries: ${plan.paaQuestions.join(' / ')}` : ''}
 - Attribute every spec and claim to its source with a year, from the dossier.
   Never print a marketplace price (see the editorial rules): if a figure is
-  essential, it is the manufacturer's RRP in AUD, labelled "RRP" with the year.
+  essential, it is the manufacturer's RRP${ctx.edition.currency ? ` in ${ctx.edition.currency}` : ''}, labelled "RRP" with the year.
   Point readers to the /go/ link for what it costs today.
 - GitHub-flavored markdown: ## H2 / ### H3, a comparison table for
   multi-product pieces, bold sparingly. No emoji.

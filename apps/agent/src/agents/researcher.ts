@@ -24,10 +24,22 @@ import {
   STRATUM_FIX,
 } from '../content/evidence.js';
 import { COVERS_RULE } from '../content/claims.js';
-import { operatorBrief, siteContext, SOURCE_DISCIPLINE, VERIFICATION_RULES } from './context.js';
+import { isWebUrl, parseOffsetTimestamp } from '../content/contract.js';
+import {
+  moneyExample,
+  operatorBrief,
+  type PromptContext,
+  siteContext,
+  SOURCE_DISCIPLINE,
+  VERIFICATION_RULES,
+  withAgentGoal,
+} from './context.js';
+import type { Edition } from '../platform/types.js';
 import type {
   ArticleRow,
+  EventStartCitation,
   EvidenceShortfall,
+  PriceObservation,
   ResearchDossier,
   TopicRow,
 } from '../pipeline/types.js';
@@ -326,6 +338,7 @@ export async function sweepUntilSufficient(
 }
 
 export async function runResearcher(
+  ctx: PromptContext,
   article: ArticleRow,
   topic: TopicRow | null,
   model: string,
@@ -333,13 +346,16 @@ export async function runResearcher(
 ): Promise<ResearchDossier> {
   const keywords = topic?.keywords?.length ? topic.keywords.join(', ') : article.title;
   const brief = operatorBrief(topic);
+  const eventStartsAt = eventStartOf(article);
+  const currency = ctx.edition.currency;
 
   // Pass 1: plan the searches, one set per stratum. Asking for a single list
   // is what produced a single kind of evidence.
   const plan = await chatJson<Record<string, string[]>>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}`,
+      system: withAgentGoal(ctx, 'research', `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}`),
       temperature: 0.4,
       prompt: `Plan web research for this piece:
 Title: ${article.title}
@@ -370,8 +386,13 @@ Example shape: {${STRATA.map((s) => `"${s.key}": ["...", "..."]`).join(', ')}}`,
   // Pass 2: synthesize the dossier, each stratum filled from its own evidence.
   const dossier = await chatJson<ResearchDossier>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}\n\n${VERIFICATION_RULES}`,
+      system: withAgentGoal(
+        ctx,
+        'research',
+        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${VERIFICATION_RULES}`,
+      ),
       temperature: 0.3,
       maxTokens: 12000,
       search: true,
@@ -383,7 +404,7 @@ STRICT RULES:
   spec, a price or a URL, and never carry one over from memory.
 - VERIFY BEFORE YOU FILE. Every price, model number, headline spec and
   availability claim gets checked against a primary source — the maker's page
-  or the retailer's listing — before it enters the dossier. Prices are AUD and
+  or the retailer's listing — before it enters the dossier. ${currency ? `Prices are ${currency} and` : 'Prices'}
   move weekly; an unchecked one is the single most likely thing to be wrong.
   Anything that survives the check is a fact; anything that doesn't is dropped,
   not hedged into the dossier for a later stage to trip over.
@@ -467,7 +488,7 @@ STRICT RULES:
 - Thin is better than invented. A stratum with three real findings beats one
   with eight you padded, and the pipeline checks these counts in code after
   you reply - a fabricated complaint fails a human reader instead of a counter.
-
+${eventStartsAt ? `\n${eventBoundRules(eventStartsAt, ctx.edition)}\n` : ''}
 ${describeBar(article.post_type, article.category)}
 
 Evidence, grouped by stratum (the floor, not the ceiling - check what matters
@@ -498,10 +519,10 @@ Return JSON:
                                      "9% of 1,076 owners surveyed"),
                       "kind": "quoted"|"aggregate",
                       "sourceUrl": string}],
- "priceObservations": [{"product": string, "value": number, "currency": string (ISO, usually "AUD"),
+ "priceObservations": [{"product": string, "value": number, "currency": string (ISO${currency ? `, usually "${currency}"` : ''}),
                         "retailer": string (named), "dateChecked": string
                         (YYYY-MM-DD you saw this price),
-                        "sourceUrl": string}],
+                        "sourceUrl": string${eventStartsAt ? `,\n                        "observedAt": string (${OBSERVED_AT})` : ''}}],
  "testedClaims": [{"claim": string (what was measured, with the figure),
                    "source": string (who tested it, named), "year": number|null,
                    "sourceUrl": string}],
@@ -521,10 +542,10 @@ Return JSON:
             "sourceUrl": string}|null,
  "keywords": {"primary": string, "secondary": string[]},
  "competitorNotes": string (what competing pages cover + the gap we can win),
- "faqIdeas": [{"question": string, "answerHint": string}] (3-6)}`,
+ "faqIdeas": [{"question": string, "answerHint": string}] (3-6)${eventStartsAt ? `,\n ${EVENT_START_SHAPE}` : ''}}`,
     },
     tracker,
-    dossierCheck(article.post_type),
+    dossierCheck(article.post_type, eventStartsAt !== null),
   );
 
   // Normalize defensively - downstream link integrity, tiering and the
@@ -538,9 +559,124 @@ Return JSON:
   // the status, the message and releases the claim already, so there is no
   // second failure path to keep.
   const normalised = normaliseDossier(dossier);
-  return sweepUntilSufficient(normalised, article, (shortfalls) =>
-    runTargetedResweep(article, topic, normalised, shortfalls, model, tracker),
+  return sweepUntilSufficient(normalised, article, async (shortfalls) => {
+    const addition = await runTargetedResweep(ctx, article, topic, normalised, shortfalls, model, tracker);
+    // The first pass was held to the event rules by its shape check; a second
+    // sweep's prices are held to them here, before the gate counts them.
+    return eventStartsAt ? withCitedPricesOnly(addition) : addition;
+  });
+}
+
+/** When the event an event-bound article previews starts; null when it is not event-bound. */
+export function eventStartOf(article: Pick<ArticleRow, 'event_starts_at'>): Date | null {
+  if (article.event_starts_at === null || article.event_starts_at === undefined) return null;
+  const at = new Date(article.event_starts_at);
+  return Number.isNaN(at.getTime()) ? null : at;
+}
+
+const OBSERVED_AT = 'ISO 8601 date-time with its UTC offset - the moment you read this price';
+
+const EVENT_START_SHAPE = `"eventStart": {"startsAt": string (ISO 8601 date-time with its UTC offset, as the source states it),
+                "sourceUrl": string (the http(s) page you read it on),
+                "observedAt": string (ISO 8601 date-time with its UTC offset - when you read it)}`;
+
+/**
+ * The research rules for a piece that previews an event. A start time and a
+ * price are the two facts in it that go stale first - a kick-off moves, a
+ * price moves by the hour - so both are cited to the minute they were read,
+ * and a price that cannot be is left out rather than hedged in.
+ */
+export function eventBoundRules(startsAt: Date, edition: Edition): string {
+  const local = new Intl.DateTimeFormat(edition.locale, {
+    timeZone: edition.timeZone,
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(startsAt);
+  return `EVENT-BOUND PIECE. It previews an event the topic says starts at
+${startsAt.toISOString()} (${local}). Everything below is cited to the minute:
+- "eventStart" is required: the start time as a source you opened states it,
+  that page's http(s) URL, and observedAt - when you read it. Confirm the time
+  above against the source; where they disagree, file what the source says.
+- Every priceObservation carries the sourceUrl you read it on and observedAt,
+  the moment you read it - not just the day. A price is any figure a reader
+  could buy or bet at: a retail price and a set of odds alike. A price you
+  cannot cite with both is left out of the dossier, not hedged into it.
+- A price lives in priceObservations and nowhere else: every product's
+  approxPrice is "", because an approximate price has no source and no time.`;
+}
+
+/** A price an event-bound piece may quote: read on a named page, at a stated moment. */
+export function isCitedObservation(observation: Partial<PriceObservation>): boolean {
+  const observedAt = parseOffsetTimestamp(observation.observedAt);
+  return (
+    isWebUrl(observation.sourceUrl ?? '') &&
+    observedAt !== null &&
+    // A moment in the future was not observed by anyone.
+    observedAt.getTime() <= Date.now() + OBSERVATION_CLOCK_SKEW_MS
   );
+}
+
+/** How far ahead of our clock an observation time may sit and still be believed. */
+const OBSERVATION_CLOCK_SKEW_MS = 5 * 60_000;
+
+/**
+ * What an event-bound dossier is missing: a cited start time, and a source and
+ * an observation time on every price. Empty when it carries all of them.
+ */
+export function eventEvidenceProblems(dossier: Partial<ResearchDossier>): string[] {
+  const problems: string[] = [];
+  const start = dossier.eventStart as Partial<EventStartCitation> | null | undefined;
+  if (!start || typeof start !== 'object') {
+    problems.push(
+      '"eventStart" is required for an event-bound piece - the start time, the page it was read on, and when',
+    );
+  } else {
+    if (!parseOffsetTimestamp(start.startsAt)) {
+      problems.push('"eventStart.startsAt" must be an ISO 8601 date-time with its UTC offset');
+    }
+    if (!isWebUrl(start.sourceUrl ?? '')) {
+      problems.push('"eventStart.sourceUrl" must be the http(s) page the start time was read on');
+    }
+    if (!isCitedObservation({ sourceUrl: start.sourceUrl, observedAt: start.observedAt })) {
+      problems.push(
+        '"eventStart.observedAt" must be when you read the start time - an ISO 8601 date-time with its UTC offset, not in the future',
+      );
+    }
+  }
+  const priced = (Array.isArray(dossier.products) ? dossier.products : []).filter(
+    (product) => typeof product?.approxPrice === 'string' && product.approxPrice.trim() !== '',
+  );
+  if (priced.length > 0) {
+    problems.push(
+      `${priced.length} product(s) carry an approxPrice - in an event-bound piece a price is quoted ` +
+        'only as a cited priceObservation, so approxPrice is ""',
+    );
+  }
+  const prices = Array.isArray(dossier.priceObservations) ? dossier.priceObservations : [];
+  const uncited = prices.filter((observation) => !isCitedObservation(observation ?? {}));
+  if (uncited.length > 0) {
+    problems.push(
+      `${uncited.length} of ${prices.length} priceObservations lack a sourceUrl or an observedAt time - ` +
+        'every price in an event-bound piece is cited with the moment it was read, or left out',
+    );
+  }
+  return problems;
+}
+
+/** A re-sweep's findings with every price that is not cited to the minute dropped. */
+export function withCitedPricesOnly(addition: Partial<ResearchDossier>): Partial<ResearchDossier> {
+  if (!Array.isArray(addition.priceObservations)) return addition;
+  return {
+    ...addition,
+    priceObservations: addition.priceObservations.filter((observation) =>
+      isCitedObservation(observation ?? {}),
+    ),
+  };
 }
 
 /**
@@ -554,6 +690,7 @@ Return JSON:
  * settled and a re-sweep has no business rewriting it.
  */
 export async function runTargetedResweep(
+  ctx: PromptContext,
   article: ArticleRow,
   topic: TopicRow | null,
   dossier: ResearchDossier,
@@ -582,10 +719,16 @@ export async function runTargetedResweep(
     })
     .join('\n');
 
+  const eventBound = eventStartOf(article) !== null;
   return chatJson<Partial<ResearchDossier>>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}\n\n${VERIFICATION_RULES}`,
+      system: withAgentGoal(
+        ctx,
+        'research',
+        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${VERIFICATION_RULES}`,
+      ),
       temperature: 0.3,
       maxTokens: 6000,
       search: true,
@@ -604,7 +747,12 @@ RULES:
 - Same discipline as the first pass: tier and date every fact, name the
   publisher, verify before you file, and never carry a spec or a URL over from
   memory.
-- ${STRATUM_FIX.expert}.${returnsClaims ? `\n- ${COVERS_RULE}` : ''}
+- ${STRATUM_FIX.expert}.${returnsClaims ? `\n- ${COVERS_RULE}` : ''}${
+  eventBound
+    ? `\n- This piece is event-bound: every priceObservation carries the sourceUrl you
+  read it on and observedAt, the moment you read it. One without both is dropped.`
+    : ''
+}
 - Return an empty array for anything you looked for and did not find. Padding
   a count here is worse than failing the piece: the gate is the last thing
   between a thin dossier and a page of spec recitation.
@@ -613,7 +761,7 @@ Search evidence for the thin ${planned.length === 1 ? 'stratum' : 'strata'}:
 ${evidence}
 
 Return JSON with only these keys:
-{${resweepShape(planned.map((p) => p.key))}}`,
+{${resweepShape(planned.map((p) => p.key), eventBound)}}`,
     },
     tracker,
   );
@@ -645,7 +793,7 @@ function existingRows(dossier: ResearchDossier, stratum: string): string[] {
 }
 
 /** The JSON keys a re-sweep of these strata may return, and nothing else. */
-function resweepShape(strata: readonly string[]): string {
+function resweepShape(strata: readonly string[], eventBound: boolean): string {
   const shapes: Record<string, string> = {
     facts: `"facts": [{"fact": string, "sourceUrl": string, "tier": "primary"|"expert"|"owner"|"aggregator"|"unknown", "date": string|null, "publisher": string|null}]`,
     testedClaims: `"testedClaims": [{"claim": string, "source": string, "year": number|null, "sourceUrl": string}]`,
@@ -653,7 +801,7 @@ function resweepShape(strata: readonly string[]): string {
     failureModes: `"failureModes": [{"product": string, "failure": string, "timeframe": string, "sourceUrl": string, "tier": "owner"|"expert"|"primary"|"aggregator"|"unknown"}]`,
     ownerComplaints: `"ownerComplaints": [{"product": string, "complaint": string, "volume": "isolated"|"recurring"|"widespread"|"unknown", "recency": string|null, "denominator": string|null, "kind": "quoted"|"aggregate", "sourceUrl": string}]`,
     whoShouldNotBuy: `"whoShouldNotBuy": [{"audience": string, "reason": string, "sourceUrl": string}]`,
-    priceObservations: `"priceObservations": [{"product": string, "value": number, "currency": string, "retailer": string, "dateChecked": string, "sourceUrl": string}]`,
+    priceObservations: `"priceObservations": [{"product": string, "value": number, "currency": string, "retailer": string, "dateChecked": string, "sourceUrl": string${eventBound ? `, "observedAt": string (${OBSERVED_AT})` : ''}}]`,
   };
   const fields = [...new Set(strata.flatMap((stratum) => STRATUM_FIELDS[stratum] ?? []))];
   const lines = fields.map((field) => shapes[field]).filter(Boolean);
@@ -679,6 +827,7 @@ function resweepShape(strata: readonly string[]): string {
  * and an empty result is the caller's signal to fail the card.
  */
 export async function runProductDiscovery(
+  ctx: PromptContext,
   article: ArticleRow,
   topic: TopicRow | null,
   keyword: string,
@@ -686,13 +835,19 @@ export async function runProductDiscovery(
   tracker: UsageTracker,
 ): Promise<ResearchDossier['products']> {
   const brief = operatorBrief(topic);
+  const eventBound = eventStartOf(article) !== null;
   const queries = [...new Set([`best ${keyword} australia`, `${keyword} price australia`])];
   const searches = await tavilySearchMany(queries, 5);
 
   const { products } = await chatJson<{ products: ResearchDossier['products'] }>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}\n\n${VERIFICATION_RULES}`,
+      system: withAgentGoal(
+        ctx,
+        'research',
+        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${VERIFICATION_RULES}`,
+      ),
       temperature: 0.2,
       search: true,
       prompt: `Name the products a buyer searching "${keyword}" is actually choosing between.
@@ -713,8 +868,7 @@ RULES:
   from an ASIN you remember. Products without one are fine: the pipeline links
   them via an Amazon search fallback.
 - goSlug is the kebab-case affiliate slug for the product ("samsung-galaxy-z-fold-8").
-- approxPrice is AUD and approximate ("about A$2,899"), or "" when you could not
-  check one. An invented price is worse than no price.
+- ${approxPriceRule(ctx.edition, eventBound)}
 - 3-6 contenders. Return an empty array rather than padding with products that
   do not exist or are not sold here - the pipeline fails the piece honestly on
   an empty list, and a fabricated contender fails a reader instead.
@@ -731,8 +885,21 @@ Return JSON:
   );
 
   // Through the same normalisation the dossier gets: slugified goSlugs and
-  // non-Amazon URLs dropped are what the assembler's link contract assumes.
-  return normaliseDossier({ products }).products;
+  // non-Amazon URLs dropped are what the assembler's link contract assumes. An
+  // event-bound piece quotes no price it cannot cite, whatever came back.
+  const found = normaliseDossier({ products }).products;
+  return eventBound ? found.map((product) => ({ ...product, approxPrice: '' })) : found;
+}
+
+/** How a discovered product's approximate price is written, in the edition's currency. */
+function approxPriceRule(edition: Edition, eventBound: boolean): string {
+  if (eventBound) {
+    return 'approxPrice is always "": an event-bound piece quotes a price only where it is cited with the moment it was read.';
+  }
+  return edition.currency
+    ? `approxPrice is ${edition.currency} and approximate ("about ${moneyExample(edition, 2899)}"), or "" when you could not
+  check one. An invented price is worse than no price.`
+    : 'approxPrice is always "": this edition quotes no currency amounts.';
 }
 
 /**
@@ -750,7 +917,7 @@ Return JSON:
  * indistinguishable downstream, and only the second is honest - so an omitted
  * field is a reprompt here, and an empty one is the evidence gate's problem.
  */
-export function dossierCheck(postType: string): ShapeCheck<ResearchDossier> {
+export function dossierCheck(postType: string, eventBound = false): ShapeCheck<ResearchDossier> {
   const needsProducts = postType === 'guide' || postType === 'roundup';
   const STRATUM_ARRAYS = [
     'failureModes',
@@ -780,6 +947,7 @@ export function dossierCheck(postType: string): ShapeCheck<ResearchDossier> {
           `the evidence genuinely has none, never to skip a stratum you did not look at`,
       );
     }
+    if (eventBound) problems.push(...eventEvidenceProblems(d));
     return problems.length > 0 ? `The dossier is incomplete: ${problems.join('; ')}.` : null;
   };
 }

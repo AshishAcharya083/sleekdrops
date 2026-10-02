@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import { pool, q } from '../db/pool.js';
 import { UsageTracker } from '../llm/index.js';
 import { runTopicScout } from '../agents/topicScout.js';
+import { resolvePromptContext } from '../agents/context.js';
 import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 import { modelFor } from './runner.js';
 
@@ -133,14 +134,14 @@ async function runClaimedScout(id: string): Promise<void> {
 
   let session: { id: string } | undefined;
   try {
-    const model = await modelFor('topic_scout');
+    const model = await modelFor('topic_scout', SLEEKDROPS_PLATFORM_ID);
     [session] = await q<{ id: string }>(
       `INSERT INTO agent_sessions (scout_run_id, platform_id, agent, model)
        VALUES ($1, $3, 'topic_scout', $2)
        RETURNING id`,
       [id, model, SLEEKDROPS_PLATFORM_ID],
     );
-    const topics = await runTopicScout(model, tracker, id);
+    const topics = await runTopicScout(await resolvePromptContext(SLEEKDROPS_PLATFORM_ID, 'au'), model, tracker, id);
     await q(
       `UPDATE scout_runs SET status = 'done', topics_found = $2, ended_at = now() WHERE id = $1`,
       [id, topics.length],

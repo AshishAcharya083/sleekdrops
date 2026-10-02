@@ -1,26 +1,60 @@
 // Shared editorial context injected into every agent prompt — the pipeline
 // equivalent of devteam-platform's global agent instructions.
-import {
-  AUTHORS,
-  type AuthorProfile,
-  BYLINE_NAME,
-  bylineFor,
-  CATEGORIES,
-  POST_TYPES,
-  todayInSydney,
-} from '../content/contract.js';
-import { describeArticleShape } from '../pipeline/types.js';
+//
+// What is brand-specific - who publishes, for whom, under which byline, in
+// which categories and post types, by which editorial rules - comes from the
+// platform profile. The audience's day, time zone and currency come from the
+// edition the piece is written for. Output formats and grounding rules stay
+// here in code: they are the contract every platform's pieces are held to.
+import { AUTHORS, type AuthorProfile, bylineFor, todayIn } from '../content/contract.js';
+import { getPostTypes, shapeById } from '../content/catalogue.js';
+import { getEdition, loadPlatform } from '../platform/registry.js';
+import type { AgentId, Edition, Platform, PlatformSeed } from '../platform/types.js';
 import type { EditorialAngle, KeywordPlan, TopicRow } from '../pipeline/types.js';
+
+/** What every agent prompt is built from: who publishes the piece, and for which edition. */
+export interface PromptContext {
+  platform: Platform;
+  edition: Edition;
+}
+
+/** The context for a piece, from the platform and edition ids on its row. */
+export async function resolvePromptContext(
+  platformId: string,
+  editionId: string,
+): Promise<PromptContext> {
+  const [platform, edition] = await Promise.all([
+    loadPlatform(platformId),
+    getEdition(platformId, editionId),
+  ]);
+  return { platform, edition };
+}
+
+/**
+ * The context an in-code seed describes, with no database involved - what a
+ * test or a profile preview builds prompts from. The seed is profile version 1.
+ */
+export function promptContextFromSeed(seed: PlatformSeed, editionId: string): PromptContext {
+  const editions = seed.editions.map((edition) => ({ ...edition, platformId: seed.platform.id }));
+  const edition = editions.find((candidate) => candidate.id === editionId);
+  if (!edition) throw new Error(`${seed.platform.id} has no edition "${editionId}"`);
+  return { platform: { ...seed.platform, profileVersion: 1, editions }, edition };
+}
+
+/** Today as the edition's audience reckons it, e.g. "2026-07-13". */
+export function editionToday(edition: Edition): string {
+  return todayIn(edition.timeZone);
+}
 
 // A function, not a const: the current date must be evaluated per run, and
 // every agent needs it — model training data lags reality by a year or more,
 // and a wrong year in a title or watermark reads as instantly stale.
-export function siteContext(): string {
-  const today = todayInSydney();
+export function siteContext(ctx: PromptContext): string {
+  const { platform, edition } = ctx;
+  const today = editionToday(edition);
+  const postTypes = getPostTypes(platform);
   return `
-SleekDrops (sleekdrops.com) is an editorial affiliate blog: "exclusive deals
-dropping daily". Primary audience: Australian shoppers (prices in AUD, Amazon
-Australia availability matters); write in plain international English.
+${platform.brandText} ${platform.audience}
 
 GROUNDING — non-negotiable:
 - Today's date is ${today}. Whenever you mention "this year", a year in a
@@ -29,14 +63,12 @@ GROUNDING — non-negotiable:
 - Facts come from the research dossier / live search evidence you are given,
   never from memory. If the evidence doesn't say it, you don't know it.
 
-Categories: ${CATEGORIES.join(', ')}.
-Post types the pipeline may produce: ${POST_TYPES.join(', ')}.
-- article: news/trend piece, no length minimum, still evidence-based.
-- guide: "best X for Y" buying guide, at least 1,500 words, at least 3 contenders.
-- roundup: "Top N" listicle with clear scoring rationale.
+Categories: ${platform.categories.join(', ')}.
+Post types the pipeline may produce: ${postTypes.map((type) => type.id).join(', ')}.
+${postTypes.map((type) => `- ${type.id}: ${type.description}`).join('\n')}
 (Never produce postType "review" — reviews require weeks of hands-on use and are human-written.)
 
-Byline. Every piece publishes under one accountable entity, ${BYLINE_NAME},
+Byline. Every piece publishes under one accountable entity, ${platform.bylineName},
 tagged with the beat it was written on. There are no named desks and no
 invented people: never claim hands-on testing, a personal history or a
 credential. The angle stage picks which beat voice carries a piece, on the
@@ -72,35 +104,37 @@ beyond it and the research evidence.`,
   return parts.join('\n\n');
 }
 
-export const EDITORIAL_RULES = `
-Editorial rules (non-negotiable):
-- Honest, useful, specific. Every recommendation names real trade-offs; a cons
-  list is never empty. Decimal ratings like 4.3 — never star spam.
-- Plain, direct voice. No emoji, no hype, no urgency copy ("HURRY!", "act now").
-- Evidence only: never invent specs, prices, or Amazon URLs. If a fact isn't in
-  the research dossier, leave it out or hedge explicitly.
-- Prices: never print an Amazon price. Amazon's Associates policies only allow
-  prices pulled live from Amazon's own API, which we do not have, so a number
-  we type is a policy breach the day the price moves. Write "check the current
-  price on Amazon" instead. Where a figure is essential to the argument, use
-  the manufacturer's RRP, labelled "RRP" with its source and year — never a
-  marketplace price, never "$X on Amazon", never "priced in AUD and checked on".
-- Affiliate links: NEVER write a raw merchant URL in the body. Every product
-  link is written as /go/<kebab-product-slug> (e.g. /go/sony-wh-1000xm6).
-  The same product always reuses the same /go/ slug.
-- Disclose honestly: if we haven't lab-tested the products, say the piece is an
-  editorial synthesis of specs, owner reviews, and expert coverage. The site
-  carries a standing methodology page and an AI-assistance disclosure, both
-  linked from every article, so the body never has to stand in for them - and
-  never overstates them. Never write "we tested", "our testers", "in our
-  testing", "we tried", "hands-on" or anything else that claims use of a
-  product nobody here has touched.
-- Structure for scanability: short paragraphs, descriptive H2/H3 headings,
-  comparison tables for multi-product pieces. Say what the piece rests on -
-  which evidence, what was excluded - where the piece's shape puts it, and
-  under that shape's own heading. "How we picked" is not a section every
-  article owes the reader.
-`.trim();
+/**
+ * A system prompt with the platform's goal for this agent appended, or the
+ * system prompt unchanged when the platform sets none - so a platform without
+ * goals sends exactly the prompt it always has.
+ */
+export function withAgentGoal(ctx: PromptContext, agent: AgentId, system: string): string {
+  const goal = ctx.platform.agentGoals[agent]?.trim();
+  return goal ? `${system}\n\n${agentGoalBlock(ctx, goal)}` : system;
+}
+
+/** The goal as a block of its own, for a prompt that has no system text to carry it. */
+export function agentGoalBlock(ctx: PromptContext, goal: string): string {
+  return `${ctx.platform.name.toUpperCase()} GOAL FOR THIS STAGE - set by the editors of
+${ctx.platform.name}. It steers what you produce; it never overrides the grounding,
+source or output rules above.
+${goal}`;
+}
+
+/**
+ * A money figure as this edition writes one, for a prompt's example ("A$2,899"
+ * in AUD). Null when the edition prints no currency amounts.
+ */
+export function moneyExample(edition: Edition, amount: number): string | null {
+  return edition.currency
+    ? new Intl.NumberFormat('en', {
+        style: 'currency',
+        currency: edition.currency,
+        maximumFractionDigits: 0,
+      }).format(amount)
+    : null;
+}
 
 /**
  * Where a fact is allowed to come from. Every agent gets this, whether or not
@@ -369,7 +403,7 @@ export function keywordPlanBrief(plan: KeywordPlan | null): string {
  * with whatever is to hand, which is the failure mode this whole stage exists
  * to prevent.
  */
-export function editorialAngleBrief(angle: EditorialAngle | null): string {
+export function editorialAngleBrief(angle: EditorialAngle | null, platform: Platform): string {
   if (!angle) return '';
   const parts = [
     'EDITORIAL ANGLE - decided before the piece was outlined. This is what the',
@@ -396,10 +430,10 @@ cannot prove. An invented position is the one thing worse than no position.`,
     );
   }
   parts.push(
-    `Structural shape: ${angle.shape} - ${describeArticleShape(angle.shape)}`,
+    `Structural shape: ${angle.shape} - ${shapeById(angle.shape)?.description ?? ''}`,
     `Why this shape: ${angle.shapeRationale}`,
     `Do NOT fall back to the house skeleton. The shape above is the silhouette
-this piece takes; a reader who reads two SleekDrops articles must not feel the
+this piece takes; a reader who reads two ${platform.name} articles must not feel the
 same running order under both.`,
   );
   return parts.join('\n');
@@ -410,8 +444,8 @@ same running order under both.`,
  * goes into a prompt - handing a writer four voices produces the average of
  * them, which is the house voice we already have.
  */
-export function authorVoiceBrief(author: AuthorProfile): string {
-  return `BYLINE VOICE - this piece publishes as ${bylineFor(author)} (beat id: ${author.id}).
+export function authorVoiceBrief(author: AuthorProfile, platform: Platform): string {
+  return `BYLINE VOICE - this piece publishes as ${bylineFor(author, platform.bylineName)} (beat id: ${author.id}).
 Write it in that beat's voice, not the site's generic one.
 Beat: ${author.beat}
 Sentence rhythm: ${author.voice.rhythm}

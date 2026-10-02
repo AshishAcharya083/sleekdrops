@@ -18,6 +18,7 @@
 import { getSetting } from '../../db/pool.js';
 import { createLogger } from '../../lib/log.js';
 import { ANTI_SLOP_RULES } from '../../agents/context.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../../platform/sleekdrops/index.js';
 import {
   detectSlop,
   formatSlopReport,
@@ -32,7 +33,6 @@ import {
   llmSettings,
 } from '../../llm/index.js';
 import type { ChannelSpec } from './channels.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../../platform/sleekdrops/index.js';
 
 const log = createLogger('distribution');
 
@@ -385,7 +385,7 @@ export function headlineBudget(spec: ChannelSpec, parts: Omit<CaptionParts, 'hea
  * takes the fallback rung rather than stopping a post.
  */
 export async function socialCopyModel(): Promise<string> {
-  const settings = await llmSettings();
+  const settings = await llmSettings(SLEEKDROPS_PLATFORM_ID);
   const overrides = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'models', {});
   if (overrides.social) return overrides.social;
   return (settings.prose_engine ?? 'claude') === 'claude'
@@ -428,6 +428,7 @@ function copyPrompt(request: CopyRequest, complaint?: string): string {
 /** The real writer. One completion per attempt, warm enough to vary on a retry. */
 export const modelWriter: CopyWriter = async (request, complaint) => {
   const result = await chat({
+    platformId: SLEEKDROPS_PLATFORM_ID,
     model: await socialCopyModel(),
     system: COPY_SYSTEM,
     prompt: copyPrompt(request, complaint),

@@ -17,23 +17,34 @@
 // the writer than a manufactured contrarian claim it would then have to
 // defend with invented reasons.
 import { chatJson, requireKeys, UsageTracker } from '../llm/index.js';
-import { AUTHORS, authorById, BYLINE_NAME, defaultAuthorFor } from '../content/contract.js';
-import { keywordPlanBrief, operatorBrief, siteContext, SOURCE_DISCIPLINE } from './context.js';
-import { ARTICLE_SHAPES, isArticleShape } from '../pipeline/types.js';
-import type { ArticleRow, ArticleShape, EditorialAngle, TopicRow } from '../pipeline/types.js';
+import { AUTHORS, authorById, defaultAuthorFor } from '../content/contract.js';
+import { getArticleShapes } from '../content/catalogue.js';
+import {
+  keywordPlanBrief,
+  operatorBrief,
+  type PromptContext,
+  siteContext,
+  SOURCE_DISCIPLINE,
+  withAgentGoal,
+} from './context.js';
+import type { ArticleRow, EditorialAngle, TopicRow } from '../pipeline/types.js';
 
 /**
- * The shape a post type falls back to when the model names one we do not
- * have. Deliberately not a single default: one fallback shape for everything
- * would rebuild the uniform skeleton this stage exists to break.
+ * The shape a post type falls back to when the model names one the platform
+ * does not publish. Deliberately not a single default: one fallback shape for
+ * everything would rebuild the uniform skeleton this stage exists to break.
  */
-const SHAPE_BY_POST_TYPE: Record<string, ArticleShape> = {
+const SHAPE_BY_POST_TYPE: Record<string, string> = {
   guide: 'segmented-buyers',
   roundup: 'ranked-list',
   article: 'question-led',
 };
 
+/** The fallback for a post type with no preference of its own, where the platform offers it. */
+const DEFAULT_SHAPE = 'question-led';
+
 export async function runAngleEditor(
+  ctx: PromptContext,
   article: ArticleRow,
   topic: TopicRow | null,
   model: string,
@@ -42,11 +53,13 @@ export async function runAngleEditor(
   const plan = article.keyword_plan;
   const planBrief = keywordPlanBrief(plan);
   const brief = operatorBrief(topic);
+  const shapes = getArticleShapes(ctx.platform);
 
   const angle = await chatJson<EditorialAngle>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}`,
+      system: withAgentGoal(ctx, 'angle', `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}`),
       temperature: 0.6,
       maxTokens: 4000,
       prompt: `You are the commissioning editor. Before this piece is outlined, decide what it
@@ -88,11 +101,9 @@ SHAPE. The structural silhouette the piece takes. Pick the one that fits this
 thesis; do not default to the list format because the topic is a product
 roundup. Every article on this site currently opens the same way, and that
 sameness is the defect this stage exists to fix.
-${Object.entries(ARTICLE_SHAPES)
-  .map(([id, description]) => `  - ${id}: ${description}`)
-  .join('\n')}
+${shapes.map((shape) => `  - ${shape.id}: ${shape.description}`).join('\n')}
 
-BYLINE. The piece publishes as ${BYLINE_NAME} whatever you choose; what you
+BYLINE. The piece publishes as ${ctx.platform.bylineName} whatever you choose; what you
 are picking is which beat's voice writes it, judged on the thesis and the
 subject. The beat becomes a tag on the byline, never a byline of its own.
 ${AUTHORS.map((a) => `  - ${a.id}: ${a.label || 'house voice'} - ${a.beat}. Cares about: ${a.voice.cares}`).join('\n')}
@@ -104,7 +115,7 @@ Return JSON:
  "contrarianTake": string (the non-obvious take, or "" when defensible is false),
  "weakness": string (when defensible is false, the evidence that was missing; "" otherwise),
  "informationGain": [{"claim": string, "absentFrom": string (a competitor URL from the plan), "evidence": string (what in the dossier proves it)}],
- "shape": one of ${Object.keys(ARTICLE_SHAPES).map((s) => `"${s}"`).join(' | ')},
+ "shape": one of ${shapes.map((shape) => `"${shape.id}"`).join(' | ')},
  "shapeRationale": string (1-2 sentences: why this shape beats the others here),
  "byline": one of ${AUTHORS.map((a) => `"${a.id}"`).join(' | ')} (the beat voice),
  "bylineRationale": string (one sentence)}`,
@@ -119,7 +130,14 @@ Return JSON:
     postType: article.post_type,
     category: article.category,
     competitorUrls: (plan?.competitors ?? []).map((c) => c.url),
+    shapes: shapes.map((shape) => shape.id),
   });
+}
+
+/** The shape recorded when the model named none the platform publishes. */
+function fallbackShape(postType: string, shapes: readonly string[]): string {
+  const preferred = Object.hasOwn(SHAPE_BY_POST_TYPE, postType) ? SHAPE_BY_POST_TYPE[postType] : DEFAULT_SHAPE;
+  return [preferred, DEFAULT_SHAPE].find((id) => shapes.includes(id)) ?? shapes[0];
 }
 
 /**
@@ -138,7 +156,13 @@ Return JSON:
  */
 export function normaliseAngle(
   raw: unknown,
-  opts: { postType: string; category: string; competitorUrls: string[] },
+  opts: {
+    postType: string;
+    category: string;
+    competitorUrls: string[];
+    /** The shape ids the platform publishes - the only ones an angle may record. */
+    shapes: readonly string[];
+  },
 ): EditorialAngle {
   const record = (value: unknown): Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -183,11 +207,7 @@ export function normaliseAngle(
           ? 'The angle stage returned no thesis, so nothing was recorded for this piece to argue.'
           : 'No take beyond what the top results already say was supported by the dossier.'),
     informationGain,
-    shape: isArticleShape(shape)
-      ? shape
-      : Object.hasOwn(SHAPE_BY_POST_TYPE, opts.postType)
-        ? SHAPE_BY_POST_TYPE[opts.postType]
-        : 'question-led',
+    shape: opts.shapes.includes(shape) ? shape : fallbackShape(opts.postType, opts.shapes),
     shapeRationale: text(a.shapeRationale),
     byline: byline.id,
     bylineRationale: text(a.bylineRationale),

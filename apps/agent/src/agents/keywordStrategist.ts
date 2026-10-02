@@ -14,7 +14,7 @@
 // writing a brief.
 import { chatJson, requireKeys, UsageTracker } from '../llm/index.js';
 import { formatSerps, tavilySerpMany } from '../tools/tavily.js';
-import { GEO_RULES, operatorBrief, siteContext } from './context.js';
+import { GEO_RULES, operatorBrief, type PromptContext, siteContext, withAgentGoal } from './context.js';
 import type { ArticleRow, KeywordPlan, TopicRow } from '../pipeline/types.js';
 
 /** How many candidates get a live SERP read. Each one is a Tavily call. */
@@ -25,6 +25,7 @@ const RISK = new Set(['Low', 'Medium', 'High']);
 const SNIPPET_FORMATS = new Set(['paragraph', 'list', 'table']);
 
 export async function runKeywordStrategist(
+  ctx: PromptContext,
   article: ArticleRow,
   topic: TopicRow | null,
   model: string,
@@ -42,8 +43,9 @@ export async function runKeywordStrategist(
   // the expensive judgement happens after we have seen the results.
   const { candidates } = await chatJson<{ candidates: string[] }>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: siteContext(),
+      system: withAgentGoal(ctx, 'keyword', siteContext(ctx)),
       temperature: 0.4,
       prompt: `Propose the search queries this piece could realistically be built to win.
 
@@ -81,8 +83,9 @@ Return JSON {"candidates": string[]} — ${CANDIDATES_TO_CHECK + 3} to ${CANDIDA
 
   const plan = await chatJson<KeywordPlan>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: `${siteContext()}\n\n${GEO_RULES}`,
+      system: withAgentGoal(ctx, 'keyword', `${siteContext(ctx)}\n\n${GEO_RULES}`),
       temperature: 0.3,
       maxTokens: 8000,
       prompt: `You are a senior SEO strategist. Pick the ONE keyword this piece is built to

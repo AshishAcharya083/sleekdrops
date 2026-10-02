@@ -13,6 +13,7 @@
 import { generateImage, visionJson } from '../llm/genai.js';
 import { gcsConfigured, uploadPublicImage } from '../tools/gcs.js';
 import { tavilyImageSearch } from '../tools/tavily.js';
+import { agentGoalBlock, type PromptContext } from './context.js';
 import type { HeroImageSource } from '../distribution/types.js';
 import type { ArticleRow } from '../pipeline/types.js';
 
@@ -67,6 +68,7 @@ async function download(url: string): Promise<{ data: Buffer; mimeType: string }
 }
 
 export async function runImageAgent(
+  ctx: PromptContext,
   article: ArticleRow,
   visionModel: string,
 ): Promise<ImageResult> {
@@ -97,7 +99,7 @@ export async function runImageAgent(
       checked += 1;
       if (checked > 8) break; // vision checks aren't free — bound the sweep
       try {
-        const verdict = await visionJson<VisionVerdict>(visionModel, img, `You are vetting a candidate hero image for an article titled "${title}".
+        const verdict = await visionJson<VisionVerdict>(ctx.platform.id, visionModel, img, `You are vetting a candidate hero image for an article titled "${title}".
 Image search context: "${hit.description || query}".
 
 Return JSON:
@@ -126,11 +128,13 @@ Return JSON:
 
   // ── 2. GENERATE: fall back to the image model ────────────────────────────
   try {
+    const goal = ctx.platform.agentGoals.image?.trim();
     const generated = await generateImage(
+      ctx.platform.id,
       `Photorealistic editorial hero photograph for a consumer product article titled "${title}".
 ${topProducts.length > 0 ? `Feature: ${topProducts.join(' and ')}.` : ''}
 Wide 16:9 composition, natural lighting, clean uncluttered background, magazine quality.
-Absolutely NO text, NO logos, NO watermarks, NO people's faces.`,
+Absolutely NO text, NO logos, NO watermarks, NO people's faces.${goal ? `\n\n${agentGoalBlock(ctx, goal)}` : ''}`,
     );
     const url = await uploadPublicImage(
       `heroes/${slug}.${EXT[generated.mimeType] ?? 'png'}`,

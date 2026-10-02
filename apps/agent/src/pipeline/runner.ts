@@ -31,6 +31,7 @@ import {
 } from '../llm/index.js';
 import { runAngleEditor } from '../agents/angleEditor.js';
 import { runAssembler } from '../agents/assembler.js';
+import { type PromptContext, resolvePromptContext } from '../agents/context.js';
 import { runEditor } from '../agents/editor.js';
 import { runImageAgent } from '../agents/imageAgent.js';
 import { runKeywordStrategist } from '../agents/keywordStrategist.js';
@@ -111,9 +112,9 @@ export const ENGINE_AGENTS = new Set([
  */
 const GEMINI_ONLY_AGENTS = new Set(['image_agent']);
 
-export async function modelFor(agent: string): Promise<string> {
-  const settings = await llmSettings();
-  const overrides = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'models', {});
+export async function modelFor(agent: string, platformId: string): Promise<string> {
+  const settings = await llmSettings(platformId);
+  const overrides = await getSetting<Record<string, string>>(platformId, 'models', {});
   if (GEMINI_ONLY_AGENTS.has(agent)) return defaultGeminiModel(settings);
 
   const pick =
@@ -127,7 +128,7 @@ export async function modelFor(agent: string): Promise<string> {
   // said gemini-2.5-flash, and the articles came out of the cheap model
   // unnoticed. Refusing to start is the honest failure: it names the missing
   // credential on the article, in the pipeline, where an operator will see it.
-  if (isClaudeModel(pick) && !(await claudeConfigured())) {
+  if (isClaudeModel(pick) && !(await claudeConfigured(platformId))) {
     throw new Error(`${agent} is set to run on ${pick}. ${CLAUDE_NOT_CONFIGURED}`);
   }
   return pick;
@@ -248,16 +249,18 @@ export interface StageOutcome {
  * stage has an answer". Separate from runStage because runStage is what is
  * raced against the budget, and the thing being raced has to be a value it can
  * hold - and because injecting one is how the timeout path is driven in a test
- * without a live model.
+ * without a live model. `ctx` is the claimed article's platform and edition,
+ * which every agent builds its prompt from.
  */
 export type StageExecutor = (
   article: ArticleRow,
   stage: Exclude<Stage, 'done'>,
   model: string | null,
   tracker: UsageTracker,
+  ctx: PromptContext,
 ) => Promise<StageOutcome>;
 
-export const executeStage: StageExecutor = async (article, stage, model, tracker) => {
+export const executeStage: StageExecutor = async (article, stage, model, tracker, ctx) => {
   let next: { stage: Stage; status: string } = { stage: 'done', status: 'done' };
   let summary = '';
 
@@ -266,7 +269,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       const topic = article.topic_id
         ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
         : null;
-      const dossier = await runResearcher(article, topic, model!, tracker);
+      const dossier = await runResearcher(ctx, article, topic, model!, tracker);
       await updateArticle(article, { research: JSON.stringify(dossier) });
       summary = `${dossier.facts?.length ?? 0} facts, ${dossier.products?.length ?? 0} products, primary keyword "${dossier.keywords?.primary}"`;
       next = { stage: 'keyword', status: 'queued' };
@@ -276,7 +279,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       const topic = article.topic_id
         ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
         : null;
-      const plan = await runKeywordStrategist(article, topic, model!, tracker);
+      const plan = await runKeywordStrategist(ctx, article, topic, model!, tracker);
       await updateArticle(article, { keyword_plan: JSON.stringify(plan) });
       // Earliest point at which "this piece has nothing to link" is knowable:
       // the dossier is built, and the SERP read has just named the intent.
@@ -286,10 +289,16 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       // A missing product list is a narrow, recoverable fault, so it gets a
       // discovery pass before the card is failed: the research stage filed
       // its evidence and skipped the contenders, and one focused search is
-      // what it takes to fill that in. Only an empty result is terminal.
+      // what it takes to fill that in. Only an empty result is terminal. A
+      // platform that carries no affiliate links has nothing to discover.
       let discoveryNote = '';
-      if ((article.research?.products?.length ?? 0) === 0 && MONETISED_INTENTS.has(plan.intent)) {
+      if (
+        ctx.platform.monetisation !== 'none' &&
+        (article.research?.products?.length ?? 0) === 0 &&
+        MONETISED_INTENTS.has(plan.intent)
+      ) {
         const products = await runProductDiscovery(
+          ctx,
           article,
           topic,
           plan.primaryKeyword,
@@ -317,7 +326,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       const topic = article.topic_id
         ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
         : null;
-      const angle = await runAngleEditor(article, topic, model!, tracker);
+      const angle = await runAngleEditor(ctx, article, topic, model!, tracker);
       await updateArticle(article, { editorial_angle: JSON.stringify(angle) });
       summary = angle.defensible
         ? `"${angle.thesis}" - ${angle.shape} shape, ${angle.informationGain.length} claim(s) the top results miss, ${angle.byline} beat`
@@ -326,7 +335,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       break;
     }
     case 'outline': {
-      const brief = await runOutliner(article, model!, tracker);
+      const brief = await runOutliner(ctx, article, model!, tracker);
       brief.slug = await uniqueSlug(article.id, brief.slug);
       // The shape goes in its own column as well as inside the brief: the
       // brief is what carries it into the writer and reviewer prompts, the
@@ -347,15 +356,15 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       const topic = article.topic_id
         ? (await q<TopicRow>('SELECT * FROM topics WHERE id = $1', [article.topic_id]))[0] ?? null
         : null;
-      const draft = await runWriter(article, topic, model!, tracker);
+      const draft = await runWriter(ctx, article, topic, model!, tracker);
       await updateArticle(article, { draft_md: draft });
       summary = `draft written (${draft.split(/\s+/).length} words)`;
       next = { stage: 'seo_review', status: 'queued' };
       break;
     }
     case 'seo_review': {
-      const review = await runSeoReviewer(article, model!, tracker);
-      const maxRounds = await getSetting<number>(SLEEKDROPS_PLATFORM_ID, 'max_revision_rounds', 2);
+      const review = await runSeoReviewer(ctx, article, model!, tracker);
+      const maxRounds = await getSetting<number>(ctx.platform.id, 'max_revision_rounds', 2);
       if (!review.pass && article.revision_round >= maxRounds) {
         review.forcedThrough = true;
       }
@@ -368,7 +377,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       break;
     }
     case 'edit': {
-      const revised = await runEditor(article, model!, tracker);
+      const revised = await runEditor(ctx, article, model!, tracker);
       await updateArticle(article, {
         draft_md: revised,
         revision_round: article.revision_round + 1,
@@ -384,7 +393,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       // assembler: the assembler stays a pure function of the card it is
       // handed, which is what lets it be driven straight from a fixture.
       const offers = await offersForArticle(article.id);
-      const assembled = await runAssembler(article, offers);
+      const assembled = await runAssembler(ctx, article, offers);
       await updateArticle(article, {
         draft_md: assembled.body,
         frontmatter: JSON.stringify(assembled.frontmatter),
@@ -421,7 +430,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       } else if (existing.heroImage) {
         summary = 'hero image already set — keeping it';
       } else {
-        const image = await runImageAgent(article, model!);
+        const image = await runImageAgent(ctx, article, model!);
         if (image.heroImage) {
           await updateArticle(article, {
             frontmatter: JSON.stringify({
@@ -492,9 +501,15 @@ export async function runStage(
   // supplies a credential, and the claim is released either way, so an
   // operator retry re-runs it. The class is still recorded - it is the whole
   // point of the column that a card says which kind of failure it hit.
+  //
+  // The prompt context is resolved here for the same reason: an article whose
+  // platform or edition does not resolve cannot run any stage, and saying so
+  // once, before a session is opened, beats every attempt failing on it.
   let model: string | null;
+  let ctx: PromptContext;
   try {
-    model = NO_LLM_AGENTS.has(agent) ? null : await modelFor(agent);
+    ctx = await resolvePromptContext(article.platform_id, article.edition_id);
+    model = NO_LLM_AGENTS.has(agent) ? null : await modelFor(agent, article.platform_id);
   } catch (err) {
     const message = scrubSecrets(err instanceof Error ? err.message : String(err));
     await q(
@@ -602,7 +617,7 @@ export async function runStage(
           () =>
             Promise.race([
               leaseLost,
-              withLlmCallTrace(trace, () => execute(current, stage, model, tracker)),
+              withLlmCallTrace(trace, () => execute(current, stage, model, tracker, ctx)),
             ]),
           () =>
             stageTimeoutError({
