@@ -19,7 +19,7 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 | 8 | `editor` | edit | Surgical revision resolving the reviewer's issues, the voice-scan findings and any admin feedback (loops with the reviewer, bounded by `max_revision_rounds`) |
 | 9 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
 | 10 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter. Stands down entirely when the operator attached their own image, and skips itself when `GCS_IMAGES_BUCKET` is unset |
-| 11 | `publisher` | publish | Upserts D1 `posts` + `affiliate_links`, fires the `content-updated` dispatch → site rebuilds |
+| 11 | `publisher` | publish | Upserts the platform's own D1 `posts` + `affiliate_links` and fires its rebuild (dispatch or deploy hook) → site rebuilds; refuses an event-bound piece after kick-off |
 
 Flow: `research → keyword → angle → outline → write → seo_review ⇄ edit → assemble → image → publish`.
 
@@ -265,6 +265,91 @@ stopped.
 - **Publishing**: gated on your approval by default (`publish_mode=approval`);
   flip to `auto` for hands-off publishing or `draft` to stage in D1 only.
 
+## Publish targets: one per platform
+
+Every platform publishes to its own D1 database, rebuilds its own site and is
+checked against its own site URL. A platform's profile names the environment
+variables that hold these (never the values), and
+`src/platform/publishTarget.ts` reads them at publish time. Nothing falls back:
+a missing variable fails the publish with
+`publish target for <platform>: <VARIABLE> is not set`, before anything is
+written, and a platform whose database or site URL is the same as another
+platform's is refused rather than published into it.
+
+| | SleekDrops | PeakOdds |
+|---|---|---|
+| D1 database id | `D1_DATABASE_ID` | `PEAKODDS_D1_DATABASE_ID` |
+| GitHub repo (`owner/repo`) | `GITHUB_REPO` | `PEAKODDS_GITHUB_REPO` |
+| Site origin | `SITE_URL` | `PEAKODDS_SITE_URL` |
+| Rebuild | `GITHUB_TOKEN`: `content-updated` repository dispatch to `GITHUB_REPO` | `PEAKODDS_REBUILD_HOOK_URL`: a deploy hook URL the publisher POSTs |
+
+`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_TOKEN` and `GITHUB_TOKEN` are shared.
+`GITHUB_REPO` and `SITE_URL` no longer have built-in defaults: a SleekDrops
+deployment must set both (`AshishAcharya083/sleekdrops` and
+`https://sleekdrops.com` in production), or every SleekDrops publish fails
+naming the one that is missing. A platform with no rebuild variable rebuilds
+by dispatch with `GITHUB_TOKEN`; one that names a variable must hold an
+http(s) URL there, and it is treated as a secret: no message quotes it.
+
+`apps/web` is the SleekDrops site and reads SleekDrops' D1 only. PeakOdds has
+no site in this repository yet.
+
+### Event-bound pieces
+
+An article with `event_starts_at` set (a match preview) is refused at publish
+from kick-off on, with an error naming the event time, however it reached the
+publish stage. Before kick-off the publisher writes `event_starts_at` and
+`odds_as_at` (ISO 8601 UTC text) onto the D1 post, so a site can show "This
+preview has expired" once the event starts; a corrected kick-off time is a
+change that rebuilds the site. The two columns are written only for an
+event-bound piece, so SleekDrops' posts table needs neither.
+
+### Provisioning PeakOdds (operator follow-up)
+
+None of this blocks a build or a test - PeakOdds publishes fail with the
+message above until it is done.
+
+1. Create the database: `wrangler d1 create peakodds`, and set its id as
+   `PEAKODDS_D1_DATABASE_ID`. Create its tables:
+
+   ```sql
+   CREATE TABLE IF NOT EXISTS posts (
+     slug             TEXT PRIMARY KEY,
+     status           TEXT NOT NULL,          -- 'published' | 'draft'
+     title            TEXT NOT NULL,
+     category         TEXT NOT NULL,
+     post_type        TEXT NOT NULL,
+     author           TEXT NOT NULL,
+     pub_date         TEXT NOT NULL,          -- YYYY-MM-DD
+     frontmatter_json TEXT NOT NULL,
+     body_md          TEXT NOT NULL,
+     event_starts_at  TEXT,                   -- ISO 8601 UTC; NULL when tied to no event
+     odds_as_at       TEXT,                   -- ISO 8601 UTC; when the quoted prices were seen
+     created_at       TEXT NOT NULL,
+     updated_at       TEXT NOT NULL
+   );
+   CREATE TABLE IF NOT EXISTS affiliate_links (
+     slug         TEXT PRIMARY KEY,
+     default_url  TEXT NOT NULL,
+     regions_json TEXT,
+     note         TEXT,
+     expires_at   TEXT,
+     created_at   TEXT NOT NULL,
+     updated_at   TEXT NOT NULL
+   );
+   ```
+
+   (`affiliate_links` stays empty for a platform with monetisation `none`; it
+   exists so a site build can read the same two tables SleekDrops' does.)
+2. Create the PeakOdds site's deploy hook (Cloudflare Pages → the project →
+   Settings → Builds → Deploy hooks) and store the URL as the secret
+   `PEAKODDS_REBUILD_HOOK_URL`.
+3. Set `PEAKODDS_SITE_URL` to the origin the site deploys to and
+   `PEAKODDS_GITHUB_REPO` to its repository.
+4. On Cloud Run, add the four to the agent service (Secret Manager for the
+   hook URL) - with `--update-env-vars`/`--update-secrets`, never
+   `--set-env-vars`, which replaces the whole set.
+
 ## Social distribution
 
 Publishing an article queues it for every connected social channel instead of
@@ -275,8 +360,24 @@ fire again for the same slug every time; `distribution_queue` is unique on
 after it a no-op. A piece parked in D1 as a draft enqueues nothing, on the same
 reading of `publish_mode` that keeps the rebuild dispatch from firing.
 
+- **Per platform, never across.** An article is queued only for the
+  channels of its own platform (`channel_connections.platform_id`), and an
+  item pairing one platform's article with another's channel is never claimed.
+  A social account belongs to one platform: connecting a Page another platform
+  already posts through is refused (409). Pasted credentials, placement
+  settings and the Facebook body-link budget are each platform's own settings.
+- **The distribution gate.** Each platform's `distribution_enabled` setting
+  switches its enqueueing, posting and insights reads. A platform with no such
+  row is off. SleekDrops' row is `true`. PeakOdds' stays off until the operator
+  has confirmed its Facebook Page is age-restricted to 18+ and
+  country-restricted to the audiences it serves; only then should its
+  `distribution_enabled` be set to `true`.
+- **Organic only.** Posting is organic. The Facebook client refuses any Graph
+  path outside the Page, post and token endpoints it uses, so an ad, a boost or
+  a promotion cannot be created from here.
 - **Readiness gate.** An item is handed to a provider only once
-  `SITE_URL/blog/<slug>` returns 200 and serves the `og:title` and `og:image`
+  `<site>/blog/<slug>` - on the channel's own platform's site URL - returns
+  200 and serves the `og:title` and `og:image`
   the post was rendered against. The site is a static build: for about 90
   seconds after publish that URL is a 404 or the previous piece, and the link
   preview a network fetches first is the one it caches. The gate re-checks
@@ -485,8 +586,10 @@ pnpm dev:agent                              # migrate + API + worker + admin UI 
 
 Required env: `GEMINI_API_KEY` (or Vertex on GCP) and `TAVILY_API_KEY`; add
 `CLAUDE_CODE_OAUTH_TOKEN` to write prose on your Claude plan. For publishing:
-`CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `CLOUDFLARE_D1_TOKEN` (D1 Edit),
-`GITHUB_TOKEN` (repo dispatch). Optional: `ADMIN_TOKEN` to protect the API —
+`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_TOKEN` (D1 Edit), plus each platform's
+publish target - for SleekDrops `D1_DATABASE_ID`, `GITHUB_REPO`, `SITE_URL` and
+`GITHUB_TOKEN` (repo dispatch); see [Publish targets](#publish-targets-one-per-platform).
+Optional: `ADMIN_TOKEN` to protect the API —
 required in practice when the API is deployed on Cloud Run.
 
 `DATABASE_URL` has no built-in default. Left unset, the `pg` driver resolves

@@ -108,6 +108,7 @@ async function article(): Promise<DistributableArticle> {
   articles.push(row.id);
   return {
     id: row.id,
+    platform_id: 'sleekdrops',
     slug: row.slug,
     title: TITLE,
     frontmatter,
@@ -283,7 +284,7 @@ test('a token that lives only in settings is redacted too', { skip }, async () =
   await connect(provider.name, ref);
   await enqueuePublishedArticle(await article(), { d1Status: 'published' });
 
-  await storeCredential(ref, secret);
+  await storeCredential('sleekdrops', ref, secret);
   try {
     const item = (await claimNextItem([provider.name]))!;
     await processItem(item, { fetchPage: async () => livePage });
@@ -291,7 +292,7 @@ test('a token that lives only in settings is redacted too', { skip }, async () =
     assert.ok(!failed.lastError!.includes(secret));
     assert.match(failed.lastError!, /rejected credential \[redacted\]/);
   } finally {
-    await removeCredential(ref);
+    await removeCredential('sleekdrops', ref);
   }
 });
 
@@ -354,13 +355,13 @@ test('a token pasted into settings wins over the environment', { skip }, async (
   await connect(provider.name, ref);
   await enqueuePublishedArticle(await article(), { d1Status: 'published' });
 
-  await storeCredential(ref, 'rotated-token-value');
+  await storeCredential('sleekdrops', ref, 'rotated-token-value');
   try {
     const item = (await claimNextItem([provider.name]))!;
     assert.equal(await processItem(item, { fetchPage: async () => livePage }), 'posted');
     assert.deepEqual(seen, ['rotated-token-value']);
   } finally {
-    await removeCredential(ref);
+    await removeCredential('sleekdrops', ref);
   }
 });
 

@@ -32,11 +32,11 @@
 // identity, no comment text, no demographic or audience breakdown - see the
 // distribution_metrics comment in 014_distribution.sql.
 import { config } from '../config.js';
-import { getSetting, q } from '../db/pool.js';
+import { q } from '../db/pool.js';
 import { createLogger } from '../lib/log.js';
 import { getConnection, redactToken, resolveCredential } from './channels.js';
 import { getProvider, registeredProviders } from './providers.js';
-import { recordMetrics } from './queue.js';
+import { gateOpenSql, recordMetrics } from './queue.js';
 import {
   toDistributionItem,
   UNCLICKABLE_COMMENT_LINK,
@@ -47,7 +47,6 @@ import {
   type LinkPlacement,
   type SocialProvider,
 } from './types.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('distribution');
 
@@ -190,6 +189,7 @@ export async function claimDueInsights(
          AND item.provider = ANY($1)
          AND channel.status = 'active'
          AND (channel.expires_at IS NULL OR channel.expires_at > now())
+         AND ${gateOpenSql('channel.platform_id')}
        ORDER BY item.posted_at ASC
        LIMIT $5
        FOR UPDATE OF item SKIP LOCKED
@@ -270,7 +270,9 @@ export async function collectItemInsights(
 
   const provider = resolveProvider(item.provider);
   const connection = provider ? await getConnection(item.channelConnectionId) : null;
-  const accessToken = connection ? await resolveCredential(connection.token_ref, connection.provider) : null;
+  const accessToken = connection
+    ? await resolveCredential(connection.platform_id, connection.token_ref, connection.provider)
+    : null;
   if (!provider || !connection || !accessToken) {
     // Nothing to read this post with. Not a failure of the network and not
     // something a reading can fix, so it waits out the same retry the
@@ -348,11 +350,10 @@ let stopped = false;
 /** One poll: read back every posted item whose next checkpoint has arrived. */
 export async function insightsTick(deps: InsightsDeps = {}): Promise<InsightOutcome[]> {
   if (stopped) return [];
-  // The same switch that stops the posting worker. An operator who turns
-  // distribution off means "make no calls to these networks as this Page";
-  // readings resume on their own if it is back on inside the item's window.
-  if (!(await getSetting<boolean>(SLEEKDROPS_PLATFORM_ID, 'distribution_enabled', true))) return [];
-
+  // The same per-platform gate that stops the posting worker, applied by the
+  // claim. An operator who turns a platform's distribution off means "make no
+  // calls to these networks as its Pages"; readings resume on their own if it
+  // is back on inside the item's window.
   const providers = (deps.availableProviders ?? registeredProviders)();
   const items = await claimDueInsights(providers);
   const outcomes: InsightOutcome[] = [];
@@ -430,7 +431,7 @@ export interface PlacementPerformance {
  * post. Placement is joined from the queue row, which is where a placement
  * resolved at render time was recorded.
  */
-export async function placementPerformance(): Promise<PlacementPerformance[]> {
+export async function placementPerformance(platformId: string): Promise<PlacementPerformance[]> {
   return q<PlacementPerformance>(
     `SELECT item.placement,
             count(*)::int AS posts,
@@ -439,6 +440,7 @@ export async function placementPerformance(): Promise<PlacementPerformance[]> {
             COALESCE(sum(reported.reactions), 0)::int AS reactions,
             count(*) FILTER (WHERE item.insights_flag IS NOT NULL)::int AS flagged
      FROM distribution_queue item
+     JOIN channel_connections channel ON channel.id = item.channel_connection_id
      JOIN LATERAL (
        SELECT max(m.impressions) AS impressions,
               max(m.clicks) AS clicks,
@@ -449,7 +451,9 @@ export async function placementPerformance(): Promise<PlacementPerformance[]> {
        ON reported.impressions IS NOT NULL
        OR reported.clicks IS NOT NULL
        OR reported.reactions IS NOT NULL
+     WHERE channel.platform_id = $1
      GROUP BY item.placement
      ORDER BY item.placement`,
+    [platformId],
   );
 }

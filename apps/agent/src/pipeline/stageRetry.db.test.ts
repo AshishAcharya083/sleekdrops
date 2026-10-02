@@ -24,6 +24,8 @@ process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
 process.env.D1_DATABASE_ID = 'test-database';
 process.env.CLOUDFLARE_D1_TOKEN = 'test-token';
 process.env.GITHUB_TOKEN = 'test-token';
+process.env.GITHUB_REPO = 'example/sleekdrops';
+process.env.SITE_URL = 'https://sleekdrops.com';
 // A Claude credential would turn the genuine-failure case below into a live
 // model call from a test suite that must never make one.
 delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
