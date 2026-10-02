@@ -926,10 +926,20 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
   });
 
   // ── Topic scout ───────────────────────────────────────────────────────────
+  // One search per edition, as the scheduler queues them. `queued` stays the
+  // first run's id so callers of the single-run shape keep working.
   app.post('/api/scout', async (c) => {
-    const id = await enqueueScoutRun(c.get('platform').id, 'au');
-    log.info('scout run queued', { scout_run_id: id });
-    return c.json({ queued: id }, 202);
+    const platform = c.get('platform');
+    if (platform.editions.length === 0) {
+      return c.json({ error: `platform ${platform.id} has no editions to scout` }, 400);
+    }
+    const runs: { id: string; edition_id: string }[] = [];
+    for (const edition of platform.editions) {
+      const id = await enqueueScoutRun(platform.id, edition.id);
+      log.info('scout run queued', { scout_run_id: id, edition_id: edition.id });
+      runs.push({ id, edition_id: edition.id });
+    }
+    return c.json({ queued: runs[0].id, runs }, 202);
   });
 
   app.get('/api/scout/queue', async (c) => {

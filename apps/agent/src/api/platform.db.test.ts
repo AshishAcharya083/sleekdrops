@@ -160,6 +160,7 @@ before(async () => {
 after(async () => {
   if (reachable) {
     await q('DELETE FROM agent_sessions WHERE platform_id = $1', [OTHER]);
+    await q('DELETE FROM scout_runs WHERE platform_id = $1', [OTHER]);
     await q('DELETE FROM articles WHERE platform_id = $1', [OTHER]);
     await q('DELETE FROM topics WHERE platform_id = $1 OR title LIKE $2', [OTHER, `${TAG}%`]);
     await q('DELETE FROM channel_connections WHERE platform_id = $1 OR provider = $2', [
@@ -425,6 +426,35 @@ test('settings are read and written per platform', { skip }, async () => {
     [OTHER],
   );
   assert.equal(row.value, 'draft');
+});
+
+test('a manual scout queues one search per edition of its own platform', { skip }, async () => {
+  const { status, body } = await call(OTHER, '/api/scout', { method: 'POST' });
+
+  assert.equal(status, 202);
+  assert.deepEqual(
+    body.runs.map((run: { edition_id: string }) => run.edition_id),
+    ['au', 'global'],
+  );
+  assert.equal(body.queued, body.runs[0].id);
+  const rows = await q<{ id: string; platform_id: string; edition_id: string; status: string }>(
+    'SELECT id, platform_id, edition_id, status FROM scout_runs WHERE id = ANY($1) ORDER BY edition_id',
+    [body.runs.map((run: { id: string }) => run.id)],
+  );
+  assert.deepEqual(
+    rows.map(({ platform_id, edition_id, status }) => ({ platform_id, edition_id, status })),
+    [
+      { platform_id: OTHER, edition_id: 'au', status: 'queued' },
+      { platform_id: OTHER, edition_id: 'global', status: 'queued' },
+    ],
+  );
+
+  const runs = await call(OTHER, '/api/scout-runs');
+  assert.equal(runs.body.runs.length, 2);
+  const sleekdrops = await call(SLEEKDROPS, '/api/scout-runs');
+  assert.ok(
+    sleekdrops.body.runs.every((run: { platform_id: string }) => run.platform_id === SLEEKDROPS),
+  );
 });
 
 test('GET /api/platform/profile is the version in force', { skip }, async () => {
