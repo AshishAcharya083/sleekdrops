@@ -54,7 +54,7 @@ test('every stage trusted with the tool actually uses it', () => {
     assert.ok(SEARCH_ENABLED.test(source), `${file} no longer searches, but it ${why}`);
     assert.match(
       source,
-      /VERIFICATION_RULES/,
+      /verificationRules\(/,
       `${file} has the tool but not the rules telling it what to check`,
     );
   }

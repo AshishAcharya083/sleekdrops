@@ -1616,10 +1616,8 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
   // warn that the selected engine cannot run — the failure that used to show
   // up only as an unexplained gemini-2.5-flash in the Sessions table.
   app.get('/api/settings', async (c) => {
-    const [rows, engines] = await Promise.all([
-      platformSettings(c.get('platform').id),
-      engineStatus(),
-    ]);
+    const platformId = c.get('platform').id;
+    const [rows, engines] = await Promise.all([platformSettings(platformId), engineStatus(platformId)]);
     return c.json({ ...settingsPayload(rows), engines });
   });
 
@@ -1654,7 +1652,7 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
     clearLlmSettingsCache();
     // Same shape as the GET: saving a token must refresh the readiness the
     // panel just warned about, without a reload.
-    const [rows, engines] = await Promise.all([platformSettings(platformId), engineStatus()]);
+    const [rows, engines] = await Promise.all([platformSettings(platformId), engineStatus(platformId)]);
     return c.json({ ...settingsPayload(rows), engines });
   });
 

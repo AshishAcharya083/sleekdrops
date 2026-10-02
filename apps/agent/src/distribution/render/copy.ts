@@ -386,7 +386,7 @@ export function headlineBudget(spec: ChannelSpec, parts: Omit<CaptionParts, 'hea
  * takes the fallback rung rather than stopping a post.
  */
 export async function socialCopyModel(platformId: string): Promise<string> {
-  const settings = await llmSettings();
+  const settings = await llmSettings(platformId);
   const overrides = await getSetting<Record<string, string>>(platformId, 'models', {});
   if (overrides.social) return overrides.social;
   return (settings.prose_engine ?? 'claude') === 'claude'
@@ -429,6 +429,7 @@ function copyPrompt(request: CopyRequest, complaint?: string): string {
 /** The real writer. One completion per attempt, warm enough to vary on a retry. */
 export const modelWriter: CopyWriter = async (request, complaint) => {
   const result = await chat({
+    platformId: request.platformId,
     model: await socialCopyModel(request.platformId),
     system: COPY_SYSTEM,
     prompt: copyPrompt(request, complaint),
