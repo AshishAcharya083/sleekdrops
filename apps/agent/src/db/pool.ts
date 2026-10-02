@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { config } from '../config.js';
 import { createLogger } from '../lib/log.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('db');
 
@@ -200,16 +201,39 @@ export async function q<T extends pg.QueryResultRow = pg.QueryResultRow>(
   return res.rows;
 }
 
-/** Get a JSONB settings value (seeded by the migration). */
-export async function getSetting<T>(key: string, fallback: T): Promise<T> {
-  const rows = await q<{ value: T }>('SELECT value FROM settings WHERE key = $1', [key]);
+/** Get one platform's JSONB settings value (seeded by the migrations). */
+export async function getPlatformSetting<T>(platformId: string, key: string, fallback: T): Promise<T> {
+  const rows = await q<{ value: T }>(
+    'SELECT value FROM settings WHERE platform_id = $1 AND key = $2',
+    [requirePlatformId(platformId), key],
+  );
   return rows.length > 0 ? rows[0].value : fallback;
 }
 
-export async function setSetting(key: string, value: unknown): Promise<void> {
+export async function setPlatformSetting(platformId: string, key: string, value: unknown): Promise<void> {
   await q(
-    `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2::jsonb, now())
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-    [key, JSON.stringify(value)],
+    `INSERT INTO settings (platform_id, key, value, updated_at) VALUES ($1, $2, $3::jsonb, now())
+     ON CONFLICT (platform_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [requirePlatformId(platformId), key, JSON.stringify(value)],
   );
+}
+
+function requirePlatformId(platformId: string): string {
+  if (typeof platformId !== 'string' || !platformId.trim()) {
+    throw new Error('no platform id given - settings are kept per platform');
+  }
+  return platformId;
+}
+
+// The callers below have no platform context of their own yet, and every one
+// of them is SleekDrops' - so they name it, rather than reading whichever
+// platform's row happens to match the key.
+
+/** Get a SleekDrops JSONB settings value (seeded by the migration). */
+export async function getSetting<T>(key: string, fallback: T): Promise<T> {
+  return getPlatformSetting(SLEEKDROPS_PLATFORM_ID, key, fallback);
+}
+
+export async function setSetting(key: string, value: unknown): Promise<void> {
+  await setPlatformSetting(SLEEKDROPS_PLATFORM_ID, key, value);
 }

@@ -94,6 +94,8 @@ interface ArticleFields {
 /** An article part-way down the pipeline, with every upstream column filled. */
 async function seed(fields: ArticleFields = {}): Promise<string> {
   const row: ArticleFields = {
+    platform_id: 'sleekdrops',
+    edition_id: 'au',
     title: brief.seoTitle,
     slug: `retry-test-${randomUUID().slice(0, 8)}`,
     category: 'Home',
@@ -125,8 +127,8 @@ async function session(
 ): Promise<void> {
   await q(
     `INSERT INTO agent_sessions
-       (article_id, agent, model, status, summary, kind, attempt, cost_usd, started_at, ended_at)
-     VALUES ($1, $2, 'claude-opus-5', $3, $2 || ' ran', $4, $5, 0.5,
+       (platform_id, article_id, agent, model, status, summary, kind, attempt, cost_usd, started_at, ended_at)
+     VALUES ('sleekdrops', $1, $2, 'claude-opus-5', $3, $2 || ' ran', $4, $5, 0.5,
              now() - make_interval(mins => $6 + 1), now() - make_interval(mins => $6))`,
     [
       articleId,

@@ -64,9 +64,10 @@ export async function saveOffer(articleId: string, input: OfferInput): Promise<P
     await client.query('BEGIN');
     const { rows } = await client.query<ProductOffer>(
       `INSERT INTO product_offers
-         (article_id, go_slug, product_name, url, price, currency, price_observed_on,
+         (article_id, platform_id, go_slug, product_name, url, price, currency, price_observed_on,
           preorder, release_date, merchant, source, entered_by, note)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       VALUES ($1, (SELECT platform_id FROM articles WHERE id = $1), $2, $3, $4, $5, $6, $7, $8,
+               $9, $10, $11, $12, $13)
        ON CONFLICT (article_id, go_slug) DO UPDATE SET
          product_name      = COALESCE(NULLIF(excluded.product_name, ''), product_offers.product_name),
          url               = excluded.url,
@@ -100,9 +101,10 @@ export async function saveOffer(articleId: string, input: OfferInput): Promise<P
     const offer = rows[0];
     await client.query(
       `INSERT INTO product_offer_revisions
-         (offer_id, article_id, go_slug, url, price, currency, price_observed_on,
+         (offer_id, article_id, platform_id, go_slug, url, price, currency, price_observed_on,
           preorder, release_date, merchant, source, entered_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+       VALUES ($1, $2, (SELECT platform_id FROM product_offers WHERE id = $1), $3, $4, $5, $6, $7,
+               $8, $9, $10, $11, $12)`,
       [
         offer.id,
         articleId,

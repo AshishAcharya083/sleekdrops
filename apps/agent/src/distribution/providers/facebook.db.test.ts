@@ -127,8 +127,8 @@ const posted = (call: RecordedCall | undefined): Record<string, string> => call?
 async function connect(): Promise<{ id: string; pageId: string }> {
   const pageId = `1000${randomUUID().replace(/\D/g, '').slice(0, 8)}`;
   const [row] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref, display_name)
-     VALUES ($1, $2, $3, 'Sleekdrops') RETURNING id`,
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref, display_name)
+     VALUES ('sleekdrops', $1, $2, $3, 'Sleekdrops') RETURNING id`,
     [FACEBOOK_PROVIDER, pageId, TOKEN_REF],
   );
   connections.push(row.id);
@@ -138,9 +138,9 @@ async function connect(): Promise<{ id: string; pageId: string }> {
 async function article(): Promise<DistributableArticle> {
   const frontmatter = { title: TITLE, dek: 'Four weeks on the 7:12, ranked.', heroImage: HERO };
   const [row] = await q<{ id: string; slug: string }>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, frontmatter,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter,
                            hero_image_source)
-     VALUES ($1, $2, 'Tech', 'guide', 'publish', 'queued', $3::jsonb, 'generated')
+     VALUES ('sleekdrops', 'au', $1, $2, 'Tech', 'guide', 'publish', 'queued', $3::jsonb, 'generated')
      RETURNING id, slug`,
     [TITLE, `quiet-commutes-${randomUUID().slice(0, 8)}`, JSON.stringify(frontmatter)],
   );

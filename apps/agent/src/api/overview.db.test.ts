@@ -49,16 +49,16 @@ before(async () => {
   if (!reachable) return;
   await migrate();
   await q(
-    "INSERT INTO topics (title, norm_title, category, post_type) VALUES ($1, $1, 'Tech', 'article')",
+    "INSERT INTO topics (platform_id, edition_id, title, norm_title, category, post_type) VALUES ('sleekdrops', 'au', $1, $1, 'Tech', 'article')",
     [AGENT],
   );
   const [run] = await q<{ id: string }>(
-    "INSERT INTO scout_runs (status, ended_at) VALUES ('done', now()) RETURNING id",
+    "INSERT INTO scout_runs (platform_id, status, ended_at) VALUES ('sleekdrops', 'done', now()) RETURNING id",
   );
   scoutRunId = run.id;
   await q(
-    `INSERT INTO agent_sessions (agent, scout_run_id, status, cost_usd, tokens_input, tokens_output)
-     VALUES ($1, $2, 'done', '0.250000', 100, 20)`,
+    `INSERT INTO agent_sessions (platform_id, agent, scout_run_id, status, cost_usd, tokens_input, tokens_output)
+     VALUES ('sleekdrops', $1, $2, 'done', '0.250000', 100, 20)`,
     [AGENT, scoutRunId],
   );
 });

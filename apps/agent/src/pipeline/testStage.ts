@@ -116,9 +116,10 @@ async function recordSession(
 ): Promise<string> {
   const [session] = await q<{ id: string }>(
     `INSERT INTO agent_sessions
-       (article_id, agent, model, status, summary, error, kind, attempt,
+       (article_id, platform_id, agent, model, status, summary, error, kind, attempt,
         tokens_input, tokens_output, cost_usd, llm_calls, ended_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 'test', $7, $8, $9, $10, $11, now())
+     VALUES ($1, (SELECT platform_id FROM articles WHERE id = $1), $2, $3, $4, $5, $6, 'test', $7,
+             $8, $9, $10, $11, now())
      RETURNING id`,
     [
       article.id,

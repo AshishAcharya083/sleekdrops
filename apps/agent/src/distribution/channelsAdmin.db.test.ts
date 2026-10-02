@@ -228,8 +228,8 @@ test('a secret name outside the channel namespace is refused before the network 
 test('a stored token_ref naming a platform secret resolves to nothing', { skip }, async () => {
   const provider = stubNetwork({});
   const [connection] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref, status)
-     VALUES ($1, $2, 'admin-token', 'disabled') RETURNING id`,
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref, status)
+     VALUES ('sleekdrops', $1, $2, 'admin-token', 'disabled') RETURNING id`,
     [provider, `page-${randomUUID().slice(0, 8)}`],
   );
   connections.push(connection.id);
@@ -412,9 +412,9 @@ test('the channel routes are behind the admin bearer', { skip }, async () => {
 async function article(): Promise<DistributableArticle> {
   const frontmatter = { title: 'A quiet commute', dek: 'Ranked.', heroImage: 'https://x/y.png' };
   const [row] = await q<{ id: string; slug: string }>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, frontmatter,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter,
                            hero_image_source)
-     VALUES ('A quiet commute', $1, 'Tech', 'guide', 'publish', 'queued', $2::jsonb, 'generated')
+     VALUES ('sleekdrops', 'au', 'A quiet commute', $1, 'Tech', 'guide', 'publish', 'queued', $2::jsonb, 'generated')
      RETURNING id, slug`,
     [`channels-admin-${randomUUID().slice(0, 8)}`, JSON.stringify(frontmatter)],
   );
@@ -469,8 +469,8 @@ async function populatedChannel(): Promise<{
 }> {
   const provider = stubNetwork({});
   const [connection] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref, status)
-     VALUES ($1, $2, 'stub-channels-ref', 'disabled') RETURNING id`,
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref, status)
+     VALUES ('sleekdrops', $1, $2, 'stub-channels-ref', 'disabled') RETURNING id`,
     [provider, `page-${randomUUID().slice(0, 8)}`],
   );
   connections.push(connection.id);
@@ -749,8 +749,8 @@ test('a provider hold writes its reason onto the row', { skip }, async () => {
   // Disabled for the same reason as populatedChannel; processItem is handed
   // the item directly, so it never goes through a claim.
   const [connection] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref, status)
-     VALUES ($1, $2, $3, 'disabled') RETURNING id`,
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref, status)
+     VALUES ('sleekdrops', $1, $2, $3, 'disabled') RETURNING id`,
     [provider, `page-${randomUUID().slice(0, 8)}`, ref],
   );
   connections.push(connection.id);

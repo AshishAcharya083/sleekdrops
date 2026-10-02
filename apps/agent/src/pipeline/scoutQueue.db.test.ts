@@ -43,8 +43,8 @@ async function seed(
   startedAt = '2000-01-01T00:00:00Z',
 ): Promise<string> {
   const [run] = await q<{ id: string }>(
-    `INSERT INTO scout_runs (status, started_at, claimed_at, heartbeat_at)
-     VALUES ($1, $2, CASE WHEN $1 = 'running' THEN now() ELSE NULL END,
+    `INSERT INTO scout_runs (platform_id, status, started_at, claimed_at, heartbeat_at)
+     VALUES ('sleekdrops', $1, $2, CASE WHEN $1 = 'running' THEN now() ELSE NULL END,
              now() - make_interval(mins => $3))
      RETURNING id`,
     [status, startedAt, heartbeatMinutesAgo],
@@ -99,7 +99,7 @@ test('a worker claims the oldest queued search and will not overlap a live one',
 test('a stranded search is re-queued and its abandoned session is closed', { skip }, async () => {
   const stale = await seed('running', 31, '1998-01-01T00:00:00Z');
   await q(
-    "INSERT INTO agent_sessions (scout_run_id, agent) VALUES ($1, 'topic_scout')",
+    "INSERT INTO agent_sessions (platform_id, scout_run_id, agent) VALUES ('sleekdrops', $1, 'topic_scout')",
     [stale],
   );
 

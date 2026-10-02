@@ -40,8 +40,8 @@ async function getUsage(): Promise<{ status: number; body: Usage }> {
 
 async function insertSession(daysAgo: number, tokensIn: number, tokensOut: number, cost: string): Promise<void> {
   await q(
-    `INSERT INTO agent_sessions (agent, model, status, tokens_input, tokens_output, cost_usd, started_at)
-     VALUES ($1, $2, 'done', $3, $4, $5, $6::timestamptz - make_interval(days => $7))`,
+    `INSERT INTO agent_sessions (platform_id, agent, model, status, tokens_input, tokens_output, cost_usd, started_at)
+     VALUES ('sleekdrops', $1, $2, 'done', $3, $4, $5, $6::timestamptz - make_interval(days => $7))`,
     [AGENT, AGENT, tokensIn, tokensOut, cost, anchor, daysAgo],
   );
 }

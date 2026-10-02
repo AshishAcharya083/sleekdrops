@@ -95,6 +95,8 @@ function stubFetch(answer: (call: number) => Response | never): number[] {
 async function insertPublishable(fields: Record<string, unknown> = {}): Promise<ArticleRow> {
   const slug = `best-stick-vacuums-${randomUUID().slice(0, 8)}`;
   const row = {
+    platform_id: 'sleekdrops',
+    edition_id: 'au',
     title: 'Best cordless stick vacuums',
     category: 'Home',
     post_type: 'guide',

@@ -103,8 +103,10 @@ function richDossier(): ResearchDossier {
 }
 
 async function insertArticle(fields: Record<string, unknown> = {}): Promise<ArticleRow> {
-  const keys = ['title', 'category', 'post_type', ...Object.keys(fields)];
+  const keys = ['platform_id', 'edition_id', 'title', 'category', 'post_type', ...Object.keys(fields)];
   const values = [
+    'sleekdrops',
+    'au',
     `Best cordless stick vacuums ${randomUUID().slice(0, 8)}`,
     'Home',
     'guide',

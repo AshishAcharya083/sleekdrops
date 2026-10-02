@@ -81,6 +81,7 @@ import {
   type HeroImageUpload,
 } from '../tools/heroImages.js';
 import { TRACE_HEADER, traceMiddleware, type TraceEnv } from './trace.js';
+import { SLEEKDROPS_AU_EDITION_ID, SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('api');
 
@@ -218,6 +219,29 @@ interface ApprovedTopic {
   hero_alt: string | null;
 }
 
+/**
+ * Queue the article an approved topic becomes. Everything it is seeded with is
+ * read off the topic row itself - its platform and edition among it - plus the
+ * platform profile version current at commissioning.
+ */
+async function createArticleFromTopic(
+  topicId: string,
+): Promise<{ id: string; title: string; stage: string; status: string }> {
+  const [article] = await q<{ id: string; title: string; stage: string; status: string }>(
+    `INSERT INTO articles
+       (topic_id, platform_id, edition_id, title, category, post_type, hero_image_url, hero_alt,
+        event_starts_at, odds_as_at, profile_version)
+     SELECT t.id, t.platform_id, t.edition_id, t.title, t.category, t.post_type, t.hero_image_url,
+            t.hero_alt, t.event_starts_at, t.odds_as_at,
+            (SELECT v.id FROM platform_profile_versions v
+              WHERE v.platform_id = t.platform_id ORDER BY v.version DESC LIMIT 1)
+       FROM topics t WHERE t.id = $1
+     RETURNING id, title, stage, status`,
+    [topicId],
+  );
+  return article;
+}
+
 function validateReferences(input: unknown): Validated<ReferenceMaterial[]> {
   if (input === undefined || input === null) return { ok: true, value: [] };
   if (!Array.isArray(input)) return { ok: false, error: 'references must be an array' };
@@ -323,8 +347,8 @@ async function syncArticleHero(
                                   ELSE (frontmatter - 'heroAlt') || $4::jsonb
                                 END,
             updated_at        = now()
-      WHERE slug = $1`,
-    [slug, heroImage, heroAlt, patch],
+      WHERE platform_id = $5 AND slug = $1`,
+    [slug, heroImage, heroAlt, patch, SLEEKDROPS_PLATFORM_ID],
   );
 }
 
@@ -563,11 +587,7 @@ export function createApp(): Hono<TraceEnv> {
         [id],
       );
       if (!topic) continue;
-      const [article] = await q<{ id: string }>(
-        `INSERT INTO articles (topic_id, title, category, post_type, hero_image_url, hero_alt)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, title, stage, status`,
-        [topic.id, topic.title, topic.category, topic.post_type, topic.hero_image_url, topic.hero_alt],
-      );
+      const article = await createArticleFromTopic(topic.id);
       // Pipeline work is picked up later by the worker's database poll, so the
       // entity ids logged here are what join those [pipeline] lines back to
       // this request's trace id.
@@ -632,11 +652,21 @@ export function createApp(): Hono<TraceEnv> {
       }
       const [topic] = await q(
         `INSERT INTO topics
-           (title, norm_title, category, post_type, source, status, instructions,
-            research_notes, hero_alt)
-         VALUES ($1, $2, $3, $4, 'manual', 'draft', $5, $6::jsonb, $7)
+           (platform_id, edition_id, title, norm_title, category, post_type, source, status,
+            instructions, research_notes, hero_alt)
+         VALUES ($8, $9, $1, $2, $3, $4, 'manual', 'draft', $5, $6::jsonb, $7)
          RETURNING *`,
-        [title, normTitle, category, postType, instructions, notes, heroAlt],
+        [
+          title,
+          normTitle,
+          category,
+          postType,
+          instructions,
+          notes,
+          heroAlt,
+          SLEEKDROPS_PLATFORM_ID,
+          SLEEKDROPS_AU_EDITION_ID,
+        ],
       );
       return c.json({ topic }, 201);
     } catch (err) {
@@ -657,11 +687,7 @@ export function createApp(): Hono<TraceEnv> {
       [c.req.param('id')],
     );
     if (!topic) return c.json({ error: 'draft topic not found or already approved' }, 409);
-    const [article] = await q<{ id: string }>(
-      `INSERT INTO articles (topic_id, title, category, post_type, hero_image_url, hero_alt)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, title, stage, status`,
-      [topic.id, topic.title, topic.category, topic.post_type, topic.hero_image_url, topic.hero_alt],
-    );
+    const article = await createArticleFromTopic(topic.id);
     log.info('article queued from manual topic approval', {
       topic_id: topic.id,
       article_id: article.id,
@@ -1178,9 +1204,10 @@ export function createApp(): Hono<TraceEnv> {
     // delete-then-republish recovery compute the same digest, skip the
     // dispatch, and leave the page missing from the live site. `pub_date`
     // stays - restoring a post is not re-publishing it on a new date.
-    await q('UPDATE articles SET published_digest = NULL, updated_at = now() WHERE slug = $1', [
-      slug,
-    ]);
+    await q(
+      'UPDATE articles SET published_digest = NULL, updated_at = now() WHERE platform_id = $2 AND slug = $1',
+      [slug, SLEEKDROPS_PLATFORM_ID],
+    );
     // Rebuild so the site actually drops the page; deletion already succeeded,
     // so a dispatch failure is reported, not thrown.
     let dispatched = false;
@@ -1372,7 +1399,9 @@ export function createApp(): Hono<TraceEnv> {
   // up only as an unexplained gemini-2.5-flash in the Sessions table.
   app.get('/api/settings', async (c) => {
     const [rows, engines] = await Promise.all([
-      q<{ key: string; value: unknown }>('SELECT key, value FROM settings'),
+      q<{ key: string; value: unknown }>('SELECT key, value FROM settings WHERE platform_id = $1', [
+        SLEEKDROPS_PLATFORM_ID,
+      ]),
       engineStatus(),
     ]);
     return c.json({ ...settingsPayload(rows), engines });
@@ -1409,7 +1438,9 @@ export function createApp(): Hono<TraceEnv> {
     // Same shape as the GET: saving a token must refresh the readiness the
     // panel just warned about, without a reload.
     const [rows, engines] = await Promise.all([
-      q<{ key: string; value: unknown }>('SELECT key, value FROM settings'),
+      q<{ key: string; value: unknown }>('SELECT key, value FROM settings WHERE platform_id = $1', [
+        SLEEKDROPS_PLATFORM_ID,
+      ]),
       engineStatus(),
     ]);
     return c.json({ ...settingsPayload(rows), engines });

@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import { pool, q } from '../db/pool.js';
 import { UsageTracker } from '../llm/index.js';
 import { runTopicScout } from '../agents/topicScout.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 import { modelFor } from './runner.js';
 
 /** How long a sweep's heartbeat may go quiet before it stops holding the lock. */
@@ -24,7 +25,8 @@ export interface ScoutQueueStatus {
 /** Add a request to the durable queue. This never refuses because another run is active. */
 export async function enqueueScoutRun(): Promise<string> {
   const [run] = await q<{ id: string }>(
-    "INSERT INTO scout_runs (status) VALUES ('queued') RETURNING id",
+    "INSERT INTO scout_runs (platform_id, status) VALUES ($1, 'queued') RETURNING id",
+    [SLEEKDROPS_PLATFORM_ID],
   );
   return run.id;
 }
@@ -133,8 +135,9 @@ async function runClaimedScout(id: string): Promise<void> {
   try {
     const model = await modelFor('topic_scout');
     [session] = await q<{ id: string }>(
-      `INSERT INTO agent_sessions (scout_run_id, agent, model)
-       VALUES ($1, 'topic_scout', $2) RETURNING id`,
+      `INSERT INTO agent_sessions (scout_run_id, platform_id, agent, model)
+       VALUES ($1, (SELECT platform_id FROM scout_runs WHERE id = $1), 'topic_scout', $2)
+       RETURNING id`,
       [id, model],
     );
     const topics = await runTopicScout(model, tracker, id);
@@ -171,8 +174,9 @@ async function runClaimedScout(id: string): Promise<void> {
       );
     } else {
       await q(
-        `INSERT INTO agent_sessions (scout_run_id, agent, status, summary, error, ended_at)
-         VALUES ($1, 'topic_scout', 'failed', 'scout could not start', $2, now())`,
+        `INSERT INTO agent_sessions (scout_run_id, platform_id, agent, status, summary, error, ended_at)
+         VALUES ($1, (SELECT platform_id FROM scout_runs WHERE id = $1), 'topic_scout', 'failed',
+                 'scout could not start', $2, now())`,
         [id, message],
       );
     }

@@ -223,14 +223,16 @@ async function finishArticle(article: ArticleRow, fields: Record<string, unknown
   });
 }
 
-/** Ensure the brief's slug doesn't collide with another article. */
+/** Ensure the brief's slug doesn't collide with another article of the same platform. */
 async function uniqueSlug(articleId: string, want: string): Promise<string> {
   for (let n = 0; n < 20; n++) {
     const candidate = n === 0 ? want : `${want}-${n + 1}`;
-    const clash = await q('SELECT 1 FROM articles WHERE slug = $1 AND id <> $2', [
-      candidate,
-      articleId,
-    ]);
+    const clash = await q(
+      `SELECT 1 FROM articles
+        WHERE slug = $1 AND id <> $2
+          AND platform_id = (SELECT platform_id FROM articles WHERE id = $2)`,
+      [candidate, articleId],
+    );
     if (clash.length === 0) return candidate;
   }
   return `${want}-${articleId.slice(0, 8)}`;
@@ -497,8 +499,8 @@ export async function runStage(
   } catch (err) {
     const message = scrubSecrets(err instanceof Error ? err.message : String(err));
     await q(
-      `INSERT INTO agent_sessions (article_id, agent, status, summary, error, attempt, ended_at)
-       VALUES ($1, $2, 'failed', $3, $4, $5, now())`,
+      `INSERT INTO agent_sessions (article_id, platform_id, agent, status, summary, error, attempt, ended_at)
+       VALUES ($1, (SELECT platform_id FROM articles WHERE id = $1), $2, 'failed', $3, $4, $5, now())`,
       [article.id, agent, `${stage} could not start`, message, article.attempt ?? 1],
     );
     await finishArticle(article, {
@@ -559,7 +561,8 @@ export async function runStage(
       const attemptStartedAt = Date.now();
 
       const [session] = await q<{ id: string }>(
-        `INSERT INTO agent_sessions (article_id, agent, model, attempt) VALUES ($1, $2, $3, $4)
+        `INSERT INTO agent_sessions (article_id, platform_id, agent, model, attempt)
+         VALUES ($1, (SELECT platform_id FROM articles WHERE id = $1), $2, $3, $4)
          RETURNING id`,
         [article.id, agent, model, article.attempt ?? 1],
       );
