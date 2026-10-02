@@ -292,6 +292,21 @@ export const reviewUnitSchema = z.object({
 });
 
 /**
+ * The trust vocabulary a review's `product` carries on the site, mirrored from
+ * apps/web/src/lib/trust.ts. The pipeline writes no reviews, so no schema here
+ * parses a product; these are the values a row must use if it ever does, and
+ * contract.test.ts asserts they match the site's.
+ */
+export const METHOD_VERSIONS = ['1.0'] as const;
+/** How the product was assessed. `reviewUnit.acquisition` keeps its own retail / loan / none. */
+export const PROVENANCES = ['retail', 'brand-sample', 'not-hands-on'] as const;
+export const BADGE_KINDS = ['review-score', 'honest-negative', 'lowest-price', 'below-average'] as const;
+/** The kinds that may be printed today; price history stays off until it is collected. */
+export const ENABLED_BADGE_KINDS = ['review-score', 'honest-negative'] as const;
+/** How far a weighted sub-score breakdown may sit from the headline rating. */
+export const SUB_SCORE_TOLERANCE = 0.05;
+
+/**
  * The offer behind a pick: a price somebody saw on a named day, not a price
  * anything is polling.
  *
