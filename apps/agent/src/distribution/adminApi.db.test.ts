@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
+process.env.SITE_URL = 'https://sleekdrops.com';
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
@@ -70,6 +71,7 @@ async function article(): Promise<DistributableArticle> {
   articles.push(row.id);
   return {
     id: row.id,
+    platform_id: 'sleekdrops',
     slug: row.slug,
     title: 'A quiet commute',
     frontmatter,
@@ -150,7 +152,7 @@ test('an article carries its own distribution queue', { skip }, async () => {
 });
 
 test('the settings the panel polls never carry a channel credential', { skip }, async () => {
-  await storeCredential('channel-stub-admin-token-ref', SECRET_VALUE);
+  await storeCredential('sleekdrops', 'channel-stub-admin-token-ref', SECRET_VALUE);
   try {
     const res = await app.request('/api/settings', { headers: AUTH });
     assert.equal(res.status, 200);
@@ -158,7 +160,7 @@ test('the settings the panel polls never carry a channel credential', { skip }, 
     assert.ok(!raw.includes(SECRET_VALUE), '/api/settings is polled by a browser');
     assert.equal('channel_credentials' in (JSON.parse(raw) as Record<string, unknown>), false);
   } finally {
-    await removeCredential('channel-stub-admin-token-ref');
+    await removeCredential('sleekdrops', 'channel-stub-admin-token-ref');
   }
 });
 

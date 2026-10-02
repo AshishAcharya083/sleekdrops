@@ -8,10 +8,16 @@
 // a row, the row is unique on (slug, channel_connection_id), and every later
 // pass is an ON CONFLICT DO NOTHING - however many times the stage runs, a
 // channel gets one item.
+//
+// Nothing here crosses platforms. An article is only ever paired with its own
+// platform's channels - and checked again when an item is claimed - and an
+// item is only claimed while its platform's `distribution_enabled` gate is on. A
+// platform with no gate row is off: distribution is something a platform is
+// switched on for, never something it inherits.
 import { randomUUID } from 'node:crypto';
-import { config } from '../config.js';
 import { getSetting, q } from '../db/pool.js';
 import { createLogger } from '../lib/log.js';
+import { siteTargetFor, type ResolvedPublishTarget } from '../platform/publishTarget.js';
 import { activeConnections } from './channels.js';
 import {
   isLinkPlacement,
@@ -25,7 +31,6 @@ import {
   type LinkPlacement,
   type RenderedPayload,
 } from './types.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('distribution');
 
@@ -58,9 +63,28 @@ export function retriesExhausted(attempts: number): boolean {
   return attempts >= MAX_POST_ATTEMPTS;
 }
 
-/** The canonical, untagged article URL. */
-export function articleUrl(slug: string): string {
-  return `${config.distribution.siteUrl}/blog/${slug}`;
+/** The site an article URL is built on: the platform's own publish target. */
+export type SiteTarget = Pick<ResolvedPublishTarget, 'siteUrl'>;
+
+/** The canonical, untagged article URL on `target`'s site. */
+export function articleUrl(target: SiteTarget, slug: string): string {
+  return `${target.siteUrl}/blog/${slug}`;
+}
+
+/** The settings key of a platform's distribution gate. A missing row means off. */
+export const DISTRIBUTION_GATE_SETTING = 'distribution_enabled';
+
+/** Whether `platformId` may distribute at all. Off unless its gate row says true. */
+export async function distributionEnabled(platformId: string): Promise<boolean> {
+  return (await getSetting<unknown>(platformId, DISTRIBUTION_GATE_SETTING, false)) === true;
+}
+
+/** The same gate, as a SQL condition on a row whose platform is `platformColumn`. */
+export function gateOpenSql(platformColumn: string): string {
+  return `EXISTS (SELECT 1 FROM settings gate
+                   WHERE gate.platform_id = ${platformColumn}
+                     AND gate.key = '${DISTRIBUTION_GATE_SETTING}'
+                     AND gate.value = 'true'::jsonb)`;
 }
 
 /**
@@ -72,8 +96,13 @@ export function articleUrl(slug: string): string {
  * the comment posts fine and returns an id, and the only symptom is referrals
  * that never arrive.
  */
-export function taggedUrl(slug: string, provider: string, placement: LinkPlacement): string {
-  const url = new URL(articleUrl(slug));
+export function taggedUrl(
+  target: SiteTarget,
+  slug: string,
+  provider: string,
+  placement: LinkPlacement,
+): string {
+  const url = new URL(articleUrl(target, slug));
   url.searchParams.set('utm_source', provider);
   url.searchParams.set('utm_medium', 'social');
   url.searchParams.set('utm_campaign', 'distribution');
@@ -128,6 +157,7 @@ function uploadableImage(article: DistributableArticle): {
  */
 export function renderPayload(
   article: DistributableArticle,
+  target: SiteTarget,
   provider: string,
   placement: LinkPlacement,
 ): RenderedPayload {
@@ -135,7 +165,7 @@ export function renderPayload(
   const frontmatter = article.frontmatter ?? {};
   const title = typeof frontmatter.title === 'string' ? frontmatter.title : article.title;
   const dek = typeof frontmatter.dek === 'string' ? frontmatter.dek : '';
-  const url = taggedUrl(slug, provider, placement);
+  const url = taggedUrl(target, slug, provider, placement);
   const caption = [title, dek, placement === 'in_body' ? url : '']
     .filter((line) => line !== '')
     .join('\n\n');
@@ -180,19 +210,25 @@ export function placementSettingKey(provider: string): string {
 export const DEFAULT_PLACEMENT_SETTING = 'distribution_link_placement';
 
 /**
- * The placement a new item for `provider` is queued with, and which setting
- * said so. The network's own setting wins, because the body-link budget that
- * makes the choice matter is a per-network rule; the global default covers a
+ * The placement a new item for one of `platformId`'s `provider` channels is
+ * queued with, and which of that platform's settings said so. The network's
+ * own setting wins, because the body-link budget that makes the choice matter
+ * is a per-network rule; the platform's network-agnostic default covers a
  * network nobody has configured yet, and 'first_comment' - which never depends
  * on a budget - covers a value no provider implements.
  */
 export async function configuredPlacement(
+  platformId: string,
   provider: string,
 ): Promise<{ placement: LinkPlacement; setting: string }> {
   const key = placementSettingKey(provider);
-  const own = await getSetting<unknown>(SLEEKDROPS_PLATFORM_ID, key, null);
+  const own = await getSetting<unknown>(platformId, key, null);
   if (isLinkPlacement(own)) return { placement: own, setting: key };
-  const fallback = await getSetting<unknown>(SLEEKDROPS_PLATFORM_ID, DEFAULT_PLACEMENT_SETTING, 'first_comment');
+  const fallback = await getSetting<unknown>(
+    platformId,
+    DEFAULT_PLACEMENT_SETTING,
+    'first_comment',
+  );
   return {
     placement: isLinkPlacement(fallback) ? fallback : 'first_comment',
     setting: DEFAULT_PLACEMENT_SETTING,
@@ -217,7 +253,25 @@ export interface EnqueueOptions {
 }
 
 /**
- * Queue one item per connected channel for a published article.
+ * The platform the article's own row belongs to. Read rather than trusted off
+ * the object passed in, which a caller builds: the channels an article is
+ * paired with are chosen by this, so it has to be the database's answer.
+ */
+async function articlePlatform(article: DistributableArticle): Promise<string> {
+  const [row] = await q<{ platform_id: string }>('SELECT platform_id FROM articles WHERE id = $1', [
+    article.id,
+  ]);
+  if (!row) throw new Error(`article ${article.id} does not exist, so it has no platform to distribute for`);
+  if (row.platform_id !== article.platform_id) {
+    throw new Error(
+      `article ${article.id} belongs to ${row.platform_id}, not ${article.platform_id} - refusing to distribute it`,
+    );
+  }
+  return row.platform_id;
+}
+
+/**
+ * Queue one item per connected channel of the article's own platform.
  *
  * Idempotent by the unique index, not by a read-then-write: two publish passes
  * racing each other both run the INSERT and exactly one of them creates a row.
@@ -229,18 +283,19 @@ export async function enqueuePublishedArticle(
   const none: EnqueueOutcome = { created: 0, alreadyQueued: 0, skipped: null };
   if (options.d1Status !== 'published') return { ...none, skipped: 'draft' };
   if (!article.slug) return { ...none, skipped: 'no-slug' };
-  if (!(await getSetting<boolean>(SLEEKDROPS_PLATFORM_ID, 'distribution_enabled', true))) {
-    return { ...none, skipped: 'disabled' };
-  }
+  const platformId = await articlePlatform(article);
+  if (!(await distributionEnabled(platformId))) return { ...none, skipped: 'disabled' };
 
-  const connections = await activeConnections();
+  const connections = await activeConnections(platformId);
   if (connections.length === 0) return { ...none, skipped: 'no-channels' };
 
+  const target = await siteTargetFor(platformId);
   const providers = [...new Set(connections.map((connection) => connection.provider))];
   const placements = new Map(
     await Promise.all(
       providers.map(
-        async (provider) => [provider, (await configuredPlacement(provider)).placement] as const,
+        async (provider) =>
+          [provider, (await configuredPlacement(platformId, provider)).placement] as const,
       ),
     ),
   );
@@ -249,7 +304,7 @@ export async function enqueuePublishedArticle(
   let disconnected = 0;
   for (const connection of connections) {
     const placement = placements.get(connection.provider)!;
-    const payload = renderPayload(article, connection.provider, placement);
+    const payload = renderPayload(article, target, connection.provider, placement);
     let rows: Array<{ id: string }>;
     try {
       rows = await q<{ id: string }>(
@@ -284,6 +339,7 @@ export async function enqueuePublishedArticle(
     if (rows.length === 0) continue;
     created += 1;
     log.info('queued for distribution', {
+      platform_id: platformId,
       article_id: article.id,
       slug: article.slug,
       provider: connection.provider,
@@ -320,7 +376,10 @@ export function describeEnqueue(outcome: EnqueueOutcome): string {
 
 /**
  * Take the next due item for a provider we actually have an adapter for, on a
- * connection that can still post.
+ * connection that can still post, of a platform whose gate is on. An item whose
+ * article is another platform's than its channel's is never taken: nothing
+ * should be able to write one, and if something did it stays put rather than
+ * post one brand's piece to the other's audience.
  *
  * `attempts` is untouched: it counts provider calls, and an item claimed while
  * the site is still rebuilding has not made one. It is spent by
@@ -339,6 +398,10 @@ export async function claimNextItem(providers: string[]): Promise<DistributionIt
          AND item.provider = ANY($1)
          AND channel.status = 'active'
          AND (channel.expires_at IS NULL OR channel.expires_at > now())
+         AND ${gateOpenSql('channel.platform_id')}
+         AND (item.article_id IS NULL OR EXISTS (
+               SELECT 1 FROM articles article
+                WHERE article.id = item.article_id AND article.platform_id = channel.platform_id))
        ORDER BY item.scheduled_at ASC
        LIMIT 1
        FOR UPDATE OF item SKIP LOCKED
@@ -490,11 +553,11 @@ export async function itemsForArticle(articleId: string): Promise<DistributionIt
 }
 
 /**
- * How many items sit in each state - the panel's headline figures. Every state
- * is present even at zero, so the panel renders a stable set of tiles instead
- * of one that appears when the first item fails.
+ * How many of `platformId`'s items sit in each state - the panel's headline
+ * figures. Every state is present even at zero, so the panel renders a stable
+ * set of tiles instead of one that appears when the first item fails.
  */
-export async function queueCounts(): Promise<Record<DistributionStatus, number>> {
+export async function queueCounts(platformId: string): Promise<Record<DistributionStatus, number>> {
   const counts: Record<DistributionStatus, number> = {
     pending: 0,
     posting: 0,
@@ -503,16 +566,26 @@ export async function queueCounts(): Promise<Record<DistributionStatus, number>>
     held: 0,
   };
   const rows = await q<{ status: DistributionStatus; n: string }>(
-    'SELECT status, count(*) n FROM distribution_queue GROUP BY status',
+    `SELECT item.status, count(*) n
+       FROM distribution_queue item
+       JOIN channel_connections channel ON channel.id = item.channel_connection_id
+      WHERE channel.platform_id = $1
+      GROUP BY item.status`,
+    [platformId],
   );
   for (const row of rows) counts[row.status] = Number(row.n);
   return counts;
 }
 
-export async function recentItems(limit = 50): Promise<DistributionItem[]> {
+/** `platformId`'s most recently changed items. */
+export async function recentItems(platformId: string, limit = 50): Promise<DistributionItem[]> {
   const rows = await q<DistributionQueueRow>(
-    'SELECT * FROM distribution_queue ORDER BY updated_at DESC LIMIT $1',
-    [limit],
+    `SELECT item.*
+       FROM distribution_queue item
+       JOIN channel_connections channel ON channel.id = item.channel_connection_id
+      WHERE channel.platform_id = $1
+      ORDER BY item.updated_at DESC LIMIT $2`,
+    [platformId, limit],
   );
   return rows.map(toDistributionItem);
 }

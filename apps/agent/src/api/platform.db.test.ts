@@ -10,6 +10,7 @@ process.env.ADMIN_TOKEN = 'test-admin-token';
 // D1 is answered by a stub below, never the network.
 process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
 process.env.D1_DATABASE_ID = 'test-d1';
+process.env.PEAKODDS_D1_DATABASE_ID = 'test-peakodds-d1';
 process.env.CLOUDFLARE_D1_TOKEN = 'test-d1-token';
 
 const { pool, q } = await import('../db/pool.js');
@@ -149,7 +150,7 @@ before(async () => {
      VALUES ($1, $2, 'other-page', 'PeakOdds Page', $3)`,
     [OTHER, NETWORK, OTHER_PAGE_REF],
   );
-  await storeCredential(OTHER_PAGE_REF, 'other-page-credential');
+  await storeCredential(OTHER, OTHER_PAGE_REF, 'other-page-credential');
   await q(
     `INSERT INTO agent_sessions (platform_id, agent, status, cost_usd) VALUES ($1, $2, 'done', '1.5')`,
     [OTHER, TAG],
@@ -167,7 +168,7 @@ after(async () => {
       OTHER,
       NETWORK,
     ]);
-    for (const ref of [OTHER_PAGE_REF, `${NETWORK}-page-token`]) await removeCredential(ref);
+    for (const ref of [OTHER_PAGE_REF, `${NETWORK}-page-token`]) await removeCredential(OTHER, ref);
     await q('DELETE FROM settings WHERE platform_id = $1', [OTHER]);
     await q('DELETE FROM editions WHERE platform_id = $1', [OTHER]);
     await q('UPDATE platforms SET profile_version = NULL WHERE id = $1', [OTHER]);
@@ -323,7 +324,7 @@ test("connecting an account another platform already has is refused and leaves i
   });
   assert.equal(taken.status, 409);
   assert.deepEqual(taken.body, {
-    error: `that ${NETWORK} account is already connected to another platform`,
+    error: `${NETWORK} account other-page is already connected for ${OTHER} - one account posts for one platform only`,
   });
 
   const [row] = await q(
@@ -337,7 +338,7 @@ test("connecting an account another platform already has is refused and leaves i
     token_ref: OTHER_PAGE_REF,
     status: 'active',
   });
-  assert.equal(await resolveCredential(OTHER_PAGE_REF, NETWORK), 'other-page-credential');
+  assert.equal(await resolveCredential(OTHER, OTHER_PAGE_REF, NETWORK), 'other-page-credential');
   const theirs = await call(OTHER, '/api/distribution');
   assert.ok(theirs.body.channels.some((ch: { externalAccountId: string }) => ch.externalAccountId === 'other-page'));
 });

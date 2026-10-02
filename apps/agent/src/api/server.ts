@@ -26,15 +26,18 @@ import {
   retryFailedItems,
   type RecoveryOutcome,
 } from '../distribution/admin.js';
-import { isChannelTokenRef, redactToken, resolveCredential } from '../distribution/channels.js';
+import { listConnections } from '../distribution/channels.js';
+import { placementPerformance } from '../distribution/insights.js';
 import { getProvider, registeredProviders } from '../distribution/providers.js';
 import {
   DEFAULT_PLACEMENT_SETTING,
   getItem,
   itemsForArticle,
   placementSettingKey,
+  queueCounts,
+  recentItems,
 } from '../distribution/queue.js';
-import { isLinkPlacement, PermanentProviderError } from '../distribution/types.js';
+import { isLinkPlacement } from '../distribution/types.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
 import { MAX_STAGE_TIMEOUT_SECONDS, stageBudgetSeconds } from '../pipeline/budgets.js';
@@ -92,20 +95,9 @@ import {
   type ApiEnv,
   type PlatformLoader,
 } from './platform.js';
-import {
-  articleBelongs,
-  channelAccountOwner,
-  channelBelongs,
-  platformChannelIds,
-  platformPlacementPerformance,
-  platformProviders,
-  platformQueueCounts,
-  platformQueueItemIds,
-  platformRecentItems,
-  queueItemBelongs,
-  topicBelongs,
-} from './scope.js';
+import { articleBelongs, channelBelongs, platformQueueItemIds, queueItemBelongs, topicBelongs } from './scope.js';
 import { TRACE_HEADER, traceMiddleware } from './trace.js';
+import { d1TargetFor, publishTargetFor } from '../platform/publishTarget.js';
 
 const log = createLogger('api');
 
@@ -199,7 +191,8 @@ function settingsPayload(rows: Array<{ key: string; value: unknown }>): Record<s
  * is registered, without this file learning its name.
  */
 async function placementSettingKeys(platformId: string): Promise<Set<string>> {
-  const providers = new Set([...registeredProviders(), ...(await platformProviders(platformId))]);
+  const providers = new Set(registeredProviders());
+  for (const connection of await listConnections(platformId)) providers.add(connection.provider);
   return new Set([DEFAULT_PLACEMENT_SETTING, ...[...providers].map(placementSettingKey)]);
 }
 
@@ -228,39 +221,6 @@ function platformSettings(platformId: string): Promise<Array<{ key: string; valu
   return q<{ key: string; value: unknown }>('SELECT key, value FROM settings WHERE platform_id = $1', [
     platformId,
   ]);
-}
-
-/** The secret names connectChannel() accepts. */
-const CHANNEL_TOKEN_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
-
-/**
- * The account a connect request's token signs in as, or null for a request
- * connectChannel() refuses before it asks the network.
- *
- * connectChannel() upserts on (provider, account) whichever platform holds the
- * row, and stores the token under that row's secret name, so whose account it
- * is has to be settled before it runs. A refusal from the network is answered
- * the way connectChannel() answers it.
- */
-async function accountToConnect(
-  body: Record<string, unknown>,
-): Promise<{ provider: string; externalAccountId: string } | null> {
-  const provider = typeof body.provider === 'string' ? body.provider.trim() : '';
-  const adapter = provider ? getProvider(provider) : null;
-  if (!adapter) return null;
-  const pasted = typeof body.token === 'string' ? body.token.trim() : '';
-  const ref = typeof body.tokenRef === 'string' ? body.tokenRef.trim() : '';
-  if (ref && !(CHANNEL_TOKEN_REF_RE.test(ref) && isChannelTokenRef(ref, provider))) return null;
-  const token = pasted || (await resolveCredential(ref || null, provider));
-  if (!token) return null;
-  try {
-    const { externalAccountId } = await adapter.authenticate({ token });
-    return { provider, externalAccountId };
-  } catch (err) {
-    const message = redactToken(err instanceof Error ? err.message : String(err), token);
-    if (err instanceof PermanentProviderError) throw new ChannelAdminError(400, message);
-    throw new ChannelAdminError(502, `${provider} could not be reached to check that token: ${message}`);
-  }
 }
 
 /** Map an operator-correctable refusal to its status; anything else is a 500. */
@@ -475,12 +435,12 @@ async function syncArticleHero(
  * this runs, so a failed dispatch is reported rather than thrown - the operator
  * needs to know the change is saved but not yet live.
  */
-async function requestRebuild(): Promise<{
+async function requestRebuild(platformId: string): Promise<{
   body: { dispatched: boolean; dispatchError: string | null };
   logged: { dispatched: boolean };
 }> {
   try {
-    await dispatchContentUpdated();
+    await dispatchContentUpdated(await publishTargetFor(platformId));
     return { body: { dispatched: true, dispatchError: null }, logged: { dispatched: true } };
   } catch (err) {
     return {
@@ -1364,7 +1324,7 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
   // Each live post carries the edition and event time of the pipeline article
   // that wrote it, when there is one - most of the site predates the pipeline.
   app.get('/api/published', async (c) => {
-    const posts = await listD1Posts();
+    const posts = await listD1Posts(await d1TargetFor(c.get('platform').id));
     const articles = await q<{ slug: string; edition_id: string; event_starts_at: Date | null }>(
       'SELECT slug, edition_id, event_starts_at FROM articles WHERE platform_id = $1 AND slug = ANY($2)',
       [c.get('platform').id, posts.map((post) => post.slug)],
@@ -1394,7 +1354,7 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
     if (parsed.value.upload && !gcsConfigured()) return c.json({ error: NO_IMAGE_STORAGE }, 503);
 
     const slug = c.req.param('slug');
-    const current = await getD1PostHero(slug);
+    const current = await getD1PostHero(await d1TargetFor(c.get('platform').id), slug);
     if (!current) return c.json({ error: 'no live post with that slug' }, 404);
 
     const heroImage = parsed.value.upload
@@ -1403,9 +1363,9 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
     if (!heroImage) return c.json({ error: 'attach an image file first' }, 400);
     const heroAlt = parsed.value.alt;
 
-    await setD1PostHero(slug, { heroImage, heroAlt });
+    await setD1PostHero(await d1TargetFor(c.get('platform').id), slug, { heroImage, heroAlt });
     await syncArticleHero(c.get('platform').id, slug, heroImage, heroAlt);
-    const rebuild = await requestRebuild();
+    const rebuild = await requestRebuild(c.get('platform').id);
     log.info('hero image set on a live post', {
       slug,
       action: parsed.value.upload ? 'upload' : 'alt_only',
@@ -1416,17 +1376,17 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
 
   app.delete('/api/published/:slug/hero-image', async (c) => {
     const slug = c.req.param('slug');
-    const removed = await setD1PostHero(slug, { heroImage: null, heroAlt: null });
+    const removed = await setD1PostHero(await d1TargetFor(c.get('platform').id), slug, { heroImage: null, heroAlt: null });
     if (!removed) return c.json({ error: 'no live post with that slug' }, 404);
     await syncArticleHero(c.get('platform').id, slug, null, null);
-    const rebuild = await requestRebuild();
+    const rebuild = await requestRebuild(c.get('platform').id);
     log.info('hero image removed from a live post', { slug, ...rebuild.logged });
     return c.json({ ok: true, ...rebuild.body });
   });
 
   app.delete('/api/published/:slug', async (c) => {
     const slug = c.req.param('slug');
-    const result = await deleteD1Post(slug);
+    const result = await deleteD1Post(await d1TargetFor(c.get('platform').id), slug);
     if (!result) return c.json({ error: 'not found' }, 404);
     // The publisher skips the site rebuild when what it is about to push
     // matches `published_digest`, the receipt of the last version pushed live.
@@ -1444,7 +1404,7 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
     let dispatched = false;
     let dispatchError: string | null = null;
     try {
-      await dispatchContentUpdated();
+      await dispatchContentUpdated(await publishTargetFor(c.get('platform').id));
       dispatched = true;
     } catch (err) {
       dispatchError = err instanceof Error ? err.message : String(err);
@@ -1461,15 +1421,14 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
   app.get('/api/distribution', async (c) => {
     const platformId = c.get('platform').id;
     const limit = Number(c.req.query('limit'));
-    const [allChannels, channelIds, counts, items, placements] = await Promise.all([
-      channelViews(),
-      platformChannelIds(platformId),
-      platformQueueCounts(platformId),
-      platformRecentItems(platformId, Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50),
-      platformPlacementPerformance(platformId),
+    const [channels, counts, items, placements] = await Promise.all([
+      channelViews(platformId),
+      queueCounts(platformId),
+      recentItems(platformId, Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50),
+      placementPerformance(platformId),
     ]);
     return c.json({
-      channels: allChannels.filter((channel) => channelIds.has(channel.id)),
+      channels,
       providers: registeredProviders(),
       // What the Connect drawer offers: every network with an adapter, and the
       // secret name a pasted token is stored under unless the operator names one.
@@ -1514,21 +1473,7 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
   app.post('/api/distribution/channels', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     try {
-      const account = await accountToConnect(body);
-      const owner =
-        account && (await channelAccountOwner(account.provider, account.externalAccountId));
-      if (account && owner && owner !== c.get('platform').id) {
-        return c.json(
-          { error: `that ${account.provider} account is already connected to another platform` },
-          409,
-        );
-      }
-      const channel = await connectChannel(body);
-      await q('UPDATE channel_connections SET platform_id = $2 WHERE id = $1', [
-        channel.id,
-        c.get('platform').id,
-      ]);
-      return c.json({ channel }, 201);
+      return c.json({ channel: await connectChannel(c.get('platform').id, body) }, 201);
     } catch (err) {
       return channelAdminFailure(c, err);
     }

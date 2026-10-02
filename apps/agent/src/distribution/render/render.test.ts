@@ -11,7 +11,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.DATABASE_URL = 'postgres://unused:unused@127.0.0.1:1/unreachable';
-process.env.SITE_URL = 'https://sleekdrops.com';
 
 const { render, needsDisclosure, AFFILIATE_DISCLOSURE, FIRST_COMMENT_CUE, channelSpec } =
   await import('./index.js');
@@ -33,10 +32,13 @@ const HANDS_ON = 'We tested these headphones for three weeks on the 7:12 and the
 const DEK =
   'The noise floor drops 12 dB on the 7:12, and the $399 Bose is the one to buy under $400. That is the whole finding.';
 const HERO = 'https://storage.googleapis.com/images/heroes/quiet-commutes.png';
+/** The site the post links to: the article's own platform's publish target. */
+const SITE = { siteUrl: 'https://sleekdrops.com' };
 
 function article(fields: Partial<DistributableArticle> = {}): DistributableArticle {
   return {
     id: '00000000-0000-0000-0000-000000000001',
+    platform_id: 'sleekdrops',
     slug: 'quiet-commutes',
     title: 'The headphones for a quiet commute',
     frontmatter: {
@@ -87,7 +89,7 @@ const deps = (over: Record<string, unknown> = {}) => ({
 // ── Composition ────────────────────────────────────────────────────────────
 
 test('the caption composes in one order: headline, cue, disclosure', async () => {
-  const payload = await render(article(), 'facebook', 'first_comment', deps());
+  const payload = await render(article(), SITE, 'facebook', 'first_comment', deps());
   const [headline, cue, disclosure, ...rest] = payload.caption.split('\n\n');
 
   assert.equal(headline, CLEAN);
@@ -106,21 +108,21 @@ test('the fixtures are the registered house text, not a second wording', () => {
 });
 
 test('the cue appears only when the link really is in the first comment', async () => {
-  const commented = await render(article(), 'facebook', 'first_comment', deps());
+  const commented = await render(article(), SITE, 'facebook', 'first_comment', deps());
   assert.ok(commented.caption.includes(FIRST_COMMENT_CUE));
   assert.ok(!commented.caption.includes('https://'), 'no link in a first-comment caption');
 
-  const inBody = await render(article(), 'facebook', 'in_body', deps());
+  const inBody = await render(article(), SITE, 'facebook', 'in_body', deps());
   assert.ok(!inBody.caption.includes(FIRST_COMMENT_CUE), 'nothing is in a first comment here');
   assert.ok(inBody.caption.endsWith(inBody.url), 'the link is the last thing in the caption');
 });
 
 test('the destination is tagged with the placement that was actually used', async () => {
-  const commented = await render(article(), 'facebook', 'first_comment', deps());
+  const commented = await render(article(), SITE, 'facebook', 'first_comment', deps());
   assert.equal(new URL(commented.url).searchParams.get('utm_content'), 'first_comment');
   assert.equal(new URL(commented.url).searchParams.get('utm_source'), 'facebook');
 
-  const inBody = await render(article(), 'facebook', 'in_body', deps());
+  const inBody = await render(article(), SITE, 'facebook', 'in_body', deps());
   assert.equal(new URL(inBody.url).searchParams.get('utm_content'), 'in_body');
 });
 
@@ -130,6 +132,7 @@ test('the disclosure rides on the monetised intents and on nothing else', async 
   for (const intent of ['Commercial Investigation', 'Transactional']) {
     const payload = await render(
       article({ keyword_plan: { intent } }),
+      SITE,
       'facebook',
       'first_comment',
       deps(),
@@ -140,6 +143,7 @@ test('the disclosure rides on the monetised intents and on nothing else', async 
   for (const plan of [{ intent: 'Informational' }, { intent: 'Navigational' }, null]) {
     const payload = await render(
       article({ keyword_plan: plan }),
+      SITE,
       'facebook',
       'first_comment',
       deps(),
@@ -158,7 +162,7 @@ test('the disclosure rides on the monetised intents and on nothing else', async 
 
 test('copy the scan trips on is regenerated once, with the hits handed back', async () => {
   const writeCopy = writer(SLOPPY, CLEANER);
-  const payload = await render(article(), 'facebook', 'first_comment', deps({ writeCopy }));
+  const payload = await render(article(), SITE, 'facebook', 'first_comment', deps({ writeCopy }));
 
   assert.ok(payload.caption.startsWith(CLEANER), 'the second attempt is what ships');
   assert.equal(writeCopy.calls.length, 2, 'exactly one regeneration');
@@ -168,7 +172,7 @@ test('copy the scan trips on is regenerated once, with the hits handed back', as
 
 test('a second trip falls back to the dek, deterministically', async () => {
   const writeCopy = writer(SLOPPY);
-  const payload = await render(article(), 'facebook', 'first_comment', deps({ writeCopy }));
+  const payload = await render(article(), SITE, 'facebook', 'first_comment', deps({ writeCopy }));
 
   assert.equal(writeCopy.calls.length, 2, 'the model gets one regeneration, never two');
   assert.ok(
@@ -177,7 +181,7 @@ test('a second trip falls back to the dek, deterministically', async () => {
   );
   assert.ok(!payload.caption.includes('delve'), 'nothing the scan rejected reaches the post');
 
-  const again = await render(article(), 'facebook', 'first_comment', deps({ writeCopy: writer(SLOPPY) }));
+  const again = await render(article(), SITE, 'facebook', 'first_comment', deps({ writeCopy: writer(SLOPPY) }));
   assert.equal(again.caption, payload.caption, 'the fallback is derived, not written');
 });
 
@@ -189,6 +193,7 @@ test('copy that claims someone here used the product never ships', async () => {
 
   const payload = await render(
     article(),
+    SITE,
     'facebook',
     'first_comment',
     deps({ writeCopy: writer(HANDS_ON) }),
@@ -201,7 +206,7 @@ test('a copy call that fails outright still produces a post', async () => {
   const writeCopy: CopyWriter = async () => {
     throw new Error('Gemini not configured');
   };
-  const payload = await render(article(), 'facebook', 'first_comment', deps({ writeCopy }));
+  const payload = await render(article(), SITE, 'facebook', 'first_comment', deps({ writeCopy }));
   assert.ok(payload.caption.startsWith('The noise floor drops 12 dB'));
   assert.ok(payload.caption.includes(FIRST_COMMENT_CUE));
 });
@@ -213,6 +218,7 @@ test('a link the model wrote itself never survives into the caption', async () =
   const smuggled = `${CLEAN} Read it here: https://sleekdrops.com/blog/quiet-commutes`;
   const payload = await render(
     article(),
+    SITE,
     'facebook',
     'first_comment',
     deps({ writeCopy: writer(smuggled) }),
@@ -227,7 +233,7 @@ test('a link the model wrote itself never survives into the caption', async () =
 
 test('a hero we generated is posted as it is', async () => {
   const card = cardStub();
-  const payload = await render(article(), 'facebook', 'first_comment', {
+  const payload = await render(article(), SITE, 'facebook', 'first_comment', {
     writeCopy: writer(CLEAN),
     ...card,
   });
@@ -241,7 +247,7 @@ test('a hero we generated is posted as it is', async () => {
 test('a hero we did not make is replaced by a card, never uploaded', async () => {
   for (const source of ['found', 'operator'] as const) {
     const card = cardStub();
-    const payload = await render(article({ hero_image_source: source }), 'facebook', 'first_comment', {
+    const payload = await render(article({ hero_image_source: source }), SITE, 'facebook', 'first_comment', {
       writeCopy: writer(CLEAN),
       ...card,
     });
@@ -260,7 +266,7 @@ test('a hero we did not make is replaced by a card, never uploaded', async () =>
 });
 
 test('no safe image means no image, and the link moves into the body', async () => {
-  const payload = await render(article({ hero_image_source: 'found' }), 'facebook', 'first_comment', {
+  const payload = await render(article({ hero_image_source: 'found' }), SITE, 'facebook', 'first_comment', {
     writeCopy: writer(CLEAN),
     renderCard: failingCard,
     uploadCard: async () => 'never reached',
@@ -278,6 +284,7 @@ test('an article with no hero at all still gets a card', async () => {
   const card = cardStub();
   const payload = await render(
     article({ frontmatter: { title: 'No hero here', dek: DEK }, hero_image_source: null }),
+    SITE,
     'facebook',
     'first_comment',
     { writeCopy: writer(CLEAN), ...card },
@@ -293,13 +300,13 @@ test('an article with no hero at all still gets a card', async () => {
 test('copy is written per channel, so a 300-character network needs no rework', async () => {
   const long = `${CLEAN} ${CLEANER} ${CLEAN} ${CLEANER}`;
 
-  const bluesky = await render(article(), 'bluesky', 'first_comment', deps({ writeCopy: writer(long) }));
+  const bluesky = await render(article(), SITE, 'bluesky', 'first_comment', deps({ writeCopy: writer(long) }));
   assert.ok(bluesky.caption.length <= channelSpec('bluesky').captionLimit, bluesky.caption);
   assert.ok(bluesky.caption.includes(AFFILIATE_DISCLOSURE), 'the fixtures are never what gets cut');
   assert.ok(bluesky.caption.includes(FIRST_COMMENT_CUE));
   assert.ok(bluesky.caption.startsWith(CLEAN.slice(0, 40)));
 
-  const facebook = await render(article(), 'facebook', 'first_comment', deps({ writeCopy: writer(long) }));
+  const facebook = await render(article(), SITE, 'facebook', 'first_comment', deps({ writeCopy: writer(long) }));
   assert.ok(
     facebook.caption.length > bluesky.caption.length,
     'the same copy is not truncated where it does not have to be',
@@ -316,7 +323,7 @@ test('an unregistered channel is treated as strict and comment-less', async () =
   assert.equal(spec.captionLimit, 300);
   assert.equal(spec.supportsFirstComment, false);
 
-  const payload = await render(article(), 'pinterest', 'first_comment', deps());
+  const payload = await render(article(), SITE, 'pinterest', 'first_comment', deps());
   assert.equal(payload.placement, 'in_body', 'a cue to a comment the network has not got is a dead end');
   assert.ok(payload.caption.endsWith(payload.url));
 });
@@ -411,6 +418,7 @@ test('a caption with no clean headline still carries its fixtures', async () => 
       title: 'We tested every pair on the 7:12',
       frontmatter: { title: 'We tested every pair on the 7:12', dek: HANDS_ON, heroImage: HERO },
     }),
+    SITE,
     'facebook',
     'first_comment',
     deps({ writeCopy: writer(HANDS_ON) }),

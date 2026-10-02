@@ -8,7 +8,6 @@
 // keeps. The rebuild takes roughly 90 seconds, so the gate polls rather than
 // waits once, and gives up long after the slowest plausible build instead of
 // holding an item forever.
-import { config } from '../config.js';
 import type { RenderedPayload } from './types.js';
 
 /**
@@ -82,12 +81,13 @@ const normalise = (text: string): string => text.replace(/\s+/g, ' ').trim();
 /**
  * Two image URLs that name the same file. The page absolutises whatever
  * frontmatter carried, so host and path are compared and a query string (a CDN
- * cache buster) is not.
+ * cache buster) is not. A relative URL is read against the page it came from,
+ * which is on the article's own platform's site.
  */
-function sameImage(expected: string, actual: string): boolean {
+function sameImage(expected: string, actual: string, pageUrl: string): boolean {
   try {
-    const want = new URL(expected, config.distribution.siteUrl);
-    const got = new URL(actual, config.distribution.siteUrl);
+    const want = new URL(expected, pageUrl);
+    const got = new URL(actual, pageUrl);
     return want.host === got.host && want.pathname === got.pathname;
   } catch {
     return normalise(expected) === normalise(actual);
@@ -105,6 +105,7 @@ function sameImage(expected: string, actual: string): boolean {
 export function evaluateReadiness(
   response: { status: number; body: string },
   expected: RenderedPayload['expected'],
+  pageUrl: string,
 ): ReadinessResult {
   if (response.status !== 200) return { ready: false, reason: `HTTP ${response.status}` };
 
@@ -117,7 +118,7 @@ export function evaluateReadiness(
   if (expected.ogImage) {
     const ogImage = metaContent(response.body, 'og:image');
     if (ogImage === null) return { ready: false, reason: 'page serves no og:image yet' };
-    if (!sameImage(expected.ogImage, ogImage)) {
+    if (!sameImage(expected.ogImage, ogImage, pageUrl)) {
       return { ready: false, reason: `og:image is still ${normalise(ogImage).slice(0, 120)}` };
     }
   }
@@ -157,7 +158,7 @@ export async function checkReadiness(
   fetcher: PageFetcher = fetchPage,
 ): Promise<ReadinessResult> {
   try {
-    return evaluateReadiness(await fetcher(url), expected);
+    return evaluateReadiness(await fetcher(url), expected, url);
   } catch (err) {
     return { ready: false, reason: `page fetch failed: ${err instanceof Error ? err.message : err}` };
   }

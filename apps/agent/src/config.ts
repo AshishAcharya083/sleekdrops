@@ -82,25 +82,22 @@ export const config = {
     publicBase: env('GCS_PUBLIC_BASE', 'https://storage.googleapis.com'),
   },
 
+  /**
+   * Shared by every platform. Which database, repository and site a publish
+   * goes to is the platform's own publish target, read from the variables its
+   * profile names - see platform/publishTarget.ts.
+   */
   d1: {
     accountId: env('CLOUDFLARE_ACCOUNT_ID'),
-    databaseId: env('D1_DATABASE_ID'),
     token: env('CLOUDFLARE_D1_TOKEN') || env('CLOUDFLARE_API_TOKEN'),
   },
 
   github: {
     token: env('GITHUB_TOKEN'),
-    repo: env('GITHUB_REPO', 'AshishAcharya083/sleekdrops'),
   },
 
-  /**
-   * Social distribution. The site URL is where the readiness gate looks for a
-   * published slug before an item is handed to a provider, so it must be the
-   * origin the rebuild actually deploys to - the same default apps/web's
-   * astro.config.mjs carries, overridable with SITE_URL for a preview.
-   */
+  /** Social distribution. Each platform's site URL is part of its publish target. */
   distribution: {
-    siteUrl: env('SITE_URL', 'https://sleekdrops.com').replace(/\/+$/, ''),
     pollMs: positiveNumber('DISTRIBUTION_POLL_MS', 15_000),
     /**
      * How often posted items are checked for a due insights reading. Coarse on
