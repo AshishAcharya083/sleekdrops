@@ -5,9 +5,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runAssembler } from './assembler.js';
+import { promptContextFromSeed } from './context.js';
+import { sleekdropsSeed } from '../platform/sleekdrops/index.js';
 import { citedSourceIndexes } from '../content/sources.js';
 import { todayInSydney } from '../content/contract.js';
 import type { ArticleRow, ContentBrief } from '../pipeline/types.js';
+
+const ctx = promptContextFromSeed(sleekdropsSeed, 'au');
 
 const brief: ContentBrief = {
   seoTitle: 'Best budget air fryers (2026)',
@@ -55,6 +59,7 @@ function article(overrides: Partial<ArticleRow> = {}): ArticleRow {
 
 test('an operator-dropped hero image lands in frontmatter with its alt text', async () => {
   const { frontmatter } = await runAssembler(
+    ctx,
     article({
       hero_image_url: 'https://storage.googleapis.com/sleekdrops-images/heroes/uploads/article-x-ab12cd34.jpg',
       hero_alt: 'Ninja air fryer on a kitchen bench',
@@ -70,6 +75,7 @@ test('an operator-dropped hero image lands in frontmatter with its alt text', as
 
 test('it outranks an image the agent found on an earlier pass', async () => {
   const { frontmatter } = await runAssembler(
+    ctx,
     article({
       hero_image_url: 'https://storage.googleapis.com/bucket/mine.jpg',
       hero_alt: 'Mine',
@@ -83,6 +89,7 @@ test('it outranks an image the agent found on an earlier pass', async () => {
 
 test('without one, an image the agent already found is carried through re-assembly', async () => {
   const { frontmatter } = await runAssembler(
+    ctx,
     article({ frontmatter: { heroImage: 'https://storage.googleapis.com/bucket/agent-found.jpg', heroAlt: 'Theirs' } }),
   );
 
@@ -94,6 +101,7 @@ test('an operator image with no alt text leaves heroAlt off entirely', async () 
   // Not null, not "": the website's frontmatter schema takes an optional
   // string, and a null would fail the site build.
   const { frontmatter } = await runAssembler(
+    ctx,
     article({ hero_image_url: 'https://storage.googleapis.com/bucket/mine.jpg', hero_alt: null }),
   );
 
@@ -102,7 +110,7 @@ test('an operator image with no alt text leaves heroAlt off entirely', async () 
 });
 
 test('no hero image at all still assembles — the site renders its cover fill', async () => {
-  const { frontmatter } = await runAssembler(article());
+  const { frontmatter } = await runAssembler(ctx, article());
 
   assert.equal('heroImage' in frontmatter, false);
   assert.match(String(frontmatter.cover), /^fill-[1-8]$/);
@@ -133,6 +141,7 @@ const oneProduct = {
 test('a commercial piece whose draft linked nothing is refused', async () => {
   await assert.rejects(
     runAssembler(
+      ctx,
       article({
         post_type: 'article',
         research: oneProduct,
@@ -147,6 +156,7 @@ test('a commercial piece whose draft linked nothing is refused', async () => {
 test('a transactional piece is held to the same bar', async () => {
   await assert.rejects(
     runAssembler(
+      ctx,
       article({ research: oneProduct, keyword_plan: plan('Transactional'), draft_md: '## Pick\n\nBuy it.' }),
     ),
     /no affiliate links/,
@@ -157,6 +167,7 @@ test('an informational piece may legitimately have no links', async () => {
   // A trend or explainer piece has nothing to sell. Gating on post_type alone
   // would either block this or wave the commercial case through.
   const { affiliateLinks } = await runAssembler(
+    ctx,
     article({ post_type: 'article', research: oneProduct, keyword_plan: plan('Informational'),
               draft_md: '## What changed\n\nFoldables got cheaper.' }),
   );
@@ -165,6 +176,7 @@ test('an informational piece may legitimately have no links', async () => {
 
 test('a commercial piece that did link its product passes', async () => {
   const { affiliateLinks } = await runAssembler(
+    ctx,
     article({
       research: oneProduct,
       keyword_plan: plan('Commercial Investigation'),
@@ -177,7 +189,7 @@ test('a commercial piece that did link its product passes', async () => {
 
 test('an article with no keyword plan is not gated', async () => {
   // Rows queued before the keyword stage existed have no intent to judge.
-  const { affiliateLinks } = await runAssembler(article({ research: oneProduct, keyword_plan: null }));
+  const { affiliateLinks } = await runAssembler(ctx, article({ research: oneProduct, keyword_plan: null }));
   assert.deepEqual(affiliateLinks, []);
 });
 
@@ -219,6 +231,7 @@ const linkedBody =
 
 test('sources, entities, picks and the currency ride through frontmatter', async () => {
   const { frontmatter } = await runAssembler(
+    ctx,
     article({ research: twoProducts, keyword_plan: vacuumPlan, draft_md: linkedBody }),
   );
 
@@ -255,6 +268,7 @@ test('a source URL is stored as the parser normalised it, not as it was stated',
   } as never;
 
   const { frontmatter } = await runAssembler(
+    ctx,
     article({ research: hostile, keyword_plan: vacuumPlan, draft_md: linkedBody }),
   );
 
@@ -273,6 +287,7 @@ test('picks only cover the /go/ slugs a dossier product stands behind', async ()
   // must not become a pick: `picks` is what the site's ItemList is built from,
   // and it carries a brand and a price this product has neither of.
   const { frontmatter, droppedSlugs, healedSlugs } = await runAssembler(
+    ctx,
     article({
       research: twoProducts,
       keyword_plan: vacuumPlan,
@@ -296,6 +311,7 @@ test('picks only cover the /go/ slugs a dossier product stands behind', async ()
 
 test('a slug the dossier never carried is linked from its own anchor text', async () => {
   const { affiliateLinks, body, healedSlugs, droppedSlugs } = await runAssembler(
+    ctx,
     article({
       research: twoProducts,
       keyword_plan: vacuumPlan,
@@ -319,6 +335,7 @@ test('a slug the dossier never carried is linked from its own anchor text', asyn
 
 test('markdown emphasis around the name is not part of the search term', async () => {
   const { affiliateLinks } = await runAssembler(
+    ctx,
     article({
       research: twoProducts,
       keyword_plan: vacuumPlan,
@@ -333,6 +350,7 @@ test('a resolved product is never overwritten by its anchor text', async () => {
   // The dossier is the better source: it carries the brand, and (where one
   // survived the liveness probe) the ASIN. Healing only fills holes.
   const { affiliateLinks, healedSlugs } = await runAssembler(
+    ctx,
     article({
       research: twoProducts,
       keyword_plan: vacuumPlan,
@@ -350,6 +368,7 @@ test('anchor text that names no product is still stripped', async () => {
   // for those words is worse than no link: it sends a reader nowhere useful
   // and still spends the click.
   const { affiliateLinks, body, droppedSlugs, healedSlugs } = await runAssembler(
+    ctx,
     article({
       research: twoProducts,
       keyword_plan: vacuumPlan,
@@ -366,6 +385,7 @@ test('anchor text that names no product is still stripped', async () => {
 
 test('a bare /go/ reference with no anchor text at all is stripped', async () => {
   const { droppedSlugs, healedSlugs } = await runAssembler(
+    ctx,
     article({
       research: twoProducts,
       keyword_plan: vacuumPlan,
@@ -383,6 +403,7 @@ test('a commercial piece whose only links are healed publishes', async () => {
   const noProducts = { ...(twoProducts as unknown as Record<string, unknown>), products: [] } as never;
 
   const { affiliateLinks, healedSlugs } = await runAssembler(
+    ctx,
     article({
       research: noProducts,
       keyword_plan: vacuumPlan,
@@ -405,7 +426,7 @@ test('a commercial piece whose only links are healed publishes', async () => {
 });
 
 test('a link labelled the way the contract prescribes is healed from its slug', async () => {
-  // LINK_PLACEMENT_RULES tells the writer to put a "Where to buy" column in
+  // linkPlacementRules tells the writer to put a "Where to buy" column in
   // the comparison table (which sits above the per-product sections) and to
   // end each section with a CTA that says where it goes. Both are anchors
   // that name no product, so the slug - a product name kebab-cased - is what
@@ -414,6 +435,7 @@ test('a link labelled the way the contract prescribes is healed from its slug', 
   const noProducts = { ...(twoProducts as unknown as Record<string, unknown>), products: [] } as never;
 
   const { affiliateLinks, healedSlugs, droppedSlugs } = await runAssembler(
+    ctx,
     article({
       research: noProducts,
       keyword_plan: vacuumPlan,
@@ -437,6 +459,7 @@ test('the name in the prose outranks the call to action above it', async () => {
   const noProducts = { ...(twoProducts as unknown as Record<string, unknown>), products: [] } as never;
 
   const { affiliateLinks } = await runAssembler(
+    ctx,
     article({
       research: noProducts,
       keyword_plan: vacuumPlan,
@@ -452,6 +475,7 @@ test('the name in the prose outranks the call to action above it', async () => {
 test('the gate fires only after healing, and reports what healing recovered', async () => {
   await assert.rejects(
     runAssembler(
+      ctx,
       article({
         research: oneProduct,
         keyword_plan: plan('Commercial Investigation'),
@@ -479,6 +503,7 @@ test('a nameless dossier product is skipped rather than failing the assembly', a
   } as never;
 
   const { frontmatter, affiliateLinks } = await runAssembler(
+    ctx,
     article({
       research: nameless,
       keyword_plan: vacuumPlan,
@@ -512,6 +537,7 @@ test('the tier, date and publisher the researcher filed a source under ride thro
   } as never;
 
   const { frontmatter } = await runAssembler(
+    ctx,
     article({ research: tiered, keyword_plan: vacuumPlan, draft_md: linkedBody }),
   );
 
@@ -539,6 +565,7 @@ test('the sources shown are the ones the body cites, and a marker past the end g
     'The [Dyson V15 Detect](/go/dyson-v15-detect) is the upgrade.';
 
   const { frontmatter, body } = await runAssembler(
+    ctx,
     article({ research: twoProducts, keyword_plan: vacuumPlan, draft_md: cited }),
   );
 
@@ -552,20 +579,20 @@ test('the sources shown are the ones the body cites, and a marker past the end g
 test('every assembly stamps the date a human last reviewed the piece', async () => {
   const today = todayInSydney();
 
-  const fresh = await runAssembler(article());
+  const fresh = await runAssembler(ctx, article());
   assert.equal(fresh.frontmatter.lastReviewed, today);
   assert.equal(fresh.frontmatter.pubDate, today);
 
   // A re-assembly keeps the original publication date and still re-stamps the
   // review: "reviewed today" and "published in June" are different promises.
-  const revisited = await runAssembler(article({ frontmatter: { pubDate: '2026-06-01' } }));
+  const revisited = await runAssembler(ctx, article({ frontmatter: { pubDate: '2026-06-01' } }));
   assert.equal(revisited.frontmatter.pubDate, '2026-06-01');
   assert.equal(revisited.frontmatter.updatedDate, today);
   assert.equal(revisited.frontmatter.lastReviewed, today);
 });
 
 test('an article with no research or keyword plan carries no structured-data fields', async () => {
-  const { frontmatter } = await runAssembler(article());
+  const { frontmatter } = await runAssembler(ctx, article());
 
   assert.equal('sources' in frontmatter, false);
   assert.equal('entities' in frontmatter, false);
@@ -622,6 +649,7 @@ const launchDraft = '## The screen\n\nThe [iPhone 18 Pro](/go/iphone-18-pro) shi
 
 test('the tier-labelled claims, the launch date and the provenance all reach frontmatter', async () => {
   const { frontmatter } = await runAssembler(
+    ctx,
     article({ research: launchResearch as never, draft_md: launchDraft }),
   );
 
@@ -660,12 +688,14 @@ test('a piece with no product in it carries no review-unit disclosure', async ()
   // explainer answers a question the piece never raises, and it displaces the
   // line that piece does need - the one saying we do not test products.
   const { frontmatter } = await runAssembler(
+    ctx,
     article({ category: 'Finance', post_type: 'article', research: null, draft_md: '## Rates\n\nRates moved.' }),
   );
   assert.equal(frontmatter.reviewUnit, undefined);
 
   // A unit that was actually lent is disclosed wherever the piece is filed.
   const lent = await runAssembler(
+    ctx,
     article({
       category: 'Finance',
       post_type: 'article',
@@ -684,6 +714,7 @@ test('a launch link that is not a web URL is dropped, and the article still asse
   // assembler checks it again rather than failing the whole article on the
   // schema (or worse, publishing a `javascript:` href).
   const { frontmatter } = await runAssembler(
+    ctx,
     article({
       research: {
         ...launchResearch,
@@ -697,6 +728,7 @@ test('a launch link that is not a web URL is dropped, and the article still asse
 
 test('the measuring source joins the list with its protocol, after the facts', async () => {
   const { frontmatter } = await runAssembler(
+    ctx,
     article({ research: launchResearch as never, draft_md: launchDraft }),
   );
   assert.deepEqual(frontmatter.sources, [
@@ -716,6 +748,7 @@ test('the measuring source joins the list with its protocol, after the facts', a
 
 test('every pick carries an evidence chip, and an unmeasured one says so', async () => {
   const { frontmatter } = await runAssembler(
+    ctx,
     article({ research: launchResearch as never, draft_md: launchDraft }),
   );
   assert.deepEqual(frontmatter.picks, [
@@ -741,6 +774,7 @@ test('a badge resting on a maker claim alone fails assembly', async () => {
   };
   await assert.rejects(
     runAssembler(
+      ctx,
       article({
         research: makerOnly as never,
         draft_md: launchDraft,
@@ -771,7 +805,7 @@ test('a brand survey attached to a model it does not cover fails assembly', asyn
     ],
   };
   await assert.rejects(
-    runAssembler(article({ research: brandSurvey as never, draft_md: launchDraft })),
+    runAssembler(ctx, article({ research: brandSurvey as never, draft_md: launchDraft })),
     /never evidence about a model it does not cover/,
   );
 });
@@ -804,6 +838,7 @@ test('a cohort rating the page may show still lands as an aggregator source, wit
   };
 
   const { frontmatter } = await runAssembler(
+    ctx,
     article({ research: surveyed as never, draft_md: launchDraft }),
   );
 

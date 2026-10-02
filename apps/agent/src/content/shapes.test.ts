@@ -1,18 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  SHAPES,
   describeShapeSelection,
   passageBudgetRule,
   selectShape,
-  shapeById,
   shapesForPostType,
   structureBrief,
 } from './shapes.js';
 import type { ArticleShape } from './shapes.js';
-import { ARTICLE_SHAPES } from '../pipeline/types.js';
-import { POST_TYPES } from './contract.js';
+import { getArticleShapes, SHAPE_CATALOGUE as SHAPES, shapeById } from './catalogue.js';
+import { promptContextFromSeed } from '../agents/context.js';
+import { sleekdropsSeed } from '../platform/sleekdrops/index.js';
 import type { EditorialAngle } from '../pipeline/types.js';
+
+const { platform } = promptContextFromSeed(sleekdropsSeed, 'au');
+const POST_TYPES = platform.postTypes;
 
 function anAngle(overrides: Partial<EditorialAngle> = {}): EditorialAngle {
   return {
@@ -33,12 +35,13 @@ function anAngle(overrides: Partial<EditorialAngle> = {}): EditorialAngle {
 // ---------------------------------------------------------------- the library
 
 test('every shape the angle stage can name has a structure behind it', () => {
-  // The angle stage picks an id out of ARTICLE_SHAPES. An id with no library
-  // entry would select nothing and silently fall through to the rotation.
-  for (const id of Object.keys(ARTICLE_SHAPES)) {
+  // The angle stage picks an id out of the platform's shapes. An id with no
+  // library entry would select nothing and silently fall through to the
+  // rotation.
+  for (const id of platform.articleShapes) {
     assert.ok(shapeById(id), `${id} is offered to the angle stage with no shape behind it`);
   }
-  assert.equal(SHAPES.length, Object.keys(ARTICLE_SHAPES).length);
+  assert.equal(getArticleShapes(platform).length, platform.articleShapes.length);
 });
 
 test('shapeById rejects anything that is not a published shape', () => {
@@ -128,20 +131,21 @@ test('no two shapes are the same silhouette', () => {
 
 test('every post type is offered several shapes', () => {
   for (const postType of POST_TYPES) {
-    const offered = shapesForPostType(postType);
+    const offered = shapesForPostType(platform, postType);
     assert.ok(offered.length >= 3, `${postType} is offered only ${offered.length} shape(s)`);
     for (const shape of offered) assert.ok(shape.postTypes.includes(postType));
   }
 });
 
 test('an unknown post type still gets the whole library, not one default', () => {
-  assert.equal(shapesForPostType('newsletter').length, SHAPES.length);
+  assert.equal(shapesForPostType(platform, 'newsletter').length, SHAPES.length);
 });
 
 // --------------------------------------------------------------- selection
 
 test('the angle stage shape is the decision of record', () => {
   const shape = selectShape({
+    platform,
     postType: 'guide',
     angle: anAngle({ shape: 'failure-led' }),
     winningFormat: 'ranked listicle',
@@ -153,7 +157,7 @@ test('the angle stage shape is the decision of record', () => {
 
 test('selection is deterministic for every post type', () => {
   for (const postType of POST_TYPES) {
-    const input = { postType, angle: null, winningFormat: null, intent: null, seed: 'article-1' };
+    const input = { platform, postType, angle: null, winningFormat: null, intent: null, seed: 'article-1' };
     const first = selectShape(input);
     assert.deepEqual(selectShape(input), first);
     assert.deepEqual(selectShape({ ...input }), first);
@@ -166,6 +170,7 @@ test('an angle shape this post type is not offered falls through to the SERP rea
   // with it takes the format the SERP rewards instead of a structure whose
   // sections that post type cannot fill.
   const shape = selectShape({
+    platform,
     postType: 'article',
     angle: anAngle({ shape: 'segmented-buyers' }),
     winningFormat: 'Head-to-head comparison',
@@ -183,7 +188,7 @@ test('the winning format picks the shape when there is no angle', () => {
     ['running costs breakdown', 'cost-of-ownership'],
   ];
   for (const [winningFormat, expected] of cases) {
-    const shape = selectShape({ postType: 'guide', angle: null, winningFormat });
+    const shape = selectShape({ platform, postType: 'guide', angle: null, winningFormat });
     assert.equal(shape.id, expected, `"${winningFormat}" should select ${expected}`);
     assert.equal(shape.selectedBy, 'format');
   }
@@ -201,7 +206,7 @@ test('a format fragment has to land on a whole word, not inside one', () => {
     ['Top 10 EVs', 'ranked-list'],
   ];
   for (const [winningFormat, expected] of cases) {
-    const shape = selectShape({ postType: 'guide', angle: null, winningFormat });
+    const shape = selectShape({ platform, postType: 'guide', angle: null, winningFormat });
     assert.equal(shape.id, expected, `"${winningFormat}" should select ${expected}`);
     assert.equal(shape.selectedBy, 'format');
   }
@@ -216,7 +221,7 @@ test('a whole-word format fragment still matches plurals and hyphenated fragment
     ['how-to', 'question-led'],
   ];
   for (const [winningFormat, expected] of cases) {
-    const shape = selectShape({ postType: 'guide', angle: null, winningFormat });
+    const shape = selectShape({ platform, postType: 'guide', angle: null, winningFormat });
     assert.equal(shape.id, expected, `"${winningFormat}" should select ${expected}`);
   }
 });
@@ -225,13 +230,14 @@ test('a format the library does not name falls through rather than half-matching
   // Every one of these contains a fragment as a substring: "single-serve",
   // "fixture", "valuable", "TVs".
   for (const winningFormat of ['single-serve fixture guide', 'valuable TVs writeup']) {
-    const shape = selectShape({ postType: 'guide', angle: null, winningFormat, intent: null });
+    const shape = selectShape({ platform, postType: 'guide', angle: null, winningFormat, intent: null });
     assert.equal(shape.selectedBy, 'rotation', `"${winningFormat}" matched a shape on a substring`);
   }
 });
 
 test('the search intent decides when the format says nothing recognisable', () => {
   const shape = selectShape({
+    platform,
     postType: 'guide',
     angle: null,
     winningFormat: 'editorial page',
@@ -247,6 +253,7 @@ test('no plan and no angle still selects, and spreads across the library', () =>
   const picked = new Set<string>();
   for (let i = 0; i < 40; i++) {
     const shape = selectShape({
+      platform,
       postType: 'guide',
       angle: null,
       winningFormat: null,
@@ -262,14 +269,14 @@ test('no plan and no angle still selects, and spreads across the library', () =>
 
 test('selection without a seed still returns a shape for the post type', () => {
   for (const postType of POST_TYPES) {
-    const shape = selectShape({ postType, angle: null });
+    const shape = selectShape({ platform, postType, angle: null });
     assert.ok(shape.postTypes.includes(postType));
   }
 });
 
 test('an angle whose shape is not a published one is ignored, not trusted', () => {
   const angle = { ...anAngle(), shape: 'constructor' } as unknown as EditorialAngle;
-  const shape = selectShape({ postType: 'roundup', angle, winningFormat: 'Top 10 list' });
+  const shape = selectShape({ platform, postType: 'roundup', angle, winningFormat: 'Top 10 list' });
   assert.equal(shape.id, 'ranked-list');
   assert.equal(shape.selectedBy, 'format');
 });
@@ -278,7 +285,7 @@ test('an angle whose shape is not a published one is ignored, not trusted', () =
 
 test('structureBrief carries the opening style, the order and the budget', () => {
   const shape = shapeById('ranked-list') as ArticleShape;
-  const brief = structureBrief(shape);
+  const brief = structureBrief(shape, platform);
   assert.match(brief, /"Ranked roundup" shape \(ranked-list\)/);
   assert.match(brief, /The ranking at a glance/);
   assert.match(brief, /extractable answer/);
@@ -290,14 +297,14 @@ test('structureBrief carries the opening style, the order and the budget', () =>
 });
 
 test('structureBrief tells a shape that omits the FAQ not to add one', () => {
-  const brief = structureBrief(shapeById('question-led') as ArticleShape);
+  const brief = structureBrief(shapeById('question-led') as ArticleShape, platform);
   assert.match(brief, /FAQ: omitted for this shape/);
   assert.ok(!/FAQ: required/.test(brief));
 });
 
 test('structureBrief is empty when no shape was recorded', () => {
-  assert.equal(structureBrief(null), '');
-  assert.equal(structureBrief(undefined), '');
+  assert.equal(structureBrief(null, platform), '');
+  assert.equal(structureBrief(undefined, platform), '');
 });
 
 test('the passage budget rule states a total, never a per-heading rule', () => {
@@ -313,6 +320,6 @@ test('the passage budget rule states a total, never a per-heading rule', () => {
 });
 
 test('describeShapeSelection names the shape and where it came from', () => {
-  const shape = selectShape({ postType: 'guide', angle: anAngle({ shape: 'head-to-head' }) });
+  const shape = selectShape({ platform, postType: 'guide', angle: anAngle({ shape: 'head-to-head' }) });
   assert.equal(describeShapeSelection(shape), 'Head-to-head (head-to-head) from the angle');
 });

@@ -20,17 +20,16 @@ import {
   estimateReadTime,
   goLinkSearchTerms,
   goSlugsIn,
-  HOME_CURRENCY,
   isWebUrl,
   MONETISED_INTENTS,
   pickCover,
-  todayInSydney,
   validateArticle,
 } from '../content/contract.js';
 import { pageClaims, pickEvidence } from '../content/claims.js';
 import { offerLinkRow, pickOfferFrom } from '../content/offers.js';
 import { articleSources, stripUnresolvedCitations } from '../content/sources.js';
 import { productSearchTerm, verifyAmazonProductUrl } from '../tools/amazon.js';
+import { editionToday, type PromptContext } from './context.js';
 import type { AffiliateLinkRow, ArticleRow, ProductOffer } from '../pipeline/types.js';
 
 export interface AssembledArticle {
@@ -66,6 +65,7 @@ function uniqueEntities(entities: string[]): string[] {
 }
 
 export async function runAssembler(
+  ctx: PromptContext,
   article: ArticleRow,
   offers: ProductOffer[] = [],
 ): Promise<AssembledArticle> {
@@ -76,7 +76,7 @@ export async function runAssembler(
   // The audience's day, not the server's: every date stamped below is a
   // calendar day this publication states - the pubDate, the review stamp, and
   // the day an offer's price is judged current against.
-  const today = todayInSydney();
+  const today = editionToday(ctx.edition);
   const offerBySlug = new Map(offers.map((offer) => [offer.go_slug, offer]));
 
   // The deterministic parts never go through the LLM. A re-assembly (e.g. the
@@ -297,11 +297,13 @@ export async function runAssembler(
       ...(unit?.returned ? { returned: unit.returned } : {}),
     };
   }
-  frontmatter.currency = HOME_CURRENCY;
+  // An edition that quotes no currency amounts states none.
+  if (ctx.edition.currency) frontmatter.currency = ctx.edition.currency;
 
   // Anything left is a genuine contract violation (schema, raw merchant URL,
-  // non-approved merchant destination).
-  const problems = validateArticle(body, frontmatter, finalLinks);
+  // non-approved merchant destination, a category or post type the platform
+  // does not publish).
+  const problems = validateArticle(body, frontmatter, finalLinks, ctx.platform);
   if (problems.length > 0) {
     throw new Error(`assembly validation failed:\n- ${problems.join('\n- ')}`);
   }
@@ -311,8 +313,14 @@ export async function runAssembler(
   // launch-window piece settles its commission 6-12+ weeks after the traffic,
   // so nobody can tell at publish time what a page earns. It is the page
   // failing to do what a "which should I buy" piece exists to do.
+  // A platform that carries no affiliate links has nothing to click by design.
   const intent = article.keyword_plan?.intent;
-  if (finalLinks.length === 0 && intent && MONETISED_INTENTS.has(intent)) {
+  if (
+    ctx.platform.monetisation !== 'none' &&
+    finalLinks.length === 0 &&
+    intent &&
+    MONETISED_INTENTS.has(intent)
+  ) {
     throw new Error(
       `no affiliate links for a ${intent} piece: the dossier carried ${products.length} product(s), ` +
         `the draft linked ${slugsInBody.length} /go/ slug(s), and healing recovered ` +

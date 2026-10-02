@@ -1406,7 +1406,7 @@ export function createApp(): Hono<TraceEnv> {
       q<{ key: string; value: unknown }>('SELECT key, value FROM settings WHERE platform_id = $1', [
         SLEEKDROPS_PLATFORM_ID,
       ]),
-      engineStatus(),
+      engineStatus(SLEEKDROPS_PLATFORM_ID),
     ]);
     return c.json({ ...settingsPayload(rows), engines });
   });
@@ -1445,7 +1445,7 @@ export function createApp(): Hono<TraceEnv> {
       q<{ key: string; value: unknown }>('SELECT key, value FROM settings WHERE platform_id = $1', [
         SLEEKDROPS_PLATFORM_ID,
       ]),
-      engineStatus(),
+      engineStatus(SLEEKDROPS_PLATFORM_ID),
     ]);
     return c.json({ ...settingsPayload(rows), engines });
   });

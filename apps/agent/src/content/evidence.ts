@@ -488,6 +488,8 @@ export function normaliseDossier(raw: unknown): ResearchDossier {
         retailer: text(o.retailer),
         dateChecked: normaliseDate(o.dateChecked),
         sourceUrl: text(o.sourceUrl),
+        // Only an event-bound piece asks for the time a price was read.
+        ...(text(o.observedAt) ? { observedAt: text(o.observedAt) } : {}),
       };
     })
     .filter((o) => o.value > 0 && o.retailer !== '');
@@ -566,6 +568,15 @@ export function normaliseDossier(raw: unknown): ResearchDossier {
       }
     : null;
 
+  const eventRaw = asRecord(d.eventStart);
+  const eventStart = text(eventRaw.startsAt)
+    ? {
+        startsAt: text(eventRaw.startsAt),
+        sourceUrl: text(eventRaw.sourceUrl),
+        observedAt: text(eventRaw.observedAt),
+      }
+    : null;
+
   const keywords = asRecord(d.keywords);
   return {
     summary: text(d.summary),
@@ -590,6 +601,8 @@ export function normaliseDossier(raw: unknown): ResearchDossier {
         return { question: text(f.question), answerHint: text(f.answerHint) };
       })
       .filter((f) => f.question !== ''),
+    // Only an event-bound piece carries one; the researcher checks it.
+    ...(eventStart ? { eventStart } : {}),
   };
 }
 

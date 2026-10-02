@@ -19,6 +19,9 @@ const { createApp } = await import('../api/server.js');
 const { runAssembler } = await import('./assembler.js');
 const { citedSourceIndexes } = await import('../content/sources.js');
 const { todayInSydney } = await import('../content/contract.js');
+const { promptContextFromSeed } = await import('./context.js');
+const { sleekdropsSeed } = await import('../platform/sleekdrops/index.js');
+const ctx = promptContextFromSeed(sleekdropsSeed, 'au');
 
 import type { ArticleRow, ContentBrief } from '../pipeline/types.js';
 
@@ -114,7 +117,7 @@ test('the researcher\'s tiers and dates reach the page, through both JSONB colum
   // runner hands the assembler is whatever Postgres returns.
   const [article] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [inserted.id]);
 
-  const assembled = await runAssembler(article);
+  const assembled = await runAssembler(ctx, article);
   await q('UPDATE articles SET draft_md = $2, frontmatter = $3 WHERE id = $1', [
     article.id,
     assembled.body,
@@ -148,7 +151,7 @@ test('the researcher\'s tiers and dates reach the page, through both JSONB colum
 test('the panel reads the sources and the review date back off the row', { skip }, async () => {
   const inserted = await insertArticle();
   const [article] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [inserted.id]);
-  const assembled = await runAssembler(article);
+  const assembled = await runAssembler(ctx, article);
   await q('UPDATE articles SET frontmatter = $2 WHERE id = $1', [
     article.id,
     JSON.stringify(assembled.frontmatter),
@@ -228,7 +231,7 @@ test('claims, the launch date and the review unit survive both JSONB columns', {
   // nobody has measured it" and "the field is missing", so they have to survive.
   assert.equal((article.research as { claims: Array<{ covers: unknown }> }).claims[0].covers, null);
 
-  const assembled = await runAssembler(article);
+  const assembled = await runAssembler(ctx, article);
   await q('UPDATE articles SET frontmatter = $2 WHERE id = $1', [
     article.id,
     JSON.stringify(assembled.frontmatter),
@@ -280,7 +283,7 @@ test('a launch link that is not http(s) never reaches the stored frontmatter', {
     ],
   );
   const [article] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [inserted.id]);
-  const assembled = await runAssembler(article);
+  const assembled = await runAssembler(ctx, article);
   await q('UPDATE articles SET frontmatter = $2 WHERE id = $1', [
     article.id,
     JSON.stringify(assembled.frontmatter),

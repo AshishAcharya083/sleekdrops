@@ -1,0 +1,326 @@
+=== call 1: chat model=snapshot-model temperature=0.5 maxTokens=8000 json=true search=false
+--- system
+SleekDrops (sleekdrops.com) is an editorial affiliate blog: "exclusive deals
+dropping daily". Primary audience: Australian shoppers (prices in AUD, Amazon
+Australia availability matters); write in plain international English.
+
+GROUNDING — non-negotiable:
+- Today's date is 2026-07-13. Whenever you mention "this year", a year in a
+  title, or how recent something is, derive it from THIS date — never from
+  your training data, which is out of date.
+- Facts come from the research dossier / live search evidence you are given,
+  never from memory. If the evidence doesn't say it, you don't know it.
+
+Categories: Tech, Home, Fashion, Health, Finance, Travel.
+Post types the pipeline may produce: article, guide, roundup.
+- article: news/trend piece, no length minimum, still evidence-based.
+- guide: "best X for Y" buying guide, at least 1,500 words, at least 3 contenders.
+- roundup: "Top N" listicle with clear scoring rationale.
+(Never produce postType "review" — reviews require weeks of hands-on use and are human-written.)
+
+Byline. Every piece publishes under one accountable entity, SleekDrops Editorial Team,
+tagged with the beat it was written on. There are no named desks and no
+invented people: never claim hands-on testing, a personal history or a
+credential. The angle stage picks which beat voice carries a piece, on the
+beat and the thesis.
+- desk: house voice — Research-led product coverage across Tech, Home, Fashion, Health, Finance and Travel
+- tech: Tech — Audio, computing, mobile, wearables and smart-home hardware
+- home: Home — Kitchen, cleaning, furniture and everything that has to survive daily use
+- value: Value — Price, warranty, running costs and the money side of Health, Finance and Travel buys
+
+Sources — non-negotiable:
+- Primary sources only. The manufacturer's spec sheet, the retailer's own
+  listing, the standards body, a hands-on owner review, or the research dossier
+  built from those. A number is publishable when you can name who published it
+  and when.
+- Competing articles are competitive intelligence, never source material. Read
+  one to see what it misses; never take a fact, a figure, a phrase, a section
+  order or an angle from it. If a claim exists only in another site's roundup,
+  it is not a fact — chase it to the primary source or leave it out.
+- Never cite, quote, link, name or paraphrase another publisher's article in
+  the body. No "according to [blog]", no borrowed table columns, no rewritten
+  version of someone else's paragraph. The reader chose this page over that one.
+- A claim you cannot trace to a primary source is either cut or hedged in plain
+  words — "Sony has not published a figure" beats a borrowed number.
+- Citations are markers, not links. A claim drawn from a numbered source in the
+  dossier carries its marker in square brackets after the sentence's full stop
+  ("RTINGS measured 28.5 hours in 2026.[3]"); the site turns each marker into a
+  link to that entry in the article's visible sources list. Keep every marker a
+  draft already carries, never renumber them — the numbering belongs to the
+  dossier, not to the draft — and never write a source URL in the body.
+
+SEO requirements:
+- One clear primary keyword per piece, used naturally in: title (front-loaded),
+  dek, first 100 words, at least one H2, and the conclusion. Around 2% body
+  density, distributed — readability wins every tie.
+- Secondary keywords woven in naturally. No stuffing, no synonym cycling
+  (repeat the right word rather than hunting for alternatives).
+- Title ≤ 60 characters, compelling and specific (year, count, or qualifier).
+- Dek (meta description) 140–160 characters, includes the primary keyword.
+- Descriptive H2/H3 hierarchy that answers real search intents. Turn the
+  People Also Ask questions from the keyword plan into H2/H3 headings and
+  answer each one directly underneath.
+- Front-load value. The first screen is the highest-value real estate: define
+  the buyer and answer the query there, then earn the depth.
+- Match the format the SERP rewards. If the winning pages are comparison
+  tables, ship a comparison table.
+- Internal coherence and people-first content that satisfies E-E-A-T.
+
+Generative-engine rules (how the piece earns a citation in ChatGPT, Claude,
+Perplexity and AI Overviews — not only a Google ranking):
+- EXTRACTABLE ANSWERS, on a budget. What a generative engine retrieves is a
+  passage, not a page: a self-contained answer to a question somebody typed,
+  quotable with nothing around it. So a piece carries a handful of those - the
+  sections that genuinely answer a query open with one, at the top of the
+  section, never buried in a third paragraph. The piece's own shape says how
+  many and how long; where no shape is recorded, take it as three or four of
+  40-60 words. What it is not is a fixed block under every heading. That reads
+  as a template to a human reviewer, and a page of interchangeable blocks gives
+  an engine nothing to prefer between them.
+- CLAIM + EVIDENCE, always paired. "Battery life runs to 30 hours with ANC on
+  (Sony, 2026 spec sheet)" is citable. "Battery life is excellent" is not.
+  Attribute by name and year — "according to research" is worthless.
+- NAME ENTITIES. Specific products, brands, chipsets, standards, RRPs,
+  retailers. "Coolblue, Bol.com and Zalando" beats "many retailers". Generative
+  engines build knowledge graphs out of named entities; unnamed ones vanish.
+- QUESTION-SHAPED HEADINGS where natural, each answered immediately underneath
+  rather than after a run-up - and the ones inside the passage budget answered
+  in an extractable block. Cover the who/what/when/where/why/how variants that
+  matter.
+- FAQ where the piece's shape carries one, and where it does the reader some
+  good: real long-tail questions the body does not already answer, 3-5 of them,
+  each answered in the passage word range. Answer engines quote a clean
+  question/answer pair far more readily than the same answer buried in prose,
+  and the site builds its FAQPage markup by parsing the visible "## FAQ"
+  section - so where a shape requires one it is not optional, and it is written
+  as "## FAQ" with "### Question?" headings. Where the shape omits it (a piece
+  whose every heading is already a question), do not bolt one on to restate the
+  article. (Google stopped showing FAQ rich results in May 2026; the section
+  earns citations, not a rich result.)
+- RECENCY. State when a spec or availability claim was checked, and the year of
+  any RRP. Engines weight freshness heavily, and a dated claim is more citable
+  than a vague one.
+- Never invent a number, source, or date to satisfy any of the above. An
+  invented specific is worse than a general sentence: it is the one failure
+  mode that destroys citability permanently. If the dossier does not have it,
+  write around it.
+--- prompt
+Create the SEO content brief for this piece.
+
+Working title: Best cordless stick vacuums
+Post type: guide | Category: Home
+
+EDITORIAL ANGLE - decided before the piece was outlined. This is what the
+article argues, and every stage after it is held to this record.
+Thesis: Battery longevity, not suction, decides which stick vacuum is worth buying.
+Reader served: Someone in a two-bedroom flat with mostly hard floors.
+The take - what a reader would not get from the top results: The cheaper Shark outlasts the Dyson on owner evidence.
+What this piece says that the top results do not - land every one of these:
+  - Battery replacement cost over three years (absent from https://example.com/best-stick-vacuums)
+    Evidence: 41 of 388 owner reviews
+Structural shape: segmented-buyers - One section per kind of buyer. The pick changes per segment and the piece says who each one is wrong for.
+Why this shape: The pick changes with floor type.
+Do NOT fall back to the house skeleton. The shape above is the silhouette
+this piece takes; a reader who reads two SleekDrops articles must not feel the
+same running order under both.
+
+KEYWORD PLAN - built from a live SERP read. The piece is written to win this query.
+Primary keyword: best cordless stick vacuum australia
+Why: Top results are thin on battery longevity.
+Search intent: Commercial Investigation | Difficulty: Moderate | Zero-click risk: Low
+Format the SERP rewards: Buyer segments guide | Length target: 1800 words
+SERP features in play: People Also Ask
+Secondary keywords: stick vacuum battery life
+People Also Ask - answer these as H2/H3: How long do cordless vacuums last?
+Entities to name explicitly (GEO): Dyson V15 Detect; Shark Detect Pro; Choice
+Gaps in the top results - this is our reason to rank: Battery replacement cost
+Top results to beat:
+  - https://example.com/best-stick-vacuums (listicle) - spec roundup. Strong at: breadth
+Snippet/citation target - "What is the best cordless stick vacuum in Australia?" as a paragraph. Draft answer to beat:
+  The Shark Detect Pro for most homes.
+What a generative engine says about this query TODAY (beat it, and be the better-sourced version):
+  Dyson V15 is usually recommended.
+
+STRUCTURE - this piece takes the "Decision tree by use case" shape (segmented-buyers). It is a
+decision recorded on the article, not a default, and it is what stops two
+SleekDrops articles sharing a silhouette. Where the editorial angle above names
+a shape, this block is that decision resolved into a structure: follow this
+one.
+
+One section per kind of buyer. The pick changes per segment and the piece says who each one is wrong for.
+
+OPENING - do not use any other opening formula:
+Open with the branch, not the winner. Two or three sentences that let a
+reader place themselves in one of the segments below, and an explicit statement
+that the pick changes per segment. Do not crown an overall winner in the
+opening - this shape argues that there isn't one.
+
+RUNNING ORDER - the sections, in this order. "repeats" means one section per
+contender / segment / question, not one section. Headings are written for this
+piece in this shape's naming, not copied from the labels below:
+
+  - [open] Which of these you are (required, extractable answer)
+      The segments, named as situations a reader recognises, and the pick each one lands on.
+
+  - [body] The pick for <segment> (required, repeats, extractable answer)
+      One per segment: the pick, the evidence for it in that use case, and who inside this segment it is still wrong for.
+
+  - [body] The picks side by side (optional)
+      A comparison table keyed by segment, with a "Where to buy" column.
+
+  - [close] How we matched picks to buyers (required)
+      The criteria that separated the segments and the evidence each pick rests on. It sits near the end because the reader wants their answer first.
+
+  - [close] FAQ (required)
+      The long-tail questions the segments do not answer. Real questions ending in "?", each answered in the passage word range.
+
+This piece carries 4 extractable answers in total,
+of 40-60 words each - a self-contained answer to a question a reader
+typed, quotable with nothing around it. Spend them on the sections marked
+"extractable answer" in the running order, and nowhere else. Every other section is written as
+ordinary prose. A 40-60 word block under every heading is a template, and it
+reads like one.
+
+FAQ: required. An "## FAQ" section with one "### Question?" per entry, each
+answered in the passage word range. The site builds FAQPage markup out of it.
+
+Research dossier:
+{
+  "summary": "Cordless stick vacuums under A$800 split on battery longevity rather than suction. The Dyson V15 leads on measured suction, the Shark Detect Pro on value.",
+  "facts": [
+    {
+      "fact": "The Dyson V15 Detect is rated at 240AW of suction.",
+      "sourceUrl": "https://www.dyson.com.au/v15-detect",
+      "tier": "primary",
+      "date": "2026-03",
+      "publisher": "Dyson"
+    },
+    {
+      "fact": "Choice measured 61 minutes of run time on the Shark Detect Pro in eco mode.",
+      "sourceUrl": "https://www.choice.com.au/stick-vacuums",
+      "tier": "expert",
+      "date": "2026-05",
+      "publisher": "Choice"
+    }
+  ],
+  "products": [
+    {
+      "name": "Dyson V15 Detect",
+      "brand": "Dyson",
+      "approxPrice": "about A$1,249",
+      "amazonUrl": "https://www.amazon.com.au/dp/B09XYZ1234",
+      "goSlug": "dyson-v15-detect",
+      "notes": "Best measured suction."
+    },
+    {
+      "name": "Shark Detect Pro",
+      "brand": "Shark",
+      "approxPrice": "about A$799",
+      "amazonUrl": null,
+      "goSlug": "shark-detect-pro",
+      "notes": "Longest eco run time."
+    }
+  ],
+  "failureModes": [
+    {
+      "product": "Dyson V15 Detect",
+      "failure": "Battery capacity drops noticeably",
+      "timeframe": "after 18-24 months",
+      "sourceUrl": "https://www.productreview.com.au/listings/dyson-v15-detect",
+      "tier": "owner"
+    }
+  ],
+  "whoShouldNotBuy": [
+    {
+      "audience": "Homes that are mostly thick carpet",
+      "reason": "Run time on boost mode is under 10 minutes on both, per Choice.",
+      "sourceUrl": "https://www.choice.com.au/stick-vacuums"
+    }
+  ],
+  "ownerComplaints": [
+    {
+      "product": "Shark Detect Pro",
+      "complaint": "Brush roll jams on long hair",
+      "volume": "recurring",
+      "recency": "2026",
+      "denominator": "41 of 388 reviews",
+      "kind": "aggregate",
+      "sourceUrl": "https://www.productreview.com.au/listings/shark-detect-pro"
+    }
+  ],
+  "priceObservations": [
+    {
+      "product": "Shark Detect Pro",
+      "value": 799,
+      "currency": "AUD",
+      "retailer": "JB Hi-Fi",
+      "dateChecked": "2026-07-10",
+      "sourceUrl": "https://www.jbhifi.com.au/products/shark-detect-pro"
+    }
+  ],
+  "testedClaims": [
+    {
+      "claim": "Shark Detect Pro ran 61 minutes in eco mode",
+      "source": "Choice",
+      "year": 2026,
+      "sourceUrl": "https://www.choice.com.au/stick-vacuums"
+    }
+  ],
+  "keywords": {
+    "primary": "best cordless stick vacuum",
+    "secondary": [
+      "stick vacuum australia"
+    ]
+  },
+  "competitorNotes": "Top pages list specs and skip battery longevity.",
+  "faqIdeas": [
+    {
+      "question": "How long do stick vacuum batteries last?",
+      "answerHint": "18-24 months"
+    }
+  ]
+}
+
+Build the outline to execute the shape, the angle and the keyword plan:
+- The sections ARE the shape's running order above. Every required section kind
+  gets at least one heading; a section marked "repeats" gets one heading per
+  contender, segment, cost line or question the dossier supports.
+- Write the headings for this piece. The shape's labels say what a section is
+  for, not what to call it — a heading copied from the label is a template.
+- The sections must argue the thesis. Every claim under "what this piece says
+  that the top results do not" gets a section or a named sub-point. That list
+  is the reason this piece exists.
+- Every People Also Ask question is answered — inside the section that owns it,
+  or as an FAQ entry where the shape carries an FAQ. None get dropped.
+- Every content gap is covered — inside the section that owns it, or as an
+  extra section placed within the shape's running order rather than appended to
+  it. The gaps are the reason this piece can outrank the pages already there.
+  Give an extra section an empty "kind".
+- Exactly 4 sections carry an extractable answer (40-60 words), and they are
+  the ones the shape marks "extractable answer". Set "extractable": true on
+  those and false on every other section, and put the answer block verbatim in
+  the extractable sections' points.
+- Order sections by the shape, then by the reader's decision path — never by
+  copying the running order of a competing page.
+- seoTitle: use one of the plan's title options, or a better one under 60 chars.
+- dek: use the plan's meta description, or a better one in 140-160 chars.
+- wordCountTarget: 1800, from the live SERP read. Do not raise it to pad.
+
+Return JSON:
+{"seoTitle": string (≤60 chars, front-loaded primary keyword, include the year when natural),
+ "dek": string (140-160 chars, includes primary keyword, sells the click honestly),
+ "slug": string (kebab-case, short, keyword-bearing),
+ "kind": string (human badge label, e.g. "Buying guide", "Comparison", "Trend watch"),
+ "searchIntent": string,
+ "primaryKeyword": string,
+ "secondaryKeywords": string[],
+ "tags": string[] (4-7 lowercase tags),
+ "wordCountTarget": number (guides ≥1500, roundups ≥1200, articles ≥700),
+ "sections": [{"heading": string (H2 text, written for this piece),
+               "kind": string (the shape's section kind this heading executes),
+               "extractable": boolean (true for exactly 4 of the sections),
+               "points": string[] (what it must cover, which products/facts from the
+               dossier to use, and for an extractable section the answer block verbatim)}],
+ "faq": [{"question": string}] (3-5 long-tail questions — prefer the plan's PAA list)}
+
+=== outcome: ok

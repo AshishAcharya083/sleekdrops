@@ -1,0 +1,10 @@
+=== call 1: image model=gemini-2.5-flash-image temperature=- maxTokens=- json=false search=false
+--- system
+
+--- prompt
+Photorealistic editorial hero photograph for a consumer product article titled "Best cordless stick vacuums in Australia (2026)".
+Feature: Dyson V15 Detect and Shark Detect Pro.
+Wide 16:9 composition, natural lighting, clean uncluttered background, magazine quality.
+Absolutely NO text, NO logos, NO watermarks, NO people's faces.
+
+=== outcome: ok

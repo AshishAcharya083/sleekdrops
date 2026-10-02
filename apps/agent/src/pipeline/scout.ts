@@ -7,6 +7,7 @@ import { config } from '../config.js';
 import { pool, q } from '../db/pool.js';
 import { UsageTracker } from '../llm/index.js';
 import { runTopicScout } from '../agents/topicScout.js';
+import { resolvePromptContext } from '../agents/context.js';
 import { activePlatforms } from './platforms.js';
 import { modelFor } from './runner.js';
 
@@ -147,7 +148,11 @@ export async function claimNextScoutRun(platformId: string): Promise<ClaimedScou
   }
 }
 
-async function runClaimedScout({ id, platform_id: platformId }: ClaimedScoutRun): Promise<void> {
+async function runClaimedScout({
+  id,
+  platform_id: platformId,
+  edition_id: editionId,
+}: ClaimedScoutRun): Promise<void> {
   const tracker = new UsageTracker();
   const heartbeat = setInterval(() => {
     void renewScoutHeartbeat(id).catch((err) =>
@@ -158,13 +163,18 @@ async function runClaimedScout({ id, platform_id: platformId }: ClaimedScoutRun)
 
   let session: { id: string } | undefined;
   try {
-    const model = await modelFor('topic_scout');
+    const model = await modelFor('topic_scout', platformId);
     [session] = await q<{ id: string }>(
       `INSERT INTO agent_sessions (scout_run_id, platform_id, agent, model)
        VALUES ($1, $2, 'topic_scout', $3) RETURNING id`,
       [id, platformId, model],
     );
-    const topics = await runTopicScout(model, tracker, id);
+    const topics = await runTopicScout(
+      await resolvePromptContext(platformId, editionId),
+      model,
+      tracker,
+      id,
+    );
     await q(
       `UPDATE scout_runs SET status = 'done', topics_found = $2, ended_at = now() WHERE id = $1`,
       [id, topics.length],

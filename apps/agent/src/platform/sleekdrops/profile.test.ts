@@ -1,41 +1,45 @@
 // The SleekDrops seed is the text its prompts were built from, moved verbatim.
-// Until every prompt reads it from the registry, the constants it was copied
-// from still exist - and the two must not drift apart.
+// The prompt snapshots pin what those prompts render; this pins the seed to
+// the constants and catalogues that still exist beside it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { EDITORIAL_RULES, siteContext } from '../../agents/context.js';
+import { promptContextFromSeed, siteContext } from '../../agents/context.js';
+import { scoutQueries } from '../../agents/topicScout.js';
+import { SHAPE_CATALOGUE } from '../../content/catalogue.js';
 import { BYLINE_NAME, CATEGORIES, HOME_CURRENCY, POST_TYPES } from '../../content/contract.js';
-import { ARTICLE_SHAPES } from '../../pipeline/types.js';
 import { PLATFORM_SEEDS } from '../profiles.js';
 import { SLEEKDROPS_PLATFORM_ID, sleekdropsSeed } from './index.js';
 
 const { platform, editions } = sleekdropsSeed;
+const ctx = promptContextFromSeed(sleekdropsSeed, 'au');
 
-/** The scout's query list, read off its source: topicScout.ts keeps it module-private. */
-function scoutQueriesInTopicScout(): string[] {
-  const source = readFileSync(new URL('../../agents/topicScout.ts', import.meta.url), 'utf8');
-  const literal = /const SCOUT_QUERIES = \[([\s\S]*?)\];/.exec(source);
-  assert.ok(literal, 'topicScout.ts declares SCOUT_QUERIES');
-  return [...literal[1].matchAll(/'([^']*)'/g)].map((m) => m[1]);
+/** The searches the pinned scout prompt ran, in order. */
+function scoutQueriesInSnapshot(): string[] {
+  const snapshot = readFileSync(
+    new URL('../../agents/__snapshots__/prompts/scout.txt', import.meta.url),
+    'utf8',
+  );
+  return [...snapshot.matchAll(/^### Search: "([^"]*)"$/gm)].map((m) => m[1]);
 }
 
 test('brand text and audience are the site context, verbatim and in order', () => {
-  assert.ok(siteContext().startsWith(`${platform.brandText} ${platform.audience}\n`));
+  assert.ok(siteContext(ctx).startsWith(`${platform.brandText} ${platform.audience}\n`));
 });
 
-test('byline, categories, post types, shapes, rules and scout queries are the current ones', () => {
+test('byline, categories, post types, shapes and scout queries are the current ones', () => {
   assert.equal(platform.id, SLEEKDROPS_PLATFORM_ID);
   assert.equal(platform.bylineName, BYLINE_NAME);
   assert.deepEqual(platform.categories, [...CATEGORIES]);
   assert.deepEqual(platform.postTypes, [...POST_TYPES]);
-  assert.deepEqual(platform.articleShapes, Object.keys(ARTICLE_SHAPES));
-  assert.equal(platform.editorialRules, EDITORIAL_RULES);
-  const [edition] = editions;
-  const queries = scoutQueriesInTopicScout();
+  assert.deepEqual(
+    platform.articleShapes,
+    SHAPE_CATALOGUE.map((shape) => shape.id),
+  );
+  const queries = scoutQueriesInSnapshot();
   assert.equal(queries.length, 6);
-  assert.deepEqual([...platform.scoutQueries, ...edition.scoutQueries], queries);
+  assert.deepEqual(scoutQueries(ctx), queries);
 });
 
 test('one Australian edition, monetised through Amazon, blocking nothing', () => {
