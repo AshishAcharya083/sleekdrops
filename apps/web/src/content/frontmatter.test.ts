@@ -280,3 +280,114 @@ test('an offer with an unreadable observation date is refused', () => {
     assert.equal(result.success, false, `${JSON.stringify(offer)} should be rejected`);
   }
 });
+
+/** A hand-written review as the roughly 320 already published carry it. */
+const legacyReview = {
+  ...assemblerOutput,
+  postType: 'review',
+  kind: 'Review',
+  picks: undefined,
+  product: {
+    name: 'Sony WH-1000XM6',
+    brand: 'Sony',
+    brandMark: 'S',
+    tagline: 'The quietest commute you can buy.',
+    rating: 4.4,
+    retailer: 'JB Hi-Fi',
+    price: 'A$549',
+    badge: "Editor's choice",
+    pros: ['Class-leading ANC', 'Comfortable for hours', 'Sharp call mics'],
+    cons: ['No aptX', 'Case is bulky'],
+  },
+};
+
+const withProduct = (product: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+  ...legacyReview,
+  ...extra,
+  product: { ...legacyReview.product, ...product },
+});
+
+test('a published review with a free-text badge and no trust fields still validates', () => {
+  for (const badge of ["Editor's choice", 'Best value', 'Hurry - ends tonight']) {
+    const parsed = blogFrontmatterSchema.parse(withProduct({ badge }));
+    assert.equal(parsed.product?.badge, badge);
+    assert.equal(parsed.product?.methodVersion, undefined);
+    assert.equal(parsed.product?.provenance, undefined);
+    assert.equal(parsed.product?.subScores, undefined);
+  }
+});
+
+test('a review carrying the trust fields keeps every one of them', () => {
+  const product = {
+    methodVersion: '1.0',
+    provenance: 'none',
+    badge: {
+      kind: 'review-score',
+      evidence: { score: 4.4, reviewSlug: 'sony-wh-1000xm6-review' },
+      checkedAt: '2026-09-20',
+    },
+    subScores: [
+      { label: 'Noise cancelling', score: 4.8, weight: 0.4 },
+      { label: 'Comfort', score: 4.2, weight: 0.3 },
+      { label: 'Value', score: 4.1, weight: 0.3 },
+    ],
+  };
+  const parsed = blogFrontmatterSchema.parse(withProduct(product));
+  assert.deepEqual(
+    {
+      methodVersion: parsed.product?.methodVersion,
+      provenance: parsed.product?.provenance,
+      badge: parsed.product?.badge,
+      subScores: parsed.product?.subScores,
+    },
+    product,
+  );
+});
+
+test('sub-scores that do not recompute the headline rating fail the build', () => {
+  const result = blogFrontmatterSchema.safeParse(
+    withProduct({
+      subScores: [
+        { label: 'Noise cancelling', score: 5, weight: 0.5 },
+        { label: 'Comfort', score: 4.6, weight: 0.5 },
+      ],
+    }),
+  );
+  assert.equal(result.success, false);
+  assert.match(result.error?.issues[0].message ?? '', /recompute to 4\.80/);
+  assert.deepEqual(result.error?.issues[0].path, ['product', 'subScores']);
+});
+
+test('a badge object is held to the registry rather than falling back to free text', () => {
+  const badges = [
+    // Missing its check date.
+    { kind: 'review-score', evidence: { score: 4.4, reviewSlug: 'sony-wh-1000xm6-review' } },
+    // Not a registry kind.
+    { kind: 'editors-choice', evidence: {}, checkedAt: '2026-09-20' },
+    // A price-history kind, well formed but switched off.
+    {
+      kind: 'lowest-price',
+      evidence: { price: 'A$499', previousLowest: 'A$529', observations: 8, sourceUrl: 'https://www.jbhifi.com.au/x' },
+      checkedAt: '2026-09-20',
+    },
+    // A score badge printing a number the review does not give.
+    { kind: 'review-score', evidence: { score: 4.7, reviewSlug: 'sony-wh-1000xm6-review' }, checkedAt: '2026-09-20' },
+  ];
+  for (const badge of badges) {
+    const result = blogFrontmatterSchema.safeParse(withProduct({ badge }));
+    assert.equal(result.success, false, `${JSON.stringify(badge)} should be rejected`);
+  }
+});
+
+test('an unpublished method version or an unknown provenance is refused', () => {
+  assert.equal(blogFrontmatterSchema.safeParse(withProduct({ methodVersion: '2.0' })).success, false);
+  assert.equal(blogFrontmatterSchema.safeParse(withProduct({ provenance: 'tested' })).success, false);
+});
+
+test('provenance and the review-unit record may not tell two stories', () => {
+  const unit = { reviewUnit: { acquisition: 'loan', supplier: 'Sony Australia', returned: '2026-09' } };
+  assert.equal(blogFrontmatterSchema.safeParse(withProduct({ provenance: 'loan' }, unit)).success, true);
+  const result = blogFrontmatterSchema.safeParse(withProduct({ provenance: 'retail' }, unit));
+  assert.equal(result.success, false);
+  assert.deepEqual(result.error?.issues[0].path, ['product', 'provenance']);
+});

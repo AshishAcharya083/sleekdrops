@@ -14,6 +14,15 @@
 
 import { z } from 'astro/zod';
 
+import {
+  assessmentProvenances,
+  badgeClaimSchema,
+  badgeProblems,
+  methodVersionIds,
+  subScoreProblems,
+} from '../lib/trust.ts';
+import { webUrl } from './web-url.ts';
+
 /**
  * Embedded product data for `postType: review` posts.
  * Replaces the old src/data/products.ts module — review structured data now
@@ -40,14 +49,53 @@ export const productSchema = z.object({
   price: z.string().min(1),
   /** Pre-formatted previous price for a sale badge. */
   priceWas: z.string().optional(),
-  /** Optional CTA badge ("Editor's choice", "Best value"). */
-  badge: z.string().optional(),
+  /**
+   * A badge from the registry in src/lib/trust.ts, with its evidence and
+   * check date. A free-text string still validates so posts written before
+   * the registry keep building, but is never printed: it carries no evidence.
+   */
+  badge: z.union([badgeClaimSchema, z.string()]).optional(),
   /** 3–5 genuine pros. */
   pros: z.array(z.string().min(1)).min(3).max(5),
   /** 2–4 honest cons. The cons column is never empty. */
   cons: z.array(z.string().min(1)).min(2).max(4),
   /** Optional key→value spec table. */
   specs: z.record(z.string()).optional(),
+  // Trust fields. Optional so the reviews published before them keep
+  // validating; a review without them reads as the general method and the
+  // honest fallback provenance (see src/lib/trust.ts).
+  /** The scoring method version `rating` was given under. */
+  methodVersion: z.enum(methodVersionIds).optional(),
+  /** How the product was assessed. */
+  provenance: z.enum(assessmentProvenances).optional(),
+  /** A weighted breakdown of `rating`; when present it must add up to it. */
+  subScores: z
+    .array(
+      z.object({
+        label: z.string().min(1),
+        score: z.number().min(1).max(5),
+        weight: z.number().positive().max(1),
+      }),
+    )
+    .min(2)
+    .optional(),
+}).superRefine((product, ctx) => {
+  if (product.subScores) {
+    for (const message of subScoreProblems(product.rating, product.subScores)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['subScores'], message });
+    }
+  }
+  if (product.badge === undefined || typeof product.badge === 'string') return;
+  for (const message of badgeProblems(product.badge)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['badge'], message });
+  }
+  if (product.badge.kind === 'review-score' && product.badge.evidence.score !== product.rating) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['badge', 'evidence', 'score'],
+      message: `a review-score badge must print the review's own rating (${product.rating})`,
+    });
+  }
 });
 
 export type ProductData = z.infer<typeof productSchema>;
@@ -75,27 +123,6 @@ export type SourceTier = (typeof sourceTiers)[number];
  * assembler always writes one, falling back to the source's hostname.
  */
 const SOURCE_DATE = /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/;
-
-/**
- * Whether a string is a URL a reader could safely be linked to.
- *
- * `z.string().url()` is not this check: it accepts `javascript:` and `data:`,
- * so a schema that only calls it hands a click-to-execute href to whatever
- * renders the field. Every source, claim and launch URL below is rendered as
- * an `href` by an article component, and all of them originate in
- * search-result text nobody controls - so the scheme is checked here rather
- * than assumed. Mirrors `isWebUrl` in the agent's content/contract.ts.
- */
-function isWebUrl(value: string): boolean {
-  try {
-    const { protocol } = new URL(value.trim());
-    return protocol === 'https:' || protocol === 'http:';
-  } catch {
-    return false;
-  }
-}
-
-const webUrl = () => z.string().url().refine(isWebUrl, { message: 'must be an http(s) URL' });
 
 export const sourceSchema = z.object({
   url: webUrl(),
@@ -201,7 +228,7 @@ export type LaunchData = z.infer<typeof launchSchema>;
  * no-sponsored-posts site is owed, and silence is what reads as concealment.
  */
 export const reviewUnitSchema = z.object({
-  acquisition: z.enum(['retail', 'loan', 'none']),
+  acquisition: z.enum(assessmentProvenances),
   /** The brand or agency that lent it - named, because "supplied for review" names nobody. */
   supplier: z.string().min(1).optional(),
   paid: z.string().min(1).optional(),
@@ -338,6 +365,16 @@ export const blogFrontmatterSchema = z
   .refine(
     (data) => data.postType !== 'review' || data.product !== undefined,
     { message: "postType: 'review' requires a `product` object in frontmatter" },
+  )
+  .refine(
+    (data) =>
+      data.product?.provenance === undefined ||
+      data.reviewUnit === undefined ||
+      data.product.provenance === data.reviewUnit.acquisition,
+    {
+      message: '`product.provenance` and `reviewUnit.acquisition` describe the same unit and must agree',
+      path: ['product', 'provenance'],
+    },
   );
 
 export type BlogFrontmatter = z.infer<typeof blogFrontmatterSchema>;

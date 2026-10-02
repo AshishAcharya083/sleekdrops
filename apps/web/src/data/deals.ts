@@ -12,6 +12,7 @@
  * re-export from this module.
  */
 
+import type { BadgeClaim } from '../lib/trust';
 import type { CategorySlug } from './categories-types';
 
 export interface Deal {
@@ -37,6 +38,13 @@ export interface Deal {
   code?: string;
   /** Show in hero "today's drop" carousel. */
   featured?: boolean;
+  /**
+   * Why this deal is worth a look, as a registry badge with its evidence and
+   * check date (src/lib/trust.ts). Price-history kinds are switched off until
+   * a price check is recorded; deals.test.ts refuses any badge that would not
+   * be printed as entered.
+   */
+  badge?: BadgeClaim;
 }
 
 export const dailyDeals: Deal[] = [];

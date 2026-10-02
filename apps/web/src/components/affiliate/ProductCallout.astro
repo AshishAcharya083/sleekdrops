@@ -2,11 +2,16 @@
 import Button from '@components/ui/Button.astro';
 import Eyebrow from '@components/ui/Eyebrow.astro';
 import { EVENTS } from '@lib/analytics';
+import { citationRel } from '@lib/sources';
+import { productCalloutLabel } from '@lib/trust';
 import type { ProductData } from '../../content/config';
 
 /**
- * ProductCallout — dark "editor's choice" panel inserted into the
- * article body. Carries an affiliate link with sponsored nofollow rel.
+ * ProductCallout — dark product panel inserted into the article body.
+ * Carries an affiliate link with sponsored nofollow rel.
+ *
+ * The label above the name comes from `productCalloutLabel`: the product's
+ * registry badge while it is printable, else the post's kind, else nothing.
  *
  * The affiliate href is built from the post slug: every review post's
  * filename must match a key in sleekdrops-cms/data/affiliate-links.json.
@@ -14,16 +19,26 @@ import type { ProductData } from '../../content/config';
 export interface Props {
   product: ProductData;
   postSlug: string;
+  /** The post's human-facing kind ("Review"), the label when there is no badge. */
+  kind?: string;
   eyebrow?: string;
 }
-const { product, postSlug, eyebrow } = Astro.props;
+const { product, postSlug, kind, eyebrow } = Astro.props;
 const href = `/go/${postSlug}`;
-const eyebrowText = eyebrow ?? product.badge ?? "Editor's choice";
+const label = productCalloutLabel({ badge: product.badge, kind, eyebrow, postSlug });
 ---
 <aside class="product-callout">
   <div class="logo" aria-hidden="true">{product.brandMark}</div>
   <div>
-    <Eyebrow dot accent>{eyebrowText}</Eyebrow>
+    {label && (
+      <Eyebrow dot accent>
+        {label.href ? (
+          <a class="proof" href={label.href} rel={label.href.startsWith('/') ? undefined : citationRel(label.href)}>{label.text}</a>
+        ) : (
+          label.text
+        )}
+      </Eyebrow>
+    )}
     <h4>{product.name}</h4>
     <p class="desc">{product.tagline}</p>
   </div>
@@ -78,6 +93,7 @@ const eyebrowText = eyebrow ?? product.badge ?? "Editor's choice";
     color: var(--paper);
   }
   .product-callout :global(.eyebrow) { color: var(--accent); }
+  .proof { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
   h4 {
     font-family: var(--font-display);
     font-size: 28px;
