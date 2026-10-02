@@ -494,7 +494,7 @@ test('GET /api/distribution reports the placement split and the flag', { skip },
 
   const res = await createApp().fetch(
     new Request('http://localhost/api/distribution?limit=200', {
-      headers: { Authorization: 'Bearer test-admin-token' },
+      headers: { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' },
     }),
   );
   assert.equal(res.status, 200);

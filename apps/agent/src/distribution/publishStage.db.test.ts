@@ -40,7 +40,7 @@ const TITLE = 'The headphones for a quiet commute';
 const HERO = 'https://storage.googleapis.com/images/heroes/quiet.png';
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 
 const realFetch = globalThis.fetch;
 const articles: string[] = [];

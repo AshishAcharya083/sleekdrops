@@ -12,9 +12,74 @@ process.env.GCS_IMAGES_BUCKET = '';
 
 const { createApp } = await import('./server.js');
 const { TRACE_HEADER } = await import('./trace.js');
+const { PLATFORM_HEADER } = await import('./platform.js');
+const { UnknownPlatformError } = await import('../platform/registry.js');
 
-const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+type Platform = import('../platform/types.js').Platform;
+
+function fixturePlatform(id: string, overrides: Partial<Platform> = {}): Platform {
+  return {
+    id,
+    name: id,
+    bylineName: `${id} Editorial Team`,
+    brandText: `${id} brand`,
+    audience: `${id} readers`,
+    categories: ['Tech', 'Home'],
+    postTypes: ['article', 'guide'],
+    articleShapes: [],
+    editorialRules: 'Be accurate.',
+    monetisation: 'amazon',
+    blockedLinkDomains: [],
+    blockedTopics: [],
+    scoutQueries: [],
+    agentGoals: {},
+    publishTarget: {
+      d1DatabaseIdEnv: 'D1_DATABASE_ID',
+      githubRepoEnv: 'GITHUB_REPO',
+      siteUrlEnv: 'SITE_URL',
+      rebuildHookEnv: null,
+    },
+    profileVersion: 1,
+    editions: [
+      {
+        id: 'au',
+        platformId: id,
+        name: 'Australia',
+        timeZone: 'Australia/Sydney',
+        currency: 'AUD',
+        locale: 'en-AU',
+        scoutQueries: [],
+        complianceFooter: '',
+      },
+    ],
+    ...overrides,
+  };
+}
+
+// The database points nowhere, so platforms resolve from fixtures - as they
+// would from the registry's cache on a server that has answered before.
+const PLATFORMS = new Map<string, Platform>([
+  ['sleekdrops', fixturePlatform('sleekdrops')],
+  [
+    'peakodds',
+    fixturePlatform('peakodds', {
+      name: 'PeakOdds',
+      categories: ['AFL', 'NRL'],
+      postTypes: ['preview', 'guide'],
+      monetisation: 'none',
+      blockedTopics: ['racing'],
+    }),
+  ],
+]);
+const app = createApp({
+  loadPlatform: async (id) => {
+    const platform = PLATFORMS.get(id);
+    if (!platform) throw new UnknownPlatformError(`unknown platform: ${id}`);
+    return platform;
+  },
+});
+// Every admin call names its platform, exactly as the panel sends it.
+const AUTH = { Authorization: 'Bearer test-admin-token', [PLATFORM_HEADER]: 'sleekdrops' };
 const CLIENT_TRACE_ID = '0199b3e7c2f97c9aa4b1d2e3f4a5b6c7';
 
 /** Drive one request and collect the JSON log lines it wrote to stdout/stderr. */
@@ -175,7 +240,196 @@ test('the CORS preflight lets X-Trace-Id through and back', async () => {
   const exposed = res.headers.get('Access-Control-Expose-Headers') ?? '';
   assert.match(allowed, new RegExp(TRACE_HEADER, 'i'));
   assert.match(allowed, /Authorization/i);
+  assert.match(allowed, new RegExp(PLATFORM_HEADER, 'i'));
   assert.match(exposed, new RegExp(TRACE_HEADER, 'i'));
+});
+
+// ── Platform scoping ────────────────────────────────────────────────────────
+// Every admin route answers for exactly one platform, named in X-Platform.
+
+const BEARER = { Authorization: 'Bearer test-admin-token' };
+
+test('an admin call without X-Platform is refused, with no default platform', async () => {
+  for (const [method, path] of [
+    ['GET', '/api/overview'],
+    ['GET', '/api/topics'],
+    ['POST', '/api/topics/manual'],
+    ['GET', '/api/settings'],
+    ['GET', '/api/platform/profile'],
+    ['PUT', '/api/platform/profile'],
+    ['GET', '/api/platform/profile/versions'],
+  ]) {
+    const { res } = await call(path, { method, headers: BEARER });
+    assert.equal(res.status, 400, `${method} ${path}`);
+    assert.deepEqual(await res.json(), { error: 'X-Platform header is required' });
+  }
+});
+
+test('an empty X-Platform counts as missing', async () => {
+  const { res } = await call('/api/topics', { headers: { ...BEARER, [PLATFORM_HEADER]: '  ' } });
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'X-Platform header is required' });
+});
+
+test('an unknown platform is named in the refusal', async () => {
+  const { res } = await call('/api/topics', { headers: { ...BEARER, [PLATFORM_HEADER]: 'nope' } });
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'unknown platform: nope' });
+});
+
+test('a bad token is still a 401 before the platform is looked at', async () => {
+  const { res } = await call('/api/topics', { headers: { [PLATFORM_HEADER]: 'nope' } });
+
+  assert.equal(res.status, 401);
+  assert.deepEqual(await res.json(), { error: 'unauthorized' });
+});
+
+test('health and the platform list answer without X-Platform', async () => {
+  for (const path of ['/api/health', '/api/platforms']) {
+    const { res } = await call(path, { headers: BEARER });
+    // The database is unreachable here, so neither is a 200 - but neither is
+    // the 400 a scoped route gives.
+    assert.notEqual(res.status, 400, path);
+  }
+});
+
+/** A manual topic exactly as the drawer posts it. */
+function manualTopic(platform: string, body: Record<string, unknown>): RequestInit {
+  return {
+    method: 'POST',
+    headers: { ...BEARER, [PLATFORM_HEADER]: platform, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  };
+}
+
+test('a manual topic must name one of its platform\'s editions', async () => {
+  for (const edition_id of [undefined, 'global']) {
+    const { res } = await call(
+      '/api/topics/manual',
+      manualTopic('sleekdrops', { title: 'Best robot vacuums', edition_id }),
+    );
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: 'edition_id must be one of: au' });
+  }
+});
+
+test('a manual topic is checked against its platform\'s categories and post types', async () => {
+  const category = await call(
+    '/api/topics/manual',
+    manualTopic('peakodds', { title: 'Grand final preview', edition_id: 'au', category: 'Tech' }),
+  );
+  assert.equal(category.res.status, 400);
+  assert.deepEqual(await category.res.json(), { error: 'category must be one of: AFL, NRL' });
+
+  const postType = await call(
+    '/api/topics/manual',
+    manualTopic('sleekdrops', { title: 'Best robot vacuums', edition_id: 'au', post_type: 'preview' }),
+  );
+  assert.equal(postType.res.status, 400);
+  assert.deepEqual(await postType.res.json(), { error: 'post_type must be one of: article, guide' });
+});
+
+test('a manual topic\'s event time must carry an offset', async () => {
+  const { res } = await call(
+    '/api/topics/manual',
+    manualTopic('peakodds', {
+      title: 'Grand final preview',
+      edition_id: 'au',
+      event_starts_at: '2026-10-03T19:30:00',
+    }),
+  );
+  assert.equal(res.status, 400);
+  assert.match(((await res.json()) as { error: string }).error, /event_starts_at/);
+});
+
+test('a racing topic is refused on a platform that blocks racing', async () => {
+  for (const body of [
+    { title: 'Melbourne Cup tips', edition_id: 'au' },
+    { title: 'Tuesday big race', edition_id: 'au', instructions: 'Cover the Melbourne Cup field' },
+  ]) {
+    const { res } = await call('/api/topics/manual', manualTopic('peakodds', body));
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: 'racing topics are not covered on PeakOdds' });
+  }
+});
+
+/** A profile save exactly as the editor sends it. */
+function profilePut(body: unknown): RequestInit {
+  return {
+    method: 'PUT',
+    headers: { ...AUTH, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  };
+}
+
+const EDITABLE = {
+  brand_text: 'SleekDrops brand',
+  audience: 'Australian shoppers',
+  editorial_rules: 'Be accurate.',
+  agent_goals: { write: 'Write tight.' },
+  scout_queries: ['best gadgets'],
+  editions: [{ id: 'au', scout_queries: [], compliance_footer: '' }],
+};
+
+test('a profile save that is not the contracted shape is refused before anything is written', async () => {
+  const cases: Array<[unknown, RegExp]> = [
+    [null, /base_version/],
+    [{ author: 'Ana', profile: EDITABLE }, /base_version/],
+    [{ base_version: 1, author: '  ', profile: EDITABLE }, /author/],
+    [{ base_version: 1, author: 'x'.repeat(101), profile: EDITABLE }, /author/],
+    [{ base_version: 1, author: 'Ana', profile: { ...EDITABLE, brand_text: ' ' } }, /brand_text/],
+    [{ base_version: 1, author: 'Ana', profile: { ...EDITABLE, scout_queries: 'one' } }, /scout_queries/],
+  ];
+  for (const [body, error] of cases) {
+    const { res } = await call('/api/platform/profile', profilePut(body));
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.match(((await res.json()) as { error: string }).error, error);
+  }
+});
+
+test('a profile save naming an unknown agent is refused', async () => {
+  const { res } = await call(
+    '/api/platform/profile',
+    profilePut({ base_version: 1, author: 'Ana', profile: { ...EDITABLE, agent_goals: { publish: 'x' } } }),
+  );
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'unknown agent id: publish' });
+});
+
+test('a profile save naming another platform\'s edition is refused', async () => {
+  const { res } = await call(
+    '/api/platform/profile',
+    profilePut({
+      base_version: 1,
+      author: 'Ana',
+      profile: { ...EDITABLE, editions: [{ id: 'global', scout_queries: [], compliance_footer: '' }] },
+    }),
+  );
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'edition global does not belong to sleekdrops' });
+});
+
+test('a profile save cannot reach the fields that are not editable', async () => {
+  for (const extra of [{ categories: ['Crypto'] }, { monetisation: 'none' }, { blocked_topics: [] }]) {
+    const { res } = await call(
+      '/api/platform/profile',
+      profilePut({ base_version: 1, author: 'Ana', profile: { ...EDITABLE, ...extra } }),
+    );
+    assert.equal(res.status, 400);
+    assert.match(((await res.json()) as { error: string }).error, /not editable/);
+  }
+  const { res } = await call(
+    '/api/platform/profile',
+    profilePut({
+      base_version: 1,
+      author: 'Ana',
+      profile: { ...EDITABLE, editions: [{ ...EDITABLE.editions[0], time_zone: 'UTC' }] },
+    }),
+  );
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'profile.editions.0.time_zone not editable' });
 });
 
 // ── Hero image drop ─────────────────────────────────────────────────────────

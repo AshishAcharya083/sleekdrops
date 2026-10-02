@@ -377,7 +377,7 @@ test('a post deleted from D1 rebuilds the site when it is published again', { sk
   const removed = await app.fetch(
     new Request(`http://localhost/api/published/${row.slug}`, {
       method: 'DELETE',
-      headers: { Authorization: 'Bearer test-admin-token' },
+      headers: { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' },
     }),
   );
   assert.equal(removed.status, 200);

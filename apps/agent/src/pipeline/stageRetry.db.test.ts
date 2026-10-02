@@ -60,7 +60,7 @@ const modelSkip = credentialled
   : skip;
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 const realFetch = globalThis.fetch;
 
 after(async () => {

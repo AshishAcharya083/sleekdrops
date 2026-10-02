@@ -20,7 +20,7 @@ const reachable = await pool
 const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to run these';
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 /** Unique so the rows this file writes never collide with anything else. */
 const AGENT = `usage-test-${randomUUID()}`;
 const TODAY = 0;
