@@ -86,6 +86,8 @@ export type ChannelStatus = 'active' | 'disabled' | 'needs_reauth';
 /** A connected account, as the database holds it. Never a token value. */
 export interface ChannelConnectionRow {
   id: string;
+  /** The one platform this account posts for. Its queue only ever carries that platform's articles. */
+  platform_id: string;
   provider: string;
   external_account_id: string;
   display_name: string | null;
@@ -390,6 +392,8 @@ export class ProviderHoldError extends Error {
  */
 export interface DistributableArticle {
   id: string;
+  /** Whose channels, settings and site the article is distributed through. */
+  platform_id: string;
   slug: string | null;
   title: string;
   frontmatter: Record<string, unknown> | null;

@@ -32,7 +32,6 @@ import {
   llmSettings,
 } from '../../llm/index.js';
 import type { ChannelSpec } from './channels.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../../platform/sleekdrops/index.js';
 
 const log = createLogger('distribution');
 
@@ -52,6 +51,8 @@ export const HEADLINE_MAX_CHARS = 220;
 
 /** What the copy is written from. No draft, no dossier - a caption is not a piece. */
 export interface CopyRequest {
+  /** The platform posting it, whose `models` setting picks the model. */
+  platformId: string;
   title: string;
   dek: string;
   /** The query the piece was built to win, when the keyword stage named one. */
@@ -384,9 +385,9 @@ export function headlineBudget(spec: ChannelSpec, parts: Omit<CaptionParts, 'hea
  * because there is no agent session to fail: an engine that is not configured
  * takes the fallback rung rather than stopping a post.
  */
-export async function socialCopyModel(): Promise<string> {
-  const settings = await llmSettings();
-  const overrides = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'models', {});
+export async function socialCopyModel(platformId: string): Promise<string> {
+  const settings = await llmSettings(platformId);
+  const overrides = await getSetting<Record<string, string>>(platformId, 'models', {});
   if (overrides.social) return overrides.social;
   return (settings.prose_engine ?? 'claude') === 'claude'
     ? defaultClaudeModel(settings)
@@ -428,7 +429,8 @@ function copyPrompt(request: CopyRequest, complaint?: string): string {
 /** The real writer. One completion per attempt, warm enough to vary on a retry. */
 export const modelWriter: CopyWriter = async (request, complaint) => {
   const result = await chat({
-    model: await socialCopyModel(),
+    platformId: request.platformId,
+    model: await socialCopyModel(request.platformId),
     system: COPY_SYSTEM,
     prompt: copyPrompt(request, complaint),
     temperature: 0.8,

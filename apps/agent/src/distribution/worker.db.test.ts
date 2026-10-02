@@ -2,8 +2,9 @@
 // the retry policy, and what a failure is allowed to write down.
 //
 // No network is involved. The provider is a stub registered under a name
-// unique to each test, so a claim here can never take a concurrent suite's
-// work, and the page fetcher is injected.
+// unique to each test, and the page fetcher is injected. A concurrent suite's
+// enqueue still fans out over this file's active channels, so every claim here
+// skips past items that are not the test's own.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -108,6 +109,7 @@ async function article(): Promise<DistributableArticle> {
   articles.push(row.id);
   return {
     id: row.id,
+    platform_id: 'sleekdrops',
     slug: row.slug,
     title: TITLE,
     frontmatter,
@@ -116,11 +118,24 @@ async function article(): Promise<DistributableArticle> {
   };
 }
 
+/**
+ * Claim for `provider` until this test's own item comes up or nothing is due.
+ * A connection is active for the whole test, so a concurrent suite's enqueue
+ * can land an item on it, and a claim may hand that one back first.
+ */
+async function claimOwn(provider: string, slug: string): Promise<DistributionItem | null> {
+  for (;;) {
+    const claimed = await claimNextItem([provider]);
+    if (!claimed || claimed.slug === slug) return claimed;
+  }
+}
+
 /** Queue one article for one stub channel and claim it, as a tick would. */
 async function queued(provider: string): Promise<DistributionItem> {
   await connect(provider);
-  await enqueuePublishedArticle(await article(), { d1Status: 'published' });
-  const item = await claimNextItem([provider]);
+  const piece = await article();
+  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  const item = await claimOwn(provider, piece.slug!);
   assert.ok(item, 'the item was queued and due');
   return item;
 }
@@ -128,7 +143,7 @@ async function queued(provider: string): Promise<DistributionItem> {
 /** Make a released item due again, and take it back. */
 async function reclaim(item: DistributionItem, provider: string): Promise<DistributionItem> {
   await q('UPDATE distribution_queue SET scheduled_at = now() WHERE id = $1', [item.id]);
-  const again = await claimNextItem([provider]);
+  const again = await claimOwn(provider, item.slug);
   assert.ok(again, 'the item came back to the queue');
   return again;
 }
@@ -281,17 +296,18 @@ test('a token that lives only in settings is redacted too', { skip }, async () =
     throw new Error(`rejected credential ${accessToken}`);
   });
   await connect(provider.name, ref);
-  await enqueuePublishedArticle(await article(), { d1Status: 'published' });
+  const piece = await article();
+  await enqueuePublishedArticle(piece, { d1Status: 'published' });
 
-  await storeCredential(ref, secret);
+  await storeCredential('sleekdrops', ref, secret);
   try {
-    const item = (await claimNextItem([provider.name]))!;
+    const item = (await claimOwn(provider.name, piece.slug!))!;
     await processItem(item, { fetchPage: async () => livePage });
     const failed = (await getItem(item.id))!;
     assert.ok(!failed.lastError!.includes(secret));
     assert.match(failed.lastError!, /rejected credential \[redacted\]/);
   } finally {
-    await removeCredential(ref);
+    await removeCredential('sleekdrops', ref);
   }
 });
 
@@ -330,8 +346,9 @@ test('a degraded post with no note still says so', { skip }, async () => {
 test('a channel whose secret is configured nowhere stops asking', { skip }, async () => {
   const provider = stub(async () => ({ remotePostId: 'never' }));
   const connection = await connect(provider.name, 'a-secret-nobody-set');
-  await enqueuePublishedArticle(await article(), { d1Status: 'published' });
-  const item = (await claimNextItem([provider.name]))!;
+  const piece = await article();
+  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  const item = (await claimOwn(provider.name, piece.slug!))!;
 
   assert.equal(await processItem(item, { fetchPage: async () => livePage }), 'blocked');
   const [row] = await q<{ status: string }>('SELECT status FROM channel_connections WHERE id = $1', [
@@ -352,15 +369,16 @@ test('a token pasted into settings wins over the environment', { skip }, async (
     return { remotePostId: 'remote-settings' };
   });
   await connect(provider.name, ref);
-  await enqueuePublishedArticle(await article(), { d1Status: 'published' });
+  const piece = await article();
+  await enqueuePublishedArticle(piece, { d1Status: 'published' });
 
-  await storeCredential(ref, 'rotated-token-value');
+  await storeCredential('sleekdrops', ref, 'rotated-token-value');
   try {
-    const item = (await claimNextItem([provider.name]))!;
+    const item = (await claimOwn(provider.name, piece.slug!))!;
     assert.equal(await processItem(item, { fetchPage: async () => livePage }), 'posted');
     assert.deepEqual(seen, ['rotated-token-value']);
   } finally {
-    await removeCredential(ref);
+    await removeCredential('sleekdrops', ref);
   }
 });
 

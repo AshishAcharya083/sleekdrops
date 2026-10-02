@@ -26,13 +26,14 @@ import {
   ANTI_SLOP_RULES,
   authorVoiceBrief,
   editorialAngleBrief,
-  EDITORIAL_RULES,
   GEO_RULES,
   keywordPlanBrief,
-  LINK_PLACEMENT_RULES,
+  linkPlacementRules,
+  type PromptContext,
   SEO_RULES,
   siteContext,
   SOURCE_DISCIPLINE,
+  withAgentGoal,
 } from './context.js';
 import type { CorpusDocument } from '../content/corpus.js';
 import type { ArticleRow } from '../pipeline/types.js';
@@ -92,6 +93,7 @@ export function voiceScanBrief(draft: string, corpus: CorpusDocument[]): string 
 }
 
 export async function runEditor(
+  ctx: PromptContext,
   article: ArticleRow,
   model: string,
   tracker: UsageTracker,
@@ -99,7 +101,7 @@ export async function runEditor(
   const draft = article.draft_md ?? '';
   const feedback = article.feedback?.trim();
   const planBrief = keywordPlanBrief(article.keyword_plan);
-  const angleBrief = editorialAngleBrief(article.editorial_angle);
+  const angleBrief = editorialAngleBrief(article.editorial_angle, ctx.platform);
   // The edit pass gets the same single voice the writer had. Without it a
   // revision rounds the byline's rhythm off and every draft converges on the
   // house voice by the second pass, which undoes the point of having bylines.
@@ -121,17 +123,22 @@ export async function runEditor(
     .filter(Boolean);
 
   const result = await chat({
+    platformId: ctx.platform.id,
     model,
-    system: [
-      siteContext(),
-      EDITORIAL_RULES,
-      SOURCE_DISCIPLINE,
-      ANTI_SLOP_RULES,
-      LINK_PLACEMENT_RULES,
-      SEO_RULES,
-      GEO_RULES,
-      authorVoiceBrief(author),
-    ].join('\n\n'),
+    system: withAgentGoal(
+      ctx,
+      'edit',
+      [
+        siteContext(ctx),
+        ctx.platform.editorialRules,
+        SOURCE_DISCIPLINE,
+        ANTI_SLOP_RULES,
+        linkPlacementRules(ctx.edition),
+        SEO_RULES,
+        GEO_RULES,
+        authorVoiceBrief(author, ctx.platform),
+      ].join('\n\n'),
+    ),
     temperature: 0.4,
     prompt: `Revise this draft to resolve every issue below. Keep everything that already
 works — this is a surgical edit, not a rewrite. Never add facts that are not in

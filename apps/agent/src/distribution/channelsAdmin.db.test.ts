@@ -28,6 +28,9 @@ import type {
 } from './types.js';
 import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
+/** The site posts link to: SleekDrops' publish target. */
+const SITE = { siteUrl: 'https://sleekdrops.com' };
+
 const reachable = await pool
   .query('SELECT 1')
   .then(() => true)
@@ -54,7 +57,7 @@ after(async () => {
       [connections, registered],
     );
     await q('DELETE FROM articles WHERE id = ANY($1)', [articles]);
-    for (const ref of refs) await removeCredential(ref);
+    for (const ref of refs) await removeCredential('sleekdrops', ref);
     for (const name of registered) await q('DELETE FROM settings WHERE key = $1', [`${name}_link_placement`]);
   }
   await pool.end();
@@ -235,14 +238,18 @@ test('a stored token_ref naming a platform secret resolves to nothing', { skip }
   );
   connections.push(connection.id);
 
-  assert.equal(await resolveCredential('admin-token', provider), null);
-  assert.equal(await resolveCredential('database-url', provider), null);
+  assert.equal(await resolveCredential('sleekdrops', 'admin-token', provider), null);
+  assert.equal(await resolveCredential('sleekdrops', 'database-url', provider), null);
   const mine = (await channelsList()).find((channel) => channel.id === connection.id)!;
   assert.deepEqual(mine.credential, { stored: false, source: null });
 
   const ref = `channel-${provider}`;
   process.env[ref.toUpperCase().replace(/[^A-Z0-9]+/g, '_')] = 'channel-scoped-secret';
-  assert.equal(await resolveCredential(ref, provider), 'channel-scoped-secret', 'CHANNEL_ is reserved for channels');
+  assert.equal(
+    await resolveCredential('sleekdrops', ref, provider),
+    'channel-scoped-secret',
+    'CHANNEL_ is reserved for channels',
+  );
 });
 
 test('a secret name another account already uses is refused, not overwritten', { skip }, async () => {
@@ -422,6 +429,7 @@ async function article(): Promise<DistributableArticle> {
   articles.push(row.id);
   return {
     id: row.id,
+    platform_id: 'sleekdrops',
     slug: row.slug,
     title: 'A quiet commute',
     frontmatter,
@@ -451,7 +459,7 @@ async function queueOn(
       piece.slug,
       connectionId,
       provider,
-      JSON.stringify(renderPayload(piece, provider, 'first_comment')),
+      JSON.stringify(renderPayload(piece, SITE, provider, 'first_comment')),
     ],
   );
   return row.id;
@@ -746,7 +754,7 @@ test('a provider hold writes its reason onto the row', { skip }, async () => {
   );
   const ref = `${provider}-hold`;
   refs.push(ref);
-  await storeCredential(ref, token);
+  await storeCredential('sleekdrops', ref, token);
   // Disabled for the same reason as populatedChannel; processItem is handed
   // the item directly, so it never goes through a claim.
   const [connection] = await q<{ id: string }>(

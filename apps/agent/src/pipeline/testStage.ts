@@ -10,6 +10,7 @@ import { q } from '../db/pool.js';
 import { withDeadline } from '../lib/deadline.js';
 import { runAngleEditor } from '../agents/angleEditor.js';
 import { runAssembler } from '../agents/assembler.js';
+import { type PromptContext, resolvePromptContext } from '../agents/context.js';
 import { runEditor } from '../agents/editor.js';
 import { runImageAgent } from '../agents/imageAgent.js';
 import { runKeywordStrategist } from '../agents/keywordStrategist.js';
@@ -23,7 +24,6 @@ import { parseStageParam, type StageParse } from './retry.js';
 import { modelFor, NO_LLM_AGENTS, STAGE_AGENT } from './runner.js';
 import { scrubSecrets, stageBudgetSeconds, stageTimeoutError } from './stageTimeout.js';
 import { StageTimeoutError, type ArticleRow, type Stage, type TopicRow } from './types.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 export interface TestStageResult {
   sessionId: string;
@@ -72,6 +72,7 @@ export type StageCall = (
   stage: Stage,
   model: string | null,
   tracker: UsageTracker,
+  ctx: PromptContext,
 ) => Promise<unknown>;
 
 const callAgent: StageCall = async function (
@@ -79,26 +80,27 @@ const callAgent: StageCall = async function (
   stage: Stage,
   model: string | null,
   tracker: UsageTracker,
+  ctx: PromptContext,
 ): Promise<unknown> {
   switch (stage) {
     case 'research':
-      return runResearcher(article, await topicFor(article), model!, tracker);
+      return runResearcher(ctx, article, await topicFor(article), model!, tracker);
     case 'keyword':
-      return runKeywordStrategist(article, await topicFor(article), model!, tracker);
+      return runKeywordStrategist(ctx, article, await topicFor(article), model!, tracker);
     case 'angle':
-      return runAngleEditor(article, await topicFor(article), model!, tracker);
+      return runAngleEditor(ctx, article, await topicFor(article), model!, tracker);
     case 'outline':
-      return runOutliner(article, model!, tracker);
+      return runOutliner(ctx, article, model!, tracker);
     case 'write':
-      return runWriter(article, await topicFor(article), model!, tracker);
+      return runWriter(ctx, article, await topicFor(article), model!, tracker);
     case 'seo_review':
-      return runSeoReviewer(article, model!, tracker);
+      return runSeoReviewer(ctx, article, model!, tracker);
     case 'edit':
-      return runEditor(article, model!, tracker);
+      return runEditor(ctx, article, model!, tracker);
     case 'assemble':
-      return runAssembler(article);
+      return runAssembler(ctx, article);
     case 'image':
-      return runImageAgent(article, model!);
+      return runImageAgent(ctx, article, model!);
     default:
       // publish and done are refused before this is reached.
       throw new Error(UNTESTABLE_STAGE_ERROR);
@@ -133,7 +135,7 @@ async function recordSession(
       tracker.tokensOutput,
       tracker.costUsd,
       tracker.llmCalls,
-      SLEEKDROPS_PLATFORM_ID,
+      article.platform_id,
     ],
   );
   return session.id;
@@ -172,8 +174,12 @@ export async function runTestStage(
   const startedAt = Date.now();
 
   let model: string | null = null;
+  let ctx: PromptContext;
   try {
-    model = NO_LLM_AGENTS.has(agent) ? null : await modelFor(agent);
+    // The article's own platform and edition: the agent is told what the
+    // pipeline would tell it, and an unknown platform fails before any spend.
+    ctx = await resolvePromptContext(article.platform_id, article.edition_id);
+    model = NO_LLM_AGENTS.has(agent) ? null : await modelFor(agent, article.platform_id);
   } catch (err) {
     const failure = scrubbedFailure(err);
     await recordSession(
@@ -193,7 +199,7 @@ export async function runTestStage(
   try {
     const output = await withDeadline(
       budgetSeconds * 1000,
-      () => withLlmCallTrace(trace, () => call(article, stage, model, tracker)),
+      () => withLlmCallTrace(trace, () => call(article, stage, model, tracker, ctx)),
       () =>
         stageTimeoutError({
           agent,

@@ -4,15 +4,15 @@
 // 018 writes the same values to the `platforms` row; after that the database
 // copy is the one that is edited and versioned.
 import type { POST_TYPES } from '../../content/contract.js';
-import type { ArticleShape } from '../../pipeline/types.js';
 import type { PlatformSeed } from '../types.js';
 
 export const SLEEKDROPS_PLATFORM_ID = 'sleekdrops';
 
-// Typed against the catalogues so a renamed or removed id fails the build
-// rather than a prompt.
+// Typed against the post type ids so a renamed or removed one fails the build
+// rather than a prompt. Shape ids are checked against SHAPE_CATALOGUE instead:
+// getArticleShapes throws on one the catalogue does not have.
 const POST_TYPE_IDS: Array<(typeof POST_TYPES)[number]> = ['article', 'guide', 'roundup'];
-const ARTICLE_SHAPE_IDS: ArticleShape[] = [
+const ARTICLE_SHAPE_IDS: string[] = [
   'verdict-first',
   'segmented-buyers',
   'head-to-head',

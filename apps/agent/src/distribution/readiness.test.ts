@@ -9,7 +9,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.DATABASE_URL = 'postgres://unused:unused@127.0.0.1:1/unreachable';
-process.env.SITE_URL = 'https://sleekdrops.com';
 
 const {
   checkReadiness,
@@ -19,6 +18,9 @@ const {
 } = await import('./readiness.js');
 
 import type { RenderedPayload } from './types.js';
+
+/** The page being checked; a relative og:image is read against it. */
+const PAGE = 'https://sleekdrops.com/blog/quiet-commutes';
 
 const expected: RenderedPayload['expected'] = {
   ogTitle: 'The headphones for a quiet commute',
@@ -43,11 +45,11 @@ function page(
 }
 
 test('the gate opens on the published page, site-name suffix and all', () => {
-  assert.deepEqual(evaluateReadiness({ status: 200, body: page() }, expected), { ready: true });
+  assert.deepEqual(evaluateReadiness({ status: 200, body: page() }, expected, PAGE), { ready: true });
 });
 
 test('a slug the rebuild has not reached yet is not ready', () => {
-  const result = evaluateReadiness({ status: 404, body: '<html>Not found</html>' }, expected);
+  const result = evaluateReadiness({ status: 404, body: '<html>Not found</html>' }, expected, PAGE);
   assert.deepEqual(result, { ready: false, reason: 'HTTP 404' });
 });
 
@@ -55,19 +57,21 @@ test('a stale build still serving the previous piece is not ready', () => {
   const result = evaluateReadiness(
     { status: 200, body: page({ title: 'The last thing we published | SleekDrops' }) },
     expected,
+    PAGE,
   );
   assert.equal(result.ready, false);
   assert.match(result.ready ? '' : result.reason, /og:title is still "The last thing we published/);
 });
 
 test('the hero the post was rendered against has to be the hero the page serves', () => {
-  const missing = evaluateReadiness({ status: 200, body: page({ image: null }) }, expected);
+  const missing = evaluateReadiness({ status: 200, body: page({ image: null }) }, expected, PAGE);
   assert.equal(missing.ready, false);
   assert.match(missing.ready ? '' : missing.reason, /no og:image/);
 
   const other = evaluateReadiness(
     { status: 200, body: page({ image: 'https://storage.googleapis.com/images/heroes/old.png' }) },
     expected,
+    PAGE,
   );
   assert.equal(other.ready, false);
 
@@ -76,6 +80,7 @@ test('the hero the post was rendered against has to be the hero the page serves'
     evaluateReadiness(
       { status: 200, body: page({ image: `${expected.ogImage}?v=2` }) },
       expected,
+      PAGE,
     ),
     { ready: true },
   );
@@ -86,6 +91,7 @@ test('an article with no hero waits only on its title', () => {
     evaluateReadiness(
       { status: 200, body: page({ image: null }) },
       { ogTitle: expected.ogTitle, ogImage: null },
+      PAGE,
     ),
     { ready: true },
   );
@@ -96,6 +102,7 @@ test('an escaped headline is compared as a reader sees it', () => {
   const result = evaluateReadiness(
     { status: 200, body: page({ title: `${title} | SleekDrops` }) },
     { ogTitle: 'Sony & Bose, tested — the 7:12 verdict', ogImage: null },
+    PAGE,
   );
   assert.deepEqual(result, { ready: true });
 });
@@ -113,6 +120,7 @@ test('a headline with an apostrophe still opens the gate', () => {
     evaluateReadiness(
       { status: 200, body: page({ title: `${title} | SleekDrops`, image: null }) },
       { ogTitle: title, ogImage: null },
+      PAGE,
     ),
     { ready: true },
   );
@@ -126,6 +134,7 @@ test('a literal angle bracket in a headline does not hide the tag', () => {
     evaluateReadiness(
       { status: 200, body: page({ title: `${title} | SleekDrops`, image: null }) },
       { ogTitle: title, ogImage: null },
+      PAGE,
     ),
     { ready: true },
   );
@@ -140,13 +149,13 @@ test('the tag is matched on its property, not on its position', () => {
     '<meta property="og:description" content="Four weeks on the 7:12, ranked." />',
   ].join('\n');
   assert.deepEqual(
-    evaluateReadiness({ status: 200, body }, { ogTitle: 'The real headline', ogImage: null }),
+    evaluateReadiness({ status: 200, body }, { ogTitle: 'The real headline', ogImage: null }, PAGE),
     { ready: true },
   );
 });
 
 test('a page with no meta tags at all is not mistaken for a rendered one', () => {
-  const result = evaluateReadiness({ status: 200, body: '<html><body>ok</body></html>' }, expected);
+  const result = evaluateReadiness({ status: 200, body: '<html><body>ok</body></html>' }, expected, PAGE);
   assert.deepEqual(result, { ready: false, reason: 'page serves no og:title yet' });
 });
 
@@ -169,4 +178,14 @@ test('the window covers a slow rebuild and then gives up', () => {
     READINESS_WINDOW_SECONDS >= 180,
     'the window has to cover a rebuild that queued behind another one',
   );
+});
+
+test("a relative hero is read against the page's own site, not another platform's", () => {
+  const relative = { ogTitle: expected.ogTitle, ogImage: '/heroes/grand-final.png' };
+  const body = page({ image: 'https://peakodds.example/heroes/grand-final.png' });
+  assert.deepEqual(
+    evaluateReadiness({ status: 200, body }, relative, 'https://peakodds.example/blog/grand-final'),
+    { ready: true },
+  );
+  assert.equal(evaluateReadiness({ status: 200, body }, relative, PAGE).ready, false);
 });

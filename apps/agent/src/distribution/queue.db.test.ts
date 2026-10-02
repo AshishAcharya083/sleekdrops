@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
+process.env.SITE_URL = 'https://sleekdrops.com';
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
@@ -88,6 +89,7 @@ async function article(): Promise<DistributableArticle> {
   articles.push(row.id);
   return {
     id: row.id,
+    platform_id: 'sleekdrops',
     slug: row.slug,
     title: 'The headphones for a quiet commute',
     frontmatter: {

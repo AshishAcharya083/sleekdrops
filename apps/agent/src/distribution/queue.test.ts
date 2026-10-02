@@ -4,7 +4,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.DATABASE_URL = 'postgres://unused:unused@127.0.0.1:1/unreachable';
-process.env.SITE_URL = 'https://sleekdrops.com';
 
 const {
   describeEnqueue,
@@ -23,9 +22,13 @@ const { credentialEnvName, isChannelTokenRef, tokenStaleness, TOKEN_STALE_WINDOW
 
 import type { DistributableArticle } from './types.js';
 
+/** The site every URL below is built on: a platform's own publish target. */
+const SITE = { siteUrl: 'https://sleekdrops.com' };
+
 function article(fields: Partial<DistributableArticle> = {}): DistributableArticle {
   return {
     id: '00000000-0000-0000-0000-000000000001',
+    platform_id: 'sleekdrops',
     slug: 'quiet-commutes',
     title: 'The headphones for a quiet commute',
     frontmatter: {
@@ -61,7 +64,7 @@ test('retries are bounded, so a queue item cannot spin forever', () => {
 // ── The rendered payload ───────────────────────────────────────────────────
 
 test('the destination is tagged per network and per placement', () => {
-  const url = new URL(taggedUrl('quiet-commutes', 'facebook', 'first_comment'));
+  const url = new URL(taggedUrl(SITE, 'quiet-commutes', 'facebook', 'first_comment'));
   assert.equal(url.origin + url.pathname, 'https://sleekdrops.com/blog/quiet-commutes');
   assert.equal(url.searchParams.get('utm_source'), 'facebook');
   assert.equal(url.searchParams.get('utm_medium'), 'social');
@@ -70,14 +73,26 @@ test('the destination is tagged per network and per placement', () => {
   // comment link a network rendered as unclickable text - is invisible from
   // the API side and only shows up as referrals that never arrive.
   assert.equal(
-    new URL(taggedUrl('quiet-commutes', 'facebook', 'in_body')).searchParams.get('utm_content'),
+    new URL(taggedUrl(SITE, 'quiet-commutes', 'facebook', 'in_body')).searchParams.get('utm_content'),
     'in_body',
   );
-  assert.equal(articleUrl('quiet-commutes'), 'https://sleekdrops.com/blog/quiet-commutes');
+  assert.equal(articleUrl(SITE, 'quiet-commutes'), 'https://sleekdrops.com/blog/quiet-commutes');
+});
+
+test("a payload links to the article's own platform's site, never another's", () => {
+  const peakOdds = { siteUrl: 'https://peakodds.example' };
+  const payload = renderPayload(
+    article({ platform_id: 'peakodds', slug: 'grand-final-preview' }),
+    peakOdds,
+    'facebook',
+    'in_body',
+  );
+  assert.equal(new URL(payload.url).origin, 'https://peakodds.example');
+  assert.ok(!payload.caption.includes('sleekdrops.com'));
 });
 
 test('a hero we generated may be uploaded; one we found may not', () => {
-  const generated = renderPayload(article(), 'facebook', 'first_comment');
+  const generated = renderPayload(article(), SITE, 'facebook', 'first_comment');
   assert.equal(
     generated.imageUrl,
     'https://storage.googleapis.com/images/heroes/quiet-commutes.png',
@@ -85,7 +100,7 @@ test('a hero we generated may be uploaded; one we found may not', () => {
   assert.equal(generated.imageSource, 'generated');
 
   for (const source of ['found', 'operator'] as const) {
-    const payload = renderPayload(article({ hero_image_source: source }), 'facebook', 'in_body');
+    const payload = renderPayload(article({ hero_image_source: source }), SITE, 'facebook', 'in_body');
     assert.equal(payload.imageUrl, null, `a ${source} hero is not ours to sublicense`);
     assert.equal(payload.imageSource, source, 'the provenance still travels, so a ladder can act');
   }
@@ -94,6 +109,7 @@ test('a hero we generated may be uploaded; one we found may not', () => {
 test('an article with no hero at all reports no provenance', () => {
   const payload = renderPayload(
     article({ frontmatter: { title: 'No hero here' }, hero_image_source: 'generated' }),
+    SITE,
     'facebook',
     'first_comment',
   );
@@ -103,17 +119,17 @@ test('an article with no hero at all reports no provenance', () => {
 });
 
 test('the link is in the caption only when the placement asks for it', () => {
-  const inBody = renderPayload(article(), 'facebook', 'in_body');
+  const inBody = renderPayload(article(), SITE, 'facebook', 'in_body');
   assert.ok(inBody.caption.includes(inBody.url), 'in_body carries the link in the post');
 
-  const firstComment = renderPayload(article(), 'facebook', 'first_comment');
+  const firstComment = renderPayload(article(), SITE, 'facebook', 'first_comment');
   assert.ok(!firstComment.caption.includes('https://'), 'first_comment keeps the caption clean');
   assert.equal(firstComment.commentText, firstComment.url);
   assert.ok(firstComment.caption.startsWith('The headphones for a quiet commute'));
 });
 
 test('the readiness expectation is the live page contract, not the caption', () => {
-  const payload = renderPayload(article(), 'facebook', 'first_comment');
+  const payload = renderPayload(article(), SITE, 'facebook', 'first_comment');
   assert.equal(payload.expected.ogTitle, 'The headphones for a quiet commute');
   assert.equal(
     payload.expected.ogImage,

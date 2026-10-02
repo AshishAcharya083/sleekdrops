@@ -1,10 +1,8 @@
 // Row shapes and inter-agent data contracts (the session.state equivalents).
 //
-// `StructureShape` is the structure library's record (content/shapes.ts),
-// imported under an alias because `ArticleShape` here is the id vocabulary the
-// angle stage picks from and the library's record is the body behind one of
-// those ids.
-import type { ArticleShape as StructureShape } from '../content/shapes.js';
+// `StructureShape` is the shape recorded on an article (content/shapes.ts):
+// the structure behind one of the catalogue's shape ids.
+import type { ShapeRecord as StructureShape } from '../content/shapes.js';
 import type { HeroImageSource } from '../distribution/types.js';
 
 export type { StructureShape };
@@ -251,6 +249,11 @@ export interface TopicSuggestion {
   keywords: string[];
   whyTrending: string;
   sources: string[];
+  /**
+   * When the event the piece previews starts (ISO 8601 with an offset). Only
+   * an event-bound topic carries one; it is what makes the piece event-bound.
+   */
+  eventStartsAt?: string;
 }
 
 /**
@@ -337,6 +340,11 @@ export interface PriceObservation {
   /** YYYY-MM-DD the price was seen; null when the source gives no date. */
   dateChecked: string | null;
   sourceUrl: string;
+  /**
+   * When the price was read, to the minute (ISO 8601 with offset). Required on
+   * every price in an event-bound piece, where a price is stale within hours.
+   */
+  observedAt?: string;
 }
 
 /** A measured result somebody published, with who measured it and when. */
@@ -452,6 +460,18 @@ export interface EvidenceSufficiency {
   checkedAt: string;
 }
 
+/**
+ * Where an event-bound piece's start time came from: the time as the source
+ * states it, the page it was read on, and when it was read.
+ */
+export interface EventStartCitation {
+  /** ISO 8601 with offset. */
+  startsAt: string;
+  sourceUrl: string;
+  /** ISO 8601 with offset. */
+  observedAt: string;
+}
+
 export interface ResearchDossier {
   summary: string;
   facts: DossierFact[];
@@ -485,6 +505,8 @@ export interface ResearchDossier {
   faqIdeas: Array<{ question: string; answerHint: string }>;
   /** Stamped by the evidence gate at the end of research; absent on pre-gate dossiers. */
   sufficiency?: EvidenceSufficiency;
+  /** Set on an event-bound piece only: the cited start time of the event it previews. */
+  eventStart?: EventStartCitation;
 }
 
 /**
@@ -528,49 +550,6 @@ export interface KeywordPlan {
   rejected: Array<{ keyword: string; reason: string }>;
 }
 
-/**
- * The structural shapes a piece may take. The list exists to stop every
- * article on the site coming out of one skeleton: a "best X" guide that opens
- * with the winner and defends it is a different document from one that splits
- * by buyer, and a reader who reads two of ours should not feel the same
- * silhouette under both.
- *
- * The value is a one-line description because it is rendered straight into the
- * outliner's prompt - the shape has to arrive as an instruction, not as an id.
- */
-export const ARTICLE_SHAPES = {
-  'verdict-first':
-    'Open with the single pick and spend the piece defending it; every other contender is a counter-argument to answer.',
-  'segmented-buyers':
-    'One section per kind of buyer. The pick changes per segment and the piece says who each one is wrong for.',
-  'head-to-head':
-    'Two or three contenders argued against each other, axis by axis, on the things that actually decide it.',
-  'failure-led':
-    'Lead with what goes wrong and how long it takes to go wrong; the recommendation is whatever survives that.',
-  'cost-of-ownership':
-    'Lead with what the thing costs over its life - RRP, consumables, warranty, resale - and rank on that.',
-  'question-led':
-    'Walk the reader question chain in the order a buyer actually asks it, answering each before the next.',
-  'ranked-list':
-    'A ranked list with the scoring rationale stated - only when the SERP genuinely rewards a list and nothing else fits.',
-} as const;
-
-export type ArticleShape = keyof typeof ARTICLE_SHAPES;
-
-/**
- * A shape we actually publish. `Object.hasOwn`, not `in`: a record read back
- * out of JSONB carries whatever string is in the column, and `'constructor' in
- * ARTICLE_SHAPES` is true.
- */
-export function isArticleShape(value: unknown): value is ArticleShape {
-  return typeof value === 'string' && Object.hasOwn(ARTICLE_SHAPES, value);
-}
-
-/** The shape as an instruction, for a prompt or the panel. Empty when unknown. */
-export function describeArticleShape(shape: string): string {
-  return isArticleShape(shape) ? ARTICLE_SHAPES[shape] : '';
-}
-
 /** One thing this piece says that a named top-3 result does not, and its proof. */
 export interface InformationGain {
   /** The claim, in the piece's own words. */
@@ -609,8 +588,8 @@ export interface EditorialAngle {
   weakness: string;
   /** What we say that the top-3 results do not. */
   informationGain: InformationGain[];
-  /** The structural shape the piece takes, from ARTICLE_SHAPES. */
-  shape: ArticleShape;
+  /** The structural shape the piece takes: one of the platform's catalogue shape ids. */
+  shape: string;
   /** Why this shape beats the others for this thesis and this SERP. */
   shapeRationale: string;
   /** The beat voice the angle commissions this in - an id from the author registry. */

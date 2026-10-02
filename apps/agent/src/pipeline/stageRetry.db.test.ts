@@ -24,6 +24,8 @@ process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
 process.env.D1_DATABASE_ID = 'test-database';
 process.env.CLOUDFLARE_D1_TOKEN = 'test-token';
 process.env.GITHUB_TOKEN = 'test-token';
+process.env.GITHUB_REPO = 'example/sleekdrops';
+process.env.SITE_URL = 'https://sleekdrops.com';
 // A Claude credential would turn the genuine-failure case below into a live
 // model call from a test suite that must never make one.
 delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -105,6 +107,9 @@ async function insertPublishable(fields: Record<string, unknown> = {}): Promise<
     status: 'running',
     claimed_by: 'test-worker',
     claimed_at: new Date(),
+    // A running row with no live lease is lapsed to any other db test file's
+    // reaper, which would re-queue it before runStage's heartbeat starts.
+    lease_expires_at: new Date(Date.now() + 10 * 60_000),
     slug,
     draft_md: '# Best cordless stick vacuums\n\nA body.',
     frontmatter: JSON.stringify({ title: 'Best cordless stick vacuums', author: 'desk' }),

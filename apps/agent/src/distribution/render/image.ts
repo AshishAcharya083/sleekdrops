@@ -108,7 +108,7 @@ export async function resolveImage(
     return { imageUrl: null, imageSource, strategy: 'none', placement: 'in_body' };
   }
 
-  const render = deps.renderCard ?? ((prompt: string) => generateImage(prompt));
+  const render = deps.renderCard ?? ((prompt: string) => generateImage(article.platform_id, prompt));
   const upload = deps.uploadCard ?? uploadPublicImage;
   try {
     const card = await render(cardPrompt(article));

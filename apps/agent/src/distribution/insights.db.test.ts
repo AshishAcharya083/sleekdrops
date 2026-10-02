@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
+process.env.SITE_URL = 'https://sleekdrops.com';
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
@@ -418,7 +419,7 @@ test('placement is joined from the queue row, and a post counts once', { skip },
     postedSecondsAgo: INSIGHT_CHECKPOINT_SECONDS[0] + 60,
   });
 
-  const before = placementsByName(await placementPerformance());
+  const before = placementsByName(await placementPerformance('sleekdrops'));
   await insightsTick({ availableProviders: () => [provider] });
   // A second reading of the same two posts: lifetime counters, so the totals
   // must not double.
@@ -426,7 +427,7 @@ test('placement is joined from the queue row, and a post counts once', { skip },
     [comment, body],
   ]);
   await insightsTick({ availableProviders: () => [provider] });
-  const now = placementsByName(await placementPerformance());
+  const now = placementsByName(await placementPerformance('sleekdrops'));
 
   assert.equal((await metrics(comment)).length, 2, 'both readings are kept');
   for (const placement of ['first_comment', 'in_body'] as const) {
@@ -447,7 +448,7 @@ test('a reading that reports nothing does not lose what a post earned', { skip }
     postedSecondsAgo: INSIGHT_CHECKPOINT_SECONDS[0] + 60,
   });
 
-  const before = placementsByName(await placementPerformance());
+  const before = placementsByName(await placementPerformance('sleekdrops'));
   await insightsTick({ availableProviders: () => [provider] });
 
   snapshot = reading(null, null, null);
@@ -456,7 +457,7 @@ test('a reading that reports nothing does not lose what a post earned', { skip }
 
   assert.equal((await metrics(id)).length, 2);
   assert.deepEqual(
-    delta(before, placementsByName(await placementPerformance()), 'in_body'),
+    delta(before, placementsByName(await placementPerformance('sleekdrops')), 'in_body'),
     { posts: 1, impressions: 1_000, clicks: 50, reactions: 10 },
     'a later empty reading does not take the post out of its placement total',
   );
@@ -470,12 +471,12 @@ test('a post with no reported numbers is not counted in the comparison', { skip 
     postedSecondsAgo: INSIGHT_CHECKPOINT_SECONDS[0] + 60,
   });
 
-  const before = placementsByName(await placementPerformance());
+  const before = placementsByName(await placementPerformance('sleekdrops'));
   await insightsTick({ availableProviders: () => [provider] });
 
   assert.deepEqual(await metrics(id), [{ impressions: null, clicks: null, reactions: null }]);
   assert.deepEqual(
-    delta(before, placementsByName(await placementPerformance()), 'in_body'),
+    delta(before, placementsByName(await placementPerformance('sleekdrops')), 'in_body'),
     { posts: 0, impressions: 0, clicks: 0, reactions: 0 },
     'a post with no numbers is no evidence either way, so it is not in the comparison',
   );
