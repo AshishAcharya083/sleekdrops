@@ -21,6 +21,7 @@ import {
 } from './context.js';
 import type { TopicSuggestion } from '../pipeline/types.js';
 import { resolveD1Target } from '../platform/publishTarget.js';
+import { blockedTopicReason } from '../platform/topicRules.js';
 
 function normalizeTitle(title: string): string {
   return slugify(title);
@@ -121,6 +122,10 @@ export async function runTopicScout(
   for (const topic of suggestions.topics ?? []) {
     if (!topic?.title || !platform.categories.includes(topic.category)) continue;
     if (!postTypes.includes(topic.postType)) topic.postType = postTypes[0];
+    // A hard block, applied to what the model returned rather than trusted to
+    // the queries: a sweep broad enough to surface racing must still file none.
+    const subject = [topic.title, topic.angle ?? '', ...[topic.keywords ?? []].flat()].join('\n');
+    if (blockedTopicReason(platform, subject)) continue;
     // An event-bound suggestion is only as good as its start time: one that
     // cannot be read, or has already passed, would schedule a preview of
     // nothing, so the suggestion is dropped rather than filed undated.

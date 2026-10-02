@@ -26,6 +26,7 @@ import {
   validateArticle,
 } from '../content/contract.js';
 import { pageClaims, pickEvidence } from '../content/claims.js';
+import { appendComplianceFooter, complianceProblems, previewOddsAsAt } from '../content/compliance.js';
 import { offerLinkRow, pickOfferFrom } from '../content/offers.js';
 import { articleSources, stripUnresolvedCitations } from '../content/sources.js';
 import { productSearchTerm, verifyAmazonProductUrl } from '../tools/amazon.js';
@@ -42,6 +43,8 @@ export interface AssembledArticle {
   /** Slugs linked to an Amazon search built from the draft's own words. */
   healedSlugs: string[];
   droppedSlugs: string[];
+  /** For a preview, when the stalest price in its picks table was seen (ISO 8601); unset otherwise. */
+  oddsAsAt?: string;
 }
 
 /**
@@ -62,6 +65,21 @@ function uniqueEntities(entities: string[]): string[] {
     if (name) seen.add(name);
   }
   return [...seen];
+}
+
+const HEADLINE_FIELDS: Array<[key: string, name: string]> = [
+  ['title', 'title'],
+  ['dek', 'dek'],
+  ['tags', 'tags'],
+  ['heroAlt', 'hero alt text'],
+];
+
+function headlineComplianceProblems(frontmatter: Record<string, unknown>, ctx: PromptContext): string[] {
+  return HEADLINE_FIELDS.flatMap(([key, name]) => {
+    const value = frontmatter[key];
+    const text = Array.isArray(value) ? value.join(', ') : typeof value === 'string' ? value : '';
+    return text ? complianceProblems(text, ctx).map((problem) => `${name}: ${problem}`) : [];
+  });
 }
 
 export async function runAssembler(
@@ -303,7 +321,16 @@ export async function runAssembler(
   // Anything left is a genuine contract violation (schema, raw merchant URL,
   // non-approved merchant destination, a category or post type the platform
   // does not publish).
-  const problems = validateArticle(body, frontmatter, finalLinks, ctx.platform);
+  const problems = [
+    ...validateArticle(body, frontmatter, finalLinks, ctx.platform),
+    ...complianceProblems(body, ctx, {
+      postType: article.post_type,
+      sourceUrls: sources.map((source) => source.url),
+    }),
+    // The headline and dek are model-written too, and the most visible text
+    // on the page and in every distribution post.
+    ...headlineComplianceProblems(frontmatter, ctx),
+  ];
   if (problems.length > 0) {
     throw new Error(`assembly validation failed:\n- ${problems.join('\n- ')}`);
   }
@@ -330,5 +357,18 @@ export async function runAssembler(
     );
   }
 
-  return { frontmatter, affiliateLinks: finalLinks, body, offerSlugs, healedSlugs, droppedSlugs };
+  const oddsAsAt = article.post_type === 'preview' ? previewOddsAsAt(body) : null;
+  // Appended from the edition's data after every check, so no model ever
+  // writes - or gets to reword - the responsible-gambling notice.
+  body = appendComplianceFooter(body, ctx.edition);
+
+  return {
+    frontmatter,
+    affiliateLinks: finalLinks,
+    body,
+    offerSlugs,
+    healedSlugs,
+    droppedSlugs,
+    ...(oddsAsAt ? { oddsAsAt } : {}),
+  };
 }

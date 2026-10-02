@@ -2,10 +2,11 @@
 // database does not have yet.
 import { pool } from '../db/pool.js';
 import { clearPlatformCache } from './registry.js';
+import { peakoddsSeed } from './peakodds/index.js';
 import { sleekdropsSeed } from './sleekdrops/index.js';
 import type { PlatformSeed } from './types.js';
 
-export const PLATFORM_SEEDS: readonly PlatformSeed[] = [sleekdropsSeed];
+export const PLATFORM_SEEDS: readonly PlatformSeed[] = [sleekdropsSeed, peakoddsSeed];
 
 /** The editable part of a seed, as platform_profile_versions.profile records it. */
 function editableProfile({ platform, editions }: PlatformSeed) {
@@ -79,6 +80,12 @@ export async function seedPlatforms(): Promise<void> {
          )
          UPDATE platforms SET profile_version = (SELECT id FROM v) WHERE id = $1`,
         [p.id, JSON.stringify(editableProfile(seed))],
+      );
+      // A new platform has no channels connected yet, so it starts with distribution off.
+      await client.query(
+        `INSERT INTO settings (platform_id, key, value) VALUES ($1, 'distribution_enabled', 'false'::jsonb)
+         ON CONFLICT (platform_id, key) DO NOTHING`,
+        [p.id],
       );
     }
     await client.query('COMMIT');

@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 
 import { promptContextFromSeed, siteContext } from '../../agents/context.js';
 import { scoutQueries } from '../../agents/topicScout.js';
-import { SHAPE_CATALOGUE } from '../../content/catalogue.js';
+import { LIBRARY_SHAPES } from '../../content/shapeLibrary.js';
 import { BYLINE_NAME, CATEGORIES, HOME_CURRENCY, POST_TYPES } from '../../content/contract.js';
 import { PLATFORM_SEEDS } from '../profiles.js';
 import { SLEEKDROPS_PLATFORM_ID, sleekdropsSeed } from './index.js';
@@ -35,7 +35,7 @@ test('byline, categories, post types, shapes and scout queries are the current o
   assert.deepEqual(platform.postTypes, [...POST_TYPES]);
   assert.deepEqual(
     platform.articleShapes,
-    SHAPE_CATALOGUE.map((shape) => shape.id),
+    LIBRARY_SHAPES.map((shape) => shape.id),
   );
   const queries = scoutQueriesInSnapshot();
   assert.equal(queries.length, 6);
