@@ -397,6 +397,7 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
         draft_md: assembled.body,
         frontmatter: JSON.stringify(assembled.frontmatter),
         affiliate_links: JSON.stringify(assembled.affiliateLinks),
+        ...(assembled.oddsAsAt ? { odds_as_at: assembled.oddsAsAt } : {}),
       });
       summary = `frontmatter + ${assembled.affiliateLinks.length} affiliate link(s) validated${
         assembled.offerSlugs.length > 0

@@ -5,6 +5,7 @@
 // and platform.articleShapes are ids into these lists, in the order that
 // platform wants them offered.
 import { LIBRARY_SHAPES } from './shapeLibrary.js';
+import { PEAKODDS_POST_TYPES, PEAKODDS_SHAPES } from '../platform/peakodds/formats.js';
 import type { ArticleShape } from './shapes.js';
 import type { Platform } from '../platform/types.js';
 
@@ -24,9 +25,10 @@ export const POST_TYPE_CATALOGUE: readonly PostTypeDef[] = [
     description: '"best X for Y" buying guide, at least 1,500 words, at least 3 contenders.',
   },
   { id: 'roundup', description: '"Top N" listicle with clear scoring rationale.' },
+  ...PEAKODDS_POST_TYPES,
 ];
 
-export const SHAPE_CATALOGUE: readonly ArticleShape[] = [...LIBRARY_SHAPES];
+export const SHAPE_CATALOGUE: readonly ArticleShape[] = [...LIBRARY_SHAPES, ...PEAKODDS_SHAPES];
 
 /** The catalogue entry for every id, looked up in the order the platform lists them. */
 function select<T extends { id: string }>(

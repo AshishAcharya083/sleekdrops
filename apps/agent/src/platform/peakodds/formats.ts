@@ -7,7 +7,8 @@
 // parts, and none of them is here. The responsible-gambling footer is not a
 // section either: the assembler appends it from the edition's data, so no
 // model ever writes it.
-import type { CatalogueShape, PostTypeDef } from './contractTypes.js';
+import type { PostTypeDef } from '../../content/catalogue.js';
+import type { ArticleShape } from '../../content/shapes.js';
 
 /** The picks table header, column for column. `content/compliance.ts` rejects any other. */
 export const PICKS_TABLE_COLUMNS = ['Market', 'Selection', 'Indicative odds (decimal)', 'As at'] as const;
@@ -16,7 +17,7 @@ export const PEAKODDS_POST_TYPES: PostTypeDef[] = [
   {
     id: 'preview',
     description:
-      'preview: tips for an upcoming fixture, round or player/award market - a picks table with indicative decimal odds and the time each price was seen, the reasoning for each pick, and a hedged verdict. Event-bound: it expires at the start time.',
+      'tips for an upcoming fixture, round or player/award market - a picks table with indicative decimal odds and the time each price was seen, the reasoning for each pick, and a hedged verdict. Event-bound: it expires at the start time.',
   },
 ];
 
@@ -32,7 +33,7 @@ const VERDICT_PURPOSE =
 const NO_FOOTER_NOTE = `Do not write a responsible-gambling notice, a helpline or an 18+ line - the
 site appends the one for this edition to every article.`;
 
-export const PEAKODDS_SHAPES: CatalogueShape[] = [
+export const PEAKODDS_SHAPES: ArticleShape[] = [
   {
     id: 'match-preview',
     description:

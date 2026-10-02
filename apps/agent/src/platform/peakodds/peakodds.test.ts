@@ -12,7 +12,7 @@ import {
   NCPG_HELPLINE,
   NZ_GAMBLING_HELPLINE,
 } from './footers.js';
-import { shapeById } from '../../content/shapes.js';
+import { shapeById } from '../../content/catalogue.js';
 import type { AgentId } from '../types.js';
 
 const { platform, editions } = peakoddsSeed;
@@ -112,7 +112,7 @@ test('preview is the post type PeakOdds adds', () => {
     PEAKODDS_POST_TYPES.map((t) => t.id),
     ['preview'],
   );
-  assert.match(PEAKODDS_POST_TYPES[0].description, /^preview: /);
+  assert.match(PEAKODDS_POST_TYPES[0].description, /^tips for an upcoming fixture/);
 });
 
 test('every selected shape exists, new or reused', () => {

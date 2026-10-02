@@ -8,7 +8,7 @@ import {
   structureBrief,
 } from './shapes.js';
 import type { ArticleShape } from './shapes.js';
-import { getArticleShapes, SHAPE_CATALOGUE as SHAPES, shapeById } from './catalogue.js';
+import { getArticleShapes, POST_TYPE_CATALOGUE, SHAPE_CATALOGUE as SHAPES, shapeById } from './catalogue.js';
 import { promptContextFromSeed } from '../agents/context.js';
 import { sleekdropsSeed } from '../platform/sleekdrops/index.js';
 import type { EditorialAngle } from '../pipeline/types.js';
@@ -87,7 +87,7 @@ test('every shape satisfies its own invariants', () => {
     assert.ok(shape.postTypes.length > 0, `${shape.id} is offered for no post type`);
     for (const postType of shape.postTypes) {
       assert.ok(
-        (POST_TYPES as readonly string[]).includes(postType),
+        POST_TYPE_CATALOGUE.some((type) => type.id === postType),
         `${shape.id} is offered for unknown post type ${postType}`,
       );
     }
@@ -138,7 +138,7 @@ test('every post type is offered several shapes', () => {
 });
 
 test('an unknown post type still gets the whole library, not one default', () => {
-  assert.equal(shapesForPostType(platform, 'newsletter').length, SHAPES.length);
+  assert.equal(shapesForPostType(platform, 'newsletter').length, getArticleShapes(platform).length);
 });
 
 // --------------------------------------------------------------- selection
