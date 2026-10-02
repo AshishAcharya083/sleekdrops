@@ -26,7 +26,8 @@ const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to 
 if (reachable) await migrate();
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const PLATFORM = 'sleekdrops';
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': PLATFORM };
 const created: string[] = [];
 
 after(async () => {
@@ -43,11 +44,11 @@ async function seed(
   startedAt = '2000-01-01T00:00:00Z',
 ): Promise<string> {
   const [run] = await q<{ id: string }>(
-    `INSERT INTO scout_runs (status, started_at, claimed_at, heartbeat_at)
+    `INSERT INTO scout_runs (status, started_at, claimed_at, heartbeat_at, platform_id, edition_id)
      VALUES ($1, $2, CASE WHEN $1 = 'running' THEN now() ELSE NULL END,
-             now() - make_interval(mins => $3))
+             now() - make_interval(mins => $3), $4, 'au')
      RETURNING id`,
-    [status, startedAt, heartbeatMinutesAgo],
+    [status, startedAt, heartbeatMinutesAgo, PLATFORM],
   );
   created.push(run.id);
   return run.id;
@@ -63,7 +64,7 @@ async function statusOf(id: string): Promise<{ status: string; claimed_at: Date 
 
 test('POST /api/scout queues behind a live search instead of returning 409', { skip }, async () => {
   const running = await seed('running', 0);
-  const before = await scoutQueueStatus();
+  const before = await scoutQueueStatus(PLATFORM);
 
   const response = await app.fetch(
     new Request('http://localhost/api/scout', { method: 'POST', headers: AUTH }),
@@ -73,7 +74,7 @@ test('POST /api/scout queues behind a live search instead of returning 409', { s
   created.push(body.queued);
 
   assert.equal((await statusOf(body.queued)).status, 'queued');
-  const after = await scoutQueueStatus();
+  const after = await scoutQueueStatus(PLATFORM);
   assert.equal(after.running, before.running);
   assert.equal(after.queued, before.queued + 1);
 
@@ -85,21 +86,21 @@ test('a worker claims the oldest queued search and will not overlap a live one',
   const first = await seed('queued', 0, '1999-01-01T00:00:00Z');
   const second = await seed('queued', 0, '1999-01-02T00:00:00Z');
 
-  const claims = await Promise.all([claimNextScoutRun(), claimNextScoutRun()]);
-  assert.equal(claims.filter((id) => id === first).length, 1);
-  assert.equal(claims.filter((id) => id === null).length, 1);
+  const claims = await Promise.all([claimNextScoutRun(PLATFORM), claimNextScoutRun(PLATFORM)]);
+  assert.equal(claims.filter((run) => run?.id === first).length, 1);
+  assert.equal(claims.filter((run) => run === null).length, 1);
   assert.equal((await statusOf(first)).status, 'running');
   assert.ok((await statusOf(first)).claimed_at);
 
   await q("UPDATE scout_runs SET status = 'done', ended_at = now() WHERE id = $1", [first]);
-  assert.equal(await claimNextScoutRun(), second);
+  assert.equal((await claimNextScoutRun(PLATFORM))?.id, second);
   await q("UPDATE scout_runs SET status = 'done', ended_at = now() WHERE id = $1", [second]);
 });
 
 test('a stranded search is re-queued and its abandoned session is closed', { skip }, async () => {
   const stale = await seed('running', 31, '1998-01-01T00:00:00Z');
   await q(
-    "INSERT INTO agent_sessions (scout_run_id, agent) VALUES ($1, 'topic_scout')",
+    "INSERT INTO agent_sessions (platform_id, scout_run_id, agent) VALUES ('sleekdrops', $1, 'topic_scout')",
     [stale],
   );
 
@@ -122,13 +123,13 @@ test('recoverStranded includes topic-search jobs and a claimed job can heartbeat
   await recoverStranded();
   assert.equal((await statusOf(stale)).status, 'queued');
 
-  assert.equal(await claimNextScoutRun(), stale);
+  assert.equal((await claimNextScoutRun(PLATFORM))?.id, stale);
   assert.equal(await renewScoutHeartbeat(stale), true);
   await q("UPDATE scout_runs SET status = 'done', ended_at = now() WHERE id = $1", [stale]);
 });
 
 test('enqueueScoutRun uses the queued state by default', { skip }, async () => {
-  const id = await enqueueScoutRun();
+  const id = await enqueueScoutRun(PLATFORM, 'au');
   created.push(id);
   assert.equal((await statusOf(id)).status, 'queued');
 });

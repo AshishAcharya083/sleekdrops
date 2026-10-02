@@ -19,6 +19,9 @@ const { createApp } = await import('../api/server.js');
 const { runAssembler } = await import('./assembler.js');
 const { citedSourceIndexes } = await import('../content/sources.js');
 const { todayInSydney } = await import('../content/contract.js');
+const { promptContextFromSeed } = await import('./context.js');
+const { sleekdropsSeed } = await import('../platform/sleekdrops/index.js');
+const ctx = promptContextFromSeed(sleekdropsSeed, 'au');
 
 import type { ArticleRow, ContentBrief } from '../pipeline/types.js';
 
@@ -31,7 +34,7 @@ const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to 
 if (reachable) await migrate();
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 
 after(async () => {
   if (reachable) await pool.end();
@@ -101,8 +104,8 @@ const draft =
 
 async function insertArticle(): Promise<ArticleRow> {
   const [inserted] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, research, outline, draft_md)
-     VALUES ($1, 'Home', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, research, outline, draft_md)
+     VALUES ('sleekdrops', 'au', $1, 'Home', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
     [brief.seoTitle, JSON.stringify(research), JSON.stringify(brief), draft],
   );
   return inserted;
@@ -114,7 +117,7 @@ test('the researcher\'s tiers and dates reach the page, through both JSONB colum
   // runner hands the assembler is whatever Postgres returns.
   const [article] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [inserted.id]);
 
-  const assembled = await runAssembler(article);
+  const assembled = await runAssembler(ctx, article);
   await q('UPDATE articles SET draft_md = $2, frontmatter = $3 WHERE id = $1', [
     article.id,
     assembled.body,
@@ -148,7 +151,7 @@ test('the researcher\'s tiers and dates reach the page, through both JSONB colum
 test('the panel reads the sources and the review date back off the row', { skip }, async () => {
   const inserted = await insertArticle();
   const [article] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [inserted.id]);
-  const assembled = await runAssembler(article);
+  const assembled = await runAssembler(ctx, article);
   await q('UPDATE articles SET frontmatter = $2 WHERE id = $1', [
     article.id,
     JSON.stringify(assembled.frontmatter),
@@ -214,8 +217,8 @@ const launchResearch = {
 
 test('claims, the launch date and the review unit survive both JSONB columns', { skip }, async () => {
   const [inserted] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, research, outline, draft_md)
-     VALUES ($1, 'Tech', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, research, outline, draft_md)
+     VALUES ('sleekdrops', 'au', $1, 'Tech', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
     [
       'iPhone 18 Pro, four days in',
       JSON.stringify(launchResearch),
@@ -228,7 +231,7 @@ test('claims, the launch date and the review unit survive both JSONB columns', {
   // nobody has measured it" and "the field is missing", so they have to survive.
   assert.equal((article.research as { claims: Array<{ covers: unknown }> }).claims[0].covers, null);
 
-  const assembled = await runAssembler(article);
+  const assembled = await runAssembler(ctx, article);
   await q('UPDATE articles SET frontmatter = $2 WHERE id = $1', [
     article.id,
     JSON.stringify(assembled.frontmatter),
@@ -267,8 +270,8 @@ test('a launch link that is not http(s) never reaches the stored frontmatter', {
   // link - so a `javascript:` URL that reached the page would be a
   // click-to-execute href. The date is the record and still publishes.
   const [inserted] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, research, outline, draft_md)
-     VALUES ($1, 'Tech', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, research, outline, draft_md)
+     VALUES ('sleekdrops', 'au', $1, 'Tech', 'guide', 'assemble', 'running', $2, $3, $4) RETURNING *`,
     [
       'iPhone 18 Pro, four days in',
       JSON.stringify({
@@ -280,7 +283,7 @@ test('a launch link that is not http(s) never reaches the stored frontmatter', {
     ],
   );
   const [article] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [inserted.id]);
-  const assembled = await runAssembler(article);
+  const assembled = await runAssembler(ctx, article);
   await q('UPDATE articles SET frontmatter = $2 WHERE id = $1', [
     article.id,
     JSON.stringify(assembled.frontmatter),

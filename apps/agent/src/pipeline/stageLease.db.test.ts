@@ -80,9 +80,9 @@ const HOLDER = 'test-worker';
 
 async function claimedArticle(leaseSecondsFromNow = STAGE_LEASE_SECONDS): Promise<ArticleRow> {
   const [row] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, claimed_by, claimed_at,
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, claimed_by, claimed_at,
                            heartbeat_at, lease_expires_at, attempt, draft_md)
-     VALUES ('Lease test card', 'Tech', 'guide', 'assemble', 'running', 'test-worker', now(),
+     VALUES ('sleekdrops', 'au', 'Lease test card', 'Tech', 'guide', 'assemble', 'running', 'test-worker', now(),
              now(), now() + make_interval(secs => $1), 1, $2)
      RETURNING *`,
     [leaseSecondsFromNow, DRAFT],
@@ -172,10 +172,10 @@ test('no credential reaches a persisted error string', { skip }, async () => {
 test('a lease that stops being refreshed is re-queued on the tick, not on a restart', { skip }, async () => {
   const lapsed = await claimedArticle();
   const live = await claimedArticle(600);
-  await q("INSERT INTO agent_sessions (article_id, agent, status) VALUES ($1, 'assembler', 'running')", [
+  await q("INSERT INTO agent_sessions (platform_id, article_id, agent, status) VALUES ('sleekdrops', $1, 'assembler', 'running')", [
     lapsed.id,
   ]);
-  await q("INSERT INTO agent_sessions (article_id, agent, status) VALUES ($1, 'assembler', 'running')", [
+  await q("INSERT INTO agent_sessions (platform_id, article_id, agent, status) VALUES ('sleekdrops', $1, 'assembler', 'running')", [
     live.id,
   ]);
 
@@ -224,7 +224,7 @@ test('past its re-queue cap a lapsed claim fails, keeping the stage and draft fo
   const exhausted = await claimedArticle(-60);
   await q('UPDATE articles SET lease_requeues = 1 WHERE id = $1', [lastChance.id]);
   await q('UPDATE articles SET lease_requeues = 2 WHERE id = $1', [exhausted.id]);
-  await q("INSERT INTO agent_sessions (article_id, agent, status) VALUES ($1, 'assembler', 'running')", [
+  await q("INSERT INTO agent_sessions (platform_id, article_id, agent, status) VALUES ('sleekdrops', $1, 'assembler', 'running')", [
     exhausted.id,
   ]);
 
@@ -283,7 +283,7 @@ test('renewing a lease pushes it forward, and only for the claim that took it', 
 test('recoverStranded re-queues a lapsed claim at boot and leaves a live one alone', { skip }, async () => {
   const lapsed = await claimedArticle(-60);
   const live = await claimedArticle(600);
-  await q("INSERT INTO agent_sessions (article_id, agent, status) VALUES ($1, 'assembler', 'running')", [
+  await q("INSERT INTO agent_sessions (platform_id, article_id, agent, status) VALUES ('sleekdrops', $1, 'assembler', 'running')", [
     lapsed.id,
   ]);
 
@@ -314,7 +314,7 @@ test('boot recovery and the tick reaper reach the same state for the same lapsed
       requeues,
     ]);
     await q(
-      "INSERT INTO agent_sessions (article_id, agent, status) SELECT unnest($1::uuid[]), 'assembler', 'running'",
+      "INSERT INTO agent_sessions (platform_id, article_id, agent, status) SELECT 'sleekdrops', unnest($1::uuid[]), 'assembler', 'running'",
       [[byReaper.id, byBoot.id]],
     );
 
@@ -416,14 +416,14 @@ test('claiming an article takes its lease without spending an attempt', { skip }
   // Dated to the epoch so this row is the longest-waiting one in the table and
   // the claim is deterministic on a database shared with the other test files.
   const [queued] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, updated_at)
-     VALUES ('Lease claim test card', 'Tech', 'guide', 'research', 'queued', '1970-01-01')
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, updated_at)
+     VALUES ('sleekdrops', 'au', 'Lease claim test card', 'Tech', 'guide', 'research', 'queued', '1970-01-01')
      RETURNING *`,
   );
   created.push(queued.id);
   assert.equal(queued.attempt, 1, 'the first pipeline pass is attempt 1');
 
-  const claimed = await claimNext();
+  const claimed = await claimNext(['sleekdrops']);
 
   assert.equal(claimed?.id, queued.id, 'the longest-waiting queued article');
   assert.equal(claimed?.status, 'running');

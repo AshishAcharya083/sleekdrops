@@ -27,6 +27,7 @@ import { getSetting } from '../db/pool.js';
 import { noteLlmCall, noteLlmCallEnded } from './callTrace.js';
 import { geminiChat } from './gemini.js';
 import { claudeChat, CLAUDE_NOT_CONFIGURED, resolveClaudeCredential } from './claude.js';
+import { activeModelStub } from './modelStub.js';
 
 export { CLAUDE_NOT_CONFIGURED };
 
@@ -48,23 +49,24 @@ export interface LlmSettings {
   prose_engine?: 'claude' | 'gemini';
 }
 
-let llmCache: { value: LlmSettings; at: number } | null = null;
+const llmCache = new Map<string, { value: LlmSettings; at: number }>();
 
-/** Admin-settable LLM config, cached for 30s to spare the DB. */
-export async function llmSettings(): Promise<LlmSettings> {
-  if (llmCache && Date.now() - llmCache.at < 30_000) return llmCache.value;
-  const value = await getSetting<LlmSettings>('llm', {});
-  llmCache = { value, at: Date.now() };
+/** A platform's admin-settable LLM config, cached for 30s to spare the DB. */
+export async function llmSettings(platformId: string): Promise<LlmSettings> {
+  const cached = llmCache.get(platformId);
+  if (cached && Date.now() - cached.at < 30_000) return cached.value;
+  const value = await getSetting<LlmSettings>(platformId, 'llm', {});
+  llmCache.set(platformId, { value, at: Date.now() });
   return value;
 }
 
 /**
- * Drop the cache after an admin save. Without this, pasting a Claude token
- * leaves the engine reporting itself unconfigured — and the pipeline refusing
- * to start on it — for up to another 30 seconds.
+ * Drop every platform's cache after an admin save. Without this, pasting a
+ * Claude token leaves the engine reporting itself unconfigured — and the
+ * pipeline refusing to start on it — for up to another 30 seconds.
  */
 export function clearLlmSettingsCache(): void {
-  llmCache = null;
+  llmCache.clear();
 }
 
 export function defaultGeminiModel(s: LlmSettings): string {
@@ -80,8 +82,8 @@ export const isClaudeModel = (model: string): boolean =>
   model.replace(/^anthropic\//, '').startsWith('claude');
 
 /** True when the Claude engine has a usable credential (token or API key). */
-export async function claudeConfigured(): Promise<boolean> {
-  return (await resolveClaudeCredential(await llmSettings())) !== null;
+export async function claudeConfigured(platformId: string): Promise<boolean> {
+  return (await resolveClaudeCredential(await llmSettings(platformId))) !== null;
 }
 
 /** Where an engine's credential came from — reported, never the value itself. */
@@ -110,8 +112,8 @@ export interface EngineStatus {
  * Gemini and wrote `gemini-2.5-flash` into its session row. The panel now says
  * so before a single article is queued.
  */
-export async function engineStatus(): Promise<EngineStatus> {
-  const settings = await llmSettings();
+export async function engineStatus(platformId: string): Promise<EngineStatus> {
+  const settings = await llmSettings(platformId);
   const credential = resolveClaudeCredential(settings);
   return {
     claude: {
@@ -148,6 +150,8 @@ export interface LlmResult {
 }
 
 export interface ChatOptions {
+  /** The platform the call is made for: its engine settings and credentials answer it. */
+  platformId: string;
   model: string;
   system?: string;
   prompt: string;
@@ -185,7 +189,21 @@ export class UsageTracker {
 export const CHAT_ATTEMPTS = 3;
 
 export async function chat(opts: ChatOptions): Promise<LlmResult> {
-  const settings = await llmSettings();
+  const stub = activeModelStub();
+  if (stub) {
+    const text = await stub({
+      kind: 'chat',
+      model: opts.model,
+      system: opts.system,
+      prompt: opts.prompt,
+      temperature: opts.temperature,
+      maxTokens: opts.maxTokens,
+      jsonMode: opts.jsonMode,
+      search: opts.search,
+    });
+    return { text, usage: { tokensInput: 0, tokensOutput: 0, costUsd: 0 }, model: opts.model };
+  }
+  const settings = await llmSettings(opts.platformId);
   let lastError: unknown;
   for (let attempt = 0; attempt < CHAT_ATTEMPTS; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * attempt));

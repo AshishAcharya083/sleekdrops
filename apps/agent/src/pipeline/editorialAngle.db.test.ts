@@ -24,9 +24,13 @@ const { migrate } = await import('../db/migrate.js');
 const { ENGINE_AGENTS, NO_LLM_AGENTS, runStage, STAGE_AGENT } = await import('./runner.js');
 const { createApp } = await import('../api/server.js');
 const { normaliseAngle } = await import('../agents/angleEditor.js');
-const { editorialAngleBrief } = await import('../agents/context.js');
+const { editorialAngleBrief, promptContextFromSeed } = await import('../agents/context.js');
+const { sleekdropsSeed } = await import('../platform/sleekdrops/index.js');
+const { platform } = promptContextFromSeed(sleekdropsSeed, 'au');
+const shapes = platform.articleShapes;
 
 import type { ArticleRow, EditorialAngle } from './types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const reachable = await pool
   .query('SELECT 1')
@@ -38,13 +42,13 @@ if (reachable) await migrate();
 
 /** The admin panel can store a Claude token too; if one is there, stand down. */
 const credentialled =
-  reachable && (await getSetting<{ claude_token?: string }>('llm', {})).claude_token;
+  reachable && (await getSetting<{ claude_token?: string }>(SLEEKDROPS_PLATFORM_ID, 'llm', {})).claude_token;
 const modelSkip = credentialled
   ? 'the database carries a Claude token - this test must not reach a live model'
   : skip;
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 
 after(async () => {
   if (reachable) await pool.end();
@@ -69,12 +73,14 @@ function anAngle(): EditorialAngle {
       byline: 'home',
       bylineRationale: 'A durability argument about a household appliance.',
     },
-    { postType: 'guide', category: 'Home', competitorUrls: ['https://choice.com.au/vacuums'] },
+    { postType: 'guide', category: 'Home', competitorUrls: ['https://choice.com.au/vacuums'], shapes },
   );
 }
 
 async function insertArticle(fields: Record<string, unknown> = {}): Promise<ArticleRow> {
   const row = {
+    platform_id: 'sleekdrops',
+    edition_id: 'au',
     title: `Best cordless stick vacuums ${randomUUID().slice(0, 8)}`,
     category: 'Home',
     post_type: 'guide',
@@ -155,7 +161,7 @@ test('the angle record survives JSONB and reaches the panel whole', { skip }, as
   // The same row is what the outliner, writer, editor and reviewer are handed.
   // Reading it back off the wire (not off the object we wrote) is the only way
   // to prove the prompt they get is built from what was persisted.
-  const brief = editorialAngleBrief(seen.editorial_angle);
+  const brief = editorialAngleBrief(seen.editorial_angle, platform);
   assert.match(brief, /Thesis: The Dyson is the wrong buy/);
   assert.match(brief, /Structural shape: failure-led/);
   assert.match(brief, /absent from https:\/\/choice\.com\.au\/vacuums/);
@@ -164,7 +170,7 @@ test('the angle record survives JSONB and reaches the panel whole', { skip }, as
 test('an article with no defensible take says so to the panel and the prompts', { skip }, async () => {
   const angle = normaliseAngle(
     { thesis: 'The Ninja is the pick.', defensible: false, weakness: 'No owner complaints were gathered.', shape: 'ranked-list', byline: 'home' },
-    { postType: 'roundup', category: 'Home', competitorUrls: [] },
+    { postType: 'roundup', category: 'Home', competitorUrls: [], shapes },
   );
   const article = await insertArticle({
     post_type: 'roundup', stage: 'write', status: 'queued', editorial_angle: JSON.stringify(angle),
@@ -178,7 +184,7 @@ test('an article with no defensible take says so to the panel and the prompts', 
   assert.equal(seen.editorial_angle?.defensible, false);
   assert.equal(seen.editorial_angle?.contrarianTake, '');
   assert.equal(seen.editorial_angle?.weakness, 'No owner complaints were gathered.');
-  assert.match(editorialAngleBrief(seen.editorial_angle), /NO DEFENSIBLE CONTRARIAN TAKE/);
+  assert.match(editorialAngleBrief(seen.editorial_angle, platform), /NO DEFENSIBLE CONTRARIAN TAKE/);
 });
 
 test('articles queued before this stage existed still read back with no angle', { skip }, async () => {
@@ -188,5 +194,5 @@ test('articles queued before this stage existed still read back with no angle', 
   );
   const { article: seen } = (await res.json()) as { article: ArticleRow };
   assert.equal(seen.editorial_angle, null);
-  assert.equal(editorialAngleBrief(seen.editorial_angle), '', 'no angle means no angle block');
+  assert.equal(editorialAngleBrief(seen.editorial_angle, platform), '', 'no angle means no angle block');
 });

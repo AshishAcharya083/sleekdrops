@@ -21,7 +21,7 @@ const reachable = await pool
 const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to run these';
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 /** Unique so the rows this file writes never collide with anything else. */
 const AGENT = `overview-test-${randomUUID()}`;
 
@@ -49,16 +49,16 @@ before(async () => {
   if (!reachable) return;
   await migrate();
   await q(
-    "INSERT INTO topics (title, norm_title, category, post_type) VALUES ($1, $1, 'Tech', 'article')",
+    "INSERT INTO topics (platform_id, edition_id, title, norm_title, category, post_type) VALUES ('sleekdrops', 'au', $1, $1, 'Tech', 'article')",
     [AGENT],
   );
   const [run] = await q<{ id: string }>(
-    "INSERT INTO scout_runs (status, ended_at) VALUES ('done', now()) RETURNING id",
+    "INSERT INTO scout_runs (platform_id, edition_id, status, ended_at) VALUES ('sleekdrops', 'au', 'done', now()) RETURNING id",
   );
   scoutRunId = run.id;
   await q(
-    `INSERT INTO agent_sessions (agent, scout_run_id, status, cost_usd, tokens_input, tokens_output)
-     VALUES ($1, $2, 'done', '0.250000', 100, 20)`,
+    `INSERT INTO agent_sessions (platform_id, agent, scout_run_id, status, cost_usd, tokens_input, tokens_output)
+     VALUES ('sleekdrops', $1, $2, 'done', '0.250000', 100, 20)`,
     [AGENT, scoutRunId],
   );
 });
@@ -100,7 +100,15 @@ test('a scout session carries the run it swept for', { skip }, async () => {
 test('one failing section degrades that figure alone, not the request', { skip }, async () => {
   // The topic-count query is made to fail the way a real outage would - the
   // relation it reads is not there - while the other five keep answering.
-  await q('ALTER TABLE topics RENAME TO topics_overview_test');
+  // Only this process's queries are redirected: renaming the shared table
+  // would break every suite running alongside this one.
+  const realQuery = pool.query;
+  pool.query = ((text: unknown, ...rest: unknown[]) =>
+    (realQuery as (...args: unknown[]) => unknown).call(
+      pool,
+      typeof text === 'string' ? text.replace(/\bFROM topics\b/, 'FROM topics_overview_test') : text,
+      ...rest,
+    )) as typeof pool.query;
   try {
     const { status, body } = await getOverview();
 
@@ -114,6 +122,6 @@ test('one failing section degrades that figure alone, not the request', { skip }
     assert.equal(body.usage30d.costUsd >= 0.25, true);
     assert.equal(typeof body.publishMode, 'string');
   } finally {
-    await q('ALTER TABLE topics_overview_test RENAME TO topics');
+    pool.query = realQuery;
   }
 });

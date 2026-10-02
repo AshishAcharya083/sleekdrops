@@ -33,7 +33,7 @@ const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to 
 if (reachable) await migrate();
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 
 after(async () => {
   if (reachable) await pool.end();
@@ -92,9 +92,9 @@ const draft =
 
 async function insertAtAssemble(): Promise<ArticleRow> {
   const [row] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, claimed_by, claimed_at,
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, claimed_by, claimed_at,
                            research, keyword_plan, outline, draft_md)
-     VALUES ($1, 'Tech', 'guide', 'assemble', 'running', 'test-worker', now(), $2, $3, $4, $5)
+     VALUES ('sleekdrops', 'au', $1, 'Tech', 'guide', 'assemble', 'running', 'test-worker', now(), $2, $3, $4, $5)
      RETURNING *`,
     [
       brief.seoTitle,
@@ -167,9 +167,9 @@ test('the panel reads the healed rows back off the card', { skip }, async () => 
 
 test('a card with nothing nameable behind its links still fails, and says so', { skip }, async () => {
   const [article] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, claimed_by, claimed_at,
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, claimed_by, claimed_at,
                            research, keyword_plan, outline, draft_md)
-     VALUES ($1, 'Tech', 'guide', 'assemble', 'running', 'test-worker', now(), $2, $3, $4, $5)
+     VALUES ('sleekdrops', 'au', $1, 'Tech', 'guide', 'assemble', 'running', 'test-worker', now(), $2, $3, $4, $5)
      RETURNING *`,
     [
       brief.seoTitle,
@@ -201,9 +201,9 @@ test('what the keyword stage rediscovers resolves as a dossier product', { skip 
   ]);
 
   const [inserted] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, claimed_by, claimed_at,
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, claimed_by, claimed_at,
                            research, keyword_plan, outline, draft_md)
-     VALUES ($1, 'Tech', 'guide', 'assemble', 'running', 'test-worker', now(), $2, $3, $4, $5)
+     VALUES ('sleekdrops', 'au', $1, 'Tech', 'guide', 'assemble', 'running', 'test-worker', now(), $2, $3, $4, $5)
      RETURNING *`,
     [
       brief.seoTitle,

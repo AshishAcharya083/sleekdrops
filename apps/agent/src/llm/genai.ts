@@ -5,17 +5,21 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { extractJson, llmSettings } from './index.js';
+import { activeModelStub } from './modelStub.js';
 
-let cached: GoogleGenAI | null = null;
+const cached = new Map<string, GoogleGenAI>();
 
-async function client(): Promise<GoogleGenAI> {
-  if (cached) return cached;
-  const settings = await llmSettings();
+/** The client for one platform's credential - each platform may set its own key. */
+async function client(platformId: string): Promise<GoogleGenAI> {
+  const existing = cached.get(platformId);
+  if (existing) return existing;
+  const settings = await llmSettings(platformId);
   const apiKey = settings.gemini_api_key || config.geminiApiKey || undefined;
+  let created: GoogleGenAI;
   if (apiKey) {
-    cached = new GoogleGenAI({ apiKey });
+    created = new GoogleGenAI({ apiKey });
   } else if (config.vertex.enabled) {
-    cached = new GoogleGenAI({
+    created = new GoogleGenAI({
       vertexai: true,
       project: config.vertex.project,
       location: config.vertex.location,
@@ -26,12 +30,13 @@ async function client(): Promise<GoogleGenAI> {
         'GEMINI_API_KEY in apps/agent/.env, or run with GOOGLE_GENAI_USE_VERTEXAI=true on GCP',
     );
   }
-  return cached;
+  cached.set(platformId, created);
+  return created;
 }
 
-/** Reset the cached client (e.g. after the admin swaps the API key). */
+/** Reset every platform's cached client (e.g. after the admin swaps the API key). */
 export function resetGenaiClient(): void {
-  cached = null;
+  cached.clear();
 }
 
 /**
@@ -39,11 +44,14 @@ export function resetGenaiClient(): void {
  * JSON reply. `mimeType` must be a real image mime (image/jpeg, image/png, …).
  */
 export async function visionJson<T>(
+  platformId: string,
   model: string,
   image: { data: Buffer; mimeType: string },
   prompt: string,
 ): Promise<T> {
-  const ai = await client();
+  const stub = activeModelStub();
+  if (stub) return extractJson<T>(await stub({ kind: 'vision', model, prompt }));
+  const ai = await client(platformId);
   const res = await ai.models.generateContent({
     model,
     contents: [
@@ -68,10 +76,15 @@ export async function visionJson<T>(
  * API surfaces that reject it.
  */
 export async function generateImage(
+  platformId: string,
   prompt: string,
   model = 'gemini-2.5-flash-image',
 ): Promise<{ data: Buffer; mimeType: string }> {
-  const ai = await client();
+  const stub = activeModelStub();
+  if (stub) {
+    return { data: Buffer.from(await stub({ kind: 'image', model, prompt }), 'base64'), mimeType: 'image/png' };
+  }
+  const ai = await client(platformId);
   const attempt = async (withAspect: boolean) =>
     ai.models.generateContent({
       model,

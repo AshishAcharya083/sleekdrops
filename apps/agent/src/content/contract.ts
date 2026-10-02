@@ -7,11 +7,15 @@ import { z } from 'zod';
 import { CLAIM_TIERS, claimProblems } from './claims.js';
 
 import { SOURCE_TIERS } from './sources.js';
+import type { Platform } from '../platform/types.js';
 
+/**
+ * SleekDrops' categories and post types. The pipeline reads a platform's own
+ * lists (platform.categories, and platform.postTypes resolved through
+ * content/catalogue.ts); these remain for the callers that are not yet
+ * platform-aware.
+ */
 export const CATEGORIES = ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel'] as const;
-
-// `review` is deliberately absent: reviews require hands-on testing and are
-// human-driven per the editorial rules. The pipeline writes the other three.
 export const POST_TYPES = ['article', 'guide', 'roundup'] as const;
 
 /**
@@ -33,21 +37,26 @@ export const MONETISED_INTENTS = new Set(['Commercial Investigation', 'Transacti
 export const HOME_CURRENCY = 'AUD';
 
 /**
- * Today as the publication reckons it - the audience's own day, in
- * Australia/Sydney, e.g. "2026-07-13".
+ * Today as an audience reckons it - their own day, in their time zone, e.g.
+ * "2026-07-13". An edition's time zone decides it for every agent.
  *
  * Never the server's UTC day: between local midnight and 10:00 AEST (11:00
- * AEDT) the two disagree, and everything dated here is a calendar day a person
- * states - a pubDate, a review stamp, the day an editor saw a price. For those
- * ten hours a UTC day would date them to yesterday.
+ * AEDT) Sydney and UTC disagree, and everything dated here is a calendar day a
+ * person states - a pubDate, a review stamp, the day an editor saw a price.
+ * For those ten hours a UTC day would date them to yesterday.
  */
-export function todayInSydney(): string {
+export function todayIn(timeZone: string): string {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Australia/Sydney',
+    timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   }).format(new Date());
+}
+
+/** Today in Australia/Sydney: SleekDrops' day, for the callers that are not yet platform-aware. */
+export function todayInSydney(): string {
+  return todayIn('Australia/Sydney');
 }
 
 /**
@@ -95,8 +104,8 @@ export interface AuthorProfile {
 }
 
 /** How a piece is attributed: the team, tagged with the beat that wrote it. */
-export function bylineFor(author: AuthorProfile): string {
-  return author.label ? `${BYLINE_NAME} - ${author.label}` : BYLINE_NAME;
+export function bylineFor(author: AuthorProfile, bylineName: string = BYLINE_NAME): string {
+  return author.label ? `${bylineName} - ${author.label}` : bylineName;
 }
 
 /**
@@ -223,6 +232,21 @@ export function isWebUrl(value: string): boolean {
   }
 }
 
+/**
+ * An ISO 8601 date-time with an explicit UTC offset ("2026-07-18T19:35:00+10:00"),
+ * as a timestamp - or null for anything else. A time without its offset is a
+ * guess about which day it is somewhere, so it is not accepted as a time.
+ */
+export function parseOffsetTimestamp(value: unknown): Date | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(trimmed)) {
+    return null;
+  }
+  const at = new Date(trimmed);
+  return Number.isNaN(at.getTime()) ? null : at;
+}
+
 const webUrl = () => z.string().url().refine(isWebUrl, { message: 'must be an http(s) URL' });
 
 export const sourceSchema = z.object({
@@ -292,6 +316,21 @@ export const reviewUnitSchema = z.object({
 });
 
 /**
+ * The trust vocabulary a review's `product` carries on the site, mirrored from
+ * apps/web/src/lib/trust.ts. The pipeline writes no reviews, so no schema here
+ * parses a product; these are the values a row must use if it ever does, and
+ * contract.test.ts asserts they match the site's.
+ */
+export const METHOD_VERSIONS = ['1.0'] as const;
+/** How the product was assessed. `reviewUnit.acquisition` keeps its own retail / loan / none. */
+export const PROVENANCES = ['retail', 'brand-sample', 'not-hands-on'] as const;
+export const BADGE_KINDS = ['review-score', 'honest-negative', 'lowest-price', 'below-average'] as const;
+/** The kinds that may be printed today; price history stays off until it is collected. */
+export const ENABLED_BADGE_KINDS = ['review-score', 'honest-negative'] as const;
+/** How far a weighted sub-score breakdown may sit from the headline rating. */
+export const SUB_SCORE_TOLERANCE = 0.05;
+
+/**
  * The offer behind a pick: a price somebody saw on a named day, not a price
  * anything is polling.
  *
@@ -346,8 +385,10 @@ export const pickSchema = z.object({
 export const frontmatterSchema = z.object({
   title: z.string().min(1),
   dek: z.string().min(1),
-  category: z.enum(CATEGORIES),
-  postType: z.enum(POST_TYPES),
+  /** One of the publishing platform's categories - checked by validateArticle. */
+  category: z.string().min(1),
+  /** One of the publishing platform's post types - checked by validateArticle. */
+  postType: z.string().min(1),
   kind: z.string().optional(),
   author: z.enum(AUTHORS.map((a) => a.id) as [string, ...string[]]),
   tags: z.array(z.string()).min(1),
@@ -580,7 +621,7 @@ export function goLinkSearchTerms(body: string): Map<string, GoLinkSearchTerm> {
  * A word the anchor and the slug share is the anchor talking about the product
  * rather than about the click, and that - not a list of call-to-action
  * phrasings to exclude - is the test. The link contract prescribes the
- * phrasings (LINK_PLACEMENT_RULES: "Check price on Amazon" table cells, "See
+ * phrasings (linkPlacementRules: "Check price on Amazon" table cells, "See
  * today's price on Amazon" CTAs, "view at Amazon AU"), so an anchor filter
  * would be excluding exactly what the writer was told to produce, and an
  * Amazon search for those words lands the reader on a page about nothing.
@@ -637,12 +678,26 @@ export function validateArticle(
   body: string,
   frontmatter: unknown,
   links: unknown[],
+  platform: Platform,
 ): string[] {
   const problems: string[] = [];
 
   const fm = frontmatterSchema.safeParse(frontmatter);
   if (!fm.success) {
     problems.push(...fm.error.issues.map((i) => `frontmatter.${i.path.join('.')}: ${i.message}`));
+  } else {
+    // The platform's own lists, not a site-wide enum: a category or post type
+    // is only valid for the platform publishing the piece.
+    if (!platform.categories.includes(fm.data.category)) {
+      problems.push(
+        `frontmatter.category: "${fm.data.category}" is not a ${platform.name} category (${platform.categories.join(', ')})`,
+      );
+    }
+    if (!platform.postTypes.includes(fm.data.postType)) {
+      problems.push(
+        `frontmatter.postType: "${fm.data.postType}" is not a ${platform.name} post type (${platform.postTypes.join(', ')})`,
+      );
+    }
   }
 
   const parsedLinks: AffiliateLink[] = [];

@@ -24,6 +24,8 @@ process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
 process.env.D1_DATABASE_ID = 'test-database';
 process.env.CLOUDFLARE_D1_TOKEN = 'test-d1-token';
 process.env.GITHUB_TOKEN = 'test-github-token';
+process.env.GITHUB_REPO = 'example/sleekdrops';
+process.env.SITE_URL = 'https://sleekdrops.com';
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
@@ -118,9 +120,9 @@ const BODY = 'The [Sony WH-1000XM6](/go/sony-wh-1000xm6) is the one.';
 /** A real row, because the publisher now reads and stamps its own columns. */
 async function article(links: AffiliateLinkRow[], fields: Record<string, unknown> = {}): Promise<ArticleRow> {
   const [row] = await q<ArticleRow>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status,
                            draft_md, frontmatter, affiliate_links, seo_review)
-     VALUES ($1, $2, 'Tech', 'guide', 'publish', 'queued', $3, $4::jsonb, $5::jsonb, $6::jsonb)
+     VALUES ('sleekdrops', 'au', $1, $2, 'Tech', 'guide', 'publish', 'queued', $3, $4::jsonb, $5::jsonb, $6::jsonb)
      RETURNING *`,
     [
       'The headphones for a quiet commute',
@@ -259,8 +261,8 @@ test('a stale review stops the publish even when it was already queued', { skip 
   const row = await article([resolved], { seo_review: { score: 80, pass: true, issues: [] } });
   const session = async (agent: string, minutesAgo: number) =>
     q(
-      `INSERT INTO agent_sessions (article_id, agent, status, kind, started_at, ended_at)
-       VALUES ($1, $2, 'done', 'pipeline', now() - make_interval(mins => $3 + 1),
+      `INSERT INTO agent_sessions (platform_id, article_id, agent, status, kind, started_at, ended_at)
+       VALUES ('sleekdrops', $1, $2, 'done', 'pipeline', now() - make_interval(mins => $3 + 1),
                now() - make_interval(mins => $3))`,
       [row.id, agent, minutesAgo],
     );
@@ -377,7 +379,7 @@ test('a post deleted from D1 rebuilds the site when it is published again', { sk
   const removed = await app.fetch(
     new Request(`http://localhost/api/published/${row.slug}`, {
       method: 'DELETE',
-      headers: { Authorization: 'Bearer test-admin-token' },
+      headers: { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' },
     }),
   );
   assert.equal(removed.status, 200);

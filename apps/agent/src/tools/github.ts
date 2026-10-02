@@ -1,12 +1,28 @@
-// Fires the `content-updated` repository dispatch that rebuilds the website
-// after the publisher writes to D1 (same contract the old pipeline used).
+// Rebuilds a platform's website after the publisher writes to D1: a POST to
+// the platform's deploy hook when it has one, else the `content-updated`
+// repository dispatch to its repo (same contract the old pipeline used).
 import { config } from '../config.js';
+import type { ResolvedPublishTarget } from '../platform/publishTarget.js';
 
-export async function dispatchContentUpdated(): Promise<void> {
+export type RebuildTarget = Pick<ResolvedPublishTarget, 'githubRepo' | 'rebuildHookUrl'>;
+
+export async function dispatchContentUpdated(target: RebuildTarget): Promise<void> {
+  if (target.rebuildHookUrl) {
+    // The hook URL is itself the credential, so neither message carries it -
+    // nor the transport error, whose cause can.
+    const res = await fetch(target.rebuildHookUrl, {
+      method: 'POST',
+      headers: { 'User-Agent': 'sleekdrops-agent' },
+    }).catch(() => {
+      throw new Error('the rebuild hook could not be reached');
+    });
+    if (!res.ok) throw new Error(`the rebuild hook failed (HTTP ${res.status})`);
+    return;
+  }
   if (!config.github.token) {
     throw new Error('GITHUB_TOKEN is not set — cannot trigger the site rebuild');
   }
-  const res = await fetch(`https://api.github.com/repos/${config.github.repo}/dispatches`, {
+  const res = await fetch(`https://api.github.com/repos/${target.githubRepo}/dispatches`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${config.github.token}`,

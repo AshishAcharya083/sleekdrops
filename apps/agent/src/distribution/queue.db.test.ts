@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
+process.env.SITE_URL = 'https://sleekdrops.com';
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
@@ -57,8 +58,8 @@ async function connect(
   fields: { status?: string; expiresAt?: string | null; provider?: string } = {},
 ): Promise<string> {
   const [row] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref, status, expires_at)
-     VALUES ($1, $2, 'test-channel-token', $3, $4)
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref, status, expires_at)
+     VALUES ('sleekdrops', $1, $2, 'test-channel-token', $3, $4)
      RETURNING id`,
     [
       fields.provider ?? PROVIDER,
@@ -73,8 +74,8 @@ async function connect(
 
 async function article(): Promise<DistributableArticle> {
   const [row] = await q<{ id: string; slug: string }>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, frontmatter)
-     VALUES ('The headphones for a quiet commute', $1, 'Tech', 'guide', 'publish', 'queued', $2::jsonb)
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter)
+     VALUES ('sleekdrops', 'au', 'The headphones for a quiet commute', $1, 'Tech', 'guide', 'publish', 'queued', $2::jsonb)
      RETURNING id, slug`,
     [
       `quiet-commutes-${randomUUID().slice(0, 8)}`,
@@ -88,6 +89,7 @@ async function article(): Promise<DistributableArticle> {
   articles.push(row.id);
   return {
     id: row.id,
+    platform_id: 'sleekdrops',
     slug: row.slug,
     title: 'The headphones for a quiet commute',
     frontmatter: {

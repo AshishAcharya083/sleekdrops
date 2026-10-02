@@ -1,20 +1,25 @@
 // Cloudflare D1 REST client — the publish target. The website's build step
 // (apps/web/scripts/fetch-content.mjs) reads the same two tables.
+//
+// Every call names the database it runs against: each platform has its own,
+// and there is no default one to land in.
 import { goSlugsIn } from '../content/contract.js';
 import { config } from '../config.js';
+import type { ResolvedPublishTarget } from '../platform/publishTarget.js';
+
+export type D1Target = Pick<ResolvedPublishTarget, 'd1DatabaseId'>;
 
 export async function d1Query<T = Record<string, unknown>>(
+  target: D1Target,
   sql: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  const { accountId, databaseId, token } = config.d1;
-  if (!accountId || !databaseId || !token) {
-    throw new Error(
-      'Cloudflare D1 env missing — need CLOUDFLARE_ACCOUNT_ID, D1_DATABASE_ID, CLOUDFLARE_D1_TOKEN',
-    );
+  const { accountId, token } = config.d1;
+  if (!accountId || !token) {
+    throw new Error('Cloudflare D1 env missing - need CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_D1_TOKEN');
   }
   const res = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`,
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${target.d1DatabaseId}/query`,
     {
       method: 'POST',
       headers: {
@@ -50,8 +55,9 @@ export interface PublishedPostRow {
 }
 
 /** Every post row in D1 (published and draft) — the admin "Published" list. */
-export async function listD1Posts(): Promise<PublishedPostRow[]> {
+export async function listD1Posts(target: D1Target): Promise<PublishedPostRow[]> {
   return d1Query<PublishedPostRow>(
+    target,
     `SELECT slug, status, title, category, post_type, author, pub_date, updated_at,
             json_extract(frontmatter_json, '$.heroImage') hero_image,
             json_extract(frontmatter_json, '$.heroAlt') hero_alt
@@ -73,10 +79,12 @@ export interface PublishedBodyRow {
  * articles that went out before the scanner existed are in it already.
  */
 export async function fetchPublishedBodies(
+  target: D1Target,
   limit: number,
   excludeSlug?: string | null,
 ): Promise<PublishedBodyRow[]> {
   return d1Query<PublishedBodyRow>(
+    target,
     `SELECT slug, title, body_md, pub_date
      FROM posts
      WHERE status = 'published' AND body_md IS NOT NULL AND slug <> ?1
@@ -120,8 +128,9 @@ export function patchHeroFrontmatter(frontmatterJson: string, hero: PostHero): R
 }
 
 /** The hero a live post currently carries, or null when there is no such post. */
-export async function getD1PostHero(slug: string): Promise<PostHero | null> {
+export async function getD1PostHero(target: D1Target, slug: string): Promise<PostHero | null> {
   const [post] = await d1Query<{ hero_image: string | null; hero_alt: string | null }>(
+    target,
     `SELECT json_extract(frontmatter_json, '$.heroImage') hero_image,
             json_extract(frontmatter_json, '$.heroAlt') hero_alt
      FROM posts WHERE slug = ?1`,
@@ -135,14 +144,15 @@ export async function getD1PostHero(slug: string): Promise<PostHero | null> {
  * `updatedDate`: swapping a photo is not an editorial revision, and the site
  * shows that date to readers.
  */
-export async function setD1PostHero(slug: string, hero: PostHero): Promise<boolean> {
+export async function setD1PostHero(target: D1Target, slug: string, hero: PostHero): Promise<boolean> {
   const [post] = await d1Query<{ frontmatter_json: string }>(
+    target,
     'SELECT frontmatter_json FROM posts WHERE slug = ?1',
     [slug],
   );
   if (!post) return false;
   const frontmatter = patchHeroFrontmatter(post.frontmatter_json, hero);
-  await d1Query("UPDATE posts SET frontmatter_json = ?2, updated_at = datetime('now') WHERE slug = ?1", [
+  await d1Query(target, "UPDATE posts SET frontmatter_json = ?2, updated_at = datetime('now') WHERE slug = ?1", [
     slug,
     JSON.stringify(frontmatter),
   ]);
@@ -156,24 +166,27 @@ export async function setD1PostHero(slug: string, hero: PostHero): Promise<boole
  * like deals/promos may point at them.)
  */
 export async function deleteD1Post(
+  target: D1Target,
   slug: string,
 ): Promise<{ removedLinks: string[] } | null> {
   const [post] = await d1Query<{ body_md: string }>(
+    target,
     'SELECT body_md FROM posts WHERE slug = ?1',
     [slug],
   );
   if (!post) return null;
   const candidates = goSlugsIn(post.body_md ?? '');
 
-  await d1Query('DELETE FROM posts WHERE slug = ?1', [slug]);
+  await d1Query(target, 'DELETE FROM posts WHERE slug = ?1', [slug]);
 
   const removedLinks: string[] = [];
   if (candidates.length > 0) {
-    const remaining = await d1Query<{ body_md: string }>('SELECT body_md FROM posts');
+    const remaining = await d1Query<{ body_md: string }>(target, 'SELECT body_md FROM posts');
     const stillUsed = new Set(remaining.flatMap((r) => goSlugsIn(r.body_md ?? '')));
     for (const linkSlug of candidates) {
       if (stillUsed.has(linkSlug)) continue;
       const deleted = await d1Query<{ slug: string }>(
+        target,
         "DELETE FROM affiliate_links WHERE slug = ?1 AND note LIKE '%used by%' RETURNING slug",
         [linkSlug],
       );
@@ -184,8 +197,11 @@ export async function deleteD1Post(
 }
 
 /** Slugs + titles of every post already in D1 — the "topics we've used" list. */
-export async function fetchPublishedPosts(): Promise<Array<{ slug: string; title: string }>> {
+export async function fetchPublishedPosts(
+  target: D1Target,
+): Promise<Array<{ slug: string; title: string }>> {
   const rows = await d1Query<{ slug: string; frontmatter_json: string }>(
+    target,
     'SELECT slug, frontmatter_json FROM posts ORDER BY slug',
   );
   return rows.map((r) => {

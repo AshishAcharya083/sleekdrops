@@ -2,11 +2,17 @@
 import Button from '@components/ui/Button.astro';
 import Eyebrow from '@components/ui/Eyebrow.astro';
 import { EVENTS } from '@lib/analytics';
+import { productBadgeClaim } from '@lib/trust';
 import type { ProductData } from '../../content/config';
 
 /**
- * ProductCallout — dark "editor's choice" panel inserted into the
- * article body. Carries an affiliate link with sponsored nofollow rel.
+ * ProductCallout — dark product panel inserted into the article body.
+ * Carries an affiliate link with sponsored nofollow rel.
+ *
+ * The eyebrow is an explicit label, else the claim of the product's registry
+ * badge, else the post's kind, else nothing. A legacy free-text badge is never
+ * printed, and there is no endorsement default: "Editor's choice" over every
+ * product is a word with no evidence behind it.
  *
  * The affiliate href is built from the post slug: every review post's
  * filename must match a key in sleekdrops-cms/data/affiliate-links.json.
@@ -14,16 +20,18 @@ import type { ProductData } from '../../content/config';
 export interface Props {
   product: ProductData;
   postSlug: string;
+  /** The post's human-facing kind ("Review"), the label when there is no badge. */
+  kind?: string;
   eyebrow?: string;
 }
-const { product, postSlug, eyebrow } = Astro.props;
+const { product, postSlug, kind, eyebrow } = Astro.props;
 const href = `/go/${postSlug}`;
-const eyebrowText = eyebrow ?? product.badge ?? "Editor's choice";
+const eyebrowText = eyebrow ?? productBadgeClaim(product) ?? kind;
 ---
 <aside class="product-callout">
   <div class="logo" aria-hidden="true">{product.brandMark}</div>
   <div>
-    <Eyebrow dot accent>{eyebrowText}</Eyebrow>
+    {eyebrowText && <Eyebrow dot accent>{eyebrowText}</Eyebrow>}
     <h4>{product.name}</h4>
     <p class="desc">{product.tagline}</p>
   </div>

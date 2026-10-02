@@ -9,15 +9,25 @@ import assert from 'node:assert/strict';
 import {
   AUTHORS,
   authorById,
+  BADGE_KINDS,
   BYLINE_NAME,
   bylineFor,
   claimSchema,
+  ENABLED_BADGE_KINDS,
   frontmatterSchema,
   isWebUrl,
   launchSchema,
+  METHOD_VERSIONS,
+  parseOffsetTimestamp,
+  PROVENANCES,
   sourceSchema,
+  SUB_SCORE_TOLERANCE,
+  validateArticle,
 } from './contract.js';
+import { promptContextFromSeed } from '../agents/context.js';
+import { sleekdropsSeed } from '../platform/sleekdrops/index.js';
 import { beats, EDITORIAL_TEAM, listBeats } from '../../../web/src/data/authors.ts';
+import * as trust from '../../../web/src/lib/trust.ts';
 
 test('the site publishes under one byline, and the beat is a tag on it', () => {
   assert.equal(EDITORIAL_TEAM.name, BYLINE_NAME);
@@ -71,4 +81,51 @@ test('a URL the browser would execute rather than follow never reaches frontmatt
     true,
   );
   assert.equal(sourceSchema.safeParse({ url: 'http://www.gsmarena.com/x' }).success, true, 'plain http still opens');
+});
+
+test('a byline belongs to the platform publishing it', () => {
+  const tech = authorById('tech');
+  assert.ok(tech);
+  assert.equal(bylineFor(tech, 'Testbrand Desk'), 'Testbrand Desk - Tech');
+  assert.equal(bylineFor(AUTHORS[0], 'Testbrand Desk'), 'Testbrand Desk');
+});
+
+test('a time is only a time with its offset', () => {
+  assert.equal(parseOffsetTimestamp('2026-07-18T19:35:00+10:00')?.toISOString(), '2026-07-18T09:35:00.000Z');
+  assert.equal(parseOffsetTimestamp('2026-07-18T09:35Z')?.toISOString(), '2026-07-18T09:35:00.000Z');
+  for (const value of ['2026-07-18T19:35:00', '2026-07-18', '18 July 7:35pm', '2026-13-40T99:99:00Z', '', null, 1]) {
+    assert.equal(parseOffsetTimestamp(value), null, String(value));
+  }
+});
+
+test('the category and post type are checked against the platform publishing the piece', () => {
+  const { platform } = promptContextFromSeed(sleekdropsSeed, 'au');
+  const frontmatter = {
+    title: 'T',
+    dek: 'D',
+    category: 'Home',
+    postType: 'guide',
+    author: 'home',
+    tags: ['t'],
+    pubDate: '2026-07-13',
+    readTime: 3,
+    cover: 'fill-1',
+  };
+  assert.deepEqual(validateArticle('Body.', frontmatter, [], platform), []);
+  const narrow = { ...platform, name: 'Narrow', categories: ['Tech'], postTypes: ['article'] };
+  assert.deepEqual(validateArticle('Body.', frontmatter, [], narrow), [
+    'frontmatter.category: "Home" is not a Narrow category (Tech)',
+    'frontmatter.postType: "guide" is not a Narrow post type (article)',
+  ]);
+});
+
+test("the trust vocabulary mirrors the site's", () => {
+  assert.deepEqual([...METHOD_VERSIONS], trust.METHOD_VERSIONS.map((entry) => entry.version));
+  assert.deepEqual([...PROVENANCES], [...trust.PROVENANCES]);
+  assert.deepEqual([...BADGE_KINDS], [...trust.BADGE_KINDS]);
+  assert.deepEqual(
+    [...ENABLED_BADGE_KINDS],
+    trust.BADGE_KINDS.filter((kind) => trust.BADGE_REGISTRY[kind].enabled),
+  );
+  assert.equal(SUB_SCORE_TOLERANCE, trust.SUB_SCORE_TOLERANCE);
 });

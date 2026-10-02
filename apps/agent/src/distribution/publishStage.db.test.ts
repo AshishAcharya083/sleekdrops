@@ -11,10 +11,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
+process.env.SITE_URL = 'https://sleekdrops.com';
 process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
 process.env.D1_DATABASE_ID = 'test-database';
 process.env.CLOUDFLARE_D1_TOKEN = 'test-d1-token';
 process.env.GITHUB_TOKEN = 'test-github-token';
+process.env.GITHUB_REPO = 'example/sleekdrops';
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
@@ -40,7 +42,7 @@ const TITLE = 'The headphones for a quiet commute';
 const HERO = 'https://storage.googleapis.com/images/heroes/quiet.png';
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 
 const realFetch = globalThis.fetch;
 const articles: string[] = [];
@@ -70,8 +72,8 @@ function stubCloudflareAndGithub(): { dispatches: number } {
 
 async function connect(): Promise<string> {
   const [row] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref)
-     VALUES ($1, $2, 'stub-publish-token') RETURNING id`,
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref)
+     VALUES ('sleekdrops', $1, $2, 'stub-publish-token') RETURNING id`,
     [PROVIDER, `page-${randomUUID().slice(0, 8)}`],
   );
   connections.push(row.id);
@@ -80,9 +82,9 @@ async function connect(): Promise<string> {
 
 async function article(fields: { heroImageSource?: HeroImageSource } = {}): Promise<ArticleRow> {
   const [row] = await q<ArticleRow>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, draft_md,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, draft_md,
                            frontmatter, affiliate_links, hero_image_source)
-     VALUES ($1, $2, 'Tech', 'guide', 'publish', 'queued', 'The body.', $3::jsonb, '[]'::jsonb, $4)
+     VALUES ('sleekdrops', 'au', $1, $2, 'Tech', 'guide', 'publish', 'queued', 'The body.', $3::jsonb, '[]'::jsonb, $4)
      RETURNING *`,
     [
       TITLE,
@@ -233,9 +235,9 @@ test('the queued payload carries the hero provenance the publish stage stored', 
 
 test('the image stage records an operator hero as operator-supplied', { skip }, async () => {
   const [row] = await q<ArticleRow>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, frontmatter,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter,
                            hero_image_url, hero_alt)
-     VALUES ($1, $2, 'Tech', 'guide', 'image', 'queued', $3::jsonb, $4, 'A commuter train')
+     VALUES ('sleekdrops', 'au', $1, $2, 'Tech', 'guide', 'image', 'queued', $3::jsonb, $4, 'A commuter train')
      RETURNING *`,
     [
       TITLE,
