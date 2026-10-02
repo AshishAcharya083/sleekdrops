@@ -1,6 +1,7 @@
 // Worker loop — polls Postgres and atomically claims queued articles
-// (FOR UPDATE SKIP LOCKED), so multiple worker processes are safe. The
-// devteam-platform claim pattern, minus the per-project round-robin.
+// (FOR UPDATE SKIP LOCKED), so multiple worker processes are safe. Claims
+// rotate across platforms, so one platform's backlog never starves another of
+// worker capacity, and a paused platform's articles are simply not claimed.
 //
 // The poll does two jobs. It claims work, and every Nth tick it reaps: a claim
 // carries a lease now (012_stage_lease.sql), and a lease nobody is renewing is
@@ -16,12 +17,13 @@
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { createLogger } from '../lib/log.js';
-import { getSetting, q } from '../db/pool.js';
+import { q } from '../db/pool.js';
+import { admitClaimed, dropStartedEvents, stageMayStartSql } from './eventWindow.js';
 import { STAGE_LEASE_SECONDS } from './lease.js';
+import { activePlatforms } from './platforms.js';
 import { STAGE_AGENT, runStage } from './runner.js';
 import { recoverStaleScoutRuns } from './scout.js';
 import type { ArticleRow, Stage } from './types.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('worker');
 
@@ -82,31 +84,64 @@ export function claimIdentity(): string {
   return `${workerId}/${randomUUID()}`;
 }
 
+/** When this process last claimed for each platform - the rotation's memory. */
+const lastClaimedAt = new Map<string, Date>();
+
 /**
- * Claim the longest-waiting queued article, taking the lease with it. The
- * claim and the lease are one statement on purpose: a worker that died between
- * the two would hold a claim nothing could ever reap.
+ * Claim the next queued article of one of `platformIds`, taking the lease with
+ * it. The claim and the lease are one statement on purpose: a worker that died
+ * between the two would hold a claim nothing could ever reap.
+ *
+ * Which platform goes next is a fair rotation, not the globally oldest row - a
+ * platform with a deep backlog would otherwise take every claim until it was
+ * through it. In order:
+ *  1. the platform with the fewest stages running right now, across every
+ *     worker (the database is the only view all instances share), so each
+ *     platform with work gets an equal share of the running capacity;
+ *  2. then the platform this worker claimed for longest ago (never first), so
+ *     a worker running one stage at a time alternates between platforms;
+ *  3. then, within the platform, the longest-waiting article.
+ *
+ * An event-bound article inside its lead window is not claimable at all
+ * (eventWindow.ts), so it waits without taking anyone's turn.
  *
  * `attempt` is not touched. It counts passes an operator asked for, not claims
  * the pipeline took: a stage re-queued after a crash is the same attempt
  * resumed, and only a retry makes it the next one.
  */
-export async function claimNext(): Promise<ArticleRow | null> {
+export async function claimNext(platformIds: readonly string[]): Promise<ArticleRow | null> {
+  if (platformIds.length === 0) return null;
+  const served = [...lastClaimedAt].filter(([platformId]) => platformIds.includes(platformId));
   const rows = await q<ArticleRow>(
     `UPDATE articles
      SET status = 'running', claimed_by = $1, claimed_at = now(), heartbeat_at = now(),
          lease_expires_at = now() + make_interval(secs => $2), updated_at = now()
      WHERE id = (
-       SELECT id FROM articles
-       WHERE status = 'queued' AND stage <> 'done'
-       ORDER BY updated_at ASC
+       SELECT a.id FROM articles a
+       LEFT JOIN (
+         SELECT platform_id, count(*) n FROM articles WHERE status = 'running' GROUP BY platform_id
+       ) busy ON busy.platform_id = a.platform_id
+       LEFT JOIN unnest($4::text[], $5::timestamptz[]) served(platform_id, claimed_at)
+         ON served.platform_id = a.platform_id
+       WHERE a.status = 'queued' AND a.stage <> 'done' AND a.platform_id = ANY($3::text[])
+         AND ${stageMayStartSql('a')}
+       ORDER BY COALESCE(busy.n, 0) ASC, served.claimed_at ASC NULLS FIRST, a.updated_at ASC
        LIMIT 1
-       FOR UPDATE SKIP LOCKED
+       FOR UPDATE OF a SKIP LOCKED
      )
      RETURNING *`,
-    [claimIdentity(), STAGE_LEASE_SECONDS],
+    [
+      claimIdentity(),
+      STAGE_LEASE_SECONDS,
+      platformIds,
+      served.map(([platformId]) => platformId),
+      served.map(([, at]) => at),
+    ],
   );
-  return rows[0] ?? null;
+  const claimed = rows[0];
+  if (!claimed) return null;
+  lastClaimedAt.set(claimed.platform_id, new Date());
+  return claimed;
 }
 
 /** True on every Nth poll - the reaper's duty cycle. */
@@ -210,18 +245,21 @@ async function tick(): Promise<void> {
   // whether or not this worker is taking new work, and a worker that is busy
   // is exactly the one that needs to notice the run it lost.
   ticks += 1;
-  if (isReapTick(ticks)) await reapExpiredLeases();
+  if (isReapTick(ticks)) {
+    await reapExpiredLeases();
+    await dropStartedEvents();
+  }
 
   if (active >= config.workerConcurrency) return;
-  const enabled = await getSetting<boolean>(SLEEKDROPS_PLATFORM_ID, 'worker_enabled', true);
-  if (!enabled) return;
+  const platformIds = (await activePlatforms()).map((platform) => platform.id);
 
   while (!stopped && active < config.workerConcurrency) {
-    const article = await claimNext();
+    const article = await claimNext(platformIds);
     if (!article) return;
     // Claimed as the process was told to stop: the claim is already this
     // worker's, so releaseHeldClaims hands it back rather than it running here.
     if (stopped) return;
+    if (!(await admitClaimed(article))) return;
     active += 1;
     void runStage(article)
       .catch((err) => console.error('[worker] runStage crashed:', err))
