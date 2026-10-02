@@ -717,13 +717,13 @@ export function createApp(): Hono<TraceEnv> {
 
   // ── Topic scout ───────────────────────────────────────────────────────────
   app.post('/api/scout', async (c) => {
-    const id = await enqueueScoutRun();
+    const id = await enqueueScoutRun(SLEEKDROPS_PLATFORM_ID, 'au');
     log.info('scout run queued', { scout_run_id: id });
     return c.json({ queued: id }, 202);
   });
 
   app.get('/api/scout/queue', async (c) => {
-    return c.json(await scoutQueueStatus());
+    return c.json(await scoutQueueStatus(SLEEKDROPS_PLATFORM_ID));
   });
 
   app.get('/api/scout-runs', async (c) => {

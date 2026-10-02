@@ -1,11 +1,13 @@
-// Durable topic-scout queue. Requests are cheap database inserts; a single
-// worker claims them in order and runs them one at a time across all agent
-// instances. A recycled process leaves its job recoverable instead of leaving
-// an operator-facing lock to diagnose and clear.
+// Durable topic-scout queue. Requests are cheap database inserts, one per
+// platform edition; a worker claims them in order and runs at most one per
+// platform at a time across all agent instances, so platforms scout side by
+// side and never wait on each other. A recycled process leaves its job
+// recoverable instead of leaving an operator-facing lock to diagnose and clear.
 import { config } from '../config.js';
 import { pool, q } from '../db/pool.js';
 import { UsageTracker } from '../llm/index.js';
 import { runTopicScout } from '../agents/topicScout.js';
+import { activePlatforms } from './platforms.js';
 import { modelFor } from './runner.js';
 
 /** How long a sweep's heartbeat may go quiet before it stops holding the lock. */
@@ -13,7 +15,8 @@ const STALE_MINUTES = 30;
 const HEARTBEAT_MS = 60_000;
 const FRESH_RUN = `heartbeat_at > now() - interval '${STALE_MINUTES} minutes'`;
 
-let active = false;
+/** Platforms with a scout running in this process. */
+const active = new Set<string>();
 let stopped = false;
 
 export interface ScoutQueueStatus {
@@ -21,26 +24,37 @@ export interface ScoutQueueStatus {
   running: number;
 }
 
+/** A claimed request: which platform edition it scouts. */
+export interface ClaimedScoutRun {
+  id: string;
+  platform_id: string;
+  edition_id: string;
+}
+
 /** Add a request to the durable queue. This never refuses because another run is active. */
-export async function enqueueScoutRun(): Promise<string> {
+export async function enqueueScoutRun(platformId: string, editionId: string): Promise<string> {
   const [run] = await q<{ id: string }>(
-    "INSERT INTO scout_runs (status) VALUES ('queued') RETURNING id",
+    `INSERT INTO scout_runs (status, platform_id, edition_id) VALUES ('queued', $1, $2)
+     RETURNING id`,
+    [platformId, editionId],
   );
   return run.id;
 }
 
 /** Small status payload for the Topics tab; internal lease details stay internal. */
-export async function scoutQueueStatus(): Promise<ScoutQueueStatus> {
+export async function scoutQueueStatus(platformId: string): Promise<ScoutQueueStatus> {
   const [status] = await q<{ queued: string; running: string }>(
     `SELECT count(*) FILTER (WHERE status = 'queued') queued,
             count(*) FILTER (WHERE status = 'running' AND ${FRESH_RUN}) running
-     FROM scout_runs`,
+     FROM scout_runs
+     WHERE platform_id = $1`,
+    [platformId],
   );
   return { queued: Number(status.queued), running: Number(status.running) };
 }
 
-export async function hasPendingScoutRuns(): Promise<boolean> {
-  const status = await scoutQueueStatus();
+export async function hasPendingScoutRuns(platformId: string): Promise<boolean> {
+  const status = await scoutQueueStatus(platformId);
   return status.queued > 0 || status.running > 0;
 }
 
@@ -76,31 +90,44 @@ export async function renewScoutHeartbeat(id: string): Promise<boolean> {
 }
 
 /**
- * Claim the oldest request if no live request is running. The transaction-level
- * advisory lock serialises this check-and-claim across Cloud Run instances;
- * queued rows remain ordinary durable work, not a lock exposed to operators.
+ * Claim this platform's oldest request if none of its requests is live. The
+ * transaction-level advisory lock serialises this check-and-claim across Cloud
+ * Run instances; queued rows remain ordinary durable work, not a lock exposed
+ * to operators.
+ *
+ * The lock is keyed per platform, so two platforms claim and scout at the same
+ * time while one platform never runs two. The key keeps the original
+ * 'sleekdrops:topic-scout' text as its prefix on purpose: it is a lock name,
+ * not a brand, and changing it would let an old and a new revision hold
+ * different locks for the same platform during a rolling deploy.
  */
-export async function claimNextScoutRun(): Promise<string | null> {
+export async function claimNextScoutRun(platformId: string): Promise<ClaimedScoutRun | null> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('sleekdrops:topic-scout', 0))");
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended('sleekdrops:topic-scout:' || $1, 0))",
+      [platformId],
+    );
     const live = await client.query(
-      `SELECT 1 FROM scout_runs WHERE status = 'running' AND ${FRESH_RUN} LIMIT 1`,
+      `SELECT 1 FROM scout_runs
+       WHERE platform_id = $1 AND status = 'running' AND ${FRESH_RUN} LIMIT 1`,
+      [platformId],
     );
     if (live.rowCount) {
       await client.query('COMMIT');
       return null;
     }
-    const next = await client.query<{ id: string }>(
-      `SELECT id FROM scout_runs
-       WHERE status = 'queued'
+    const next = await client.query<ClaimedScoutRun>(
+      `SELECT id, platform_id, edition_id FROM scout_runs
+       WHERE platform_id = $1 AND status = 'queued'
        ORDER BY started_at ASC, id ASC
        LIMIT 1
        FOR UPDATE SKIP LOCKED`,
+      [platformId],
     );
-    const id = next.rows[0]?.id;
-    if (!id) {
+    const run = next.rows[0];
+    if (!run) {
       await client.query('COMMIT');
       return null;
     }
@@ -108,10 +135,10 @@ export async function claimNextScoutRun(): Promise<string | null> {
       `UPDATE scout_runs
        SET status = 'running', claimed_at = now(), heartbeat_at = now(), error = NULL, ended_at = NULL
        WHERE id = $1`,
-      [id],
+      [run.id],
     );
     await client.query('COMMIT');
-    return id;
+    return run;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -120,7 +147,7 @@ export async function claimNextScoutRun(): Promise<string | null> {
   }
 }
 
-async function runClaimedScout(id: string): Promise<void> {
+async function runClaimedScout({ id, platform_id: platformId }: ClaimedScoutRun): Promise<void> {
   const tracker = new UsageTracker();
   const heartbeat = setInterval(() => {
     void renewScoutHeartbeat(id).catch((err) =>
@@ -133,9 +160,9 @@ async function runClaimedScout(id: string): Promise<void> {
   try {
     const model = await modelFor('topic_scout');
     [session] = await q<{ id: string }>(
-      `INSERT INTO agent_sessions (scout_run_id, agent, model)
-       VALUES ($1, 'topic_scout', $2) RETURNING id`,
-      [id, model],
+      `INSERT INTO agent_sessions (scout_run_id, platform_id, agent, model)
+       VALUES ($1, $2, 'topic_scout', $3) RETURNING id`,
+      [id, platformId, model],
     );
     const topics = await runTopicScout(model, tracker, id);
     await q(
@@ -171,9 +198,9 @@ async function runClaimedScout(id: string): Promise<void> {
       );
     } else {
       await q(
-        `INSERT INTO agent_sessions (scout_run_id, agent, status, summary, error, ended_at)
-         VALUES ($1, 'topic_scout', 'failed', 'scout could not start', $2, now())`,
-        [id, message],
+        `INSERT INTO agent_sessions (scout_run_id, platform_id, agent, status, summary, error, ended_at)
+         VALUES ($1, $2, 'topic_scout', 'failed', 'scout could not start', $3, now())`,
+        [id, platformId, message],
       );
     }
     console.error(`[scout] run ${id} failed: ${message}`);
@@ -182,21 +209,30 @@ async function runClaimedScout(id: string): Promise<void> {
   }
 }
 
-/** Drain one request at a time. Safe to call eagerly after enqueue and from the poller. */
+/**
+ * Start the next request of every platform that is not paused and has no
+ * scout running here, one request per platform at a time. Safe to call eagerly
+ * after enqueue and from the poller. Resolves once every run it started ends.
+ */
 export async function processScoutQueue(): Promise<void> {
-  if (stopped || active) return;
+  if (stopped) return;
   await recoverStaleScoutRuns();
-  const id = await claimNextScoutRun();
-  if (!id) return;
-  active = true;
-  try {
-    await runClaimedScout(id);
-  } finally {
-    active = false;
-    queueMicrotask(() =>
-      void processScoutQueue().catch((err) => console.error('[scout] queue failed:', err)),
+  const runs: Promise<void>[] = [];
+  for (const platform of await activePlatforms()) {
+    if (stopped || active.has(platform.id)) continue;
+    const run = await claimNextScoutRun(platform.id);
+    if (!run) continue;
+    active.add(platform.id);
+    runs.push(
+      runClaimedScout(run).finally(() => {
+        active.delete(platform.id);
+        queueMicrotask(() =>
+          void processScoutQueue().catch((err) => console.error('[scout] queue failed:', err)),
+        );
+      }),
     );
   }
+  await Promise.all(runs);
 }
 
 export function startScoutWorker(): void {

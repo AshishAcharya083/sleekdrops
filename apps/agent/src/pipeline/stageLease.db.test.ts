@@ -423,7 +423,7 @@ test('claiming an article takes its lease without spending an attempt', { skip }
   created.push(queued.id);
   assert.equal(queued.attempt, 1, 'the first pipeline pass is attempt 1');
 
-  const claimed = await claimNext();
+  const claimed = await claimNext(['sleekdrops']);
 
   assert.equal(claimed?.id, queued.id, 'the longest-waiting queued article');
   assert.equal(claimed?.status, 'running');
