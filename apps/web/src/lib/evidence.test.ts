@@ -249,12 +249,27 @@ test('a release still ahead of us is written in the tense it deserves', () => {
 test('the review-unit line names the supplier and what happened to the unit', () => {
   const loan = provenanceCopy({ acquisition: 'loan', supplier: 'Apple Australia', returned: '2026-10' });
   assert.equal(loan.variant, 'loan');
-  assert.equal(loan.lead, 'Apple Australia lent us this unit for testing.');
+  assert.equal(loan.lead, 'Apple Australia lent us this unit for this review.');
   assert.match(loan.detail, /returned it in Oct 2026/);
   assert.match(loan.detail, /had no input into this page/);
   // "Supplied for review" names nobody and leaves the unit's fate open - the
   // family of vague labels the ACCC's sweep singled out.
   assert.doesNotMatch(`${loan.lead} ${loan.detail}`, /supplied for review/i);
+});
+
+test('no review-unit line claims the product was tested', () => {
+  // Reviews are researched, and /how-we-rate says so: a loan or a purchase
+  // records how the unit arrived, never that anybody here put it through tests.
+  for (const unit of [
+    { acquisition: 'retail', paid: 'A$2,199' },
+    { acquisition: 'loan', supplier: 'Apple Australia', returned: '2026-10' },
+    { acquisition: 'none' },
+  ] as const) {
+    for (const measuredOurselves of [false, true]) {
+      const copy = provenanceCopy(unit, measuredOurselves);
+      assert.doesNotMatch(`${copy.lead} ${copy.detail} ${copy.independence}`, /\btest(ed|ing)?\b/i);
+    }
+  }
 });
 
 test('a bought unit says what we paid, and a missing unit says there was none', () => {

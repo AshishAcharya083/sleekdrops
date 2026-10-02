@@ -1,12 +1,13 @@
 ---
 import BaseLayout from '@layouts/BaseLayout.astro';
 import LegalLayout from '@components/article/LegalLayout.astro';
+import { ASSESSMENT_SUMMARY, INDEPENDENCE_MECHANISM, PAID_LINK_NOTE, methodologyHref } from '@lib/methodology';
 import { buildCategorySchema, buildMeta } from '@lib/seo';
 
 const meta = buildMeta({
   title: 'Affiliate disclaimer',
   description:
-    'SleekDrops earns a commission when you click affiliate links. We research every pick independently, never accept paid placements, and disclose every commercial relationship.',
+    'SleekDrops earns a commission when you buy through affiliate links. Products are researched from published evidence rather than tested hands-on, and a commission never affects a score or a pick.',
   pathname: '/disclaimer',
 });
 ---
@@ -18,7 +19,7 @@ const meta = buildMeta({
   <LegalLayout
     eyebrow="Legal"
     titleHtml="Affiliate <em>disclaimer</em>."
-    updated="September 6, 2026"
+    updated="October 2, 2026"
     toc={[
       { href: '#summary',    label: 'Plain summary' },
       { href: '#how',        label: 'How affiliate links work' },
@@ -35,24 +36,22 @@ const meta = buildMeta({
 
     <h2 id="how">How affiliate links <em>work</em></h2>
     <p>When you click an affiliate product link on SleekDrops, you're currently sent to Amazon. If you make a qualifying purchase within its cookie window, Amazon attributes the sale to SleekDrops and pays us a small commission. The price you pay is the same — the retailer absorbs the commission out of its margin, not your wallet.</p>
+    <p>Prices are not quoted from Amazon. Amazon's programme only allows prices drawn live from its own systems, so we point you to the current price instead; where a figure matters we give the manufacturer's RRP with its year.</p>
 
     <h2 id="independence">Editorial <em>independence</em></h2>
     <p>We don't take sponsorships. We don't run "promoted" or "sponsored" posts. No brand or PR agency pays us to publish, and no brand has approval or pre-view rights over SleekDrops coverage. The recommendation comes first; the affiliate link is added after we've decided what to recommend.</p>
-    <p>No brand has supplied us with a product. If one ever does, the piece will say so, and we will return the unit or disclose ongoing access in the byline.</p>
+    <p>That is a mechanism, not a slogan:</p>
+    <ul>
+      {INDEPENDENCE_MECHANISM.map((sentence) => <li>{sentence}</li>)}
+    </ul>
+    <p>When a brand supplies a product, the piece says so, and we return the unit or disclose ongoing access in the byline. The full independence policy is on <a href={methodologyHref('independence')}>how we rate</a>.</p>
 
     <h2 id="testing">What a pick <em>rests on</em></h2>
-    <p>We research; we do not test products, and we don't claim to. The full evidence standard is on <a href="/how-we-research">how we research</a>. Here is what a recommendation rests on:</p>
-    <ul>
-      <li><strong>Reviews</strong> compare a product against its nearest competitors on manufacturer specifications, owner reviews and expert coverage, with Australian availability checked on the date the piece shows.</li>
-      <li><strong>Buying guides</strong> compare at least three contenders side by side on the same criteria.</li>
-      <li><strong>Roundups</strong> are ranked against stated criteria — we'll always tell you what we weighted and why.</li>
-      <li><strong>Hands-on use</strong> plays no part: nobody here has used these products. Every recommendation rests on the sources listed at the foot of the article, each with its publisher and date.</li>
-      <li><strong>Pros and cons</strong> are honest: 3–5 genuine advantages, 2–4 genuine disadvantages. If we can't find any cons, we haven't looked hard enough yet.</li>
-      <li><strong>Prices</strong> are not quoted from Amazon. Amazon's programme only allows prices drawn live from its own systems, so we point you to the current price instead; where a figure matters we give the manufacturer's RRP with its year.</li>
-    </ul>
+    <p>{ASSESSMENT_SUMMARY}</p>
+    <p>How a product is assessed, what each score band means and which version of the method scored it are published in one place, on <a href={methodologyHref('assessment')}>how we rate</a>. The evidence standard behind every source is on <a href="/how-we-research">how we research</a>.</p>
 
     <h2 id="labelling">How links are <em>labelled</em></h2>
-    <p>Every affiliate link carries <code>rel="sponsored"</code> in the HTML, per Google's guidance, and every page with one opens with a disclosure under the byline. Buttons and links that say "Check price on Amazon", "See it on Amazon" or similar are always affiliate and always go to Amazon; in-body text links to manufacturers, standards bodies and other sources are not.</p>
+    <p>Every affiliate link carries <code>rel="sponsored"</code> in the HTML, per Google's guidance, and every page with one opens with a disclosure under the byline. A review's buy buttons also carry the line "{PAID_LINK_NOTE}" beside them. Buttons and links that say "Check price on Amazon", "See it on Amazon" or similar are always affiliate and always go to Amazon; in-body text links to manufacturers, standards bodies and other sources are not.</p>
 
     <h2 id="corrections">Corrections</h2>
     <p>Spotted a mistake — a stale price, an old promo code, or a claim that no longer holds? Tell us at <a href="mailto:corrections@sleekdrops.com">corrections@sleekdrops.com</a> and we'll update the post (and credit you in the footer if you'd like).</p>

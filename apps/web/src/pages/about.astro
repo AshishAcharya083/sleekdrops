@@ -3,6 +3,8 @@ import BaseLayout from '@layouts/BaseLayout.astro';
 import Eyebrow from '@components/ui/Eyebrow.astro';
 import { listAuthors, listBeats, authorInitials } from '@data/authors';
 import { SITE_DESCRIPTION } from '@data/site';
+import { brandSuppliedCount, scoreSummary } from '@lib/about-stats';
+import { ASSESSMENT_SUMMARY, INDEPENDENCE_MECHANISM, methodologyHref } from '@lib/methodology';
 import { getAllPosts } from '@lib/posts';
 import { buildCategorySchema, buildMeta } from '@lib/seo';
 
@@ -13,8 +15,17 @@ const team = listAuthors();
 const beatLabels = listBeats()
   .map((beat) => beat.label)
   .filter(Boolean);
-// The one number on this page we can stand behind: it is counted, not claimed.
-const published = (await getAllPosts()).length;
+// Counted from the published posts, so a reader could recount them. Paid
+// placements is the one policy figure; its mechanism is stated in principle 01.
+const posts = await getAllPosts();
+const frontmatter = posts.map((post) => post.data);
+const scores = scoreSummary(frontmatter);
+const stats = [
+  { value: String(posts.length), label: 'Articles published' },
+  ...(scores ? [{ value: scores.average.toFixed(1), label: 'Average score given' }] : []),
+  { value: '0', label: 'Paid placements', accent: true },
+  { value: String(brandSuppliedCount(frontmatter)), label: 'Brand-supplied products', accent: true },
+];
 
 const meta = buildMeta({
   title: 'About SleekDrops',
@@ -43,12 +54,12 @@ const meta = buildMeta({
         <div class="principle">
           <span class="num">01 / Independence</span>
           <h3>No <em>paid</em> placements. Ever.</h3>
-          <p>No brand pays for a place on this site. We don't take sponsorships, we don't run "promoted" posts, and no brand sees a piece before it's published. We earn a commission when you buy through our links, and that never decides what we recommend.</p>
+          <p>{INDEPENDENCE_MECHANISM.join(' ')} No brand sees a piece before it's published. <a href={methodologyHref('independence')}>How that is enforced</a>.</p>
         </div>
         <div class="principle">
           <span class="num">02 / Method</span>
           <h3>If we can't <em>source</em> it, we don't say it.</h3>
-          <p>We research; we do not test products. Every pick is an editorial synthesis of published test results, manufacturer specs and owner reports, compared against its nearest competitors, with Australian availability checked on the date shown. No article here is written from hands-on use, and every one of them lists the sources it used. The full method is in <a href="/how-we-research">how we research</a>.</p>
+          <p>{ASSESSMENT_SUMMARY} How a score is given is on <a href={methodologyHref('assessment')}>how we rate</a>, and the evidence standard on <a href="/how-we-research">how we research</a>.</p>
         </div>
         <div class="principle">
           <span class="num">03 / Honesty</span>
@@ -95,11 +106,19 @@ const meta = buildMeta({
     <div class="container">
       <Eyebrow accent dot>The numbers</Eyebrow>
       <h2>Independent, and paid only when <em>you</em> buy.</h2>
-      <div class="row">
-        <div><div class="num">{published}</div><div class="lbl">Articles published</div></div>
-        <div><div class="num"><em>0</em></div><div class="lbl">Paid placements</div></div>
-        <div><div class="num"><em>0</em></div><div class="lbl">Brand-supplied products</div></div>
+      <div class="row" style={`--stat-cols: ${stats.length}`}>
+        {stats.map((stat) => (
+          <div>
+            <div class="num">{stat.accent ? <em>{stat.value}</em> : stat.value}</div>
+            <div class="lbl">{stat.label}</div>
+          </div>
+        ))}
       </div>
+      {scores && (
+        <p class="stats-context">
+          The average is across {scores.scored} scored {scores.scored === 1 ? 'review' : 'reviews'}. What each score band means, and how every score we have given is spread across them, is published on <a href={methodologyHref('distribution')}>how we rate</a>.
+        </p>
+      )}
     </div>
   </section>
 </BaseLayout>
@@ -274,7 +293,7 @@ const meta = buildMeta({
   .stats-band h2 em { font-style: italic; }
   .stats-band .row {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(var(--stat-cols), 1fr);
     gap: 24px;
     max-width: 920px;
     margin: 0 auto;
@@ -296,4 +315,13 @@ const meta = buildMeta({
     font-weight: 700;
     margin-top: 8px;
   }
+  .stats-context {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--muted);
+    max-width: 56ch;
+    margin: 40px auto 0;
+  }
+  .stats-context a { color: var(--ink); text-underline-offset: 2px; }
+  .principle p a { color: var(--ink); text-underline-offset: 2px; }
 </style>
