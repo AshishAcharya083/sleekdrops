@@ -14,15 +14,9 @@
  * Kept out of chrome.ts so the dispatch rules are testable under the bare
  * `node --test` runner: this module never imports the analytics wrapper (which
  * pulls in the SDK), and takes `track` and `warn` from its caller instead.
- *
- * It never statically imports ./trust.ts either. That module carries the zod
- * schemas badges are validated with, and chrome.ts ships on every page, so a
- * static import roughly doubled every page's script. The badge kinds are
- * mirrored below in a map the compiler holds to the registry's own key type,
- * and the method version is loaded on the one page that reports it.
  */
 
-import type { BadgeKind } from './trust.ts';
+import { CURRENT_METHOD_VERSION, isBadgeKind } from './trust.ts';
 import type { EventProps } from './pii.ts';
 
 /** The page-view `screen` the methodology page declares on BaseLayout. */
@@ -40,29 +34,8 @@ export interface TrustAnalyticsDeps {
   warn: (message: string) => void;
 }
 
-/**
- * Every key of `badgeRegistry`. Typed as a record over `BadgeKind` so a kind
- * added to or removed from the registry fails the type check until it is
- * mirrored here; trust-analytics.test.ts checks the keys at runtime too.
- */
-const REGISTRY_KINDS: Record<BadgeKind, true> = {
-  'review-score': true,
-  'lowest-price': true,
-  'below-average': true,
-  'skip-for-now': true,
-};
-
-/** True when `value` names a kind in the badge registry. */
-export function isBadgeKind(value: string | undefined): value is BadgeKind {
-  return value !== undefined && Object.hasOwn(REGISTRY_KINDS, value);
-}
-
-/**
- * Wires the trust hooks under `root`. The returned promise settles once the
- * methodology view, when this page reports one, has been dispatched; nothing
- * else waits on it.
- */
-export async function wireTrustAnalytics(root: ParentNode, deps: TrustAnalyticsDeps): Promise<void> {
+/** Wires the trust hooks under `root`, and reports the methodology view when this is that page. */
+export function wireTrustAnalytics(root: ParentNode, deps: TrustAnalyticsDeps): void {
   const { screenName, parseProps, track, warn } = deps;
 
   /* `toggle` does not bubble, so each explainer gets its own listener. Only the
@@ -93,15 +66,6 @@ export async function wireTrustAnalytics(root: ParentNode, deps: TrustAnalyticsD
   });
 
   if (screenName === METHODOLOGY_SCREEN) {
-    /* The view happened whether or not the chunk arrives (a stale deploy can
-       404 it), so a failed load still counts the view, without the version. */
-    const version = await import('./trust.ts').then(
-      (trust) => trust.CURRENT_METHOD_VERSION,
-      () => {
-        warn('could not load the trust module; Methodology Viewed sent without method_version');
-        return undefined;
-      },
-    );
-    track('methodologyViewed', version ? { method_version: version } : undefined);
+    track('methodologyViewed', { method_version: CURRENT_METHOD_VERSION });
   }
 }

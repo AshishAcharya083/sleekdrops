@@ -359,7 +359,6 @@ Owning component: `chrome.ts` (`[data-toc] a` handler).
 
 A view of the `/how-we-rate` methodology page, so the share of readers who go and check how scores are given is measurable on its own rather than buried among page views.
 Fires once per document, after that page's `Page Viewed`, when the page view's `screen` is `how-we-rate`.
-The version is read from `trust.ts` through a dynamic import, so its validation code loads on this page only rather than in every page's script; if that chunk fails to load, the view is still sent without `method_version` and one `serverLog('warn', ...)` line is logged.
 
 | Property | Type | Notes |
 |---|---|---|
@@ -390,7 +389,7 @@ Fires on every click of an element carrying `data-trust-badge`.
 
 | Property | Type | Notes |
 |---|---|---|
-| `badge_kind` | string | The badge's registry kind (`review-score`, `skip-for-now`, ...), taken from the attribute and winning over any prop of the same name. |
+| `badge_kind` | string | The badge's registry kind (`review-score`, `honest-negative`, ...; `BADGE_REGISTRY` in [`src/lib/trust.ts`](../src/lib/trust.ts)), taken from the attribute and winning over any prop of the same name. |
 | `slug` | string | The deal or promo slug. |
 | `placement` | string | `deal-card`, `deals-index`, `deal-detail`, `promo-card`, `promo-detail` or `home`. |
 

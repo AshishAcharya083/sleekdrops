@@ -20,10 +20,12 @@ It is not a build gate.
 - **Validator:** [`@adobe/structured-data-validator`](https://www.npmjs.com/package/@adobe/structured-data-validator) 1.7.0, which checks every property against the schema.org vocabulary and applies Google's rich-result requirements for `Product`, `Offer`, `Review` and `Rating`.
 - **Extractor:** [`@marbec/web-auto-extractor`](https://www.npmjs.com/package/@marbec/web-auto-extractor) 2.2.1, the extractor the validator is built to read.
 - **Vocabulary:** schema.org release 29.3 (`schemaorg-all-https.jsonld` from the schemaorg/schemaorg GitHub release).
-- **Fixtures:** the `buildPostSchema` output for a review post (Harman Kardon Luna 2, rating 4.4, price A$229, author `desk`), wrapped in an HTML page through `jsonLdScript`, in two forms:
+- **Fixtures:** the `buildPostSchema` output for a review post (Harman Kardon Luna 2, rating 4.4, price A$229, author `desk`), serialised with `jsonLdScript` into a `<script type="application/ld+json">` in an otherwise empty HTML page, in two forms:
   1. **Versioned and revised:** `methodVersion: '1.0'`, published 2026-05-30, updated 2026-09-12.
   2. **Legacy:** no `methodVersion`, no `updatedDate`.
 - The vocabulary check was confirmed live by renaming `isBasedOn` and `version` to non-schema names in a copy of fixture 1: the validator reported both as "not supported by the schema.org specification".
+
+The run was repeated on 2026-10-02 after the branch was rebuilt on SLE-146's merged trust model (`methodLabel` and `MethodVersion` from `src/lib/trust.ts`), with the same result below.
 
 The hosted validators (validator.schema.org and Google's Rich Results Test) could not be reached from the build sandbox, so this run used the offline validator above.
 

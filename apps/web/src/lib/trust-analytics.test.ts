@@ -9,11 +9,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
-import { CURRENT_METHOD_VERSION, badgeKinds, badgeRegistry } from './trust.ts';
-import { isBadgeKind, wireTrustAnalytics, type TrustEvent } from './trust-analytics.ts';
+import { BADGE_REGISTRY, CURRENT_METHOD_VERSION } from './trust.ts';
+import { wireTrustAnalytics, type TrustEvent } from './trust-analytics.ts';
 import type { EventProps } from './pii.ts';
 
 interface FixtureElement {
@@ -71,41 +69,37 @@ function parseProps(raw: string | undefined): EventProps | undefined {
 function wire(elements: FixtureElement[], screenName?: string) {
   const tracked: { event: TrustEvent; props: EventProps | undefined }[] = [];
   const warnings: string[] = [];
-  const settled = wireTrustAnalytics(fixtureDocument(elements), {
+  wireTrustAnalytics(fixtureDocument(elements), {
     screenName,
     parseProps,
     track: (event, props) => tracked.push({ event, props }),
     warn: (message) => warnings.push(message),
   });
-  return { tracked, warnings, settled };
+  return { tracked, warnings };
 }
 
 // ── Methodology Viewed ──────────────────────────────────────────────────────
 
-test('the methodology page reports one view carrying the current method version', async () => {
-  const { tracked, warnings, settled } = wire([], 'how-we-rate');
-  await settled;
+test('the methodology page reports one view carrying the current method version', () => {
+  const { tracked, warnings } = wire([], 'how-we-rate');
   assert.deepEqual(tracked, [
     { event: 'methodologyViewed', props: { method_version: CURRENT_METHOD_VERSION } },
   ]);
   assert.deepEqual(warnings, []);
 });
 
-test('no other screen reports a methodology view', async () => {
+test('no other screen reports a methodology view', () => {
   for (const screen of [undefined, 'blog-post', 'how-we-research', 'home']) {
-    const { tracked, settled } = wire([], screen);
-    await settled;
+    const { tracked } = wire([], screen);
     assert.deepEqual(tracked, [], `screen ${screen}`);
   }
 });
 
-test('the hooks are live before the methodology view has been sent', async () => {
+test('the methodology page still wires the other hooks it renders', () => {
   const link = badgeLink('review-score');
-  const { tracked, settled } = wire([link], 'how-we-rate');
+  const { tracked } = wire([link], 'how-we-rate');
   link.dispatch('click');
-  assert.deepEqual(tracked.map((entry) => entry.event), ['trustBadgeClicked']);
-  await settled;
-  assert.deepEqual(tracked.map((entry) => entry.event), ['trustBadgeClicked', 'methodologyViewed']);
+  assert.deepEqual(tracked.map((entry) => entry.event), ['methodologyViewed', 'trustBadgeClicked']);
 });
 
 // ── Score Explainer Expanded ────────────────────────────────────────────────
@@ -218,10 +212,10 @@ test('every click is its own event', () => {
 });
 
 test("the attribute's kind wins over a badge_kind smuggled into the props", () => {
-  const link = badgeLink('skip-for-now', '{"slug":"x","placement":"home","badge_kind":"lowest-price"}');
+  const link = badgeLink('honest-negative', '{"slug":"x","placement":"home","badge_kind":"lowest-price"}');
   const { tracked } = wire([link]);
   link.dispatch('click');
-  assert.equal(tracked[0]?.props?.badge_kind, 'skip-for-now');
+  assert.equal(tracked[0]?.props?.badge_kind, 'honest-negative');
 });
 
 test('a badge with malformed props still reports its kind', () => {
@@ -245,21 +239,13 @@ test('a kind outside the badge registry is dropped with one warning per click', 
 test('every registry kind is accepted, enabled or not', () => {
   // A disabled kind never renders, but if one ever did its click is still a
   // real badge - the registry, not the enabled flag, is the vocabulary.
-  for (const kind of Object.keys(badgeRegistry)) {
-    assert.equal(isBadgeKind(kind), true, kind);
+  for (const kind of Object.keys(BADGE_REGISTRY)) {
+    const link = badgeLink(kind);
+    const { tracked, warnings } = wire([link]);
+    link.dispatch('click');
+    assert.equal(tracked[0]?.props?.badge_kind, kind);
+    assert.deepEqual(warnings, [], kind);
   }
-  assert.deepEqual(Object.keys(badgeRegistry).sort(), [...badgeKinds].sort());
-  assert.equal(isBadgeKind(undefined), false);
-});
-
-test('the module the client bundles imports nothing from trust.ts but types', () => {
-  // trust.ts carries zod; a static value import would ship it on every page.
-  const source = readFileSync(fileURLToPath(new URL('./trust-analytics.ts', import.meta.url)), 'utf8');
-  const staticImports = [...source.matchAll(/^import\s+(.*?)\s+from\s+'([^']+)';$/gm)];
-  for (const [, clause, specifier] of staticImports) {
-    if (specifier === './trust.ts') assert.match(clause, /^type\s/, `value import from trust.ts: ${clause}`);
-  }
-  assert.ok(staticImports.some(([, , specifier]) => specifier === './trust.ts'));
 });
 
 // ── A page without the surfaces ─────────────────────────────────────────────

@@ -103,7 +103,7 @@ if (!window.__sdChromeInit) {
   /* Trust surfaces: a methodology page view, a score explainer opened, a deal
      badge's proof link followed - each from the plain hook its component
      renders. The rules live in the pure ./trust-analytics module. */
-  void wireTrustAnalytics(document, {
+  wireTrustAnalytics(document, {
     screenName,
     parseProps,
     track: (event, props) => track(EVENTS[event], props),
