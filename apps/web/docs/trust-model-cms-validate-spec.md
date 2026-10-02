@@ -3,38 +3,36 @@
 **Status, 2026-10-02.** Optional follow-up, not a gate.
 Nothing in this repository's build, tests or CI depends on it.
 
-## Why this document exists
+## Which validator this targets
 
-The review frontmatter now carries a shared trust vocabulary, defined once in
-[`src/lib/trust.ts`](../src/lib/trust.ts) and applied to `productSchema` in
-[`src/content/frontmatter.ts`](../src/content/frontmatter.ts).
-`sleekdrops-cms/scripts/validate.ts` historically mirrored that schema so a post failed in the content repo's CI rather than in this site's build.
+The review frontmatter now carries a shared trust vocabulary, defined once in [`src/lib/trust.ts`](../src/lib/trust.ts) and applied to `productSchema` in [`src/content/frontmatter.ts`](../src/content/frontmatter.ts).
+`sleekdrops-cms/scripts/validate.ts` historically mirrored that schema, so a hand-written review failed in the content repo's CI rather than in this site's build.
 That repository is not visible from here, so the change it needs is written out below instead of committed.
 
+The diff targets the **`productSchema` block of `sleekdrops-cms/scripts/validate.ts`**, as it was mirrored from this repository before this change, with `z` imported from `zod`.
 Two facts to check before applying it:
 
-- `frontmatter.ts` records that the `validate.ts` counterpart was **decommissioned on 2026-06-13**, when content moved to D1.
-  If it is no longer run anywhere, there is nothing to do.
+- `frontmatter.ts` records that this `validate.ts` was **decommissioned on 2026-06-13**, when content moved to D1.
+  If nothing runs it any more, there is nothing to do: this site's build enforces every rule below on its own.
 - The live mirror is the agent's [`apps/agent/src/content/contract.ts`](../../agent/src/content/contract.ts).
-  It has no product schema (the pipeline never writes `postType: review`), and `reviewUnit.acquisition` keeps its three values, so it needs no change.
+  It has no product schema, because the pipeline never writes `postType: review`.
+  It now exports the trust vocabulary (`METHOD_VERSIONS`, `PROVENANCES`, `BADGE_KINDS`, `ENABLED_BADGE_KINDS`, `SUB_SCORE_TOLERANCE`), and `contract.test.ts` asserts those match `trust.ts`.
 
-If `validate.ts` is still run, apply the diff below.
-Every new field is optional and the old free-text badge string still validates, so the roughly 320 published reviews pass unchanged.
+Every new field is optional and a free-text badge string still validates, so the roughly 320 published reviews pass unchanged.
 
 ## What the site now enforces
 
 - `product.methodVersion`: optional, one of the published method versions (today only `"1.0"`).
-- `product.provenance`: optional, exactly `"retail"`, `"loan"` or `"none"` - the same values as `reviewUnit.acquisition`, and it must agree with it when both are set.
-- `product.subScores`: optional array of at least two `{ label, score, weight }`.
-  Weights must sum to 1 (within 0.001) and the weighted sum must sit within **0.05** of `product.rating`.
-- `product.badge`: either a legacy string (accepted, never printed) or a registry badge `{ kind, evidence, checkedAt }`.
-  `checkedAt` is `YYYY-MM-DD`.
-  The price-history kinds `lowest-price` and `below-average` are well-formed but refused while switched off.
-  A `review-score` badge must print the review's own `rating`.
+- `product.provenance`: optional, exactly `"retail"`, `"brand-sample"` or `"not-hands-on"`.
+  `reviewUnit.acquisition` keeps its own `retail` / `loan` / `none`; when both are set they must say the same thing (`loan` is `brand-sample`, `none` is `not-hands-on`).
+- `product.subScores`: optional array of at least two `{ label, score, weight }`, scores 1-5 and weights above 0 up to 1.
+  The weights must sum to 1 (within 0.001), and the weighted sum must sit within **0.05** of `product.rating`.
+- `product.badge`: a string.
+  A registry kind is held to the registry: `"review-score"` is accepted (the review's own rating is its evidence), `"honest-negative"` is refused (it needs a note a review does not carry, so it belongs on a deal), and the switched-off price-history kinds `"lowest-price"` and `"below-average"` are refused.
+  Any other string is a legacy label: it validates, and the site never prints it.
 
 ## The diff
 
-Written against the `productSchema` block as it was mirrored from this repository before the change, with `z` imported from `zod`.
 The CMS cannot import from this repository, so the vocabulary is inlined; keep it in step with `src/lib/trust.ts`.
 
 ```diff
@@ -42,51 +40,14 @@ The CMS cannot import from this repository, so the vocabulary is inlined; keep i
  
 +// --- Trust vocabulary, mirrored from apps/web/src/lib/trust.ts ---------------
 +const METHOD_VERSIONS = ['1.0'] as const;
-+const ASSESSMENT_PROVENANCES = ['retail', 'loan', 'none'] as const;
++const PROVENANCES = ['retail', 'brand-sample', 'not-hands-on'] as const;
 +const SUB_SCORE_TOLERANCE = 0.05;
++const BADGE_KINDS = new Set(['review-score', 'honest-negative', 'lowest-price', 'below-average']);
 +// Kinds that are defined but refused until price checks are recorded.
 +const DISABLED_BADGE_KINDS = new Set(['lowest-price', 'below-average']);
-+
-+const isWebUrl = (value: string) => {
-+  try {
-+    const { protocol } = new URL(value.trim());
-+    return protocol === 'https:' || protocol === 'http:';
-+  } catch {
-+    return false;
-+  }
-+};
-+const webUrl = () => z.string().url().refine(isWebUrl, { message: 'must be an http(s) URL' });
-+const checkedAt = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-+const price = z.string().min(1);
-+
-+const badgeClaimSchema = z.discriminatedUnion('kind', [
-+  z.object({
-+    kind: z.literal('review-score'),
-+    evidence: z
-+      .object({ score: z.number().min(1).max(5), reviewSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/) })
-+      .strict(),
-+    checkedAt,
-+  }).strict(),
-+  z.object({
-+    kind: z.literal('lowest-price'),
-+    evidence: z
-+      .object({ price, previousLowest: price, observations: z.number().int().min(2), sourceUrl: webUrl() })
-+      .strict(),
-+    checkedAt,
-+  }).strict(),
-+  z.object({
-+    kind: z.literal('below-average'),
-+    evidence: z
-+      .object({ price, average: price, below: price, observations: z.number().int().min(2), sourceUrl: webUrl() })
-+      .strict(),
-+    checkedAt,
-+  }).strict(),
-+  z.object({
-+    kind: z.literal('skip-for-now'),
-+    evidence: z.object({ reason: z.string().min(1), sourceUrl: webUrl() }).strict(),
-+    checkedAt,
-+  }).strict(),
-+]);
++// Kinds a review carries the evidence for itself.
++const PRODUCT_BADGE_KINDS = new Set(['review-score']);
++const ACQUISITION_PROVENANCE = { retail: 'retail', loan: 'brand-sample', none: 'not-hands-on' } as const;
 +
 -const productSchema = z.object({
 -  name: z.string().min(1),
@@ -112,13 +73,13 @@ The CMS cannot import from this repository, so the vocabulary is inlined; keep i
 +    retailer: z.string().min(1),
 +    price: z.string().min(1),
 +    priceWas: z.string().optional(),
-+    // A registry badge; a legacy string still validates and is never printed.
-+    badge: z.union([badgeClaimSchema, z.string()]).optional(),
++    // A registry kind, or a legacy label that validates and is never printed.
++    badge: z.string().optional(),
 +    pros: z.array(z.string().min(1)).min(3).max(5),
 +    cons: z.array(z.string().min(1)).min(2).max(4),
 +    specs: z.record(z.string()).optional(),
 +    methodVersion: z.enum(METHOD_VERSIONS).optional(),
-+    provenance: z.enum(ASSESSMENT_PROVENANCES).optional(),
++    provenance: z.enum(PROVENANCES).optional(),
 +    subScores: z
 +      .array(z.object({ label: z.string().min(1), score: z.number().min(1).max(5), weight: z.number().positive().max(1) }))
 +      .min(2)
@@ -138,26 +99,14 @@ The CMS cannot import from this repository, so the vocabulary is inlined; keep i
 +        });
 +      }
 +    }
-+    if (product.badge === undefined || typeof product.badge === 'string') return;
-+    if (DISABLED_BADGE_KINDS.has(product.badge.kind)) {
-+      ctx.addIssue({
-+        code: 'custom',
-+        path: ['badge'],
-+        message: `badge kind "${product.badge.kind}" is switched off until the data behind it is collected`,
-+      });
-+    }
-+    if (product.badge.kind === 'review-score' && product.badge.evidence.score !== product.rating) {
-+      ctx.addIssue({
-+        code: 'custom',
-+        path: ['badge', 'evidence', 'score'],
-+        message: `a review-score badge must print the review's own rating (${product.rating})`,
-+      });
++    const badge = product.badge;
++    if (badge === undefined || !BADGE_KINDS.has(badge)) return;
++    if (DISABLED_BADGE_KINDS.has(badge)) {
++      ctx.addIssue({ code: 'custom', path: ['badge'], message: `badge kind "${badge}" is switched off until the data behind it is collected` });
++    } else if (!PRODUCT_BADGE_KINDS.has(badge)) {
++      ctx.addIssue({ code: 'custom', path: ['badge'], message: `badge kind "${badge}" needs evidence a review does not carry, so it belongs on a deal` });
 +    }
 +  });
- 
- const reviewUnitSchema = z.object({
--  acquisition: z.enum(['retail', 'loan', 'none']),
-+  acquisition: z.enum(ASSESSMENT_PROVENANCES),
 ```
 
 And on the frontmatter object, after the existing `postType: 'review'` refinement:
@@ -172,7 +121,7 @@ And on the frontmatter object, after the existing `postType: 'review'` refinemen
 +    (data) =>
 +      data.product?.provenance === undefined ||
 +      data.reviewUnit === undefined ||
-+      data.product.provenance === data.reviewUnit.acquisition,
++      data.product.provenance === ACQUISITION_PROVENANCE[data.reviewUnit.acquisition],
 +    {
 +      message: '`product.provenance` and `reviewUnit.acquisition` describe the same unit and must agree',
 +      path: ['product', 'provenance'],
@@ -180,7 +129,7 @@ And on the frontmatter object, after the existing `postType: 'review'` refinemen
 +  );
 ```
 
-If the CMS copy predates `reviewUnit`, skip both `reviewUnit` hunks.
+If the CMS copy predates `reviewUnit`, skip the second hunk and the `ACQUISITION_PROVENANCE` line.
 
 ## Keeping it in step
 

@@ -192,7 +192,7 @@ const asideSummary = [
               {offerPicks.map((pick) => <OfferCallout pick={pick} />)}
             </section>
           )}
-          {product && <ProductCallout product={product} postSlug={post.slug} kind={post.data.kind} />}
+          {product && <ProductCallout product={product} postSlug={post.slug} />}
           {product && <ProsConsList pros={product.pros} cons={product.cons} />}
           {hasAffiliateLinks && <AffiliateDisclosure />}
         </ArticleBody>

@@ -12,6 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { blogFrontmatterSchema } from './frontmatter.ts';
+import { BADGE_KINDS, BADGE_REGISTRY } from '../lib/trust.ts';
 
 /** Verbatim output of `runAssembler` for a guide with picks, sources and entities. */
 const assemblerOutput = {
@@ -308,7 +309,7 @@ const withProduct = (product: Record<string, unknown>, extra: Record<string, unk
 });
 
 test('a published review with a free-text badge and no trust fields still validates', () => {
-  for (const badge of ["Editor's choice", 'Best value', 'Hurry - ends tonight']) {
+  for (const badge of ["Editor's choice", 'Best value', 'Hurry - ends tonight', '']) {
     const parsed = blogFrontmatterSchema.parse(withProduct({ badge }));
     assert.equal(parsed.product?.badge, badge);
     assert.equal(parsed.product?.methodVersion, undefined);
@@ -320,12 +321,8 @@ test('a published review with a free-text badge and no trust fields still valida
 test('a review carrying the trust fields keeps every one of them', () => {
   const product = {
     methodVersion: '1.0',
-    provenance: 'none',
-    badge: {
-      kind: 'review-score',
-      evidence: { score: 4.4, reviewSlug: 'sony-wh-1000xm6-review' },
-      checkedAt: '2026-09-20',
-    },
+    provenance: 'not-hands-on',
+    badge: 'review-score',
     subScores: [
       { label: 'Noise cancelling', score: 4.8, weight: 0.4 },
       { label: 'Comfort', score: 4.2, weight: 0.3 },
@@ -358,35 +355,26 @@ test('sub-scores that do not recompute the headline rating fail the build', () =
   assert.deepEqual(result.error?.issues[0].path, ['product', 'subScores']);
 });
 
-test('a badge object is held to the registry rather than falling back to free text', () => {
-  const badges = [
-    // Missing its check date.
-    { kind: 'review-score', evidence: { score: 4.4, reviewSlug: 'sony-wh-1000xm6-review' } },
-    // Not a registry kind.
-    { kind: 'editors-choice', evidence: {}, checkedAt: '2026-09-20' },
-    // A price-history kind, well formed but switched off.
-    {
-      kind: 'lowest-price',
-      evidence: { price: 'A$499', previousLowest: 'A$529', observations: 8, sourceUrl: 'https://www.jbhifi.com.au/x' },
-      checkedAt: '2026-09-20',
-    },
-    // A score badge printing a number the review does not give.
-    { kind: 'review-score', evidence: { score: 4.7, reviewSlug: 'sony-wh-1000xm6-review' }, checkedAt: '2026-09-20' },
-  ];
-  for (const badge of badges) {
+test('a badge naming a registry kind is held to the registry rather than passing as free text', () => {
+  const disabled = BADGE_KINDS.filter((kind) => !BADGE_REGISTRY[kind].enabled);
+  // A review cannot evidence an honest-negative note, and price history is off.
+  for (const badge of ['honest-negative', ...disabled]) {
     const result = blogFrontmatterSchema.safeParse(withProduct({ badge }));
-    assert.equal(result.success, false, `${JSON.stringify(badge)} should be rejected`);
+    assert.equal(result.success, false, `${badge} should be rejected`);
+    assert.deepEqual(result.error?.issues[0].path, ['product', 'badge']);
   }
 });
 
 test('an unpublished method version or an unknown provenance is refused', () => {
   assert.equal(blogFrontmatterSchema.safeParse(withProduct({ methodVersion: '2.0' })).success, false);
-  assert.equal(blogFrontmatterSchema.safeParse(withProduct({ provenance: 'tested' })).success, false);
+  for (const provenance of ['tested', 'loan', 'none']) {
+    assert.equal(blogFrontmatterSchema.safeParse(withProduct({ provenance })).success, false, provenance);
+  }
 });
 
 test('provenance and the review-unit record may not tell two stories', () => {
   const unit = { reviewUnit: { acquisition: 'loan', supplier: 'Sony Australia', returned: '2026-09' } };
-  assert.equal(blogFrontmatterSchema.safeParse(withProduct({ provenance: 'loan' }, unit)).success, true);
+  assert.equal(blogFrontmatterSchema.safeParse(withProduct({ provenance: 'brand-sample' }, unit)).success, true);
   const result = blogFrontmatterSchema.safeParse(withProduct({ provenance: 'retail' }, unit));
   assert.equal(result.success, false);
   assert.deepEqual(result.error?.issues[0].path, ['product', 'provenance']);

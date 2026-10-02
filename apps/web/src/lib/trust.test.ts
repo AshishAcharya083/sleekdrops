@@ -5,276 +5,322 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { dailyDeals } from '../data/deals.ts';
 import {
   assessmentProvenance,
-  assessmentProvenances,
-  badgeClaimText,
-  badgeInWindow,
-  badgeKinds,
+  BADGE_KINDS,
+  BADGE_REGISTRY,
+  badgeAllowance,
+  badgeClaim,
   badgeProblems,
-  badgeProofHref,
-  badgeRegistry,
   capBadged,
   CURRENT_METHOD_VERSION,
-  displayableBadge,
+  formatCheckDay,
+  isBadgeLive,
+  MAX_BADGED_PER_LISTING,
   methodLabel,
-  methodVersions,
-  productCalloutLabel,
-  provenanceLabel,
+  METHOD_VERSIONS,
+  productBadgeClaim,
+  productBadgeKind,
+  productBadgeProblems,
+  PROVENANCE_COPY,
+  PROVENANCES,
+  SCORE_BANDS,
   scoreBand,
-  scoreBands,
+  SUB_SCORE_TOLERANCE,
   subScoreProblems,
   weightedScore,
-  type BadgeClaim,
+  type DealBadge,
 } from './trust.ts';
 
 // Midday in Sydney on 2 October 2026.
 const BUILD = new Date('2026-10-02T02:00:00Z');
 
-const scoreBadge = (overrides: Partial<Extract<BadgeClaim, { kind: 'review-score' }>> = {}): BadgeClaim => ({
+const scoreBadge: DealBadge = {
   kind: 'review-score',
-  evidence: { score: 4.4, reviewSlug: 'sony-wh-1000xm6-review' },
+  evidence: { reviewSlug: 'sony-wh-1000xm6-review', rating: 4.4 },
   checkedAt: '2026-09-20',
-  ...overrides,
-});
-
-const skipBadge: BadgeClaim = {
-  kind: 'skip-for-now',
-  evidence: { reason: 'it was A$60 cheaper in July', sourceUrl: 'https://www.jbhifi.com.au/products/x' },
-  checkedAt: '2026-10-01',
 };
 
-const lowestBadge: BadgeClaim = {
-  kind: 'lowest-price',
-  evidence: {
-    price: 'A$349',
-    previousLowest: 'A$379',
-    observations: 12,
-    sourceUrl: 'https://www.jbhifi.com.au/products/x',
-  },
+const skipBadge: DealBadge = {
+  kind: 'honest-negative',
+  evidence: { note: 'Likely cheaper at Black Friday (27 Nov).' },
   checkedAt: '2026-10-02',
 };
 
-test('each band starts exactly on its boundary and stops just below the next', () => {
-  assert.equal(scoreBand(5).label, 'Excellent');
-  assert.equal(scoreBand(4.5).label, 'Excellent');
-  assert.equal(scoreBand(4.4).label, 'Strong');
-  assert.equal(scoreBand(4.0).label, 'Strong');
-  assert.equal(scoreBand(3.9).label, 'Decent');
-  assert.equal(scoreBand(3.5).label, 'Decent');
-  assert.equal(scoreBand(3.4).label, 'Mixed');
-  assert.equal(scoreBand(3.0).label, 'Mixed');
-  assert.equal(scoreBand(2.9).label, 'Weak');
-  assert.equal(scoreBand(1).label, 'Weak');
-});
+const daysAfter = (day: string, days: number) => new Date(Date.parse(`${day}T02:00:00Z`) + days * 86_400_000);
 
-test('a score is banded as it is printed, so the word never contradicts the number', () => {
-  // 4.46 prints as "4.5"; calling it Strong would sit beside the Excellent number.
-  assert.equal((4.46).toFixed(1), '4.5');
-  assert.equal(scoreBand(4.46).label, 'Excellent');
-  assert.equal(scoreBand(4.44).label, 'Strong');
-});
+const disabledKinds = BADGE_KINDS.filter((kind) => !BADGE_REGISTRY[kind].enabled);
 
-test('a score off the 1-5 scale is refused rather than banded', () => {
-  for (const score of [0.9, 5.1, Number.NaN, Number.POSITIVE_INFINITY]) {
-    assert.throws(() => scoreBand(score), RangeError);
+/** A well-formed badge of any kind, so a disabled kind is refused for being off rather than malformed. */
+function sampleBadge(kind: (typeof BADGE_KINDS)[number]): DealBadge {
+  switch (kind) {
+    case 'review-score':
+      return scoreBadge;
+    case 'honest-negative':
+      return skipBadge;
+    case 'lowest-price':
+      return { kind, evidence: { price: 'A$449', previousLowest: 'A$479', observations: 12 }, checkedAt: '2026-10-02' };
+    case 'below-average':
+      return {
+        kind,
+        evidence: { price: 'A$449', average: 'A$490', below: 'A$41', observations: 12 },
+        checkedAt: '2026-10-02',
+      };
   }
+}
+
+// --- Score bands -------------------------------------------------------------
+
+test('every band boundary belongs to the band it opens', () => {
+  const cases: Array<[number, string]> = [
+    [5, 'Excellent'],
+    [4.5, 'Excellent'],
+    [4.4, 'Strong'],
+    [4.0, 'Strong'],
+    [3.9, 'Decent'],
+    [3.5, 'Decent'],
+    [3.4, 'Mixed'],
+    [3.0, 'Mixed'],
+    [2.9, 'Weak'],
+    [1, 'Weak'],
+  ];
+  for (const [rating, label] of cases) assert.equal(scoreBand(rating).label, label, `${rating}`);
 });
 
-test('every band is one word with a plain-language meaning, highest first', () => {
-  for (const band of scoreBands) {
-    assert.match(band.label, /^[A-Z][a-z]+$/);
-    assert.ok(band.meaning.length > 10);
+test('a score is banded as it is printed, so the number and the word never disagree', () => {
+  assert.equal(scoreBand(4.46).id, 'excellent');
+  assert.equal(scoreBand(4.44).id, 'strong');
+  assert.equal(scoreBand(3.95).id, 'strong');
+});
+
+test('the bands run high to low, cover the whole scale and each carry one word', () => {
+  for (let i = 1; i < SCORE_BANDS.length; i += 1) assert.ok(SCORE_BANDS[i - 1].min > SCORE_BANDS[i].min);
+  assert.equal(SCORE_BANDS[SCORE_BANDS.length - 1].min, 1);
+  for (const band of SCORE_BANDS) {
+    assert.match(band.label, /^[A-Z][a-z]+$/, band.id);
+    assert.ok(band.meaning.length > 0, band.id);
   }
-  const mins = scoreBands.map((band) => band.min);
-  assert.deepEqual(mins, [...mins].sort((a, b) => b - a));
-  assert.equal(mins.at(-1), 1);
+  for (let tenths = 10; tenths <= 50; tenths += 1) assert.doesNotThrow(() => scoreBand(tenths / 10));
 });
 
-test('the current method is the latest published version, labelled for readers', () => {
-  assert.equal(CURRENT_METHOD_VERSION, methodVersions.at(-1)?.version);
+test('a score outside the scale is clamped rather than thrown on', () => {
+  assert.equal(scoreBand(5.4).id, 'excellent');
+  assert.equal(scoreBand(0).id, 'weak');
+  assert.equal(scoreBand(Number.NaN).id, 'weak');
+});
+
+test('no band meaning is a superlative the site average would contradict', () => {
+  for (const band of SCORE_BANDS) assert.doesNotMatch(band.meaning, /\bbest\b|ever|world/i, band.id);
+});
+
+// --- Method version and provenance -------------------------------------------
+
+test('the current method version is the newest published one, oldest first', () => {
+  assert.equal(CURRENT_METHOD_VERSION, METHOD_VERSIONS[METHOD_VERSIONS.length - 1].version);
+  assert.ok(METHOD_VERSIONS.some((entry) => entry.version === '1.0'));
+  const dates = METHOD_VERSIONS.map((entry) => entry.date);
+  assert.deepEqual([...dates].sort(), dates);
+  for (const date of dates) assert.match(date, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(methodLabel('1.0'), 'Method v1.0');
-  for (const entry of methodVersions) assert.match(entry.effective, /^\d{4}-\d{2}-\d{2}$/);
 });
 
-test('provenance has exactly the three ways a product can be assessed', () => {
-  assert.deepEqual([...assessmentProvenances], ['retail', 'loan', 'none']);
-  assert.equal(provenanceLabel('retail'), 'Bought at retail by us');
-  assert.equal(provenanceLabel('loan'), 'Sample supplied by the brand and returned');
-  assert.equal(provenanceLabel('none'), 'Not hands-on: assessed from published specs and owner reports');
-});
-
-test('a review that records no provenance falls back to the honest one', () => {
-  assert.equal(assessmentProvenance(undefined), 'none');
-  assert.equal(assessmentProvenance({}), 'none');
-  assert.equal(assessmentProvenance({}, { acquisition: 'loan' }), 'loan');
+test('provenance has exactly the three plain options, and the fallback is not hands-on', () => {
+  assert.deepEqual([...PROVENANCES], ['retail', 'brand-sample', 'not-hands-on']);
+  assert.match(PROVENANCE_COPY.retail.statement, /bought .* at retail/i);
+  assert.match(PROVENANCE_COPY['brand-sample'].statement, /supplied .* returned/i);
+  assert.match(PROVENANCE_COPY['not-hands-on'].statement, /did not handle/);
+  assert.match(PROVENANCE_COPY['not-hands-on'].statement, /published specs and owner reports/);
+  assert.equal(assessmentProvenance(undefined), 'not-hands-on');
+  assert.equal(assessmentProvenance({}, { acquisition: 'loan' }), 'brand-sample');
+  assert.equal(assessmentProvenance({}, { acquisition: 'none' }), 'not-hands-on');
   assert.equal(assessmentProvenance({ provenance: 'retail' }, { acquisition: 'retail' }), 'retail');
 });
 
-test('a breakdown whose weighted sum is the headline score passes', () => {
+// --- Sub-scores --------------------------------------------------------------
+
+test('a breakdown whose weighted sum is the headline passes', () => {
   const subScores = [
-    { label: 'Value', score: 4.5, weight: 0.4 },
-    { label: 'Build', score: 4.0, weight: 0.3 },
-    { label: 'Battery', score: 4.6, weight: 0.3 },
+    { label: 'Noise cancelling', score: 4.8, weight: 0.4 },
+    { label: 'Comfort', score: 4.2, weight: 0.3 },
+    { label: 'Value', score: 4.1, weight: 0.3 },
   ];
-  assert.equal(Number(weightedScore(subScores).toFixed(2)), 4.38);
+  assert.ok(Math.abs(weightedScore(subScores) - 4.41) < 1e-9);
   assert.deepEqual(subScoreProblems(4.4, subScores), []);
 });
 
-test('a breakdown is allowed half a printed decimal of drift and no more', () => {
-  const subScores = (top: number) => [
-    { label: 'A', score: top, weight: 0.5 },
-    { label: 'B', score: 4.0, weight: 0.5 },
+test('a breakdown exactly on the tolerance passes and one just past it fails', () => {
+  const pair = (a: number, b: number) => [
+    { label: 'A', score: a, weight: 0.5 },
+    { label: 'B', score: b, weight: 0.5 },
   ];
-  // Recomputes to 4.35 and 4.45: exactly on the tolerance either side of 4.4.
-  assert.deepEqual(subScoreProblems(4.4, subScores(4.7)), []);
-  assert.deepEqual(subScoreProblems(4.4, subScores(4.9)), []);
-  // 4.5 is a tenth away - the headline would be printing a different number.
-  assert.equal(subScoreProblems(4.4, subScores(5.0)).length, 1);
-  assert.match(subScoreProblems(4.4, subScores(5.0))[0], /recompute to 4\.50/);
+  assert.equal(SUB_SCORE_TOLERANCE, 0.05);
+  assert.deepEqual(subScoreProblems(4.0, pair(4.1, 4.0)), []);
+  assert.match(subScoreProblems(4.0, pair(4.2, 4.0))[0], /recompute to 4\.10/);
 });
 
-test('weights that do not sum to one are refused before anything is recomputed', () => {
+test('a breakdown whose weights do not sum to 1 fails before any arithmetic is trusted', () => {
   const problems = subScoreProblems(4.0, [
-    { label: 'A', score: 4.0, weight: 0.5 },
-    { label: 'B', score: 4.0, weight: 0.4 },
+    { label: 'A', score: 4, weight: 0.5 },
+    { label: 'B', score: 4, weight: 0.4 },
   ]);
   assert.deepEqual(problems, ['sub-score weights sum to 0.900, not 1']);
 });
 
-test('the registry holds only checkable statements: no urgency, scarcity, countdown or endorsement', () => {
-  assert.deepEqual([...badgeKinds].sort(), Object.keys(badgeRegistry).sort());
-  const banned = /hurry|limited|only \d|left|ends|ending|countdown|today only|selling fast|editor|choice|best|top pick|recommended|award|guarantee/i;
-  for (const kind of badgeKinds) {
-    const definition = badgeRegistry[kind];
-    assert.doesNotMatch(kind, banned, kind);
-    assert.doesNotMatch(definition.claimTemplate, banned, definition.claimTemplate);
-    assert.ok(definition.checkDate.length > 0, `${kind} says what its check date records`);
-    assert.ok(definition.validForDays > 0, `${kind} has a window`);
+// --- Badge registry ----------------------------------------------------------
+
+test('every registry entry declares its claim, evidence, window, proof and switch', () => {
+  for (const kind of BADGE_KINDS) {
+    const entry = BADGE_REGISTRY[kind];
+    assert.equal(entry.kind, kind);
+    assert.ok(entry.label.length > 0, kind);
+    assert.ok(entry.claimTemplate.length > 0, kind);
+    assert.ok(entry.evidenceField.length > 0, kind);
+    assert.ok(Number.isInteger(entry.windowDays) && entry.windowDays > 0, kind);
+    assert.ok(entry.proof === 'review' || entry.proof === 'glossary', kind);
+    assert.equal(typeof entry.enabled, 'boolean', kind);
+    const evidence = sampleBadge(kind).evidence as Record<string, unknown>;
+    assert.ok(entry.evidenceField in evidence, `${kind} evidenceField is a key of its evidence`);
   }
 });
 
-test('price-history kinds are defined but off; the score and honest-negative kinds are on', () => {
-  assert.equal(badgeRegistry['lowest-price'].family, 'price-history');
-  assert.equal(badgeRegistry['lowest-price'].enabled, false);
-  assert.equal(badgeRegistry['below-average'].family, 'price-history');
-  assert.equal(badgeRegistry['below-average'].enabled, false);
-  assert.equal(badgeRegistry['review-score'].enabled, true);
-  assert.equal(badgeRegistry['skip-for-now'].family, 'honest-negative');
-  assert.equal(badgeRegistry['skip-for-now'].enabled, true);
+test('the score and honest-negative badges are on; price history is defined but off', () => {
+  assert.equal(BADGE_REGISTRY['review-score'].enabled, true);
+  assert.equal(BADGE_REGISTRY['review-score'].proof, 'review');
+  assert.equal(BADGE_REGISTRY['honest-negative'].enabled, true);
+  assert.ok(disabledKinds.length > 0);
+  for (const kind of disabledKinds) assert.equal(BADGE_REGISTRY[kind].proof, 'glossary', kind);
 });
 
-test('each badge prints its claim from its evidence and links its proof', () => {
-  assert.equal(badgeClaimText(scoreBadge()), '4.4/5 in our review');
-  assert.equal(badgeClaimText(scoreBadge({ evidence: { score: 4, reviewSlug: 'x' } })), '4.0/5 in our review');
-  assert.equal(badgeClaimText(skipBadge), 'Skip for now: it was A$60 cheaper in July');
-  assert.equal(badgeClaimText(lowestBadge), 'Lowest price in 90 days');
-  assert.equal(
-    badgeClaimText({
-      kind: 'below-average',
-      evidence: { price: 'A$349', average: 'A$390', below: '$41', observations: 30, sourceUrl: 'https://x.com/' },
-      checkedAt: '2026-10-02',
-    }),
-    '$41 below its 30-day average',
-  );
-
-  assert.equal(badgeRegistry['review-score'].proof, 'review');
-  assert.equal(badgeProofHref(scoreBadge()), '/blog/sony-wh-1000xm6-review');
-  assert.equal(badgeRegistry['skip-for-now'].proof, 'source');
-  assert.equal(badgeProofHref(skipBadge), 'https://www.jbhifi.com.au/products/x');
+test('the registry holds no urgency, scarcity, countdown or endorsement kind', () => {
+  const banned = /hurry|limited|only \d|left|ends|countdown|today only|editor|choice|best|recommended|pick|award/i;
+  for (const kind of BADGE_KINDS) {
+    const { label, claimTemplate } = BADGE_REGISTRY[kind];
+    assert.doesNotMatch(`${kind} ${label} ${claimTemplate}`, banned, kind);
+  }
 });
 
-test('a badge cannot be entered without its evidence or its check date', () => {
-  assert.deepEqual(badgeProblems(scoreBadge()), []);
-  assert.deepEqual(badgeProblems(skipBadge), []);
-
-  const { checkedAt: _dropped, ...undated } = scoreBadge();
-  assert.notDeepEqual(badgeProblems(undated), []);
-  assert.notDeepEqual(badgeProblems({ kind: 'review-score', checkedAt: '2026-09-20' }), []);
-  assert.notDeepEqual(badgeProblems({ ...skipBadge, evidence: { reason: 'cheaper in July' } }), []);
-  assert.notDeepEqual(badgeProblems({ ...skipBadge, evidence: { ...skipBadge.evidence, sourceUrl: 'javascript:alert(1)' } }), []);
-  assert.notDeepEqual(badgeProblems({ kind: 'editors-choice', evidence: {}, checkedAt: '2026-09-20' }), []);
-  assert.notDeepEqual(badgeProblems({ ...scoreBadge(), checkedAt: '20 Sept 2026' }), []);
-  assert.notDeepEqual(badgeProblems({ ...scoreBadge(), checkedAt: '2026-02-30' }), []);
-  assert.notDeepEqual(badgeProblems({ ...scoreBadge(), checkedAt: '2026-13-01' }), []);
+test('an honest-negative badge lives at most 14 days and always prints its check date', () => {
+  assert.ok(BADGE_REGISTRY['honest-negative'].windowDays <= 14);
+  assert.equal(badgeClaim(skipBadge), 'Skip for now - checked 2 Oct. Likely cheaper at Black Friday (27 Nov).');
+  assert.equal(formatCheckDay('2026-01-09'), '9 Jan');
 });
 
-test('a well-formed price-history badge is still refused while its kind is off', () => {
-  assert.deepEqual(badgeProblems(lowestBadge), [
-    'badge kind "lowest-price" is switched off until the data behind it is collected',
-  ]);
-  assert.equal(displayableBadge(lowestBadge, BUILD), null);
+test('a badge claim fills its template from the evidence', () => {
+  assert.equal(badgeClaim(scoreBadge), '4.4/5 in our review');
+  assert.equal(badgeClaim({ ...scoreBadge, evidence: { reviewSlug: 'x', rating: 4 } }), '4.0/5 in our review');
+  assert.equal(badgeClaim(sampleBadge('below-average')), 'A$41 below its 30-day average');
 });
 
-test('a badge stands from its check date to the end of its window, and not after', () => {
-  // review-score stands for the 365-day review interval.
-  assert.equal(badgeInWindow(scoreBadge({ checkedAt: '2026-10-02' }), BUILD), true);
-  assert.equal(badgeInWindow(scoreBadge({ checkedAt: '2025-10-02' }), BUILD), true);
-  assert.equal(badgeInWindow(scoreBadge({ checkedAt: '2025-10-01' }), BUILD), false);
-  // skip-for-now stands for 14 days.
-  assert.equal(badgeInWindow({ ...skipBadge, checkedAt: '2026-09-18' }, BUILD), true);
-  assert.equal(badgeInWindow({ ...skipBadge, checkedAt: '2026-09-17' }, BUILD), false);
-  // A check dated after the build has not happened yet.
-  assert.equal(badgeInWindow(scoreBadge({ checkedAt: '2026-10-03' }), BUILD), false);
-  assert.equal(displayableBadge(scoreBadge({ checkedAt: '2025-01-01' }), BUILD), null);
+test('a live badge stays live through the last day of its window and lapses the day after', () => {
+  const window = BADGE_REGISTRY['honest-negative'].windowDays;
+  assert.equal(isBadgeLive(skipBadge, daysAfter(skipBadge.checkedAt, 0)), true);
+  assert.equal(isBadgeLive(skipBadge, daysAfter(skipBadge.checkedAt, window)), true);
+  assert.equal(isBadgeLive(skipBadge, daysAfter(skipBadge.checkedAt, window + 1)), false);
 });
 
-test("a check dated today in Sydney stands on a UTC build that is still on yesterday", () => {
-  // 20:00 UTC on 1 October is 06:00 on 2 October in Sydney.
-  const earlyMorningInSydney = new Date('2026-10-01T20:00:00Z');
-  assert.equal(badgeInWindow(scoreBadge({ checkedAt: '2026-10-02' }), earlyMorningInSydney), true);
+test('the window is counted in Sydney days, not the build server UTC day', () => {
+  // 23:30 UTC on 1 October is already 2 October in Sydney.
+  assert.equal(isBadgeLive(skipBadge, new Date('2026-10-01T23:30:00Z')), true);
+  // Daylight saving has begun by then: 13:00 UTC on 16 October is midnight
+  // on 17 October in Sydney, day 15, lapsed.
+  assert.equal(isBadgeLive(skipBadge, new Date('2026-10-16T12:00:00Z')), true);
+  assert.equal(isBadgeLive(skipBadge, new Date('2026-10-16T13:00:00Z')), false);
 });
 
-test('the cap keeps badges on the first printable items and the rest of the list intact', () => {
-  const items = [
-    { id: 'a', badge: scoreBadge() },
-    { id: 'b', badge: lowestBadge },
-    { id: 'c', badge: undefined },
-    { id: 'd', badge: skipBadge },
-    { id: 'e', badge: scoreBadge() },
-    { id: 'f', badge: scoreBadge() },
+test('a check dated after the build has not happened yet', () => {
+  assert.equal(isBadgeLive({ ...skipBadge, checkedAt: '2026-10-03' }, BUILD), false);
+});
+
+test('a badge missing or emptying its evidence is never live', () => {
+  const broken = [
+    { ...skipBadge, evidence: { note: '   ' } },
+    { ...skipBadge, evidence: {} },
+    { ...scoreBadge, evidence: { reviewSlug: '', rating: 4.4 } },
+    { ...scoreBadge, evidence: { reviewSlug: 'sony-wh-1000xm6-review' } },
+    { ...scoreBadge, checkedAt: '' },
+    { ...scoreBadge, checkedAt: '2026-02-30' },
+  ] as unknown as DealBadge[];
+  for (const badge of broken) {
+    assert.equal(isBadgeLive(badge, BUILD), false, JSON.stringify(badge));
+    assert.ok(badgeProblems(badge).length > 0, JSON.stringify(badge));
+  }
+});
+
+test('isBadgeLive never throws, whatever it is handed', () => {
+  const junk = [undefined, null, 'review-score', { kind: 'editors-choice', evidence: {}, checkedAt: '2026-10-01' }];
+  for (const badge of junk) assert.equal(isBadgeLive(badge as unknown as DealBadge, BUILD), false);
+  assert.equal(isBadgeLive(scoreBadge, new Date('not a date')), false);
+});
+
+test('a disabled kind is never live, however well evidenced and fresh', () => {
+  for (const kind of disabledKinds) {
+    const badge = sampleBadge(kind);
+    assert.equal(isBadgeLive(badge, daysAfter(badge.checkedAt, 0)), false, kind);
+    assert.match(badgeProblems(badge).join(), /switched off/, kind);
+  }
+});
+
+test('every deal badge is a registry badge that could print as entered', () => {
+  // Deals are code-as-data, so this is where a malformed or switched-off badge
+  // is caught before deploy rather than silently dropped from the card.
+  for (const deal of dailyDeals) {
+    if (deal.badge !== undefined) assert.deepEqual(badgeProblems(deal.badge), [], `deal "${deal.slug}"`);
+  }
+});
+
+// --- Listing cap -------------------------------------------------------------
+
+test('capBadged keeps the first badged items up to the cap, in list order', () => {
+  const items = ['a', 'B', 'c', 'D', 'E', 'f', 'G', 'H'];
+  const isBadged = (item: string) => item === item.toUpperCase();
+  const { withinCap, overCap } = capBadged(items, isBadged);
+  assert.equal(MAX_BADGED_PER_LISTING, 3);
+  assert.deepEqual(withinCap, ['a', 'B', 'c', 'D', 'E', 'f']);
+  assert.deepEqual(overCap, ['G', 'H']);
+  assert.deepEqual(capBadged(items, isBadged, 1).overCap, ['D', 'E', 'G', 'H']);
+  assert.deepEqual(capBadged(items, isBadged, 0).withinCap, ['a', 'c', 'f']);
+});
+
+test('capBadged leaves a listing under the cap alone and never throws', () => {
+  assert.deepEqual(capBadged(['A', 'b'], (item) => item === 'A'), { withinCap: ['A', 'b'], overCap: [] });
+  assert.deepEqual(capBadged([], () => true), { withinCap: [], overCap: [] });
+  const throwing = capBadged([1, 2], () => {
+    throw new Error('boom');
+  });
+  assert.deepEqual(throwing, { withinCap: [1, 2], overCap: [] });
+});
+
+test('the badge allowance is about one in five items, at least one, never past the ceiling', () => {
+  const cases: Array<[number, number]> = [
+    [1, 1],
+    [9, 1],
+    [10, 2],
+    [14, 2],
+    [15, 3],
+    [60, 3],
   ];
-  const capped = capBadged(items, (item) => item.badge, 2, BUILD);
-
-  assert.deepEqual(
-    capped.map(({ item }) => item.id),
-    ['a', 'b', 'c', 'd', 'e', 'f'],
-  );
-  // The disabled price badge neither prints nor uses up a slot.
-  assert.deepEqual(
-    capped.map(({ badge }) => badge?.kind ?? null),
-    ['review-score', null, null, 'skip-for-now', null, null],
-  );
+  for (const [count, allowed] of cases) assert.equal(badgeAllowance(count), allowed, `${count} items`);
+  assert.equal(badgeAllowance(60, 2), 2);
 });
 
-test('the cap defaults to three per list', () => {
-  const items = Array.from({ length: 6 }, () => scoreBadge());
-  const capped = capBadged(items, (badge) => badge, undefined, BUILD);
-  assert.equal(capped.filter(({ badge }) => badge !== null).length, 3);
+// --- Product (review) badges -------------------------------------------------
+
+test('a legacy free-text product badge validates but names no registry kind and prints nothing', () => {
+  for (const legacy of ["Editor's choice", 'Best value', 'Hurry - ends tonight']) {
+    assert.deepEqual(productBadgeProblems(legacy), []);
+    assert.equal(productBadgeKind(legacy), undefined);
+    assert.equal(productBadgeClaim({ badge: legacy, rating: 4.4 }), undefined);
+  }
+  assert.equal(productBadgeClaim({ rating: 4.4 }), undefined);
 });
 
-test("a product callout never falls back to an endorsement", () => {
-  const postSlug = 'sony-wh-1000xm6-review';
-  // A legacy free-text badge carries no evidence and is not printed.
-  assert.deepEqual(productCalloutLabel({ badge: "Editor's choice", kind: 'Review', postSlug }, BUILD), {
-    text: 'Review',
-  });
-  assert.equal(productCalloutLabel({ badge: 'Best value', postSlug }, BUILD), null);
-  assert.equal(productCalloutLabel({ postSlug }, BUILD), null);
-  // The review's own score badge needs no link to the page it is on.
-  assert.deepEqual(productCalloutLabel({ badge: scoreBadge(), kind: 'Review', postSlug }, BUILD), {
-    text: '4.4/5 in our review',
-  });
-  assert.deepEqual(productCalloutLabel({ badge: skipBadge, postSlug }, BUILD), {
-    text: 'Skip for now: it was A$60 cheaper in July',
-    href: 'https://www.jbhifi.com.au/products/x',
-  });
-  // A lapsed badge gives way to the kind rather than printing a stale claim.
-  assert.deepEqual(
-    productCalloutLabel({ badge: { ...skipBadge, checkedAt: '2026-01-01' }, kind: 'Review', postSlug }, BUILD),
-    { text: 'Review' },
-  );
-  assert.deepEqual(productCalloutLabel({ badge: scoreBadge(), eyebrow: 'In this guide', postSlug }, BUILD), {
-    text: 'In this guide',
-  });
+test('a review-score product badge prints the review rating', () => {
+  assert.equal(productBadgeKind('review-score'), 'review-score');
+  assert.equal(productBadgeClaim({ badge: 'review-score', rating: 4.4 }), '4.4/5 in our review');
+});
+
+test('a product badge naming a kind a review cannot evidence, or a disabled kind, is refused', () => {
+  assert.match(productBadgeProblems('honest-negative').join(), /belongs on a deal/);
+  for (const kind of disabledKinds) assert.match(productBadgeProblems(kind).join(), /switched off/, kind);
 });

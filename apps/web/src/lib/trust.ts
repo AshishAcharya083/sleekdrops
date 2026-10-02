@@ -11,17 +11,13 @@
  * scarcity, countdown or endorsement kind ("Editor's choice", "Best value"),
  * because none of those is a statement a reader could check.
  *
- * Explicit .ts extensions: this module is loaded directly by the node --test
- * runner (see trust.test.ts), which needs real specifiers.
+ * Plain TypeScript with no Astro imports, and explicit .ts specifiers, so the
+ * node --test runner and the frontmatter schema can both load it directly.
  */
 
-import { z } from 'astro/zod';
-
-import { webUrl } from '../content/web-url.ts';
 import { REVIEW_INTERVAL_DAYS } from './sources.ts';
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
-const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function assertNever(value: never): never {
@@ -30,9 +26,9 @@ function assertNever(value: never): never {
 
 // --- Score bands -------------------------------------------------------------
 
-export const scoreBandIds = ['excellent', 'strong', 'decent', 'mixed', 'weak'] as const;
+export const SCORE_BAND_IDS = ['excellent', 'strong', 'decent', 'mixed', 'weak'] as const;
 
-export type ScoreBandId = (typeof scoreBandIds)[number];
+export type ScoreBandId = (typeof SCORE_BAND_IDS)[number];
 
 export interface ScoreBand {
   id: ScoreBandId;
@@ -53,7 +49,7 @@ export interface ScoreBand {
  * almost everything excellent. Each meaning is a recommendation we can stand
  * behind at that score, not a superlative.
  */
-export const scoreBands: readonly ScoreBand[] = [
+export const SCORE_BANDS: readonly ScoreBand[] = [
   { id: 'excellent', label: 'Excellent', min: 4.5, meaning: "We'd recommend this without hesitation." },
   { id: 'strong', label: 'Strong', min: 4.0, meaning: 'A good buy for most people, with trade-offs worth reading first.' },
   { id: 'decent', label: 'Decent', min: 3.5, meaning: 'Worth it if its strengths match what you need.' },
@@ -61,53 +57,59 @@ export const scoreBands: readonly ScoreBand[] = [
   { id: 'weak', label: 'Weak', min: 1.0, meaning: "We'd steer you elsewhere." },
 ];
 
+/** The score the way every surface prints it: "4.4". */
+export function formatScore(rating: number): string {
+  return rating.toFixed(1);
+}
+
 /**
  * The band a 1.0-5.0 score falls in.
  *
  * Banded on the score as printed (one decimal), so 4.46 shows as "4.5" and is
  * called Excellent rather than sitting beside the word for the band below.
+ * The schema keeps ratings inside the scale; anything outside it is clamped
+ * rather than thrown on, so a render never fails over a band word.
  */
-export function scoreBand(score: number): ScoreBand {
-  if (!Number.isFinite(score) || score < 1 || score > 5) {
-    throw new RangeError(`a score must be between 1.0 and 5.0, got ${score}`);
-  }
-  const printed = Number(formatScore(score));
-  const band = scoreBands.find((candidate) => printed >= candidate.min);
-  // Unreachable while the lowest band starts at the scale's floor.
-  if (!band) throw new RangeError(`no band covers ${score}`);
-  return band;
-}
-
-/** The score the way every surface prints it: "4.4". */
-export function formatScore(score: number): string {
-  return score.toFixed(1);
+export function scoreBand(rating: number): ScoreBand {
+  const lowest = SCORE_BANDS[SCORE_BANDS.length - 1];
+  if (!Number.isFinite(rating)) return lowest;
+  const printed = Number(formatScore(Math.min(5, Math.max(1, rating))));
+  return SCORE_BANDS.find((band) => printed >= band.min) ?? lowest;
 }
 
 // --- Methodology version -----------------------------------------------------
 
+export type MethodVersion = '1.0';
+
+export interface MethodVersionEntry {
+  version: MethodVersion;
+  /** The day the version took effect, YYYY-MM-DD. */
+  date: string;
+  /** What the version is, or what changed from the one before it. */
+  summary: string;
+}
+
 /**
- * Every published version of the scoring method, oldest first, each with the
- * day it took effect and what changed. A review records the version it was
- * scored under, so an older score stays readable against the rules it was
- * actually given rather than being re-judged by newer ones.
+ * Every published version of the scoring method, oldest first. A review
+ * records the version it was scored under, so an older score stays readable
+ * against the rules it was actually given rather than being re-judged by
+ * newer ones.
  */
-export const methodVersions = [
+export const METHOD_VERSIONS: readonly MethodVersionEntry[] = [
   {
     version: '1.0',
-    effective: '2026-10-02',
-    changes:
+    date: '2026-10-02',
+    summary:
       'First published method: one decimal score out of 5, read against the five bands, with a written explanation.',
   },
-] as const;
+];
 
-export type MethodVersion = (typeof methodVersions)[number]['version'];
-
-export const methodVersionIds = methodVersions.map((entry) => entry.version) as [
+export const METHOD_VERSION_IDS = METHOD_VERSIONS.map((entry) => entry.version) as [
   MethodVersion,
   ...MethodVersion[],
 ];
 
-export const CURRENT_METHOD_VERSION: MethodVersion = methodVersions[methodVersions.length - 1].version;
+export const CURRENT_METHOD_VERSION: MethodVersion = METHOD_VERSIONS[METHOD_VERSIONS.length - 1].version;
 
 /** "Method v1.0". */
 export function methodLabel(version: MethodVersion): string {
@@ -116,40 +118,56 @@ export function methodLabel(version: MethodVersion): string {
 
 // --- Assessment provenance ---------------------------------------------------
 
-/**
- * How the product was assessed. The same three values `reviewUnit.acquisition`
- * has always carried, so the two never disagree about what they mean.
- */
-export const assessmentProvenances = ['retail', 'loan', 'none'] as const;
+export const PROVENANCES = ['retail', 'brand-sample', 'not-hands-on'] as const;
 
-export type AssessmentProvenance = (typeof assessmentProvenances)[number];
+export type Provenance = (typeof PROVENANCES)[number];
+
+/** The label for each provenance, and the sentence every surface prints verbatim. */
+export const PROVENANCE_COPY: Record<Provenance, { label: string; statement: string }> = {
+  retail: {
+    label: 'Bought at retail',
+    statement: 'We bought this product at retail with our own money.',
+  },
+  'brand-sample': {
+    label: 'Brand sample, returned',
+    statement: 'The brand supplied this sample for review, and we returned it afterwards.',
+  },
+  'not-hands-on': {
+    label: 'Not hands-on',
+    statement: 'We did not handle this product. We assessed it from published specs and owner reports.',
+  },
+};
 
 /**
  * What a review falls back to when it records nothing: the honest default for
  * a desk that does not test hands-on. Claiming a unit we never held is the
  * failure; saying we held none when we did costs nothing but credit.
  */
-export const FALLBACK_PROVENANCE: AssessmentProvenance = 'none';
+export const FALLBACK_PROVENANCE: Provenance = 'not-hands-on';
 
-export function provenanceLabel(provenance: AssessmentProvenance): string {
-  switch (provenance) {
+/** How `reviewUnit.acquisition` (retail / loan / none) says the same thing. */
+export type ReviewUnitAcquisition = 'retail' | 'loan' | 'none';
+
+export function provenanceFromAcquisition(acquisition: ReviewUnitAcquisition): Provenance {
+  switch (acquisition) {
     case 'retail':
-      return 'Bought at retail by us';
+      return 'retail';
     case 'loan':
-      return 'Sample supplied by the brand and returned';
+      return 'brand-sample';
     case 'none':
-      return 'Not hands-on: assessed from published specs and owner reports';
+      return 'not-hands-on';
     default:
-      return assertNever(provenance);
+      return assertNever(acquisition);
   }
 }
 
-/** The provenance a review states, from the product, then the review unit, then the fallback. */
+/** The provenance a review states: the product's, then its review unit's, then the fallback. */
 export function assessmentProvenance(
-  product: { provenance?: AssessmentProvenance } | undefined,
-  reviewUnit?: { acquisition: AssessmentProvenance },
-): AssessmentProvenance {
-  return product?.provenance ?? reviewUnit?.acquisition ?? FALLBACK_PROVENANCE;
+  product: { provenance?: Provenance } | undefined,
+  reviewUnit?: { acquisition: ReviewUnitAcquisition },
+): Provenance {
+  if (product?.provenance) return product.provenance;
+  return reviewUnit ? provenanceFromAcquisition(reviewUnit.acquisition) : FALLBACK_PROVENANCE;
 }
 
 // --- Weighted sub-scores -----------------------------------------------------
@@ -181,212 +199,195 @@ export function weightedScore(subScores: readonly SubScore[]): number {
  * reader who does the sum would rightly stop trusting both.
  */
 export function subScoreProblems(rating: number, subScores: readonly SubScore[]): string[] {
-  const problems: string[] = [];
   const weights = subScores.reduce((sum, entry) => sum + entry.weight, 0);
   if (Math.abs(weights - 1) > WEIGHT_SUM_TOLERANCE + FLOAT_SLACK) {
-    problems.push(`sub-score weights sum to ${weights.toFixed(3)}, not 1`);
-    return problems;
+    return [`sub-score weights sum to ${weights.toFixed(3)}, not 1`];
   }
   const recomputed = weightedScore(subScores);
   if (Math.abs(recomputed - rating) > SUB_SCORE_TOLERANCE + FLOAT_SLACK) {
-    problems.push(
+    return [
       `sub-scores recompute to ${recomputed.toFixed(2)}, more than ${SUB_SCORE_TOLERANCE} from the headline ${formatScore(rating)}`,
-    );
-  }
-  return problems;
-}
-
-// --- Badge registry ----------------------------------------------------------
-
-export const badgeKinds = ['review-score', 'lowest-price', 'below-average', 'skip-for-now'] as const;
-
-export type BadgeKind = (typeof badgeKinds)[number];
-
-export type BadgeFamily = 'quality' | 'price-history' | 'honest-negative';
-
-/** Where a badge's proof link lands: the review behind it, or the source the check was made against. */
-export type BadgeProofTarget = 'review' | 'source';
-
-const formattedPrice = z.string().min(1);
-
-/** The evidence each kind cannot be entered without. */
-const badgeEvidence = {
-  'review-score': z
-    .object({
-      score: z.number().min(1).max(5),
-      /** The post the score is from - the proof link. */
-      reviewSlug: z.string().regex(SLUG),
-    })
-    .strict(),
-  'lowest-price': z
-    .object({
-      /** The price on the check date, e.g. "A$449". */
-      price: formattedPrice,
-      /** The lowest price seen in the window before it. */
-      previousLowest: formattedPrice,
-      /** Price checks recorded across the window - one sighting is not a history. */
-      observations: z.number().int().min(2),
-      sourceUrl: webUrl(),
-    })
-    .strict(),
-  'below-average': z
-    .object({
-      price: formattedPrice,
-      average: formattedPrice,
-      /** Pre-formatted gap, e.g. "$41". */
-      below: formattedPrice,
-      observations: z.number().int().min(2),
-      sourceUrl: webUrl(),
-    })
-    .strict(),
-  'skip-for-now': z
-    .object({
-      /** Why not now, as a checkable fact: "it was A$60 cheaper in July". */
-      reason: z.string().min(1),
-      sourceUrl: webUrl(),
-    })
-    .strict(),
-} satisfies Record<BadgeKind, z.ZodTypeAny>;
-
-export interface BadgeDefinition<K extends BadgeKind = BadgeKind> {
-  family: BadgeFamily;
-  /** The printed claim; `{placeholders}` are filled from the evidence by `badgeClaimText`. */
-  claimTemplate: string;
-  /** The evidence payload the kind requires. */
-  evidence: (typeof badgeEvidence)[K];
-  /** How far back from the check date the evidence looks, or null when the claim looks back at nothing. */
-  observationDays: number | null;
-  /** How long after its check date the badge may still be printed. */
-  validForDays: number;
-  /** What the badge's `checkedAt` records. */
-  checkDate: string;
-  proof: BadgeProofTarget;
-  /** Off for any kind the site cannot yet back with data it collects. */
-  enabled: boolean;
-}
-
-export const badgeRegistry: { readonly [K in BadgeKind]: BadgeDefinition<K> } = {
-  'review-score': {
-    family: 'quality',
-    claimTemplate: '{score}/5 in our review',
-    evidence: badgeEvidence['review-score'],
-    observationDays: null,
-    validForDays: REVIEW_INTERVAL_DAYS,
-    checkDate: 'The day the review behind the score was last checked against its sources.',
-    proof: 'review',
-    enabled: true,
-  },
-  // The two price-history kinds are the badges shoppers trust most and the
-  // ones we cannot honestly print: nothing here records price checks yet.
-  // They are defined so recording one is all it takes, and stay off until then.
-  'lowest-price': {
-    family: 'price-history',
-    claimTemplate: 'Lowest price in {observationDays} days',
-    evidence: badgeEvidence['lowest-price'],
-    observationDays: 90,
-    validForDays: 1,
-    checkDate: 'The day the current price was seen.',
-    proof: 'source',
-    enabled: false,
-  },
-  'below-average': {
-    family: 'price-history',
-    claimTemplate: '{below} below its {observationDays}-day average',
-    evidence: badgeEvidence['below-average'],
-    observationDays: 30,
-    validForDays: 1,
-    checkDate: 'The day the current price was seen.',
-    proof: 'source',
-    enabled: false,
-  },
-  // A site that sometimes says "not now" is believed when it says "buy".
-  'skip-for-now': {
-    family: 'honest-negative',
-    claimTemplate: 'Skip for now: {reason}',
-    evidence: badgeEvidence['skip-for-now'],
-    observationDays: null,
-    validForDays: 14,
-    checkDate: 'The day the reason was checked.',
-    proof: 'source',
-    enabled: true,
-  },
-};
-
-/** A real calendar day: the regex alone would let "2026-02-30" roll over into March. */
-const checkedAt = z
-  .string()
-  .regex(ISO_DAY)
-  .refine(
-    (day) => {
-      const parsed = new Date(`${day}T00:00:00Z`);
-      return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === day;
-    },
-    { message: 'must be a real calendar day' },
-  );
-
-/** A badge as entered: a registry kind, its evidence and the day it was checked. */
-export const badgeClaimSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('review-score'), evidence: badgeEvidence['review-score'], checkedAt }).strict(),
-  z.object({ kind: z.literal('lowest-price'), evidence: badgeEvidence['lowest-price'], checkedAt }).strict(),
-  z.object({ kind: z.literal('below-average'), evidence: badgeEvidence['below-average'], checkedAt }).strict(),
-  z.object({ kind: z.literal('skip-for-now'), evidence: badgeEvidence['skip-for-now'], checkedAt }).strict(),
-]);
-
-export type BadgeClaim = z.infer<typeof badgeClaimSchema>;
-
-/**
- * Why a badge may not be entered, or nothing when it may: its shape, then
- * whether its kind is switched on. A disabled kind is refused rather than
- * silently hidden, so nobody publishes a claim believing it is live.
- */
-export function badgeProblems(value: unknown): string[] {
-  const parsed = badgeClaimSchema.safeParse(value);
-  if (!parsed.success) {
-    return parsed.error.issues.map((issue) => `${issue.path.join('.') || 'badge'}: ${issue.message}`);
-  }
-  if (!badgeRegistry[parsed.data.kind].enabled) {
-    return [`badge kind "${parsed.data.kind}" is switched off until the data behind it is collected`];
+    ];
   }
   return [];
 }
 
-function claimValues(badge: BadgeClaim): Record<string, string> {
-  const { observationDays } = badgeRegistry[badge.kind];
-  const window: Record<string, string> =
-    observationDays === null ? {} : { observationDays: String(observationDays) };
-  switch (badge.kind) {
-    case 'review-score':
-      return { ...window, score: formatScore(badge.evidence.score) };
-    case 'lowest-price':
-      return { ...window, price: badge.evidence.price };
-    case 'below-average':
-      return { ...window, below: badge.evidence.below };
-    case 'skip-for-now':
-      return { ...window, reason: badge.evidence.reason };
-    default:
-      return assertNever(badge);
+// --- Badge registry ----------------------------------------------------------
+
+export const BADGE_KINDS = ['review-score', 'honest-negative', 'lowest-price', 'below-average'] as const;
+
+export type BadgeKind = (typeof BADGE_KINDS)[number];
+
+export interface BadgeDefinition<K extends BadgeKind = BadgeKind> {
+  kind: K;
+  /** Short glossary name. */
+  label: string;
+  /** The printed claim; `{placeholders}` are filled by `badgeClaim`. */
+  claimTemplate: string;
+  /** The evidence key the claim stands on. */
+  evidenceField: string;
+  /** How many days after `checkedAt` the badge may still be printed. */
+  windowDays: number;
+  /** Where the proof link lands: the review behind it, or the methodology badge glossary. */
+  proof: 'review' | 'glossary';
+  /** Off for any kind the site cannot yet back with data it collects. */
+  enabled: boolean;
+}
+
+export const BADGE_REGISTRY: { readonly [K in BadgeKind]: BadgeDefinition<K> } = {
+  'review-score': {
+    kind: 'review-score',
+    label: 'Review score',
+    claimTemplate: '{rating}/5 in our review',
+    evidenceField: 'rating',
+    // As long as the review behind it stays inside its re-check cadence.
+    windowDays: REVIEW_INTERVAL_DAYS,
+    proof: 'review',
+    enabled: true,
+  },
+  // A site that sometimes says "not now" is believed when it says "buy". The
+  // claim always prints its check date, and fourteen days is its longest life:
+  // a price call goes stale fast, and an undated "skip" reads as permanent.
+  'honest-negative': {
+    kind: 'honest-negative',
+    label: 'Skip for now',
+    claimTemplate: 'Skip for now - checked {checkedOn}. {note}',
+    evidenceField: 'note',
+    windowDays: 14,
+    proof: 'glossary',
+    enabled: true,
+  },
+  // The price-history kinds are the badges shoppers trust most and the ones we
+  // cannot honestly print: nothing here records price checks yet. They are
+  // defined so recording one is all it takes, and stay off until then. Each
+  // check stands for a day, since a price can move the next.
+  'lowest-price': {
+    kind: 'lowest-price',
+    label: 'Lowest tracked price',
+    claimTemplate: 'Lowest price we have tracked in 90 days',
+    evidenceField: 'observations',
+    windowDays: 1,
+    proof: 'glossary',
+    enabled: false,
+  },
+  'below-average': {
+    kind: 'below-average',
+    label: 'Below its average price',
+    claimTemplate: '{below} below its 30-day average',
+    evidenceField: 'observations',
+    windowDays: 1,
+    proof: 'glossary',
+    enabled: false,
+  },
+};
+
+/** A badge as entered: a registry kind, the evidence that kind requires and the day it was checked. */
+export type DealBadge =
+  | { kind: 'review-score'; evidence: { reviewSlug: string; rating: number }; checkedAt: string }
+  | { kind: 'honest-negative'; evidence: { note: string }; checkedAt: string }
+  | {
+      kind: 'lowest-price';
+      /** Formatted prices ("A$449") and how many price checks the 90 days hold. */
+      evidence: { price: string; previousLowest: string; observations: number };
+      checkedAt: string;
+    }
+  | {
+      kind: 'below-average';
+      /** `below` is the pre-formatted gap, e.g. "A$41". */
+      evidence: { price: string; average: string; below: string; observations: number };
+      checkedAt: string;
+    };
+
+export function isBadgeKind(value: unknown): value is BadgeKind {
+  return typeof value === 'string' && (BADGE_KINDS as readonly string[]).includes(value);
+}
+
+const filled = (value: unknown) => typeof value === 'string' && value.trim() !== '';
+// One sighting of a price is not a history.
+const priceHistory = (value: unknown) => Number.isInteger(value) && (value as number) >= 2;
+
+/** Whether a value is a real calendar day: the pattern alone lets "2026-02-30" roll into March. */
+export function isCheckDay(value: unknown): value is string {
+  if (typeof value !== 'string' || !ISO_DAY.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * Why a badge could not be printed as entered, or nothing when it could:
+ * its kind, its evidence, its check date and whether the kind is switched on.
+ * Takes `unknown` because deals and frontmatter are typed by hand, and a
+ * disabled kind is reported rather than silently hidden so nobody publishes a
+ * claim believing it is live.
+ */
+export function badgeProblems(value: unknown): string[] {
+  if (typeof value !== 'object' || value === null) return ['a badge must be { kind, evidence, checkedAt }'];
+  const { kind, evidence, checkedAt } = value as Record<string, unknown>;
+  if (!isBadgeKind(kind)) return [`"${String(kind)}" is not a badge kind in the registry`];
+  const problems: string[] = [];
+  if (!BADGE_REGISTRY[kind].enabled) {
+    problems.push(`badge kind "${kind}" is switched off until the data behind it is collected`);
   }
+  if (!isCheckDay(checkedAt)) problems.push('checkedAt must be a real YYYY-MM-DD day');
+  const e = (typeof evidence === 'object' && evidence !== null ? evidence : {}) as Record<string, unknown>;
+  const missing = (keys: Record<string, (value: unknown) => boolean>) => {
+    for (const [key, valid] of Object.entries(keys)) {
+      if (!valid(e[key])) problems.push(`evidence.${key} is missing or empty`);
+    }
+  };
+  switch (kind) {
+    case 'review-score':
+      missing({
+        reviewSlug: (slug) => typeof slug === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug),
+        rating: (rating) => typeof rating === 'number' && rating >= 1 && rating <= 5,
+      });
+      break;
+    case 'honest-negative':
+      missing({ note: filled });
+      break;
+    case 'lowest-price':
+      missing({ price: filled, previousLowest: filled, observations: priceHistory });
+      break;
+    case 'below-average':
+      missing({ price: filled, average: filled, below: filled, observations: priceHistory });
+      break;
+    default:
+      return assertNever(kind);
+  }
+  return problems;
 }
 
-/** The badge's printed claim: "4.4/5 in our review". */
-export function badgeClaimText(badge: BadgeClaim): string {
-  const values = claimValues(badge);
-  return badgeRegistry[badge.kind].claimTemplate.replace(/\{(\w+)\}/g, (_, key: string) => {
-    const value = values[key];
-    if (value === undefined) throw new Error(`badge "${badge.kind}" has no value for {${key}}`);
-    return value;
-  });
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "2026-10-02" as "2 Oct", the way a check date is printed inside a claim. */
+export function formatCheckDay(day: string): string {
+  const [, month, date] = day.split('-').map(Number);
+  return `${date} ${MONTHS[month - 1]}`;
 }
 
-/** Where the badge's proof link points. */
-export function badgeProofHref(badge: BadgeClaim): string {
+function fillTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? '').trim();
+}
+
+/** The review-score claim for a rating: "4.4/5 in our review". */
+export function reviewScoreClaim(rating: number): string {
+  return fillTemplate(BADGE_REGISTRY['review-score'].claimTemplate, { rating: formatScore(rating) });
+}
+
+/** The badge's printed claim, its registry template filled from the evidence. */
+export function badgeClaim(badge: DealBadge): string {
   switch (badge.kind) {
     case 'review-score':
-      return `/blog/${badge.evidence.reviewSlug}`;
+      return reviewScoreClaim(badge.evidence.rating);
+    case 'honest-negative':
+      return fillTemplate(BADGE_REGISTRY[badge.kind].claimTemplate, {
+        checkedOn: formatCheckDay(badge.checkedAt),
+        note: badge.evidence.note.trim(),
+      });
     case 'lowest-price':
+      return fillTemplate(BADGE_REGISTRY[badge.kind].claimTemplate, {});
     case 'below-average':
-    case 'skip-for-now':
-      return badge.evidence.sourceUrl;
+      return fillTemplate(BADGE_REGISTRY[badge.kind].claimTemplate, { below: badge.evidence.below });
     default:
       return assertNever(badge);
   }
@@ -407,81 +408,105 @@ function sydneyDay(moment: Date): string {
 }
 
 /**
- * Whether a badge's check still stands on `asOf` - the build, since the page
- * is static. A check dated after `asOf` has not happened yet and does not.
+ * Whether a badge may be printed on `asOf` - the build, since pages are
+ * static: its kind is switched on, its evidence is all there, and `asOf` is
+ * no later than `windowDays` after the check. A check dated after `asOf` has
+ * not happened yet and does not count. Never throws.
  */
-export function badgeInWindow(badge: BadgeClaim, asOf: Date = new Date()): boolean {
-  const ageDays = (Date.parse(sydneyDay(asOf)) - Date.parse(badge.checkedAt)) / DAY_MS;
-  return ageDays >= 0 && ageDays <= badgeRegistry[badge.kind].validForDays;
-}
-
-/** The badge to print, or null when it is switched off or its check has lapsed. */
-export function displayableBadge(badge: BadgeClaim | undefined, asOf: Date = new Date()): BadgeClaim | null {
-  if (!badge || !badgeRegistry[badge.kind].enabled || !badgeInWindow(badge, asOf)) return null;
-  return badge;
+export function isBadgeLive(badge: DealBadge, asOf: Date): boolean {
+  try {
+    if (badgeProblems(badge).length > 0 || Number.isNaN(asOf.getTime())) return false;
+    const ageDays = (Date.parse(sydneyDay(asOf)) - Date.parse(badge.checkedAt)) / DAY_MS;
+    return ageDays >= 0 && ageDays <= BADGE_REGISTRY[badge.kind].windowDays;
+  } catch {
+    return false;
+  }
 }
 
 /**
- * The most items in one list that may carry a badge. A grid in which every
- * card is badged tells the reader nothing about any of them.
+ * The most items in one listing that may carry a badge, however long it is.
+ * A grid in which every card is badged tells the reader nothing about any of them.
  */
-export const MAX_BADGED_PER_LIST = 3;
+export const MAX_BADGED_PER_LISTING = 3;
 
-export interface BadgedItem<T> {
-  item: T;
-  badge: BadgeClaim | null;
+/**
+ * How many badges a listing of `itemCount` items should carry: about one in
+ * five, at least one, never more than `ceiling`. A badge only stands out
+ * among plain neighbours, so a short list earns fewer - 1 for up to 9 items,
+ * 2 for 10-14 and 3 from 15. Pass it as `capBadged`'s `max`.
+ */
+export function badgeAllowance(itemCount: number, ceiling: number = MAX_BADGED_PER_LISTING): number {
+  return Math.max(1, Math.min(ceiling, Math.floor(itemCount * 0.2)));
 }
 
 /**
- * Pairs each item with the badge it may print, in list order, keeping badges
- * on at most `max` items. Items past the cap are kept - only their badge goes.
+ * Splits a listing at the badge cap, keeping list order. `overCap` holds the
+ * badged items beyond the first `max`, which still render but without their
+ * badge; `withinCap` holds every other item, badged or not. Never throws.
  */
 export function capBadged<T>(
   items: readonly T[],
-  badgeOf: (item: T) => BadgeClaim | undefined,
-  max: number = MAX_BADGED_PER_LIST,
-  asOf: Date = new Date(),
-): BadgedItem<T>[] {
+  isBadged: (item: T) => boolean,
+  max: number = MAX_BADGED_PER_LISTING,
+): { withinCap: T[]; overCap: T[] } {
+  const withinCap: T[] = [];
+  const overCap: T[] = [];
   let badged = 0;
-  return items.map((item) => {
-    const badge = badged < max ? displayableBadge(badgeOf(item), asOf) : null;
-    if (badge) badged += 1;
-    return { item, badge };
-  });
-}
-
-/**
- * A product's badge as a registry claim. A legacy free-text label ("Editor's
- * choice") still validates so older posts keep building, but carries no
- * evidence and is never printed.
- */
-export function registryBadge(value: BadgeClaim | string | undefined): BadgeClaim | undefined {
-  return typeof value === 'string' ? undefined : value;
-}
-
-export interface CalloutLabel {
-  text: string;
-  /** The badge's proof link, when it lands somewhere other than the page itself. */
-  href?: string;
-}
-
-/**
- * The label above a product callout: an explicit one, else the product's
- * badge while it is printable, else the post's kind, else none. There is no
- * endorsement default - "Editor's choice" over every product is a word with
- * no evidence, read as a guarantee we have not made.
- */
-export function productCalloutLabel(
-  options: { badge?: BadgeClaim | string; kind?: string; eyebrow?: string; postSlug: string },
-  asOf: Date = new Date(),
-): CalloutLabel | null {
-  if (options.eyebrow) return { text: options.eyebrow };
-  const badge = displayableBadge(registryBadge(options.badge), asOf);
-  if (badge) {
-    const text = badgeClaimText(badge);
-    const href = badgeProofHref(badge);
-    // A review's own score badge is proved by the page it sits on.
-    return href === `/blog/${options.postSlug}` ? { text } : { text, href };
+  for (const item of items) {
+    let hasBadge = false;
+    try {
+      hasBadge = isBadged(item);
+    } catch {
+      hasBadge = false;
+    }
+    if (hasBadge && badged >= max) {
+      overCap.push(item);
+      continue;
+    }
+    if (hasBadge) badged += 1;
+    withinCap.push(item);
   }
-  return options.kind ? { text: options.kind } : null;
+  return { withinCap, overCap };
+}
+
+// --- Product (review) badges -------------------------------------------------
+
+/**
+ * The kinds a review's `product.badge` may name. A review carries the
+ * evidence for these itself - its own rating, slug and dates - so naming the
+ * kind is the whole entry. The others need evidence a review does not hold.
+ */
+export const PRODUCT_BADGE_KINDS = ['review-score'] as const satisfies readonly BadgeKind[];
+
+export type ProductBadgeKind = (typeof PRODUCT_BADGE_KINDS)[number];
+
+/**
+ * Why a review's `product.badge` may not stand, or nothing when it may. A
+ * string that is not a registry kind is a legacy label from before the
+ * registry: it validates so older posts keep building, and is never printed.
+ */
+export function productBadgeProblems(badge: string): string[] {
+  if (!isBadgeKind(badge)) return [];
+  if (!BADGE_REGISTRY[badge].enabled) {
+    return [`badge kind "${badge}" is switched off until the data behind it is collected`];
+  }
+  if (!(PRODUCT_BADGE_KINDS as readonly string[]).includes(badge)) {
+    return [`badge kind "${badge}" needs evidence a review does not carry, so it belongs on a deal`];
+  }
+  return [];
+}
+
+/** A review's badge as a registry kind, or undefined for none or a legacy label. */
+export function productBadgeKind(badge: string | undefined): ProductBadgeKind | undefined {
+  return (PRODUCT_BADGE_KINDS as readonly (string | undefined)[]).includes(badge)
+    ? (badge as ProductBadgeKind)
+    : undefined;
+}
+
+/**
+ * The claim a review's own badge prints, or undefined when it names no
+ * registry kind. The review is its own evidence, so the claim is its rating.
+ */
+export function productBadgeClaim(product: { badge?: string; rating: number }): string | undefined {
+  return productBadgeKind(product.badge) === 'review-score' ? reviewScoreClaim(product.rating) : undefined;
 }
