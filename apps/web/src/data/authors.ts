@@ -67,7 +67,7 @@ export const EDITORIAL_TEAM = {
   id: 'desk',
   name: 'SleekDrops Editorial Team',
   role: 'Editorial team',
-  bio: 'Researches products, prices and published evidence for Australian shoppers. Each recommendation states what we checked and when we have not tested a product ourselves.',
+  bio: 'Researches products, prices and published evidence for Australian shoppers. Products are assessed from published specifications, independent test results and owner reports rather than handled, and each recommendation lists what it rests on.',
   initials: 'SD',
 } as const;
 

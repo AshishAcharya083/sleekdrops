@@ -1,0 +1,28 @@
+---
+import { PAID_LINK_NOTE } from '@lib/methodology';
+
+/**
+ * PaidLinkNote - the commission line that sits beside a buy button.
+ *
+ * Owned by SLE-147. This is an interim copy of the contract component so
+ * SLE-151's branch builds before SLE-147 lands; SLE-147's version replaces it
+ * on restack.
+ */
+export interface Props {
+  /** `dark` for a CTA sitting on an ink panel. */
+  tone?: 'light' | 'dark';
+}
+const { tone = 'light' } = Astro.props;
+---
+<p class:list={['paid-link-note', `paid-link-note--${tone}`]}>{PAID_LINK_NOTE}</p>
+
+<style>
+  .paid-link-note {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    max-width: 34ch;
+  }
+  .paid-link-note--light { color: var(--muted); }
+  .paid-link-note--dark { color: var(--paper); opacity: 0.72; }
+</style>
