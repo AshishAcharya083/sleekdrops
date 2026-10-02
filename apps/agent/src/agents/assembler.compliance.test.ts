@@ -121,6 +121,17 @@ test('certainty and inducement language fail assembly', async () => {
   );
 });
 
+test('certainty, inducement or a bookmaker in the title, dek or tags fails assembly', async () => {
+  const cases: Array<[Partial<ContentBrief>, RegExp]> = [
+    [{ seoTitle: 'Swans v Lions: lock of the round, guaranteed winner' }, /title: certainty language/],
+    [{ dek: 'Claim your bonus bet at sportsbet.com.au' }, /dek: links or names a blocked domain[\s\S]*dek: inducement terms/],
+    [{ tags: ['afl', 'bonus bet'] }, /tags: inducement terms/],
+  ];
+  for (const [fields, expected] of cases) {
+    await assert.rejects(runAssembler(au, article({ outline: { ...brief, ...fields } })), expected);
+  }
+});
+
 test('a preview with no valid picks table fails assembly', async () => {
   const withBookmakerColumn = `| Market | Selection | Bookmaker | Indicative odds (decimal) | As at |
 | --- | --- | --- | --- | --- |
@@ -144,7 +155,7 @@ test('a PeakOdds explainer is checked but carries no odds_as_at', async () => {
       draft_md: '## What a line bet is\n\nA handicap applied to the favourite.',
     }),
   );
-  assert.equal(assembled.oddsAsAt, null);
+  assert.equal('oddsAsAt' in assembled, false);
   assert.ok(assembled.body.includes(AU_FOOTER));
 });
 
@@ -164,5 +175,5 @@ test('SleekDrops output is unchanged: no footer, no odds_as_at, no blocked domai
     }),
   );
   assert.equal(assembled.body, draft);
-  assert.equal(assembled.oddsAsAt, null);
+  assert.equal('oddsAsAt' in assembled, false);
 });
