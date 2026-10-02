@@ -25,6 +25,8 @@ const { render, renderForItem, AFFILIATE_DISCLOSURE, FIRST_COMMENT_CUE } =
 import type { CopyWriter } from './copy.js';
 import type { DistributableArticle, DistributionItem, DistributionQueueRow } from '../types.js';
 
+const SITE = { siteUrl: 'https://sleekdrops.com' };
+
 const reachable = await pool
   .query('SELECT 1')
   .then(() => true)
@@ -120,7 +122,7 @@ test('a queued item renders from its own article row', { skip }, async () => {
   assert.equal(item.provider, PROVIDER);
   assert.equal(item.placement, 'first_comment', 'the configured default');
 
-  const payload = await renderForItem(item, article, { writeCopy, renderCard, uploadCard });
+  const payload = await renderForItem(item, article, SITE, { writeCopy, renderCard, uploadCard });
 
   assert.ok(payload.caption.includes(FIRST_COMMENT_CUE), 'the row is placed in a first comment');
   assert.ok(payload.caption.includes(AFFILIATE_DISCLOSURE), 'the stored intent is a monetised one');
@@ -162,8 +164,8 @@ test('what the first attempt composed is what every later one posts', { skip }, 
     uploadCard,
   };
 
-  const first = await renderForItem(item, article, counted);
-  const retry = await renderForItem(await queuedItem(article.slug!, connection), article, counted);
+  const first = await renderForItem(item, article, SITE, counted);
+  const retry = await renderForItem(await queuedItem(article.slug!, connection), article, SITE, counted);
 
   assert.ok(first.renderedAt, 'the renderer stamps what it produced');
   assert.deepEqual(retry, first, 'the retry sends the post an operator already saw');
@@ -178,7 +180,7 @@ test('a placement the renderer had to move moves on the row too', { skip }, asyn
   const item = await queuedItem(article.slug!, connection);
   assert.equal(item.placement, 'first_comment');
 
-  const payload = await renderForItem(item, article, {
+  const payload = await renderForItem(item, article, SITE, {
     writeCopy,
     renderCard: async () => {
       throw new Error('image model returned no image data');
@@ -199,7 +201,7 @@ test('an unmonetised article on a found hero renders neither', { skip }, async (
   await enqueuePublishedArticle(article, { d1Status: 'published' });
   const item = await queuedItem(article.slug!, connection);
 
-  const payload = await render(article, item.provider, item.placement, {
+  const payload = await render(article, SITE, item.provider, item.placement, {
     writeCopy,
     renderCard,
     uploadCard,

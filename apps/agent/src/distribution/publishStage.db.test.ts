@@ -11,10 +11,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
+process.env.SITE_URL = 'https://sleekdrops.com';
 process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
 process.env.D1_DATABASE_ID = 'test-database';
 process.env.CLOUDFLARE_D1_TOKEN = 'test-d1-token';
 process.env.GITHUB_TOKEN = 'test-github-token';
+process.env.GITHUB_REPO = 'example/sleekdrops';
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');

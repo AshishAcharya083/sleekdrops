@@ -9,6 +9,7 @@ import { CATEGORIES, POST_TYPES, slugify } from '../content/contract.js';
 import { siteContext, SOURCE_DISCIPLINE, VERIFICATION_RULES } from './context.js';
 import type { TopicSuggestion } from '../pipeline/types.js';
 import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
+import { d1TargetFor } from '../platform/publishTarget.js';
 
 const SCOUT_QUERIES = [
   'trending products Australia this week',
@@ -31,7 +32,9 @@ export async function runTopicScout(
   // Build the avoid-list: everything published on the site + every topic the
   // scout has ever suggested (approved, rejected or pending alike).
   const [published, previous] = await Promise.all([
-    fetchPublishedPosts().catch(() => [] as Array<{ slug: string; title: string }>),
+    d1TargetFor(SLEEKDROPS_PLATFORM_ID)
+      .then(fetchPublishedPosts)
+      .catch(() => [] as Array<{ slug: string; title: string }>),
     q<{ title: string }>('SELECT title FROM topics ORDER BY created_at DESC LIMIT 200'),
   ]);
   const avoid = [

@@ -39,6 +39,9 @@ import type {
 } from '../types.js';
 import { SLEEKDROPS_PLATFORM_ID } from '../../platform/sleekdrops/index.js';
 
+/** The site posts link to: SleekDrops' publish target. */
+const SITE = { siteUrl: 'https://sleekdrops.com' };
+
 const reachable = await pool
   .query('SELECT 1')
   .then(() => true)
@@ -148,6 +151,7 @@ async function article(): Promise<DistributableArticle> {
   articles.push(row.id);
   return {
     id: row.id,
+    platform_id: 'sleekdrops',
     slug: row.slug,
     title: TITLE,
     frontmatter,
@@ -184,7 +188,7 @@ async function spentBodyLink(connectionId: string, articleId: string): Promise<v
 // ── The payload, as the renderer hands it over ─────────────────────────────
 
 function payload(item: DistributionItem, placement: LinkPlacement, imageUrl: string | null): RenderedPayload {
-  const url = taggedUrl(item.slug, FACEBOOK_PROVIDER, placement);
+  const url = taggedUrl(SITE, item.slug, FACEBOOK_PROVIDER, placement);
   return {
     caption:
       placement === 'in_body'

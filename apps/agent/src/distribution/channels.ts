@@ -7,11 +7,14 @@
 // one), else from the environment, which is where Cloud Run mounts a Secret
 // Manager secret. Nothing in this module returns a token to anything that
 // logs, and no caller may put one in `last_error` - see redactToken.
+//
+// A connection belongs to one platform, and so does the `channel_credentials`
+// row its pasted token is kept in: a platform only ever reads, lists and
+// posts through its own.
 import { CONFIG_ENV_KEYS } from '../config.js';
 import { getSetting, q } from '../db/pool.js';
 import { createLogger } from '../lib/log.js';
 import { scrubSecrets } from '../pipeline/stageTimeout.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 import type { ChannelConnectionRow, ChannelStatus } from './types.js';
 
 const log = createLogger('distribution');
@@ -54,20 +57,26 @@ function environmentCredential(ref: string, provider: string): string | null {
   return process.env[credentialEnvName(ref)] || null;
 }
 
+/** The tokens operators pasted for `platformId`'s channels, keyed by token_ref. */
+function storedCredentials(platformId: string): Promise<Record<string, string>> {
+  return getSetting<Record<string, string>>(platformId, 'channel_credentials', {});
+}
+
 /**
- * The secret `ref` names for a `provider` channel, or null when it is
- * configured nowhere.
+ * The secret `ref` names for one of `platformId`'s `provider` channels, or
+ * null when it is configured nowhere.
  *
  * Settings first: that is the one an operator can set without a redeploy, and
  * a rotated token pasted into the panel has to win over the stale value still
  * mounted in the environment.
  */
 export async function resolveCredential(
+  platformId: string,
   ref: string | null,
   provider: string,
 ): Promise<string | null> {
   if (!ref) return null;
-  const stored = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'channel_credentials', {});
+  const stored = await storedCredentials(platformId);
   const fromSettings = stored[ref];
   if (typeof fromSettings === 'string' && fromSettings !== '') return fromSettings;
   return environmentCredential(ref, provider);
@@ -154,41 +163,53 @@ export function tokenTier(expiresAt: string | null, now: Date = new Date()): Tok
 export type CredentialSource = 'panel' | 'environment';
 
 export async function credentialSource(
+  platformId: string,
   ref: string | null,
   provider: string,
 ): Promise<CredentialSource | null> {
   if (!ref) return null;
-  const stored = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'channel_credentials', {});
+  const stored = await storedCredentials(platformId);
   if (typeof stored[ref] === 'string' && stored[ref] !== '') return 'panel';
   return environmentCredential(ref, provider) ? 'environment' : null;
 }
 
 /**
- * Keep a pasted credential under its reference in the `channel_credentials`
- * row, which /api/settings never returns. Nothing reads it back out except
- * `resolveCredential` at post time.
+ * Keep a pasted credential under its reference in the platform's
+ * `channel_credentials` row, which /api/settings never returns. Nothing reads
+ * it back out except `resolveCredential` at post time.
  *
  * One key is written in place rather than the whole row read and rewritten:
  * every channel's credential shares the row, and a read-modify-write racing
  * another connect would put back a copy without the other's token.
  */
-export async function storeCredential(ref: string, value: string): Promise<void> {
+export async function storeCredential(platformId: string, ref: string, value: string): Promise<void> {
   await q(
     `INSERT INTO settings (platform_id, key, value, updated_at)
      VALUES ($3, 'channel_credentials', jsonb_build_object($1::text, $2::text), now())
      ON CONFLICT (platform_id, key) DO UPDATE
        SET value = settings.value || EXCLUDED.value, updated_at = now()`,
-    [ref, value, SLEEKDROPS_PLATFORM_ID],
+    [ref, value, platformId],
   );
 }
 
 /** Forget a pasted credential. A secret mounted in the environment is not ours to remove. */
-export async function removeCredential(ref: string): Promise<void> {
+export async function removeCredential(platformId: string, ref: string): Promise<void> {
   await q(
     `UPDATE settings SET value = value - $1::text, updated_at = now()
       WHERE platform_id = $2 AND key = 'channel_credentials' AND value ? $1::text`,
-    [ref, SLEEKDROPS_PLATFORM_ID],
+    [ref, platformId],
   );
+}
+
+/** An account already connected for one platform, which another platform tried to connect. */
+export class ChannelOwnedElsewhereError extends Error {
+  constructor(provider: string, externalAccountId: string, owner: string) {
+    super(
+      `${provider} account ${externalAccountId} is already connected for ${owner} - ` +
+        'one account posts for one platform only',
+    );
+    this.name = 'ChannelOwnedElsewhereError';
+  }
 }
 
 /**
@@ -196,8 +217,13 @@ export async function removeCredential(ref: string): Promise<void> {
  * one back to 'active' with the reference and expiry just established. Keyed on
  * `channel_connections_account_idx`, so connecting the same Page twice is a
  * reconnect rather than a second channel posting everything twice.
+ *
+ * The reconnect only ever applies within the platform that owns the account:
+ * another platform connecting the same Page is refused, because taking the row
+ * over would hand that Page the other brand's queue.
  */
 export async function upsertConnection(input: {
+  platformId: string;
   provider: string;
   externalAccountId: string;
   displayName: string | null;
@@ -213,6 +239,7 @@ export async function upsertConnection(input: {
      ON CONFLICT (provider, external_account_id) DO UPDATE
        SET display_name = EXCLUDED.display_name, token_ref = EXCLUDED.token_ref,
            expires_at = EXCLUDED.expires_at, status = 'active', updated_at = now()
+       WHERE channel_connections.platform_id = EXCLUDED.platform_id
      RETURNING *`,
     [
       input.provider,
@@ -220,10 +247,19 @@ export async function upsertConnection(input: {
       input.displayName,
       input.tokenRef,
       input.expiresInSeconds,
-      SLEEKDROPS_PLATFORM_ID,
+      input.platformId,
     ],
   );
+  if (!row) {
+    const owner = await findConnection(input.provider, input.externalAccountId);
+    throw new ChannelOwnedElsewhereError(
+      input.provider,
+      input.externalAccountId,
+      owner?.platform_id ?? 'another platform',
+    );
+  }
   log.info('channel connected', {
+    platform_id: row.platform_id,
     channel_connection_id: row.id,
     provider: row.provider,
     token_ref: row.token_ref,
@@ -231,14 +267,30 @@ export async function upsertConnection(input: {
   return row;
 }
 
-/** Every connection that may currently be enqueued for or posted to. */
-export async function activeConnections(): Promise<ChannelConnectionRow[]> {
+/** Every connection of `platformId` that may currently be enqueued for or posted to. */
+export async function activeConnections(platformId: string): Promise<ChannelConnectionRow[]> {
   return q<ChannelConnectionRow>(
-    `SELECT * FROM channel_connections WHERE status = 'active' ORDER BY provider, created_at`,
+    `SELECT * FROM channel_connections
+      WHERE platform_id = $1 AND status = 'active'
+      ORDER BY provider, created_at`,
+    [platformId],
   );
 }
 
-export async function listConnections(): Promise<ChannelConnectionRow[]> {
+/** Every connection of `platformId`, whatever its status. */
+export async function listConnections(platformId: string): Promise<ChannelConnectionRow[]> {
+  return q<ChannelConnectionRow>(
+    'SELECT * FROM channel_connections WHERE platform_id = $1 ORDER BY provider, created_at',
+    [platformId],
+  );
+}
+
+/**
+ * Every connection of every platform. Only for what is global by nature: the
+ * secret names a token_ref maps to in the environment are one namespace, so
+ * two platforms' channels must not read the same one.
+ */
+export async function listAllConnections(): Promise<ChannelConnectionRow[]> {
   return q<ChannelConnectionRow>('SELECT * FROM channel_connections ORDER BY provider, created_at');
 }
 
