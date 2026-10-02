@@ -126,7 +126,7 @@ export function Published() {
                 </td>
               </tr>
             ))}
-            {posts.length === 0 && (
+            {data && posts.length === 0 && (
               <tr>
                 <td colSpan={10} className="muted" style={{ textAlign: 'center', padding: 24 }}>
                   no {platform.name} posts in D1
