@@ -1,4 +1,5 @@
 import { describeApiError, type ApiError } from './api-error';
+import { fmtEventTime, isEventExpired, type EditionInfo } from './platform';
 import {
   budgetMinutes,
   elapsedBand,
@@ -50,6 +51,46 @@ export function OutOfDateBadge() {
   return (
     <span className="badge outline-amber" title="Regenerated when the retry reaches this stage">
       {OUT_OF_DATE_LABEL}
+    </span>
+  );
+}
+
+/**
+ * An event-bound piece whose kick-off has passed. A preview of a game already
+ * played reads as wrong, not as old, so it is marked rather than left to the
+ * date column.
+ */
+export function ExpiredBadge() {
+  return (
+    <span className="badge red" title="Kick-off has passed - this preview is out of date">
+      <span aria-hidden="true">⌛</span>
+      Expired
+    </span>
+  );
+}
+
+/**
+ * The edition a piece is written for and, when it is event-bound, its kick-off
+ * in that edition's own time zone - plus the Expired mark once it has passed.
+ */
+export function EditionEvent({
+  editionId,
+  edition,
+  eventStartsAt,
+}: {
+  editionId: string | null;
+  edition: EditionInfo | null;
+  eventStartsAt: string | null;
+}) {
+  return (
+    <span className="edition-event">
+      {editionId && <span className="badge gray">{edition?.name ?? editionId}</span>}
+      {eventStartsAt && (
+        <span className="event-time" title="Event start">
+          <span aria-hidden="true">🗓</span> {fmtEventTime(eventStartsAt, edition)}
+        </span>
+      )}
+      {isEventExpired(eventStartsAt) && <ExpiredBadge />}
     </span>
   );
 }

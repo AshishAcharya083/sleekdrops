@@ -114,3 +114,24 @@ test('an ApiError passes through normalisation unchanged, keeping its kind', () 
   const original = new ApiError('unauthorized', { kind: 'unauthorized', status: 401 });
   assert.equal(toApiError(original), original);
 });
+
+test('a refusal keeps the rest of its body, such as the version a 409 names', async () => {
+  // The profile editor's conflict, as PUT /api/platform/profile answers it.
+  const res = new Response(
+    JSON.stringify({ error: 'profile changed since you loaded it', current_version: 6 }),
+    { status: 409, headers: { 'Content-Type': 'application/json' } },
+  );
+  const error = apiErrorFromResponse(res, await res.json(), TRACE_HEADER);
+
+  assert.equal(error.status, 409);
+  assert.equal(error.kind, 'request');
+  assert.equal(error.message, 'profile changed since you loaded it');
+  assert.equal(error.body.current_version, 6);
+  assert.deepEqual(new ApiError('x', { kind: 'unreachable' }).body, {});
+});
+
+test('a missing or unknown platform is a refused request, worded by the agent', async () => {
+  const res = new Response(JSON.stringify({ error: 'X-Platform header is required' }), { status: 400 });
+  const error = apiErrorFromResponse(res, await res.json(), TRACE_HEADER);
+  assert.equal(describeApiError(error), 'Request failed: X-Platform header is required');
+});

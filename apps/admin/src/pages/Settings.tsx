@@ -3,6 +3,8 @@ import { EVENTS, captureError, log, track } from '../analytics';
 import type { LinkPlacement, Settings } from '../api';
 import { api } from '../api';
 import { providerLabel } from '../channels';
+import { usePlatform } from '../hooks';
+import { PlatformProfileEditor } from './PlatformProfile';
 
 // Every agent that runs a prompt, and therefore has a model worth overriding.
 // `assembler` and `publisher` run deterministic code; `image_agent` is pinned
@@ -26,7 +28,22 @@ const SOURCE_LABEL: Record<string, string> = {
   'vertex-adc': 'via the Cloud Run service account (Vertex ADC)',
 };
 
-export function SettingsPage() {
+/**
+ * Everything here belongs to the selected platform: the engine and pipeline
+ * settings below, and the profile its prompts are built from.
+ */
+export function SettingsPage({ onSaved }: { onSaved?: () => void } = {}) {
+  return (
+    <>
+      <PipelineSettings onSaved={onSaved} />
+      <PlatformProfileEditor />
+    </>
+  );
+}
+
+/** `onSaved` lets the shell re-read what it shows per platform, e.g. Channels. */
+function PipelineSettings({ onSaved }: { onSaved?: () => void }) {
+  const platform = usePlatform();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -69,6 +86,7 @@ export function SettingsPage() {
       });
       setSettings(next);
       setSaved(true);
+      onSaved?.();
       track(EVENTS.settingsSaved, shape);
       log('info', 'platform settings saved', shape);
       setTimeout(() => setSaved(false), 2500);
@@ -89,6 +107,9 @@ export function SettingsPage() {
 
   return (
     <div className="card">
+      <p className="muted" style={{ marginTop: 0 }}>
+        Settings for <strong>{platform.name}</strong>. The other platforms keep their own.
+      </p>
       {engineBroken && (
         <div className="warn-banner">
           {engine === 'claude' ? (

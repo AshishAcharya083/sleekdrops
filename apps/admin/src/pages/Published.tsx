@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
 import type { PublishedPost, RebuildResult } from '../api';
-import { api, apiUpload, fmtTime } from '../api';
-import { ApiErrorBanner, Badge } from '../components';
+import { api, apiUpload, findEdition, fmtTime, siteArticleUrl } from '../api';
+import { ApiErrorBanner, Badge, EditionEvent } from '../components';
 import { HeroImageField } from '../HeroImageField';
-import { usePoll } from '../hooks';
+import { usePlatform, usePoll } from '../hooks';
 
 /**
  * Published — the live site's content (Cloudflare D1 posts table). Deleting a
@@ -13,6 +13,7 @@ import { usePoll } from '../hooks';
  * links are cleaned up with it).
  */
 export function Published() {
+  const platform = usePlatform();
   const { data, error, refresh } = usePoll<{ posts: PublishedPost[] }>('/api/published', 30_000);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -68,6 +69,7 @@ export function Published() {
               <th>Slug</th>
               <th>Category</th>
               <th>Type</th>
+              <th>Edition / event</th>
               <th>Author</th>
               <th>Published</th>
               <th>Status</th>
@@ -88,12 +90,17 @@ export function Published() {
                 </td>
                 <td style={{ maxWidth: 320 }}>{p.title}</td>
                 <td className="mono muted">
-                  <a href={`https://sleekdrops.com/blog/${p.slug}/`} target="_blank" rel="noreferrer">
-                    {p.slug}
-                  </a>
+                  <PostLink url={siteArticleUrl(platform.id, p.slug)} slug={p.slug} />
                 </td>
                 <td>{p.category}</td>
                 <td>{p.post_type}</td>
+                <td>
+                  <EditionEvent
+                    editionId={p.edition_id}
+                    edition={findEdition(platform, p.edition_id)}
+                    eventStartsAt={p.event_starts_at}
+                  />
+                </td>
                 <td>{p.author}</td>
                 <td className="muted">{p.pub_date}</td>
                 <td>
@@ -121,8 +128,8 @@ export function Published() {
             ))}
             {posts.length === 0 && (
               <tr>
-                <td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 24 }}>
-                  no posts in D1
+                <td colSpan={10} className="muted" style={{ textAlign: 'center', padding: 24 }}>
+                  no {platform.name} posts in D1
                 </td>
               </tr>
             )}
@@ -142,6 +149,15 @@ export function Published() {
         />
       )}
     </>
+  );
+}
+
+function PostLink({ url, slug }: { url: string | null; slug: string }) {
+  if (!url) return <>{slug}</>;
+  return (
+    <a href={url} target="_blank" rel="noreferrer">
+      {slug}
+    </a>
   );
 }
 
