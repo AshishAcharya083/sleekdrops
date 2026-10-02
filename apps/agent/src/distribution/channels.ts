@@ -11,6 +11,7 @@ import { CONFIG_ENV_KEYS } from '../config.js';
 import { getSetting, q } from '../db/pool.js';
 import { createLogger } from '../lib/log.js';
 import { scrubSecrets } from '../pipeline/stageTimeout.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 import type { ChannelConnectionRow, ChannelStatus } from './types.js';
 
 const log = createLogger('distribution');
@@ -66,7 +67,7 @@ export async function resolveCredential(
   provider: string,
 ): Promise<string | null> {
   if (!ref) return null;
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  const stored = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'channel_credentials', {});
   const fromSettings = stored[ref];
   if (typeof fromSettings === 'string' && fromSettings !== '') return fromSettings;
   return environmentCredential(ref, provider);
@@ -157,7 +158,7 @@ export async function credentialSource(
   provider: string,
 ): Promise<CredentialSource | null> {
   if (!ref) return null;
-  const stored = await getSetting<Record<string, string>>('channel_credentials', {});
+  const stored = await getSetting<Record<string, string>>(SLEEKDROPS_PLATFORM_ID, 'channel_credentials', {});
   if (typeof stored[ref] === 'string' && stored[ref] !== '') return 'panel';
   return environmentCredential(ref, provider) ? 'environment' : null;
 }
@@ -173,11 +174,11 @@ export async function credentialSource(
  */
 export async function storeCredential(ref: string, value: string): Promise<void> {
   await q(
-    `INSERT INTO settings (key, value, updated_at)
-     VALUES ('channel_credentials', jsonb_build_object($1::text, $2::text), now())
-     ON CONFLICT (key) DO UPDATE
+    `INSERT INTO settings (platform_id, key, value, updated_at)
+     VALUES ($3, 'channel_credentials', jsonb_build_object($1::text, $2::text), now())
+     ON CONFLICT (platform_id, key) DO UPDATE
        SET value = settings.value || EXCLUDED.value, updated_at = now()`,
-    [ref, value],
+    [ref, value, SLEEKDROPS_PLATFORM_ID],
   );
 }
 
@@ -185,8 +186,8 @@ export async function storeCredential(ref: string, value: string): Promise<void>
 export async function removeCredential(ref: string): Promise<void> {
   await q(
     `UPDATE settings SET value = value - $1::text, updated_at = now()
-      WHERE key = 'channel_credentials' AND value ? $1::text`,
-    [ref],
+      WHERE platform_id = $2 AND key = 'channel_credentials' AND value ? $1::text`,
+    [ref, SLEEKDROPS_PLATFORM_ID],
   );
 }
 
@@ -205,8 +206,8 @@ export async function upsertConnection(input: {
 }): Promise<ChannelConnectionRow> {
   const [row] = await q<ChannelConnectionRow>(
     `INSERT INTO channel_connections
-       (provider, external_account_id, display_name, token_ref, expires_at, status)
-     VALUES ($1, $2, $3, $4,
+       (platform_id, provider, external_account_id, display_name, token_ref, expires_at, status)
+     VALUES ($6, $1, $2, $3, $4,
              CASE WHEN $5::int IS NULL THEN NULL ELSE now() + make_interval(secs => $5) END,
              'active')
      ON CONFLICT (provider, external_account_id) DO UPDATE
@@ -219,6 +220,7 @@ export async function upsertConnection(input: {
       input.displayName,
       input.tokenRef,
       input.expiresInSeconds,
+      SLEEKDROPS_PLATFORM_ID,
     ],
   );
   log.info('channel connected', {

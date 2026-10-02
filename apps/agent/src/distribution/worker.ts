@@ -44,6 +44,7 @@ import {
   type DistributionItem,
   type SocialProvider,
 } from './types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const log = createLogger('distribution');
 
@@ -216,7 +217,7 @@ export async function distributionTick(deps: DistributionDeps = {}): Promise<Ite
   // whether or not the queue is currently allowed to take new work.
   if (isReapTick(ticks)) await recoverStrandedItems();
 
-  if (!(await getSetting<boolean>('distribution_enabled', true))) return [];
+  if (!(await getSetting<boolean>(SLEEKDROPS_PLATFORM_ID, 'distribution_enabled', true))) return [];
 
   const providers = (deps.availableProviders ?? registeredProviders)();
   if (providers.length === 0) return [];

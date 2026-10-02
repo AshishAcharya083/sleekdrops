@@ -55,8 +55,8 @@ after(async () => {
 
 async function connect(provider: string): Promise<string> {
   const [row] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref)
-     VALUES ($1, $2, 'test-channel-token')
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref)
+     VALUES ('sleekdrops', $1, $2, 'test-channel-token')
      RETURNING id`,
     [provider, `account-${randomUUID().slice(0, 8)}`],
   );
@@ -71,8 +71,8 @@ async function publishedArticle(fields: {
 }): Promise<DistributableArticle> {
   const [row] = await q<{ id: string }>(
     `INSERT INTO articles
-       (title, slug, category, post_type, stage, status, frontmatter, keyword_plan, hero_image_source)
-     VALUES ('The headphones for a quiet commute', $1, 'Tech', 'guide', 'publish', 'queued',
+       (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter, keyword_plan, hero_image_source)
+     VALUES ('sleekdrops', 'au', 'The headphones for a quiet commute', $1, 'Tech', 'guide', 'publish', 'queued',
              $2::jsonb, $3::jsonb, $4)
      RETURNING id`,
     [

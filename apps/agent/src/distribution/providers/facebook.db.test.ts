@@ -37,6 +37,7 @@ import type {
   RenderedPayload,
   SocialProvider,
 } from '../types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../../platform/sleekdrops/index.js';
 
 const reachable = await pool
   .query('SELECT 1')
@@ -127,8 +128,8 @@ const posted = (call: RecordedCall | undefined): Record<string, string> => call?
 async function connect(): Promise<{ id: string; pageId: string }> {
   const pageId = `1000${randomUUID().replace(/\D/g, '').slice(0, 8)}`;
   const [row] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref, display_name)
-     VALUES ($1, $2, $3, 'Sleekdrops') RETURNING id`,
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref, display_name)
+     VALUES ('sleekdrops', $1, $2, $3, 'Sleekdrops') RETURNING id`,
     [FACEBOOK_PROVIDER, pageId, TOKEN_REF],
   );
   connections.push(row.id);
@@ -138,9 +139,9 @@ async function connect(): Promise<{ id: string; pageId: string }> {
 async function article(): Promise<DistributableArticle> {
   const frontmatter = { title: TITLE, dek: 'Four weeks on the 7:12, ranked.', heroImage: HERO };
   const [row] = await q<{ id: string; slug: string }>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, frontmatter,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter,
                            hero_image_source)
-     VALUES ($1, $2, 'Tech', 'guide', 'publish', 'queued', $3::jsonb, 'generated')
+     VALUES ('sleekdrops', 'au', $1, $2, 'Tech', 'guide', 'publish', 'queued', $3::jsonb, 'generated')
      RETURNING id, slug`,
     [TITLE, `quiet-commutes-${randomUUID().slice(0, 8)}`, JSON.stringify(frontmatter)],
   );
@@ -417,7 +418,7 @@ test('a quota rejection beats the local count and corrects it', { skip }, async 
   assert.equal(receipt.remotePostId, `${pageId}_930`, 'the item still went out, in the other placement');
   assert.equal(calls.filter((call) => call.path.endsWith('/feed')).length, 1);
 
-  const state = await getSetting<Record<string, { month: string }>>(BODY_LINK_BUDGET_SETTING, {});
+  const state = await getSetting<Record<string, { month: string }>>(SLEEKDROPS_PLATFORM_ID, BODY_LINK_BUDGET_SETTING, {});
   assert.equal(state[pageId]?.month, new Date().toISOString().slice(0, 7));
 
   // And the correction sticks: the next item for this Page, whose rows still
@@ -434,7 +435,7 @@ test('a quota rejection beats the local count and corrects it', { skip }, async 
   ).post({ accessToken: TOKEN, externalAccountId: pageId, item: next.item });
   assert.equal(second.calls.some((call) => call.path.endsWith('/feed')), false);
 
-  await setSetting(BODY_LINK_BUDGET_SETTING, {});
+  await setSetting(SLEEKDROPS_PLATFORM_ID, BODY_LINK_BUDGET_SETTING, {});
 });
 
 // ── The ladder's last rung, through the worker ─────────────────────────────

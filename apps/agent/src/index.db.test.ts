@@ -460,9 +460,9 @@ test(
 
       const insert = (claimedBy: string) =>
         db.query<{ id: string }>(
-          `INSERT INTO articles (title, category, post_type, stage, status, claimed_by, claimed_at,
+          `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, claimed_by, claimed_at,
                                  heartbeat_at, lease_expires_at, draft_md)
-           VALUES ('Shutdown test card', 'Tech', 'guide', 'seo_review', 'running', $1, now(), now(),
+           VALUES ('sleekdrops', 'au', 'Shutdown test card', 'Tech', 'guide', 'seo_review', 'running', $1, now(), now(),
                    now() + interval '5 minutes', '## Half a draft')
            RETURNING id`,
           [claimedBy],
@@ -470,7 +470,7 @@ test(
       const mine = (await insert(`${workerId}/${randomUUID()}`)).rows[0].id;
       const theirs = (await insert(`worker-another-instance/${randomUUID()}`)).rows[0].id;
       await db.query(
-        "INSERT INTO agent_sessions (article_id, agent, status) VALUES ($1, 'seo_reviewer', 'running')",
+        "INSERT INTO agent_sessions (platform_id, article_id, agent, status) VALUES ('sleekdrops', $1, 'seo_reviewer', 'running')",
         [mine],
       );
 

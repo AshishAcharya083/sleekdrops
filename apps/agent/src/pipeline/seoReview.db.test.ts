@@ -41,6 +41,8 @@ after(async () => {
 
 async function insertArticle(fields: Record<string, unknown> = {}): Promise<ArticleRow> {
   const row = {
+    platform_id: 'sleekdrops',
+    edition_id: 'au',
     title: `Best cordless stick vacuums ${randomUUID().slice(0, 8)}`,
     category: 'Home',
     post_type: 'guide',

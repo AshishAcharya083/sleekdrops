@@ -36,6 +36,7 @@ const { MAX_STAGE_ATTEMPTS, stageRetryDelayMs } = await import('./failures.js');
 const { createApp } = await import('../api/server.js');
 
 import type { ArticleRow } from './types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 /**
  * The two columns migration 015 adds. Declared here rather than on ArticleRow:
@@ -54,7 +55,7 @@ if (reachable) await migrate();
 
 /** The admin panel can store a Claude token too; if one is there, stand down. */
 const credentialled =
-  reachable && (await getSetting<{ claude_token?: string }>('llm', {})).claude_token;
+  reachable && (await getSetting<{ claude_token?: string }>(SLEEKDROPS_PLATFORM_ID, 'llm', {})).claude_token;
 const modelSkip = credentialled
   ? 'the database carries a Claude token - this test must not reach a live model'
   : skip;
@@ -95,6 +96,8 @@ function stubFetch(answer: (call: number) => Response | never): number[] {
 async function insertPublishable(fields: Record<string, unknown> = {}): Promise<ArticleRow> {
   const slug = `best-stick-vacuums-${randomUUID().slice(0, 8)}`;
   const row = {
+    platform_id: 'sleekdrops',
+    edition_id: 'au',
     title: 'Best cordless stick vacuums',
     category: 'Home',
     post_type: 'guide',

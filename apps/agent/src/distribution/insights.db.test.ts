@@ -98,16 +98,16 @@ async function posted(fields: {
   tokenRef?: string;
 }): Promise<string> {
   const [connection] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref)
-     VALUES ($1, $2, $3) RETURNING id`,
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref)
+     VALUES ('sleekdrops', $1, $2, $3) RETURNING id`,
     [fields.provider, `page-${randomUUID().slice(0, 8)}`, fields.tokenRef ?? TOKEN_REF],
   );
   connections.push(connection.id);
 
   const slug = `insights-${randomUUID().slice(0, 8)}`;
   const [article] = await q<{ id: string }>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status)
-     VALUES ('The headphones for a quiet commute', $1, 'Tech', 'guide', 'publish', 'done')
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status)
+     VALUES ('sleekdrops', 'au', 'The headphones for a quiet commute', $1, 'Tech', 'guide', 'publish', 'done')
      RETURNING id`,
     [slug],
   );
