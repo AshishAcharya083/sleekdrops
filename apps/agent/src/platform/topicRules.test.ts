@@ -20,6 +20,10 @@ test('horse, greyhound and harness racing are blocked, whole-word and case-insen
     'Race meeting preview: Flemington',
     'Spring racing carnival best bets',
     'Kentucky Derby contenders',
+    'Dogs tips: Wentworth Park tonight',
+    'The dogs at Sandown: best bets',
+    'Dog racing quaddie: Albion Park',
+    'Trot form guide: Melton',
   ]) {
     assert.equal(
       blockedTopicReason(blocksRacing, text),
@@ -33,8 +37,7 @@ test('plain "race" and other sport are let through', () => {
   for (const text of [
     'Premier League title race: who has the run-in?',
     'The race to the playoffs: NBA Western Conference',
-    'Bulldogs v Roosters tips: can the Dogs bounce back?',
-    'Arsenal have won five on the trot - can they make it six?',
+    'Bulldogs v Roosters tips: can Canterbury bounce back?',
     'How Melbourne harness their pace on the counter',
     'Formula 1 Singapore Grand Prix preview',
     'Horsens v Brondby preview',

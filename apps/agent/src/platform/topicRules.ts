@@ -4,9 +4,10 @@ import type { Platform, TopicClass } from './types.js';
 
 const TOPIC_CLASS_PATTERNS: Record<TopicClass, RegExp> = {
   // Horse, greyhound and harness racing. Plain "race" ("title race", "race to
-  // the playoffs") and motor racing stay allowed. Bare "dogs" is left out
-  // because "the Dogs" is the Bulldogs' nickname, bare "harness" because teams
-  // harness momentum, and "on the trot" is a winning streak.
+  // the playoffs") and motor racing stay allowed, and bare "harness" because
+  // teams harness momentum. Bare "dogs" and "trot" are blocked on purpose: the
+  // block is a hard one, so "the Dogs" (Bulldogs) or "on the trot" being
+  // refused is the accepted cost of never letting a greyhound meeting through.
   racing: new RegExp(
     String.raw`\b(?:` +
       [
@@ -17,9 +18,10 @@ const TOPIC_CLASS_PATTERNS: Record<TopicClass, RegExp> = {
         String.raw`race[\s-]?(?:meetings?|meets?|courses?)`,
         String.raw`(?:spring|autumn) racing(?: carnival)?`,
         String.raw`greyhounds?`,
-        String.raw`dogs? racing`,
+        String.raw`dogs`,
+        String.raw`dog racing`,
         String.raw`harness[\s-]rac(?:e|es|ing)`,
-        String.raw`(?<!on the )trots?`,
+        String.raw`trots?`,
         String.raw`trotting`,
         String.raw`trotters?`,
         String.raw`pacing`,
