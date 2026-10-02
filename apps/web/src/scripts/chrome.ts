@@ -11,8 +11,8 @@
  *  4. Smooth-scroll for in-page anchor links, plus a highlight flash so the
  *     click is acknowledged even when the target is already on screen.
  *  5. Product-analytics dispatch (page view, list views, funnel clicks,
- *     outbound-click decoration and read completion) from `data-*` hooks, via
- *     the analytics wrapper (see docs/analytics-events.md).
+ *     outbound-click decoration, trust-surface use and read completion) from
+ *     `data-*` hooks, via the analytics wrapper (see docs/analytics-events.md).
  *  6. A/B experiment copy: swapping `[data-experiment-copy]` labels in place
  *     once the flag payload resolves, via the experiments wrapper.
  *  7. A/B experiment nav items: removing (and restoring) a
@@ -45,6 +45,7 @@ import {
   READ_ACTIVE_MS,
 } from '@lib/read-completion';
 import { newEventId } from '@lib/visit';
+import { wireTrustAnalytics } from '@lib/trust-analytics';
 import { getFeatureValue, subscribe as onExperimentsChanged } from '@lib/experiments';
 import {
   applyNavExperimentItems,
@@ -98,6 +99,16 @@ if (!window.__sdChromeInit) {
   const pageView = parseProps(document.body.dataset.pageView);
   const screenName = typeof pageView?.screen === 'string' ? pageView.screen : undefined;
   trackPageView({ referrer: document.referrer, ...pageView });
+
+  /* Trust surfaces: a methodology page view, a score explainer opened, a deal
+     badge's proof link followed - each from the plain hook its component
+     renders. The rules live in the pure ./trust-analytics module. */
+  wireTrustAnalytics(document, {
+    screenName,
+    parseProps,
+    track: (event, props) => track(EVENTS[event], props),
+    warn: (message) => serverLog('warn', message),
+  });
 
   /* List views: one event per rendered deal or promo list, never one per card.
      The list element carries the whole payload as JSON on `data-list-view`
