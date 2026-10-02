@@ -49,6 +49,8 @@ export const EVENTS = {
   channelActioned: 'Channel Actioned',
   distributionItemActioned: 'Distribution Item Actioned',
   connectionSettingChanged: 'Connection Setting Changed',
+  platformSwitched: 'Platform Switched',
+  platformProfileSaved: 'Platform Profile Saved',
 } as const;
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];

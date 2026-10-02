@@ -34,16 +34,27 @@ export class ApiError extends Error {
   readonly status: number | null;
   /** The agent's trace id, when it returned one - it names its own log lines. */
   readonly traceId: string | null;
+  /**
+   * The rest of the error body, for a refusal that says more than a sentence -
+   * the profile editor's 409 carries the version that is now current.
+   */
+  readonly body: Readonly<Record<string, unknown>>;
 
   constructor(
     message: string,
-    detail: { kind: ApiFailureKind; status?: number | null; traceId?: string | null },
+    detail: {
+      kind: ApiFailureKind;
+      status?: number | null;
+      traceId?: string | null;
+      body?: Record<string, unknown>;
+    },
   ) {
     super(message);
     this.name = 'ApiError';
     this.kind = detail.kind;
     this.status = detail.status ?? null;
     this.traceId = detail.traceId ?? null;
+    this.body = detail.body ?? {};
   }
 }
 
@@ -51,6 +62,7 @@ export class ApiError extends Error {
 interface ErrorEnvelope {
   error?: string;
   traceId?: string;
+  [field: string]: unknown;
 }
 
 /**
@@ -68,6 +80,7 @@ export function apiErrorFromResponse(
     kind: failureKindForStatus(res.status),
     status: res.status,
     traceId: body.traceId ?? res.headers.get(traceHeader),
+    body,
   });
 }
 

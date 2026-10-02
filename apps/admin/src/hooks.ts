@@ -1,7 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { captureError } from './analytics';
-import { api } from './api';
+import { api, getPlatform, onPlatformChange, type PlatformInfo } from './api';
 import { toApiError, type ApiError } from './api-error';
+
+/** The selected platform. App.tsx renders no page until there is one. */
+export const PlatformContext = createContext<PlatformInfo | null>(null);
+
+export function usePlatform(): PlatformInfo {
+  const platform = useContext(PlatformContext);
+  if (!platform) throw new Error('usePlatform() used outside the selected platform');
+  return platform;
+}
 
 /**
  * Poll a GET endpoint on an interval; realtime-enough for a light admin.
@@ -10,6 +19,10 @@ import { toApiError, type ApiError } from './api-error';
  * renders the last good data with the error banner above it, so one transient
  * 500 in the 4s loop cannot empty the screen. The error is the classified
  * ApiError, so the banner can name the cause instead of guessing.
+ *
+ * A platform switch is the one thing that does discard it: the payload belongs
+ * to the platform it was fetched for, so the switch empties it and a response
+ * still in flight for the previous platform is dropped when it lands.
  */
 export function usePoll<T>(path: string, intervalMs = 4000): {
   data: T | null;
@@ -21,17 +34,27 @@ export function usePoll<T>(path: string, intervalMs = 4000): {
   const alive = useRef(true);
 
   const load = useCallback(() => {
+    const requestedFor = getPlatform();
     api<T>(path)
       .then((d) => {
-        if (!alive.current) return;
+        if (!alive.current || getPlatform() !== requestedFor) return;
         setData(d);
         setError(null);
       })
       .catch((e: unknown) => {
         captureError(e, { route: path, action: 'poll' });
-        if (alive.current) setError(toApiError(e));
+        if (alive.current && getPlatform() === requestedFor) setError(toApiError(e));
       });
   }, [path]);
+
+  useEffect(
+    () =>
+      onPlatformChange(() => {
+        setData(null);
+        setError(null);
+      }),
+    [],
+  );
 
   useEffect(() => {
     alive.current = true;

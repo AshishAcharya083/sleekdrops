@@ -2,7 +2,8 @@
 // into the header bar is stored in localStorage and sent as a bearer.
 //
 // This is also the panel's single fetch chokepoint, so it is where the client
-// trace id goes out as X-Trace-Id, where every request failure is logged and
+// trace id goes out as X-Trace-Id, where the selected platform goes out as
+// X-Platform (see platform.ts), where every request failure is logged and
 // reported with a stack trace, and where that failure is classified (see
 // api-error.ts) so a tab can tell a rejected token from a stopped server. The
 // agent's log lines for the same request carry that id, so a client error in
@@ -16,6 +17,11 @@ import { ApiError, apiErrorFromResponse } from './api-error';
 // import point for everything it reads off the API.
 export * from './stages';
 import { fmtSeconds, type StageBudgets } from './stages';
+// The same goes for the platform selection and the profile editor's shapes.
+export * from './platform';
+export * from './profile';
+import { createPlatformSelection, platformHeaders, type PlatformListener } from './platform';
+import { PROFILE_AUTHOR_KEY } from './profile';
 
 /** A markdown reference the operator supplied (uploaded file or pasted block). */
 export interface ReferenceMaterial {
@@ -40,6 +46,9 @@ export interface Topic {
   /** Operator-dropped hero image, attached while briefing the piece. */
   hero_image_url: string | null;
   hero_alt: string | null;
+  edition_id: string;
+  /** Kick-off of the fixture the piece is about; null when it is not event-bound. */
+  event_starts_at: string | null;
   created_at: string;
 }
 
@@ -50,6 +59,10 @@ export interface ManualTopicPayload {
   instructions: string;
   category: string;
   post_type: string;
+  /** One of the selected platform's editions. */
+  edition_id: string;
+  /** ISO 8601 with offset; left out for a piece that is not event-bound. */
+  event_starts_at?: string;
   /** The image file itself is uploaded separately; only its alt text is here. */
   hero_alt: string;
   references: ReferenceMaterial[];
@@ -60,9 +73,6 @@ export interface ScoutQueueStatus {
   queued: number;
   running: number;
 }
-
-export const TOPIC_CATEGORIES = ['Tech', 'Home', 'Fashion', 'Health', 'Finance', 'Travel'] as const;
-export const TOPIC_POST_TYPES = ['article', 'guide', 'roundup'] as const;
 
 export interface ArticleSummary {
   id: string;
@@ -75,6 +85,10 @@ export interface ArticleSummary {
   revision_round: number;
   seo_score: string | null;
   hero_image_url: string | null;
+  edition_id: string;
+  event_starts_at: string | null;
+  /** When the oldest price a preview quotes was observed. */
+  odds_as_at: string | null;
   error: string | null;
   /**
    * How the last stage run failed: 'transient' (the pipeline retried it and
@@ -386,6 +400,9 @@ export interface PublishedPost {
   /** Read out of the live post's frontmatter — null when it has no hero. */
   hero_image: string | null;
   hero_alt: string | null;
+  /** Null on a post with no pipeline article behind it. */
+  edition_id: string | null;
+  event_starts_at: string | null;
 }
 
 /** What the hero routes report back about the site rebuild they asked for. */
@@ -536,19 +553,46 @@ export function setApiBase(base: string): void {
   localStorage.setItem('sleekdrops_api_base', base.trim());
 }
 
+const platformSelection = createPlatformSelection(localStorage);
+
+/** The platform every request is sent for; null until the panel has chosen one. */
+export function getPlatform(): string | null {
+  return platformSelection.get();
+}
+
+/** Switch platforms. False when `platformId` was already the selected one. */
+export function setPlatform(platformId: string): boolean {
+  return platformSelection.select(platformId);
+}
+
+/** Called on every switch, so cached data from the previous platform is dropped. */
+export function onPlatformChange(listener: PlatformListener): () => void {
+  return platformSelection.subscribe(listener);
+}
+
+export function getProfileAuthor(): string {
+  return localStorage.getItem(PROFILE_AUTHOR_KEY) ?? '';
+}
+
+export function setProfileAuthor(author: string): void {
+  localStorage.setItem(PROFILE_AUTHOR_KEY, author.trim());
+}
+
 const elapsed = (startedAt: number): number => Math.round(performance.now() - startedAt);
 
 /**
- * The one place a request leaves the panel: auth, trace header, failure logging
- * and error reporting all live here, whether the body is JSON or a file.
+ * The one place a request leaves the panel: auth, trace and platform headers,
+ * failure logging and error reporting all live here, whether the body is JSON
+ * or a file.
  */
 async function request<T>(path: string, init: RequestInit, headers: Record<string, string>): Promise<T> {
+  const method = init.method ?? 'GET';
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   const traceId = getTraceId();
   if (traceId) headers[TRACE_HEADER] = traceId;
+  Object.assign(headers, platformHeaders(path, method, getPlatform()));
 
-  const method = init.method ?? 'GET';
   const started = performance.now();
   log('info', `api request ${method} ${path}`, { route: path, method });
 
@@ -568,7 +612,7 @@ async function request<T>(path: string, init: RequestInit, headers: Record<strin
   }
 
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string; traceId?: string };
+    const body = (await res.json().catch(() => ({}))) as { error?: string; traceId?: string; [field: string]: unknown };
     const error = apiErrorFromResponse(res, body, TRACE_HEADER);
     const attributes = {
       route: path,

@@ -48,7 +48,7 @@ Fired on boot and on every tab change.
 
 | Property | Type | Notes |
 |---|---|---|
-| `tab` | string | `Overview`, `Topics`, `Pipeline`, `Published`, `Channels`, `Sessions` or `Settings`. |
+| `tab` | string | `Overview`, `Topics`, `Pipeline`, `Published`, `Channels`, `Sessions` or `Settings`. Channels is not offered on a platform that does not distribute. |
 | `path` | string | The SPA's path - constant in practice, kept for parity with the website. |
 
 Owning screen: `App.tsx`.
@@ -95,8 +95,10 @@ The manual-topic drawer submitted a brief - as a draft, or on the way to an imme
 |---|---|---|
 | `action` | string | `draft` (Save as draft) or `approve` (Approve & start now). |
 | `mode` | string | `create` or `edit`. |
-| `category` | string | Chosen category. |
-| `post_type` | string | `article`, `guide` or `roundup`. |
+| `category` | string | Chosen category, one of the selected platform's. |
+| `post_type` | string | One of the selected platform's post types, e.g. `article`, `guide` or `roundup`. |
+| `edition_id` | string | The edition the piece is written for, e.g. `au`. |
+| `event_bound` | boolean | Whether a kick-off time was given. Never the time itself. |
 | `reference_count` | number | Reference materials attached. Never their contents. |
 | `instructions_provided` | boolean | Whether the operator wrote instructions. Never the text. |
 | `hero_image_provided` | boolean | Whether a hero image is attached to the brief. Never the file or its URL. |
@@ -247,6 +249,30 @@ It fires on the transition only, not per keystroke, and **never carries the ente
 | `value_present` | boolean | Whether the field now holds a value. |
 
 Owning screen: `App.tsx`.
+
+### Platform Switched
+
+The operator picked another platform in the header bar.
+Fires only when the selection actually changed, not when the panel chooses the first platform on boot.
+
+| Property | Type | Notes |
+|---|---|---|
+| `platform_id` | string | The platform switched to, e.g. `sleekdrops` or `peakodds`. |
+
+Owning screen: `App.tsx`.
+
+### Platform Profile Saved
+
+A new version of the selected platform's profile was written.
+**Never carries the profile text or the author's name** - only which platform, which version and how many fields changed.
+
+| Property | Type | Notes |
+|---|---|---|
+| `platform_id` | string | The platform whose profile was saved. |
+| `version` | number | The version the save created. |
+| `count` | number | Fields that differ from the version before it. |
+
+Owning screen: `pages/PlatformProfile.tsx`.
 
 ### `$error` (SDK)
 
