@@ -35,7 +35,7 @@ const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to 
 if (reachable) await migrate();
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 
 after(async () => {
   if (reachable) await pool.end();

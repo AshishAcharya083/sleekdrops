@@ -27,7 +27,7 @@ if (reachable) await migrate();
 
 const app = createApp();
 const PLATFORM = 'sleekdrops';
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': PLATFORM };
 const created: string[] = [];
 
 after(async () => {

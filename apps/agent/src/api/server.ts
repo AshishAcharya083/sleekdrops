@@ -8,7 +8,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { config } from '../config.js';
-import { CATEGORIES, POST_TYPES, slugify, todayInSydney } from '../content/contract.js';
+import { slugify, todayInSydney } from '../content/contract.js';
 import { offerCoverage, validateOfferInput } from '../content/offers.js';
 import { deleteOffer, offerRevisionsForArticle, offersForArticle, saveOffer } from '../db/offers.js';
 import { getSetting, q, setSetting } from '../db/pool.js';
@@ -19,7 +19,6 @@ import {
   connectChannel,
   disconnectChannel,
   isQueueFilter,
-  isUuid,
   overridePlacement,
   queueItemDetail,
   releaseHeldItems,
@@ -27,7 +26,7 @@ import {
   retryFailedItems,
   type RecoveryOutcome,
 } from '../distribution/admin.js';
-import { getConnection, listConnections } from '../distribution/channels.js';
+import { listConnections } from '../distribution/channels.js';
 import { placementPerformance } from '../distribution/insights.js';
 import { getProvider, registeredProviders } from '../distribution/providers.js';
 import {
@@ -42,6 +41,16 @@ import { isLinkPlacement } from '../distribution/types.js';
 import { createLogger, runWithTrace } from '../lib/log.js';
 import { clearLlmSettingsCache, engineStatus } from '../llm/index.js';
 import { MAX_STAGE_TIMEOUT_SECONDS, stageBudgetSeconds } from '../pipeline/budgets.js';
+import {
+  currentProfileVersion,
+  listProfileVersions,
+  parseProfileUpdate,
+  saveProfileVersion,
+  StaleProfileError,
+} from '../platform/profileStore.js';
+import { listPlatforms } from '../platform/registry.js';
+import { blockedTopicReason } from '../platform/topicRules.js';
+import type { Platform } from '../platform/types.js';
 import {
   cancelArticle,
   groupAttempts,
@@ -80,8 +89,14 @@ import {
   storeHeroImage,
   type HeroImageUpload,
 } from '../tools/heroImages.js';
-import { TRACE_HEADER, traceMiddleware, type TraceEnv } from './trace.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
+import {
+  PLATFORM_HEADER,
+  platformMiddleware,
+  type ApiEnv,
+  type PlatformLoader,
+} from './platform.js';
+import { articleBelongs, channelBelongs, platformQueueItemIds, queueItemBelongs, topicBelongs } from './scope.js';
+import { TRACE_HEADER, traceMiddleware } from './trace.js';
 import { d1TargetFor, publishTargetFor } from '../platform/publishTarget.js';
 
 const log = createLogger('api');
@@ -175,26 +190,60 @@ function settingsPayload(rows: Array<{ key: string; value: unknown }>): Record<s
  * than listed so a second network's setting is writable the moment its adapter
  * is registered, without this file learning its name.
  */
-async function placementSettingKeys(): Promise<Set<string>> {
+async function placementSettingKeys(platformId: string): Promise<Set<string>> {
   const providers = new Set(registeredProviders());
-  for (const connection of await listConnections(SLEEKDROPS_PLATFORM_ID)) providers.add(connection.provider);
+  for (const connection of await listConnections(platformId)) providers.add(connection.provider);
   return new Set([DEFAULT_PLACEMENT_SETTING, ...[...providers].map(placementSettingKey)]);
 }
 
+/** A platform as the panel's switcher lists it. */
+function platformSummary(platform: Platform, distributionEnabled: Set<string>) {
+  return {
+    id: platform.id,
+    name: platform.name,
+    monetisation: platform.monetisation,
+    // A platform with no setting row has never had distribution switched on.
+    distribution_enabled: distributionEnabled.has(platform.id),
+    categories: [...platform.categories],
+    post_types: [...platform.postTypes],
+    editions: platform.editions.map((edition) => ({
+      id: edition.id,
+      name: edition.name,
+      time_zone: edition.timeZone,
+      locale: edition.locale,
+      currency: edition.currency,
+    })),
+  };
+}
+
+/** The settings rows of one platform, as /api/settings reads them. */
+function platformSettings(platformId: string): Promise<Array<{ key: string; value: unknown }>> {
+  return q<{ key: string; value: unknown }>('SELECT key, value FROM settings WHERE platform_id = $1', [
+    platformId,
+  ]);
+}
+
 /** Map an operator-correctable refusal to its status; anything else is a 500. */
-function channelAdminFailure(c: Context<TraceEnv>, err: unknown): Response {
+function channelAdminFailure(c: Context<ApiEnv>, err: unknown): Response {
   if (err instanceof ChannelAdminError) return c.json({ error: err.message }, err.status);
   throw err;
 }
 
-/** A manual retry/release answered for one item: 404, 409 or the refreshed row. */
+/**
+ * A manual retry/release answered for one item: 404, 409 or the refreshed row.
+ * The item is checked against the platform before anything is requeued.
+ */
 async function singleRecovery(
-  c: Context<TraceEnv>,
+  c: Context<ApiEnv>,
   id: string,
-  outcome: RecoveryOutcome,
+  recover: (ids: string[]) => Promise<RecoveryOutcome>,
   wanted: 'failed' | 'held',
 ): Promise<Response> {
-  const item = isUuid(id) ? await getItem(id) : null;
+  if (!(await queueItemBelongs(c.get('platform').id, id))) {
+    return c.json({ error: 'no queue item with that id' }, 404);
+  }
+  const outcome = await recover([id]);
+  const item = await getItem(id);
   if (!item) return c.json({ error: 'no queue item with that id' }, 404);
   if (outcome.updated.length === 0) {
     return c.json(
@@ -218,6 +267,56 @@ interface ApprovedTopic {
   post_type: string;
   hero_image_url: string | null;
   hero_alt: string | null;
+  edition_id: string;
+  event_starts_at: Date | null;
+}
+
+const APPROVED_TOPIC_COLUMNS =
+  'id, title, category, post_type, hero_image_url, hero_alt, edition_id, event_starts_at';
+
+/**
+ * Queue the article an approved topic becomes, stamped with the profile
+ * version in force right now - what the piece is written under, so a later
+ * profile edit can always be told apart from what this article saw.
+ */
+async function createArticleFromTopic(
+  platformId: string,
+  topic: ApprovedTopic,
+): Promise<{ id: string; title: string; stage: string; status: string }> {
+  const [article] = await q<{ id: string; title: string; stage: string; status: string }>(
+    `INSERT INTO articles
+       (platform_id, edition_id, topic_id, title, category, post_type, hero_image_url, hero_alt,
+        event_starts_at, profile_version)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+             (SELECT profile_version FROM platforms WHERE id = $1))
+     RETURNING id, title, stage, status`,
+    [
+      platformId,
+      topic.edition_id,
+      topic.id,
+      topic.title,
+      topic.category,
+      topic.post_type,
+      topic.hero_image_url,
+      topic.hero_alt,
+      topic.event_starts_at,
+    ],
+  );
+  return article;
+}
+
+/** ISO 8601 with an explicit offset: an event time without one is a guess. */
+const EVENT_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+function validateEventStartsAt(input: unknown): Validated<string | null> {
+  if (input === undefined || input === null || input === '') return { ok: true, value: null };
+  if (typeof input !== 'string' || !EVENT_TIME_RE.test(input) || Number.isNaN(Date.parse(input))) {
+    return {
+      ok: false,
+      error: 'event_starts_at must be an ISO 8601 date-time with an offset, e.g. 2026-10-03T19:30:00+10:00',
+    };
+  }
+  return { ok: true, value: input };
 }
 
 function validateReferences(input: unknown): Validated<ReferenceMaterial[]> {
@@ -269,7 +368,7 @@ type HeroImageParse =
  * format, magic bytes and size) plus an optional `alt` part. The file is
  * optional so the same route also carries an alt-text-only edit.
  */
-async function readHeroImageBody(c: Context<TraceEnv>): Promise<HeroImageParse> {
+async function readHeroImageBody(c: Context<ApiEnv>): Promise<HeroImageParse> {
   const limitMb = MAX_HERO_IMAGE_BYTES / 1024 / 1024;
   // Bound the read before it happens - parseBody() buffers the whole body.
   if (Number(c.req.header('Content-Length') ?? 0) > MAX_HERO_IMAGE_BYTES + MULTIPART_OVERHEAD) {
@@ -307,6 +406,7 @@ async function readHeroImageBody(c: Context<TraceEnv>): Promise<HeroImageParse> 
  * file to a social network for native upload.
  */
 async function syncArticleHero(
+  platformId: string,
   slug: string,
   heroImage: string | null,
   heroAlt: string | null,
@@ -325,8 +425,8 @@ async function syncArticleHero(
                                   ELSE (frontmatter - 'heroAlt') || $4::jsonb
                                 END,
             updated_at        = now()
-      WHERE platform_id = $5 AND slug = $1`,
-    [slug, heroImage, heroAlt, patch, SLEEKDROPS_PLATFORM_ID],
+      WHERE slug = $1 AND platform_id = $5`,
+    [slug, heroImage, heroAlt, patch, platformId],
   );
 }
 
@@ -335,12 +435,12 @@ async function syncArticleHero(
  * this runs, so a failed dispatch is reported rather than thrown - the operator
  * needs to know the change is saved but not yet live.
  */
-async function requestRebuild(): Promise<{
+async function requestRebuild(platformId: string): Promise<{
   body: { dispatched: boolean; dispatchError: string | null };
   logged: { dispatched: boolean };
 }> {
   try {
-    await dispatchContentUpdated(await publishTargetFor(SLEEKDROPS_PLATFORM_ID));
+    await dispatchContentUpdated(await publishTargetFor(platformId));
     return { body: { dispatched: true, dispatchError: null }, logged: { dispatched: true } };
   } catch (err) {
     return {
@@ -380,8 +480,13 @@ function budgets(): { default_seconds: number; per_stage: Record<Stage, number> 
 
 const ADMIN_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../../admin/dist');
 
-export function createApp(): Hono<TraceEnv> {
-  const app = new Hono<TraceEnv>();
+export interface AppOptions {
+  /** How an X-Platform id is resolved - the registry unless a test supplies one. */
+  loadPlatform?: PlatformLoader;
+}
+
+export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
+  const app = new Hono<ApiEnv>();
   // Chrome's Local Network Access: the Pages-hosted admin (https) calling a
   // localhost agent API needs this header on the CORS preflight response.
   app.use('*', async (c, next) => {
@@ -390,14 +495,15 @@ export function createApp(): Hono<TraceEnv> {
       c.res.headers.set('Access-Control-Allow-Private-Network', 'true');
     }
   });
-  // Explicit CORS: X-Trace-Id has to survive the preflight from the Cloudflare
-  // Pages origin, and the browser has to be allowed to read the echoed id back.
+  // Explicit CORS: X-Trace-Id and X-Platform have to survive the preflight from
+  // the Cloudflare Pages origin, and the browser has to be allowed to read the
+  // echoed trace id back.
   app.use(
     '*',
     cors({
       origin: '*',
       allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization', TRACE_HEADER],
+      allowHeaders: ['Content-Type', 'Authorization', TRACE_HEADER, PLATFORM_HEADER],
       exposeHeaders: [TRACE_HEADER],
       maxAge: 86_400,
     }),
@@ -433,6 +539,9 @@ export function createApp(): Hono<TraceEnv> {
     return next();
   });
 
+  // After auth, so a bad token is still a 401 whatever platform it names.
+  app.use('/api/*', platformMiddleware(options.loadPlatform));
+
   app.get('/api/health', async (c) => {
     try {
       await q('SELECT 1');
@@ -448,6 +557,7 @@ export function createApp(): Hono<TraceEnv> {
   // failure is logged under the request's trace id with the section that
   // produced it, so a recurring overview error can be attributed to a cause.
   app.get('/api/overview', async (c) => {
+    const platformId = c.get('platform').id;
     const failedSections: string[] = [];
     const section = async <T>(name: string, load: () => Promise<T>, fallback: T): Promise<T> => {
       try {
@@ -466,14 +576,19 @@ export function createApp(): Hono<TraceEnv> {
     const [topics, articles, runningSessions, usage30d, recentSessions, settings] = await Promise.all([
       section(
         'topics',
-        () => q<{ status: string; n: string }>('SELECT status, count(*) n FROM topics GROUP BY status'),
+        () =>
+          q<{ status: string; n: string }>(
+            'SELECT status, count(*) n FROM topics WHERE platform_id = $1 GROUP BY status',
+            [platformId],
+          ),
         [] as Array<{ status: string; n: string }>,
       ),
       section(
         'articles',
         () =>
           q<{ stage: string; status: string; n: string }>(
-            'SELECT stage, status, count(*) n FROM articles GROUP BY stage, status',
+            'SELECT stage, status, count(*) n FROM articles WHERE platform_id = $1 GROUP BY stage, status',
+            [platformId],
           ),
         [] as Array<{ stage: string; status: string; n: string }>,
       ),
@@ -481,7 +596,8 @@ export function createApp(): Hono<TraceEnv> {
         'runningSessions',
         async () => {
           const rows = await q<{ n: string }>(
-            "SELECT count(*) n FROM agent_sessions WHERE status = 'running'",
+            "SELECT count(*) n FROM agent_sessions WHERE platform_id = $1 AND status = 'running'",
+            [platformId],
           );
           return Number(rows[0]?.n ?? 0);
         },
@@ -493,7 +609,9 @@ export function createApp(): Hono<TraceEnv> {
           const rows = await q<{ cost: string; tin: string; tout: string; runs: string }>(
             `SELECT COALESCE(sum(cost_usd), 0) cost, COALESCE(sum(tokens_input), 0) tin,
                     COALESCE(sum(tokens_output), 0) tout, count(*) runs
-             FROM agent_sessions WHERE started_at > now() - interval '30 days'`,
+             FROM agent_sessions
+             WHERE platform_id = $1 AND started_at > now() - interval '30 days'`,
+            [platformId],
           );
           return {
             costUsd: Number(rows[0]?.cost ?? 0),
@@ -512,7 +630,9 @@ export function createApp(): Hono<TraceEnv> {
                     s.tokens_input, s.tokens_output, s.started_at, s.ended_at,
                     s.article_id, s.scout_run_id, s.attempt, s.kind, a.title article_title
              FROM agent_sessions s LEFT JOIN articles a ON a.id = s.article_id
+             WHERE s.platform_id = $1
              ORDER BY s.started_at DESC LIMIT 12`,
+            [platformId],
           ),
         [] as unknown[],
       ),
@@ -520,8 +640,8 @@ export function createApp(): Hono<TraceEnv> {
         'settings',
         async () => {
           const [publishMode, workerEnabled] = await Promise.all([
-            getSetting(SLEEKDROPS_PLATFORM_ID, 'publish_mode', 'approval'),
-            getSetting(SLEEKDROPS_PLATFORM_ID, 'worker_enabled', true),
+            getSetting(platformId, 'publish_mode', 'approval'),
+            getSetting(platformId, 'worker_enabled', true),
           ]);
           return { publishMode, workerEnabled };
         },
@@ -545,10 +665,16 @@ export function createApp(): Hono<TraceEnv> {
 
   // ── Topics ────────────────────────────────────────────────────────────────
   app.get('/api/topics', async (c) => {
+    const platformId = c.get('platform').id;
     const status = c.req.query('status');
     const rows = status
-      ? await q('SELECT * FROM topics WHERE status = $1 ORDER BY created_at DESC LIMIT 200', [status])
-      : await q('SELECT * FROM topics ORDER BY created_at DESC LIMIT 200');
+      ? await q(
+          'SELECT * FROM topics WHERE platform_id = $1 AND status = $2 ORDER BY created_at DESC LIMIT 200',
+          [platformId, status],
+        )
+      : await q('SELECT * FROM topics WHERE platform_id = $1 ORDER BY created_at DESC LIMIT 200', [
+          platformId,
+        ]);
     return c.json({ topics: rows });
   });
 
@@ -556,29 +682,17 @@ export function createApp(): Hono<TraceEnv> {
   app.post('/api/topics/approve', async (c) => {
     const { ids } = (await c.req.json()) as { ids: string[] };
     if (!Array.isArray(ids) || ids.length === 0) return c.json({ error: 'ids required' }, 400);
+    const platformId = c.get('platform').id;
     const created: unknown[] = [];
     for (const id of ids) {
       const [topic] = await q<ApprovedTopic>(
         `UPDATE topics SET status = 'approved', updated_at = now()
-         WHERE id = $1 AND status = 'suggested'
-         RETURNING id, title, category, post_type, hero_image_url, hero_alt`,
-        [id],
+         WHERE id = $1 AND platform_id = $2 AND status = 'suggested'
+         RETURNING ${APPROVED_TOPIC_COLUMNS}`,
+        [id, platformId],
       );
       if (!topic) continue;
-      const [article] = await q<{ id: string }>(
-        `INSERT INTO articles
-           (platform_id, edition_id, topic_id, title, category, post_type, hero_image_url, hero_alt)
-         VALUES ($7, 'au', $1, $2, $3, $4, $5, $6) RETURNING id, title, stage, status`,
-        [
-          topic.id,
-          topic.title,
-          topic.category,
-          topic.post_type,
-          topic.hero_image_url,
-          topic.hero_alt,
-          SLEEKDROPS_PLATFORM_ID,
-        ],
-      );
+      const article = await createArticleFromTopic(platformId, topic);
       // Pipeline work is picked up later by the worker's database poll, so the
       // entity ids logged here are what join those [pipeline] lines back to
       // this request's trace id.
@@ -593,6 +707,7 @@ export function createApp(): Hono<TraceEnv> {
   // approval is a separate, explicit step). Passing an `id` edits an existing
   // draft in place instead of creating a new one.
   app.post('/api/topics/manual', async (c) => {
+    const platform = c.get('platform');
     const body = (await c.req.json().catch(() => null)) as {
       id?: string;
       title?: string;
@@ -601,6 +716,8 @@ export function createApp(): Hono<TraceEnv> {
       post_type?: string;
       hero_alt?: string;
       references?: unknown;
+      edition_id?: unknown;
+      event_starts_at?: unknown;
     } | null;
     if (!body) return c.json({ error: 'invalid JSON body' }, 400);
 
@@ -609,19 +726,34 @@ export function createApp(): Hono<TraceEnv> {
     const normTitle = slugify(title);
     if (!normTitle) return c.json({ error: 'title must contain letters or numbers' }, 400);
 
-    const category = body.category?.trim() || CATEGORIES[0];
-    if (!(CATEGORIES as readonly string[]).includes(category)) {
-      return c.json({ error: `category must be one of: ${CATEGORIES.join(', ')}` }, 400);
+    const editionId = typeof body.edition_id === 'string' ? body.edition_id.trim() : '';
+    if (!platform.editions.some((edition) => edition.id === editionId)) {
+      return c.json(
+        { error: `edition_id must be one of: ${platform.editions.map((edition) => edition.id).join(', ')}` },
+        400,
+      );
     }
-    const postType = body.post_type?.trim() || 'article';
-    if (!(POST_TYPES as readonly string[]).includes(postType)) {
-      return c.json({ error: `post_type must be one of: ${POST_TYPES.join(', ')}` }, 400);
+    const eventStartsAt = validateEventStartsAt(body.event_starts_at);
+    if (!eventStartsAt.ok) return c.json({ error: eventStartsAt.error }, 400);
+
+    const category = body.category?.trim() || platform.categories[0];
+    if (!platform.categories.includes(category)) {
+      return c.json({ error: `category must be one of: ${platform.categories.join(', ')}` }, 400);
     }
+    const postType = body.post_type?.trim() || platform.postTypes[0];
+    if (!platform.postTypes.includes(postType)) {
+      return c.json({ error: `post_type must be one of: ${platform.postTypes.join(', ')}` }, 400);
+    }
+
+    const instructions = body.instructions?.trim() || null;
+    // The brief is checked as well as the title: "the Cup on Tuesday" says
+    // nothing about horses until the instructions name the race.
+    const blocked = blockedTopicReason(platform, [title, instructions ?? ''].join('\n'));
+    if (blocked) return c.json({ error: blocked }, 400);
 
     const refs = validateReferences(body.references);
     if (!refs.ok) return c.json({ error: refs.error }, 400);
 
-    const instructions = body.instructions?.trim() || null;
     const notes = JSON.stringify(refs.value);
     // The hero image itself is uploaded separately (it needs a row to hang
     // off); its alt text rides along with the rest of the brief so editing it
@@ -633,10 +765,23 @@ export function createApp(): Hono<TraceEnv> {
         const [updated] = await q(
           `UPDATE topics
              SET title = $2, norm_title = $3, category = $4, post_type = $5,
-                 instructions = $6, research_notes = $7::jsonb, hero_alt = $8, updated_at = now()
-           WHERE id = $1 AND source = 'manual' AND status = 'draft'
+                 instructions = $6, research_notes = $7::jsonb, hero_alt = $8,
+                 edition_id = $10, event_starts_at = $11, updated_at = now()
+           WHERE id = $1 AND platform_id = $9 AND source = 'manual' AND status = 'draft'
            RETURNING *`,
-          [body.id, title, normTitle, category, postType, instructions, notes, heroAlt],
+          [
+            body.id,
+            title,
+            normTitle,
+            category,
+            postType,
+            instructions,
+            notes,
+            heroAlt,
+            platform.id,
+            editionId,
+            eventStartsAt.value,
+          ],
         );
         if (!updated) return c.json({ error: 'draft topic not found' }, 404);
         return c.json({ topic: updated });
@@ -644,10 +789,12 @@ export function createApp(): Hono<TraceEnv> {
       const [topic] = await q(
         `INSERT INTO topics
            (platform_id, edition_id, title, norm_title, category, post_type, source, status,
-            instructions, research_notes, hero_alt)
-         VALUES ($8, $9, $1, $2, $3, $4, 'manual', 'draft', $5, $6::jsonb, $7)
+            instructions, research_notes, hero_alt, event_starts_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'manual', 'draft', $7, $8::jsonb, $9, $10)
          RETURNING *`,
         [
+          platform.id,
+          editionId,
           title,
           normTitle,
           category,
@@ -655,8 +802,7 @@ export function createApp(): Hono<TraceEnv> {
           instructions,
           notes,
           heroAlt,
-          SLEEKDROPS_PLATFORM_ID,
-          'au',
+          eventStartsAt.value,
         ],
       );
       return c.json({ topic }, 201);
@@ -671,27 +817,17 @@ export function createApp(): Hono<TraceEnv> {
   // Approve a single draft manual topic → create its article at stage=research.
   // The costly generation run only ever fires here, never on topic capture.
   app.post('/api/topics/:id/approve', async (c) => {
+    const platformId = c.get('platform').id;
+    const id = c.req.param('id');
+    if (!(await topicBelongs(platformId, id))) return c.json({ error: 'topic not found' }, 404);
     const [topic] = await q<ApprovedTopic>(
       `UPDATE topics SET status = 'approved', updated_at = now()
-       WHERE id = $1 AND status = 'draft'
-       RETURNING id, title, category, post_type, hero_image_url, hero_alt`,
-      [c.req.param('id')],
+       WHERE id = $1 AND platform_id = $2 AND status = 'draft'
+       RETURNING ${APPROVED_TOPIC_COLUMNS}`,
+      [id, platformId],
     );
     if (!topic) return c.json({ error: 'draft topic not found or already approved' }, 409);
-    const [article] = await q<{ id: string }>(
-      `INSERT INTO articles
-         (platform_id, edition_id, topic_id, title, category, post_type, hero_image_url, hero_alt)
-       VALUES ($7, 'au', $1, $2, $3, $4, $5, $6) RETURNING id, title, stage, status`,
-      [
-        topic.id,
-        topic.title,
-        topic.category,
-        topic.post_type,
-        topic.hero_image_url,
-        topic.hero_alt,
-        SLEEKDROPS_PLATFORM_ID,
-      ],
-    );
+    const article = await createArticleFromTopic(platformId, topic);
     log.info('article queued from manual topic approval', {
       topic_id: topic.id,
       article_id: article.id,
@@ -709,9 +845,10 @@ export function createApp(): Hono<TraceEnv> {
     if (!gcsConfigured()) return c.json({ error: NO_IMAGE_STORAGE }, 503);
 
     const id = c.req.param('id');
+    const platformId = c.get('platform').id;
     const [topic] = await q<{ id: string }>(
-      "SELECT id FROM topics WHERE id = $1 AND source = 'manual' AND status = 'draft'",
-      [id],
+      "SELECT id FROM topics WHERE id = $1 AND platform_id = $2 AND source = 'manual' AND status = 'draft'",
+      [id, platformId],
     );
     if (!topic) return c.json({ error: 'draft topic not found' }, 404);
 
@@ -725,11 +862,13 @@ export function createApp(): Hono<TraceEnv> {
   });
 
   app.delete('/api/topics/:id/hero-image', async (c) => {
+    const id = c.req.param('id');
+    const platformId = c.get('platform').id;
     const [updated] = await q<{ id: string }>(
       `UPDATE topics SET hero_image_url = NULL, hero_alt = NULL, updated_at = now()
-       WHERE id = $1 AND source = 'manual' AND status = 'draft'
+       WHERE id = $1 AND platform_id = $2 AND source = 'manual' AND status = 'draft'
        RETURNING id`,
-      [c.req.param('id')],
+      [id, platformId],
     );
     if (!updated) return c.json({ error: 'draft topic not found' }, 404);
     return c.json({ ok: true });
@@ -739,25 +878,39 @@ export function createApp(): Hono<TraceEnv> {
     const { ids } = (await c.req.json()) as { ids: string[] };
     if (!Array.isArray(ids) || ids.length === 0) return c.json({ error: 'ids required' }, 400);
     await q(
-      "UPDATE topics SET status = 'rejected', updated_at = now() WHERE id = ANY($1) AND status = 'suggested'",
-      [ids],
+      `UPDATE topics SET status = 'rejected', updated_at = now()
+       WHERE id = ANY($1) AND platform_id = $2 AND status = 'suggested'`,
+      [ids, c.get('platform').id],
     );
     return c.json({ ok: true });
   });
 
   // ── Topic scout ───────────────────────────────────────────────────────────
+  // One search per edition, as the scheduler queues them. `queued` stays the
+  // first run's id so callers of the single-run shape keep working.
   app.post('/api/scout', async (c) => {
-    const id = await enqueueScoutRun(SLEEKDROPS_PLATFORM_ID, 'au');
-    log.info('scout run queued', { scout_run_id: id });
-    return c.json({ queued: id }, 202);
+    const platform = c.get('platform');
+    if (platform.editions.length === 0) {
+      return c.json({ error: `platform ${platform.id} has no editions to scout` }, 400);
+    }
+    const runs: { id: string; edition_id: string }[] = [];
+    for (const edition of platform.editions) {
+      const id = await enqueueScoutRun(platform.id, edition.id);
+      log.info('scout run queued', { scout_run_id: id, edition_id: edition.id });
+      runs.push({ id, edition_id: edition.id });
+    }
+    return c.json({ queued: runs[0].id, runs }, 202);
   });
 
   app.get('/api/scout/queue', async (c) => {
-    return c.json(await scoutQueueStatus(SLEEKDROPS_PLATFORM_ID));
+    return c.json(await scoutQueueStatus(c.get('platform').id));
   });
 
   app.get('/api/scout-runs', async (c) => {
-    const rows = await q('SELECT * FROM scout_runs ORDER BY started_at DESC LIMIT 20');
+    const rows = await q(
+      'SELECT * FROM scout_runs WHERE platform_id = $1 ORDER BY started_at DESC LIMIT 20',
+      [c.get('platform').id],
+    );
     return c.json({ runs: rows });
   });
 
@@ -775,16 +928,19 @@ export function createApp(): Hono<TraceEnv> {
               a.published_at, a.created_at, a.updated_at,
               a.hero_image_url, (a.seo_review ->> 'score') seo_score,
               a.attempt, a.stale_from_stage, a.claimed_at, a.heartbeat_at, a.lease_expires_at,
+              a.edition_id, a.event_starts_at, a.odds_as_at,
               ${reviewStaleSql('a')} AS review_stale
-       FROM articles a ORDER BY a.updated_at DESC LIMIT 200`,
+       FROM articles a WHERE a.platform_id = $1 ORDER BY a.updated_at DESC LIMIT 200`,
+      [c.get('platform').id],
     );
     return c.json({ articles: rows, stageBudgets: stageBudgets(), budgets: budgets() });
   });
 
   app.get('/api/articles/:id', async (c) => {
     const [article] = await q<ArticleRow & { review_stale: boolean }>(
-      `SELECT a.*, ${reviewStaleSql('a')} AS review_stale FROM articles a WHERE a.id = $1`,
-      [c.req.param('id')],
+      `SELECT a.*, ${reviewStaleSql('a')} AS review_stale FROM articles a
+        WHERE a.id = $1 AND a.platform_id = $2`,
+      [c.req.param('id'), c.get('platform').id],
     );
     if (!article) return c.json({ error: 'not found' }, 404);
     const sessions = await q<SessionAttemptRow>(
@@ -814,6 +970,7 @@ export function createApp(): Hono<TraceEnv> {
   // the run that stopped is released, and the re-run is its own attempt.
   app.post('/api/articles/:id/retry', async (c) => {
     const id = c.req.param('id');
+    if (!(await articleBelongs(c.get('platform').id, id))) return c.json({ error: 'not found' }, 404);
     const result = await requeueInPlace(id);
     if (!result.ok) return c.json({ error: result.error }, result.status);
     log.info('article re-queued for retry', { article_id: id, attempt: result.article.attempt });
@@ -830,6 +987,7 @@ export function createApp(): Hono<TraceEnv> {
     if (!parsed.ok) return c.json({ error: parsed.error }, 400);
 
     const id = c.req.param('id');
+    if (!(await articleBelongs(c.get('platform').id, id))) return c.json({ error: 'not found' }, 404);
     const result = await retryFromStage(id, parsed.stage);
     if (!result.ok) return c.json({ error: result.error }, result.status);
     log.info('article retried from a stage', {
@@ -849,7 +1007,10 @@ export function createApp(): Hono<TraceEnv> {
     if (!parsed.ok) return c.json({ error: parsed.error }, 400);
 
     const id = c.req.param('id');
-    const [article] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [id]);
+    const [article] = await q<ArticleRow>(
+      'SELECT * FROM articles WHERE id = $1 AND platform_id = $2',
+      [id, c.get('platform').id],
+    );
     if (!article) return c.json({ error: 'not found' }, 404);
     if (article.status === 'running') {
       return c.json({ error: 'the article is mid-stage - try again when it finishes' }, 409);
@@ -877,6 +1038,7 @@ export function createApp(): Hono<TraceEnv> {
   // even the stored research has to be paid for again.
   app.post('/api/articles/:id/rerun-all', async (c) => {
     const id = c.req.param('id');
+    if (!(await articleBelongs(c.get('platform').id, id))) return c.json({ error: 'not found' }, 404);
     const result = await rerunAll(id);
     if (!result.ok) return c.json({ error: result.error }, result.status);
     log.info('article re-queued from research', { article_id: id, attempt: result.article.attempt });
@@ -885,6 +1047,7 @@ export function createApp(): Hono<TraceEnv> {
 
   app.post('/api/articles/:id/approve-publish', async (c) => {
     const id = c.req.param('id');
+    if (!(await articleBelongs(c.get('platform').id, id))) return c.json({ error: 'not found' }, 404);
     // The staleness guard is part of the same statement: a draft regenerated
     // after the review that approved it must not become a published,
     // review-branded piece, and the panel's disabled button is only the first
@@ -913,6 +1076,7 @@ export function createApp(): Hono<TraceEnv> {
   // instead of the row staying wedged in 'running' with no operator lever.
   app.post('/api/articles/:id/cancel', async (c) => {
     const id = c.req.param('id');
+    if (!(await articleBelongs(c.get('platform').id, id))) return c.json({ error: 'not found' }, 404);
     const result = await cancelArticle(id);
     if (!result.ok) return c.json({ error: result.error }, result.status);
     log.info('article cancelled', { article_id: id, pending: result.pending });
@@ -925,12 +1089,14 @@ export function createApp(): Hono<TraceEnv> {
   app.post('/api/articles/:id/feedback', async (c) => {
     const { feedback } = (await c.req.json()) as { feedback?: string };
     if (!feedback?.trim()) return c.json({ error: 'feedback required' }, 400);
+    const id = c.req.param('id');
+    if (!(await articleBelongs(c.get('platform').id, id))) return c.json({ error: 'not found' }, 404);
     const rows = await q(
       `UPDATE articles
        SET feedback = $2, stage = 'edit', status = 'queued', error = NULL, updated_at = now()
        WHERE id = $1 AND status <> 'running' AND draft_md IS NOT NULL
        RETURNING id`,
-      [c.req.param('id'), feedback.trim()],
+      [id, feedback.trim()],
     );
     if (rows.length === 0) {
       return c.json({ error: 'article has no draft yet or is currently running' }, 409);
@@ -956,8 +1122,8 @@ export function createApp(): Hono<TraceEnv> {
 
     const id = c.req.param('id');
     const [article] = await q<{ id: string; status: string; hero_image_url: string | null }>(
-      'SELECT id, status, hero_image_url FROM articles WHERE id = $1',
-      [id],
+      'SELECT id, status, hero_image_url FROM articles WHERE id = $1 AND platform_id = $2',
+      [id, c.get('platform').id],
     );
     if (!article) return c.json({ error: 'article not found' }, 404);
     if (article.status === 'running') {
@@ -1005,6 +1171,10 @@ export function createApp(): Hono<TraceEnv> {
   // Detach: the piece falls back to whatever the image agent finds on its next
   // pass, or to the generated cover fill.
   app.delete('/api/articles/:id/hero-image', async (c) => {
+    const id = c.req.param('id');
+    if (!(await articleBelongs(c.get('platform').id, id))) {
+      return c.json({ error: 'article not found' }, 404);
+    }
     const [updated] = await q<{ id: string }>(
       `UPDATE articles
           SET hero_image_url    = NULL,
@@ -1015,10 +1185,10 @@ export function createApp(): Hono<TraceEnv> {
               updated_at        = now()
         WHERE id = $1 AND status <> 'running'
         RETURNING id`,
-      [c.req.param('id')],
+      [id],
     );
     if (!updated) return c.json({ error: 'article not found, or mid-stage' }, 409);
-    log.info('hero image removed from article', { article_id: c.req.param('id') });
+    log.info('hero image removed from article', { article_id: id });
     return c.json({ ok: true });
   });
 
@@ -1028,6 +1198,7 @@ export function createApp(): Hono<TraceEnv> {
   // which pays for an editor pass).
   app.post('/api/articles/:id/republish', async (c) => {
     const id = c.req.param('id');
+    if (!(await articleBelongs(c.get('platform').id, id))) return c.json({ error: 'not found' }, 404);
     // The staleness guard rides in the statement the same way it does on the
     // approval path: this queues a publish, and a draft the reviewer has never
     // seen must not reach the live site through the cheap door either. The
@@ -1056,8 +1227,8 @@ export function createApp(): Hono<TraceEnv> {
   app.get('/api/articles/:id/offers', async (c) => {
     const [article] = await q<OfferArticle>(
       `SELECT id, title, slug, stage, status, draft_md, research, affiliate_links, frontmatter
-         FROM articles WHERE id = $1`,
-      [c.req.param('id')],
+         FROM articles WHERE id = $1 AND platform_id = $2`,
+      [c.req.param('id'), c.get('platform').id],
     );
     if (!article) return c.json({ error: 'not found' }, 404);
     return c.json(await offerCoverageResponse(article));
@@ -1070,8 +1241,8 @@ export function createApp(): Hono<TraceEnv> {
     const id = c.req.param('id');
     const [article] = await q<OfferArticle>(
       `SELECT id, title, slug, stage, status, draft_md, research, affiliate_links, frontmatter
-         FROM articles WHERE id = $1`,
-      [id],
+         FROM articles WHERE id = $1 AND platform_id = $2`,
+      [id, c.get('platform').id],
     );
     if (!article) return c.json({ error: 'not found' }, 404);
 
@@ -1105,12 +1276,13 @@ export function createApp(): Hono<TraceEnv> {
   // authority, outlives the record.
   app.delete('/api/articles/:id/offers/:slug', async (c) => {
     const id = c.req.param('id');
+    if (!(await articleBelongs(c.get('platform').id, id))) return c.json({ error: 'not found' }, 404);
     const removed = await deleteOffer(id, c.req.param('slug'));
     if (!removed) return c.json({ error: 'no offer attached to that slug' }, 404);
     const [article] = await q<OfferArticle>(
       `SELECT id, title, slug, stage, status, draft_md, research, affiliate_links, frontmatter
-         FROM articles WHERE id = $1`,
-      [id],
+         FROM articles WHERE id = $1 AND platform_id = $2`,
+      [id, c.get('platform').id],
     );
     if (!article) return c.json({ error: 'not found' }, 404);
     log.info('offer detached from article', { article_id: id, go_slug: c.req.param('slug') });
@@ -1128,13 +1300,15 @@ export function createApp(): Hono<TraceEnv> {
   // card that has never been assembled will pick the offers up on its first
   // pass anyway. In approval mode the rebuilt card comes back to the gate.
   app.post('/api/articles/:id/reassemble', async (c) => {
+    const id = c.req.param('id');
+    if (!(await articleBelongs(c.get('platform').id, id))) return c.json({ error: 'not found' }, 404);
     const rows = await q<{ id: string }>(
       `UPDATE articles SET stage = 'assemble', status = 'queued', error = NULL, updated_at = now()
        WHERE id = $1 AND status <> 'running'
          AND stage IN ('assemble', 'image', 'publish', 'done')
          AND draft_md IS NOT NULL AND outline IS NOT NULL AND frontmatter IS NOT NULL
        RETURNING id`,
-      [c.req.param('id')],
+      [id],
     );
     if (rows.length === 0) {
       return c.json(
@@ -1147,9 +1321,22 @@ export function createApp(): Hono<TraceEnv> {
   });
 
   // ── Published site content (Cloudflare D1 — what the website builds from) ─
+  // Each live post carries the edition and event time of the pipeline article
+  // that wrote it, when there is one - most of the site predates the pipeline.
   app.get('/api/published', async (c) => {
-    const posts = await listD1Posts(await d1TargetFor(SLEEKDROPS_PLATFORM_ID));
-    return c.json({ posts });
+    const posts = await listD1Posts(await d1TargetFor(c.get('platform').id));
+    const articles = await q<{ slug: string; edition_id: string; event_starts_at: Date | null }>(
+      'SELECT slug, edition_id, event_starts_at FROM articles WHERE platform_id = $1 AND slug = ANY($2)',
+      [c.get('platform').id, posts.map((post) => post.slug)],
+    );
+    const bySlug = new Map(articles.map((article) => [article.slug, article]));
+    return c.json({
+      posts: posts.map((post) => ({
+        ...post,
+        edition_id: bySlug.get(post.slug)?.edition_id ?? null,
+        event_starts_at: bySlug.get(post.slug)?.event_starts_at ?? null,
+      })),
+    });
   });
 
   // Hero image on a post that is already live. The pipeline only knows about
@@ -1167,7 +1354,7 @@ export function createApp(): Hono<TraceEnv> {
     if (parsed.value.upload && !gcsConfigured()) return c.json({ error: NO_IMAGE_STORAGE }, 503);
 
     const slug = c.req.param('slug');
-    const current = await getD1PostHero(await d1TargetFor(SLEEKDROPS_PLATFORM_ID), slug);
+    const current = await getD1PostHero(await d1TargetFor(c.get('platform').id), slug);
     if (!current) return c.json({ error: 'no live post with that slug' }, 404);
 
     const heroImage = parsed.value.upload
@@ -1176,9 +1363,9 @@ export function createApp(): Hono<TraceEnv> {
     if (!heroImage) return c.json({ error: 'attach an image file first' }, 400);
     const heroAlt = parsed.value.alt;
 
-    await setD1PostHero(await d1TargetFor(SLEEKDROPS_PLATFORM_ID), slug, { heroImage, heroAlt });
-    await syncArticleHero(slug, heroImage, heroAlt);
-    const rebuild = await requestRebuild();
+    await setD1PostHero(await d1TargetFor(c.get('platform').id), slug, { heroImage, heroAlt });
+    await syncArticleHero(c.get('platform').id, slug, heroImage, heroAlt);
+    const rebuild = await requestRebuild(c.get('platform').id);
     log.info('hero image set on a live post', {
       slug,
       action: parsed.value.upload ? 'upload' : 'alt_only',
@@ -1189,17 +1376,17 @@ export function createApp(): Hono<TraceEnv> {
 
   app.delete('/api/published/:slug/hero-image', async (c) => {
     const slug = c.req.param('slug');
-    const removed = await setD1PostHero(await d1TargetFor(SLEEKDROPS_PLATFORM_ID), slug, { heroImage: null, heroAlt: null });
+    const removed = await setD1PostHero(await d1TargetFor(c.get('platform').id), slug, { heroImage: null, heroAlt: null });
     if (!removed) return c.json({ error: 'no live post with that slug' }, 404);
-    await syncArticleHero(slug, null, null);
-    const rebuild = await requestRebuild();
+    await syncArticleHero(c.get('platform').id, slug, null, null);
+    const rebuild = await requestRebuild(c.get('platform').id);
     log.info('hero image removed from a live post', { slug, ...rebuild.logged });
     return c.json({ ok: true, ...rebuild.body });
   });
 
   app.delete('/api/published/:slug', async (c) => {
     const slug = c.req.param('slug');
-    const result = await deleteD1Post(await d1TargetFor(SLEEKDROPS_PLATFORM_ID), slug);
+    const result = await deleteD1Post(await d1TargetFor(c.get('platform').id), slug);
     if (!result) return c.json({ error: 'not found' }, 404);
     // The publisher skips the site rebuild when what it is about to push
     // matches `published_digest`, the receipt of the last version pushed live.
@@ -1209,15 +1396,15 @@ export function createApp(): Hono<TraceEnv> {
     // dispatch, and leave the page missing from the live site. `pub_date`
     // stays - restoring a post is not re-publishing it on a new date.
     await q(
-      'UPDATE articles SET published_digest = NULL, updated_at = now() WHERE platform_id = $2 AND slug = $1',
-      [slug, SLEEKDROPS_PLATFORM_ID],
+      'UPDATE articles SET published_digest = NULL, updated_at = now() WHERE slug = $1 AND platform_id = $2',
+      [slug, c.get('platform').id],
     );
     // Rebuild so the site actually drops the page; deletion already succeeded,
     // so a dispatch failure is reported, not thrown.
     let dispatched = false;
     let dispatchError: string | null = null;
     try {
-      await dispatchContentUpdated(await publishTargetFor(SLEEKDROPS_PLATFORM_ID));
+      await dispatchContentUpdated(await publishTargetFor(c.get('platform').id));
       dispatched = true;
     } catch (err) {
       dispatchError = err instanceof Error ? err.message : String(err);
@@ -1232,12 +1419,13 @@ export function createApp(): Hono<TraceEnv> {
   // and what is the queue doing. No token value is reachable from here - a
   // connection reports the *name* of the secret it reads, never the secret.
   app.get('/api/distribution', async (c) => {
+    const platformId = c.get('platform').id;
     const limit = Number(c.req.query('limit'));
     const [channels, counts, items, placements] = await Promise.all([
-      channelViews(SLEEKDROPS_PLATFORM_ID),
-      queueCounts(SLEEKDROPS_PLATFORM_ID),
-      recentItems(SLEEKDROPS_PLATFORM_ID, Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50),
-      placementPerformance(SLEEKDROPS_PLATFORM_ID),
+      channelViews(platformId),
+      queueCounts(platformId),
+      recentItems(platformId, Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50),
+      placementPerformance(platformId),
     ]);
     return c.json({
       channels,
@@ -1259,7 +1447,7 @@ export function createApp(): Hono<TraceEnv> {
   // One channel's queue, filtered the way the panel's chips are.
   app.get('/api/distribution/channels/:id/queue', async (c) => {
     const id = c.req.param('id');
-    if (!isUuid(id) || !(await getConnection(id))) {
+    if (!(await channelBelongs(c.get('platform').id, id))) {
       return c.json({ error: 'no channel with that id' }, 404);
     }
     const status = c.req.query('status') ?? 'all';
@@ -1278,10 +1466,14 @@ export function createApp(): Hono<TraceEnv> {
   // Connect a channel from a pasted token (or a secret the deployment mounts).
   // The answer is the channel as the list renders it - presence of the
   // credential, never the credential.
+  //
+  // The channel belongs to the platform that connected it. An account another
+  // platform already posts through is refused, leaving that platform's row,
+  // credential and queue as they were.
   app.post('/api/distribution/channels', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     try {
-      return c.json({ channel: await connectChannel(SLEEKDROPS_PLATFORM_ID, body) }, 201);
+      return c.json({ channel: await connectChannel(c.get('platform').id, body) }, 201);
     } catch (err) {
       return channelAdminFailure(c, err);
     }
@@ -1289,7 +1481,9 @@ export function createApp(): Hono<TraceEnv> {
 
   app.put('/api/distribution/channels/:id/credential', async (c) => {
     const id = c.req.param('id');
-    if (!isUuid(id)) return c.json({ error: 'no channel with that id' }, 404);
+    if (!(await channelBelongs(c.get('platform').id, id))) {
+      return c.json({ error: 'no channel with that id' }, 404);
+    }
     const body = (await c.req.json().catch(() => ({}))) as { token?: unknown };
     try {
       return c.json({ channel: await replaceCredential(id, body.token) });
@@ -1300,7 +1494,9 @@ export function createApp(): Hono<TraceEnv> {
 
   app.delete('/api/distribution/channels/:id', async (c) => {
     const id = c.req.param('id');
-    if (!isUuid(id)) return c.json({ error: 'no channel with that id' }, 404);
+    if (!(await channelBelongs(c.get('platform').id, id))) {
+      return c.json({ error: 'no channel with that id' }, 404);
+    }
     try {
       return c.json({ ok: true, ...(await disconnectChannel(id)) });
     } catch (err) {
@@ -1310,19 +1506,21 @@ export function createApp(): Hono<TraceEnv> {
 
   app.get('/api/distribution/items/:id', async (c) => {
     const id = c.req.param('id');
-    const detail = isUuid(id) ? await queueItemDetail(id) : null;
+    const detail = (await queueItemBelongs(c.get('platform').id, id))
+      ? await queueItemDetail(id)
+      : null;
     if (!detail) return c.json({ error: 'no queue item with that id' }, 404);
     return c.json(detail);
   });
 
   app.post('/api/distribution/items/:id/retry', async (c) => {
     const id = c.req.param('id');
-    return singleRecovery(c, id, await retryFailedItems([id]), 'failed');
+    return singleRecovery(c, id, retryFailedItems, 'failed');
   });
 
   app.post('/api/distribution/items/:id/release', async (c) => {
     const id = c.req.param('id');
-    return singleRecovery(c, id, await releaseHeldItems([id]), 'held');
+    return singleRecovery(c, id, releaseHeldItems, 'held');
   });
 
   // The bulk bar: retry every failed item, or release every held one, among
@@ -1342,14 +1540,24 @@ export function createApp(): Hono<TraceEnv> {
       return c.json({ error: 'ids must be a list of 1-200 queue item ids' }, 400);
     }
     const ids = body.ids as string[];
-    const outcome =
-      body.action === 'retry' ? await retryFailedItems(ids) : await releaseHeldItems(ids);
-    return c.json({ ok: true, action: body.action, ...outcome });
+    // Another platform's item is skipped exactly like one in the wrong state.
+    const own = await platformQueueItemIds(c.get('platform').id, ids);
+    const recover = body.action === 'retry' ? retryFailedItems : releaseHeldItems;
+    const outcome = await recover(ids.filter((id) => own.has(id)));
+    const updated = new Set(outcome.updated);
+    return c.json({
+      ok: true,
+      action: body.action,
+      updated: outcome.updated,
+      skipped: ids.filter((id) => !updated.has(id)),
+    });
   });
 
   app.put('/api/distribution/items/:id/placement', async (c) => {
     const id = c.req.param('id');
-    if (!isUuid(id)) return c.json({ error: 'no queue item with that id' }, 404);
+    if (!(await queueItemBelongs(c.get('platform').id, id))) {
+      return c.json({ error: 'no queue item with that id' }, 404);
+    }
     const body = (await c.req.json().catch(() => ({}))) as { placement?: unknown };
     if (!isLinkPlacement(body.placement)) {
       return c.json({ error: 'placement must be first_comment | in_body' }, 400);
@@ -1367,30 +1575,36 @@ export function createApp(): Hono<TraceEnv> {
     const rows = await q(
       `SELECT s.*, a.title article_title, a.slug article_slug
        FROM agent_sessions s LEFT JOIN articles a ON a.id = s.article_id
+       WHERE s.platform_id = $2
        ORDER BY s.started_at DESC LIMIT $1`,
-      [limit],
+      [limit, c.get('platform').id],
     );
     return c.json({ sessions: rows });
   });
 
   app.get('/api/usage', async (c) => {
+    const scope = [c.get('platform').id];
     const [byAgent, byModel, daily] = await Promise.all([
       q(
         `SELECT agent, count(*) runs, COALESCE(sum(tokens_input), 0) tokens_input,
                 COALESCE(sum(tokens_output), 0) tokens_output, COALESCE(sum(cost_usd), 0) cost_usd
-         FROM agent_sessions GROUP BY agent ORDER BY cost_usd DESC`,
+         FROM agent_sessions WHERE platform_id = $1 GROUP BY agent ORDER BY cost_usd DESC`,
+        scope,
       ),
       q(
         `SELECT COALESCE(model, 'unknown') model, count(*) runs,
                 COALESCE(sum(tokens_input), 0) tokens_input,
                 COALESCE(sum(tokens_output), 0) tokens_output, COALESCE(sum(cost_usd), 0) cost_usd
-         FROM agent_sessions GROUP BY model ORDER BY cost_usd DESC`,
+         FROM agent_sessions WHERE platform_id = $1 GROUP BY model ORDER BY cost_usd DESC`,
+        scope,
       ),
       q(
         `SELECT date_trunc('day', started_at)::date AS day, count(*) runs,
                 COALESCE(sum(cost_usd), 0) cost_usd
-         FROM agent_sessions WHERE started_at > now() - interval '30 days'
+         FROM agent_sessions
+         WHERE platform_id = $1 AND started_at > now() - interval '30 days'
          GROUP BY day ORDER BY day DESC`,
+        scope,
       ),
     ]);
     return c.json({ byAgent, byModel, daily });
@@ -1402,18 +1616,15 @@ export function createApp(): Hono<TraceEnv> {
   // warn that the selected engine cannot run — the failure that used to show
   // up only as an unexplained gemini-2.5-flash in the Sessions table.
   app.get('/api/settings', async (c) => {
-    const [rows, engines] = await Promise.all([
-      q<{ key: string; value: unknown }>('SELECT key, value FROM settings WHERE platform_id = $1', [
-        SLEEKDROPS_PLATFORM_ID,
-      ]),
-      engineStatus(SLEEKDROPS_PLATFORM_ID),
-    ]);
+    const platformId = c.get('platform').id;
+    const [rows, engines] = await Promise.all([platformSettings(platformId), engineStatus(platformId)]);
     return c.json({ ...settingsPayload(rows), engines });
   });
 
   app.put('/api/settings', async (c) => {
+    const platformId = c.get('platform').id;
     const body = (await c.req.json()) as Record<string, unknown>;
-    const placementKeys = await placementSettingKeys();
+    const placementKeys = await placementSettingKeys(platformId);
     // Checked before anything is written, so a bad placement cannot land half
     // a save.
     for (const key of placementKeys) {
@@ -1436,18 +1647,62 @@ export function createApp(): Hono<TraceEnv> {
       if (key === 'publish_mode' && !['approval', 'auto', 'draft'].includes(String(body[key]))) {
         return c.json({ error: 'publish_mode must be approval | auto | draft' }, 400);
       }
-      await setSetting(SLEEKDROPS_PLATFORM_ID, key, body[key]);
+      await setSetting(platformId, key, body[key]);
     }
     clearLlmSettingsCache();
     // Same shape as the GET: saving a token must refresh the readiness the
     // panel just warned about, without a reload.
-    const [rows, engines] = await Promise.all([
-      q<{ key: string; value: unknown }>('SELECT key, value FROM settings WHERE platform_id = $1', [
-        SLEEKDROPS_PLATFORM_ID,
-      ]),
-      engineStatus(SLEEKDROPS_PLATFORM_ID),
-    ]);
+    const [rows, engines] = await Promise.all([platformSettings(platformId), engineStatus(platformId)]);
     return c.json({ ...settingsPayload(rows), engines });
+  });
+
+  // ── Platforms and their profiles ─────────────────────────────────────────
+  // The switcher's list. Exempt from X-Platform: it is how the panel learns
+  // which ids it may send.
+  app.get('/api/platforms', async (c) => {
+    const [platforms, distribution] = await Promise.all([
+      listPlatforms(),
+      q<{ platform_id: string; value: unknown }>(
+        "SELECT platform_id, value FROM settings WHERE key = 'distribution_enabled'",
+      ),
+    ]);
+    const distributionEnabled = new Set(
+      distribution.filter((row) => row.value === true).map((row) => row.platform_id),
+    );
+    return c.json({
+      platforms: platforms.map((platform) => platformSummary(platform, distributionEnabled)),
+    });
+  });
+
+  app.get('/api/platform/profile', async (c) => {
+    const platformId = c.get('platform').id;
+    const current = await currentProfileVersion(platformId);
+    if (!current) return c.json({ error: `no profile version is recorded for ${platformId}` }, 404);
+    return c.json({ platform_id: platformId, ...current });
+  });
+
+  // Every save is a new version with its author and time; a save written
+  // against a version someone else has since replaced is refused, not merged.
+  app.put('/api/platform/profile', async (c) => {
+    const platform = c.get('platform');
+    const body = await c.req.json().catch(() => null);
+    const parsed = parseProfileUpdate(body, platform);
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    try {
+      const saved = await saveProfileVersion(platform.id, parsed.value);
+      log.info('platform profile saved', { platform_id: platform.id, version: saved.version });
+      return c.json({ platform_id: platform.id, ...saved });
+    } catch (err) {
+      if (err instanceof StaleProfileError) {
+        return c.json({ error: err.message, current_version: err.currentVersion }, 409);
+      }
+      throw err;
+    }
+  });
+
+  app.get('/api/platform/profile/versions', async (c) => {
+    const versions = await listProfileVersions(c.get('platform').id);
+    return c.json({ versions });
   });
 
   // ── Admin SPA (built apps/admin) ─────────────────────────────────────────

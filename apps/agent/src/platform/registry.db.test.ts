@@ -456,11 +456,16 @@ test('a loaded platform cannot be mutated under other callers', { skip }, async 
 
 test('the admin API tags manual topics and the articles approvals create with SleekDrops', { skip }, async () => {
   const app = createApp();
+  const headers = { ...AUTH, 'X-Platform': 'sleekdrops' };
   const created = await app.fetch(
     new Request('http://localhost/api/topics/manual', {
       method: 'POST',
-      headers: AUTH,
-      body: JSON.stringify({ title: `Quietest dishwashers ${randomUUID().slice(0, 8)}`, category: 'Home' }),
+      headers,
+      body: JSON.stringify({
+        title: `Quietest dishwashers ${randomUUID().slice(0, 8)}`,
+        category: 'Home',
+        edition_id: 'au',
+      }),
     }),
   );
   assert.equal(created.status, 201);
@@ -469,7 +474,7 @@ test('the admin API tags manual topics and the articles approvals create with Sl
   assert.equal(topic.edition_id, 'au');
 
   const approved = await app.fetch(
-    new Request(`http://localhost/api/topics/${topic.id}/approve`, { method: 'POST', headers: AUTH }),
+    new Request(`http://localhost/api/topics/${topic.id}/approve`, { method: 'POST', headers }),
   );
   assert.equal(approved.status, 200);
   const { article } = (await approved.json()) as { article: { id: string } };
@@ -479,7 +484,7 @@ test('the admin API tags manual topics and the articles approvals create with Sl
   );
   assert.deepEqual(row, { platform_id: 'sleekdrops', edition_id: 'au' });
 
-  const settings = await app.fetch(new Request('http://localhost/api/settings', { headers: AUTH }));
+  const settings = await app.fetch(new Request('http://localhost/api/settings', { headers }));
   assert.equal(settings.status, 200);
   const body = (await settings.json()) as { publish_mode: string };
   assert.equal(body.publish_mode, 'auto', "another platform's publish_mode does not leak in");

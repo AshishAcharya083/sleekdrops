@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 process.env.ADMIN_TOKEN = 'test-admin-token';
 process.env.SITE_URL = 'https://sleekdrops.com';
 
-const { pool, q } = await import('../db/pool.js');
+const { pool, q, setSetting } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
 const { registerProvider, unregisterProvider } = await import('./providers.js');
 const {
@@ -25,8 +25,10 @@ const {
   placementPerformance,
 } = await import('./insights.js');
 const { createApp } = await import('../api/server.js');
+const { clearPlatformCache } = await import('../platform/registry.js');
 
 import type { PlacementPerformance } from './insights.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 import {
   UNCLICKABLE_COMMENT_LINK,
   type InsightSnapshot,
@@ -41,6 +43,28 @@ const reachable = await pool
 const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to run these';
 
 if (reachable) await migrate();
+
+// The placement comparison totals a whole platform, and other suites post to
+// SleekDrops concurrently, so this file posts to a platform of its own.
+const PLATFORM = `test-insights-${randomUUID().slice(0, 8)}`;
+if (reachable) {
+  await q(
+    `INSERT INTO platforms
+     SELECT (jsonb_populate_record(NULL::platforms,
+               to_jsonb(p) || jsonb_build_object('id', $1::text, 'name', $1::text))).*
+     FROM platforms p WHERE p.id = $2`,
+    [PLATFORM, SLEEKDROPS_PLATFORM_ID],
+  );
+  await q(
+    `INSERT INTO editions
+     SELECT (jsonb_populate_record(NULL::editions,
+               to_jsonb(e) || jsonb_build_object('platform_id', $1::text))).*
+     FROM editions e WHERE e.platform_id = $2 AND e.id = 'au'`,
+    [PLATFORM, SLEEKDROPS_PLATFORM_ID],
+  );
+  await setSetting(PLATFORM, 'distribution_enabled', true);
+  clearPlatformCache();
+}
 
 const TOKEN = 'stub-insights-token-4b21e7';
 const TOKEN_REF = 'channel-stub-insights-token';
@@ -57,6 +81,10 @@ after(async () => {
     // The queue rows, and the metrics keyed to them, cascade with the channel.
     await q('DELETE FROM channel_connections WHERE id = ANY($1)', [connections]);
     await q('DELETE FROM articles WHERE id = ANY($1)', [articles]);
+    await q('DELETE FROM settings WHERE platform_id = $1', [PLATFORM]);
+    await q('DELETE FROM editions WHERE platform_id = $1', [PLATFORM]);
+    await q('DELETE FROM platforms WHERE id = $1', [PLATFORM]);
+    clearPlatformCache();
   }
   await pool.end();
 });
@@ -100,17 +128,17 @@ async function posted(fields: {
 }): Promise<string> {
   const [connection] = await q<{ id: string }>(
     `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref)
-     VALUES ('sleekdrops', $1, $2, $3) RETURNING id`,
-    [fields.provider, `page-${randomUUID().slice(0, 8)}`, fields.tokenRef ?? TOKEN_REF],
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [PLATFORM, fields.provider, `page-${randomUUID().slice(0, 8)}`, fields.tokenRef ?? TOKEN_REF],
   );
   connections.push(connection.id);
 
   const slug = `insights-${randomUUID().slice(0, 8)}`;
   const [article] = await q<{ id: string }>(
     `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status)
-     VALUES ('sleekdrops', 'au', 'The headphones for a quiet commute', $1, 'Tech', 'guide', 'publish', 'done')
+     VALUES ($1, 'au', 'The headphones for a quiet commute', $2, 'Tech', 'guide', 'publish', 'done')
      RETURNING id`,
-    [slug],
+    [PLATFORM, slug],
   );
   articles.push(article.id);
 
@@ -419,7 +447,7 @@ test('placement is joined from the queue row, and a post counts once', { skip },
     postedSecondsAgo: INSIGHT_CHECKPOINT_SECONDS[0] + 60,
   });
 
-  const before = placementsByName(await placementPerformance('sleekdrops'));
+  const before = placementsByName(await placementPerformance(PLATFORM));
   await insightsTick({ availableProviders: () => [provider] });
   // A second reading of the same two posts: lifetime counters, so the totals
   // must not double.
@@ -427,7 +455,7 @@ test('placement is joined from the queue row, and a post counts once', { skip },
     [comment, body],
   ]);
   await insightsTick({ availableProviders: () => [provider] });
-  const now = placementsByName(await placementPerformance('sleekdrops'));
+  const now = placementsByName(await placementPerformance(PLATFORM));
 
   assert.equal((await metrics(comment)).length, 2, 'both readings are kept');
   for (const placement of ['first_comment', 'in_body'] as const) {
@@ -448,7 +476,7 @@ test('a reading that reports nothing does not lose what a post earned', { skip }
     postedSecondsAgo: INSIGHT_CHECKPOINT_SECONDS[0] + 60,
   });
 
-  const before = placementsByName(await placementPerformance('sleekdrops'));
+  const before = placementsByName(await placementPerformance(PLATFORM));
   await insightsTick({ availableProviders: () => [provider] });
 
   snapshot = reading(null, null, null);
@@ -457,7 +485,7 @@ test('a reading that reports nothing does not lose what a post earned', { skip }
 
   assert.equal((await metrics(id)).length, 2);
   assert.deepEqual(
-    delta(before, placementsByName(await placementPerformance('sleekdrops')), 'in_body'),
+    delta(before, placementsByName(await placementPerformance(PLATFORM)), 'in_body'),
     { posts: 1, impressions: 1_000, clicks: 50, reactions: 10 },
     'a later empty reading does not take the post out of its placement total',
   );
@@ -471,12 +499,12 @@ test('a post with no reported numbers is not counted in the comparison', { skip 
     postedSecondsAgo: INSIGHT_CHECKPOINT_SECONDS[0] + 60,
   });
 
-  const before = placementsByName(await placementPerformance('sleekdrops'));
+  const before = placementsByName(await placementPerformance(PLATFORM));
   await insightsTick({ availableProviders: () => [provider] });
 
   assert.deepEqual(await metrics(id), [{ impressions: null, clicks: null, reactions: null }]);
   assert.deepEqual(
-    delta(before, placementsByName(await placementPerformance('sleekdrops')), 'in_body'),
+    delta(before, placementsByName(await placementPerformance(PLATFORM)), 'in_body'),
     { posts: 0, impressions: 0, clicks: 0, reactions: 0 },
     'a post with no numbers is no evidence either way, so it is not in the comparison',
   );
@@ -495,7 +523,7 @@ test('GET /api/distribution reports the placement split and the flag', { skip },
 
   const res = await createApp().fetch(
     new Request('http://localhost/api/distribution?limit=200', {
-      headers: { Authorization: 'Bearer test-admin-token' },
+      headers: { Authorization: 'Bearer test-admin-token', 'X-Platform': PLATFORM },
     }),
   );
   assert.equal(res.status, 200);

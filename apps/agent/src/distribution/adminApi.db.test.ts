@@ -24,7 +24,7 @@ const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to 
 if (reachable) await migrate();
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 const PROVIDER = `stub-admin-${randomUUID().slice(0, 8)}`;
 const SECRET_VALUE = 'a-page-token-nobody-should-see';
 process.env.CHANNEL_STUB_ADMIN_TOKEN_REF = SECRET_VALUE;

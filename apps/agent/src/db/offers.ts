@@ -18,7 +18,6 @@
 // a test.
 import { pool, q } from './pool.js';
 import type { OfferInput, ProductOffer, ProductOfferRevision } from '../pipeline/types.js';
-import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const OFFER_COLUMNS = `
   id, article_id, go_slug, product_name, url, price::text AS price, currency,
@@ -58,6 +57,9 @@ export async function offerRevisionsForArticle(
  *
  * `product_name` is only overwritten when the caller supplies one, so a feed
  * sync that knows a SKU but not the editor's product wording cannot blank it.
+ *
+ * The offer takes its platform from the card it is attached to, so the two
+ * can never disagree.
  */
 export async function saveOffer(articleId: string, input: OfferInput): Promise<ProductOffer> {
   const client = await pool.connect();
@@ -65,9 +67,10 @@ export async function saveOffer(articleId: string, input: OfferInput): Promise<P
     await client.query('BEGIN');
     const { rows } = await client.query<ProductOffer>(
       `INSERT INTO product_offers
-         (article_id, platform_id, go_slug, product_name, url, price, currency, price_observed_on,
+         (platform_id, article_id, go_slug, product_name, url, price, currency, price_observed_on,
           preorder, release_date, merchant, source, entered_by, note)
-       VALUES ($1, $14, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       SELECT platform_id, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+         FROM articles WHERE id = $1
        ON CONFLICT (article_id, go_slug) DO UPDATE SET
          product_name      = COALESCE(NULLIF(excluded.product_name, ''), product_offers.product_name),
          url               = excluded.url,
@@ -96,10 +99,10 @@ export async function saveOffer(articleId: string, input: OfferInput): Promise<P
         input.source,
         input.enteredBy,
         input.note ?? null,
-        SLEEKDROPS_PLATFORM_ID,
       ],
     );
     const offer = rows[0];
+    if (!offer) throw new Error(`no article ${articleId} to attach an offer to`);
     await client.query(
       `INSERT INTO product_offer_revisions
          (offer_id, article_id, go_slug, url, price, currency, price_observed_on,
