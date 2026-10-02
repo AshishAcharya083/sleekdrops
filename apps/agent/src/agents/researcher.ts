@@ -26,12 +26,14 @@ import {
 import { COVERS_RULE } from '../content/claims.js';
 import { isWebUrl, parseOffsetTimestamp } from '../content/contract.js';
 import {
+  editionMarket,
+  type EditionMarket,
   moneyExample,
   operatorBrief,
   type PromptContext,
   siteContext,
   SOURCE_DISCIPLINE,
-  VERIFICATION_RULES,
+  verificationRules,
   withAgentGoal,
 } from './context.js';
 import type { Edition } from '../platform/types.js';
@@ -70,14 +72,13 @@ export const STRATA = [
     key: 'owner',
     label: 'OWNER REVIEWS AND LONG-TERM COMPLAINTS',
     brief:
-      'ProductReview.com.au, Choice member reliability surveys, Whirlpool Forums and OzBargain for tech, ' +
-      'Bunnings verified-purchase reviews for home, Reddit, "after 6 months", "stopped working", warranty and return experiences',
+      'owner review sites and forums, verified-purchase retailer reviews, Reddit, "after 6 months", ' +
+      '"stopped working", warranty and return experiences',
   },
   {
     key: 'price',
     label: 'PRICE AND AVAILABILITY',
-    brief:
-      'named Australian retailer listings with a price and the day it was seen, price history, stock status',
+    brief: 'named retailer listings with a price and the day it was seen, price history, stock status',
   },
   {
     key: 'competing',
@@ -88,20 +89,80 @@ export const STRATA = [
 
 type StratumKey = (typeof STRATA)[number]['key'];
 
+/**
+ * Where owners and prices are found in a country whose sources we know by
+ * name. A country missing here, or an edition written for readers anywhere,
+ * is briefed in general terms rather than sent to another country's forums.
+ */
+interface LocalSources {
+  ownerBrief: string;
+  ownerSite: string;
+  retailers: string;
+  /** A synthesis rule on how to tier the country's own sources. */
+  sourceRules: string;
+}
+
+const LOCAL_SOURCES: Readonly<Record<string, LocalSources>> = {
+  AU: {
+    ownerBrief:
+      'ProductReview.com.au, Choice member reliability surveys, Whirlpool Forums and OzBargain for tech, ' +
+      'Bunnings verified-purchase reviews for home, Reddit, "after 6 months", "stopped working", warranty and return experiences',
+    ownerSite: 'productreview.com.au',
+    retailers: 'jb hi-fi officeworks',
+    sourceRules: `- KNOW YOUR AUSTRALIAN SOURCES. Choice's member reliability surveys ARE owner
+  evidence (owner-assessed, brand-level, sample size published) - tier them
+  "owner" and carry the sample size. Choice's lab results are "expert".
+  Canstar Blue is a commissioned paid panel that licenses award logos to the
+  brands it rates: tier it "aggregator", never "expert" or "owner", and never
+  file it as a testedClaim. Retailer reviews (JB Hi-Fi, The Good Guys,
+  Bunnings) count only where the review is a verified purchase and is neither
+  syndicated from another market nor written for an incentive; store-service
+  ratings ("delivery was fast") are not product evidence at all. For Health
+  topics there is no strong Australian owner corpus - say the sample is small
+  rather than inflating it.`,
+  },
+};
+
+function localSources(market: EditionMarket | null): LocalSources | null {
+  return (market && LOCAL_SOURCES[market.region]) ?? null;
+}
+
+/** A search term to append, with its space, or nothing. */
+function prefixed(term: string | undefined): string {
+  return term ? ` ${term}` : '';
+}
+
+/** What a search appends to look in the edition's country, e.g. " australia"; nothing for a global one. */
+function marketQuery(market: EditionMarket | null): string {
+  return prefixed(market?.name.toLowerCase());
+}
+
+/** The strata as briefed for one edition: owners and prices are looked for where its readers buy. */
+export function strataFor(market: EditionMarket | null): Array<Omit<PlannedStratum, 'queries'>> {
+  const local = localSources(market);
+  return STRATA.map((stratum) => {
+    if (stratum.key === 'owner' && local) return { ...stratum, brief: local.ownerBrief };
+    if (stratum.key === 'price' && market) {
+      return { ...stratum, brief: stratum.brief.replace(/^named /, `named ${market.adjective} `) };
+    }
+    return stratum;
+  });
+}
+
 /** Queries per stratum. Ten searches total is the budget for one dossier. */
 const QUERIES_PER_STRATUM = 2;
 
 /** Used when the planner returns nothing for a stratum - never search blind. */
-function fallbackQuery(key: StratumKey, title: string): string {
+function fallbackQuery(key: StratumKey, title: string, market: EditionMarket | null): string {
   switch (key) {
     case 'primary':
       return `${title} specifications official site`;
     case 'expert':
       return `${title} review tested measured gsmarena notebookcheck`;
     case 'owner':
-      return `${title} problems after 6 months owner reviews productreview.com.au`;
+      return `${title} problems after 6 months owner reviews${prefixed(localSources(market)?.ownerSite)}`;
     case 'price':
-      return `${title} price australia`;
+      return `${title} price${marketQuery(market)}`;
     case 'competing':
       return `best ${title}`;
   }
@@ -121,7 +182,11 @@ export interface PlannedStratum {
  * to a hand-written query rather than to nothing, because a missing owner
  * sweep is exactly the hole this stage exists to close.
  */
-export function planStrata(plan: unknown, title: string): PlannedStratum[] {
+export function planStrata(
+  plan: unknown,
+  title: string,
+  market: EditionMarket | null,
+): PlannedStratum[] {
   // Models occasionally wrap the object in the key the old prompt used. Reach
   // through that rather than silently falling back to the default queries.
   const reply = plan !== null && typeof plan === 'object' ? (plan as Record<string, unknown>) : {};
@@ -132,14 +197,14 @@ export function planStrata(plan: unknown, title: string): PlannedStratum[] {
       : reply
   ) as Record<string, unknown>;
 
-  return STRATA.map((stratum) => {
+  return strataFor(market).map((stratum) => {
     const queries = (Array.isArray(strata[stratum.key]) ? (strata[stratum.key] as unknown[]) : [])
       .filter((query): query is string => typeof query === 'string' && query.trim() !== '')
       .map((query) => query.trim())
       .slice(0, QUERIES_PER_STRATUM);
     return {
       ...stratum,
-      queries: queries.length > 0 ? queries : [fallbackQuery(stratum.key, title)],
+      queries: queries.length > 0 ? queries : [fallbackQuery(stratum.key, title, market)],
     };
   });
 }
@@ -174,21 +239,27 @@ export function groupEvidence(
  * thin far more often from asking the wrong question than from the evidence
  * not existing.
  */
-export function resweepQueries(stratum: string, title: string): string[] {
+export function resweepQueries(
+  stratum: string,
+  title: string,
+  market: EditionMarket | null,
+): string[] {
+  const where = marketQuery(market);
+  const local = localSources(market);
   switch (stratum) {
     case 'primary':
-      return [`${title} official specifications press release`, `${title} RRP australia official announcement`];
+      return [`${title} official specifications press release`, `${title} RRP${where} official announcement`];
     case 'expert':
       return [
         `${title} gsmarena review battery test screen brightness`,
         `${title} notebookcheck OR dxomark OR displaymate OR ifixit measured`,
       ];
     case 'owner':
-      return [`${title} problems reddit owners`, `${title} productreview.com.au reviews complaints`];
+      return [`${title} problems reddit owners`, `${title} ${local?.ownerSite ?? 'owner'} reviews complaints`];
     case 'price':
-      return [`${title} price australia jb hi-fi officeworks`, `${title} australia launch price rrp`];
+      return [`${title} price${where}${prefixed(local?.retailers)}`, `${title}${where} launch price rrp`];
     case 'competing':
-      return [`best ${title} australia`, `${title} review comparison which to buy`];
+      return [`best ${title}${where}`, `${title} review comparison which to buy`];
     default:
       return [`${title} ${stratum}`];
   }
@@ -204,11 +275,12 @@ export function resweepQueries(stratum: string, title: string): string[] {
 export function resweepPlan(
   shortfalls: readonly EvidenceShortfall[],
   title: string,
+  market: EditionMarket | null,
 ): PlannedStratum[] {
   const thin = new Set(shortfalls.map((s) => s.stratum));
-  return STRATA.filter((stratum) => thin.has(stratum.key)).map((stratum) => ({
+  return strataFor(market).filter((stratum) => thin.has(stratum.key)).map((stratum) => ({
     ...stratum,
-    queries: resweepQueries(stratum.key, title),
+    queries: resweepQueries(stratum.key, title, market),
   }));
 }
 
@@ -348,6 +420,8 @@ export async function runResearcher(
   const brief = operatorBrief(topic);
   const eventStartsAt = eventStartOf(article);
   const currency = ctx.edition.currency;
+  const market = editionMarket(ctx.edition);
+  const local = localSources(market);
 
   // Pass 1: plan the searches, one set per stratum. Asking for a single list
   // is what produced a single kind of evidence.
@@ -364,7 +438,7 @@ Angle: ${topic?.angle ?? 'n/a'}
 Target keywords: ${keywords}
 ${brief ? `\n${brief}\n\nLet the operator brief steer these queries: search to verify and expand on it, not to second-guess it.\n` : ''}
 Return JSON with exactly these keys, each holding ${QUERIES_PER_STRATUM} search queries:
-${STRATA.map((s) => `"${s.key}": ${s.label.toLowerCase()} - ${s.brief}`).join('\n')}
+${strataFor(market).map((s) => `"${s.key}": ${s.label.toLowerCase()} - ${s.brief}`).join('\n')}
 
 Write each query the way someone hunting that specific evidence would type it.
 The owner queries matter most and are the easiest to get wrong: "best X" returns
@@ -376,7 +450,7 @@ Example shape: {${STRATA.map((s) => `"${s.key}": ["...", "..."]`).join(', ')}}`,
     tracker,
   );
 
-  const planned = planStrata(plan, article.title);
+  const planned = planStrata(plan, article.title, market);
 
   // De-duped: two strata can land on the same phrasing, and a repeated query
   // is a paid search that returns what we already have.
@@ -391,7 +465,7 @@ Example shape: {${STRATA.map((s) => `"${s.key}": ["...", "..."]`).join(', ')}}`,
       system: withAgentGoal(
         ctx,
         'research',
-        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${VERIFICATION_RULES}`,
+        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${verificationRules(ctx.edition)}`,
       ),
       temperature: 0.3,
       maxTokens: 12000,
@@ -428,24 +502,13 @@ STRICT RULES:
   "Rtings", "Sony", "ProductReview.com.au" - and null when the page names no
   publisher. It is what lets the article attribute the claim instead of
   asserting it.
-- KNOW YOUR AUSTRALIAN SOURCES. Choice's member reliability surveys ARE owner
-  evidence (owner-assessed, brand-level, sample size published) - tier them
-  "owner" and carry the sample size. Choice's lab results are "expert".
-  Canstar Blue is a commissioned paid panel that licenses award logos to the
-  brands it rates: tier it "aggregator", never "expert" or "owner", and never
-  file it as a testedClaim. Retailer reviews (JB Hi-Fi, The Good Guys,
-  Bunnings) count only where the review is a verified purchase and is neither
-  syndicated from another market nor written for an incentive; store-service
-  ratings ("delivery was fast") are not product evidence at all. For Health
-  topics there is no strong Australian owner corpus - say the sample is small
-  rather than inflating it.
-- WIDEN THE EXPERT STRATUM TO ANYONE WHO PUBLISHES A PROTOCOL. ${STRATUM_FIX.expert}.
+${local ? `${local.sourceRules}\n` : ''}- WIDEN THE EXPERT STRATUM TO ANYONE WHO PUBLISHES A PROTOCOL. ${STRATUM_FIX.expert}.
 - NEW RELEASES: fill "launch" when the piece is about a product that went on
   sale in roughly the last ${LAUNCH_WINDOW_DAYS} days, or goes on sale in the next
   ${LAUNCH_WINDOW_DAYS}, with the release date and the http(s) page you read that date
   on. The link is not optional here: a release date nobody can check relaxes
   nothing, because it is the one field that lowers the bar rather than meeting
-  it. Inside that window no Australian lab result exists yet, and the gate
+  it. Inside that window no ${market ? `${market.adjective} ` : ''}lab result exists yet, and the gate
   stops asking for one - but it still asks for expert coverage, which inside
   the window means the protocol-publishing outlets above and dated hands-on
   where something was measured.
@@ -698,7 +761,7 @@ export async function runTargetedResweep(
   model: string,
   tracker: UsageTracker,
 ): Promise<Partial<ResearchDossier>> {
-  const planned = resweepPlan(shortfalls, article.title);
+  const planned = resweepPlan(shortfalls, article.title, editionMarket(ctx.edition));
   if (planned.length === 0) return {};
 
   const searches = await tavilySearchMany([...new Set(planned.flatMap((s) => s.queries))], 5);
@@ -727,7 +790,7 @@ export async function runTargetedResweep(
       system: withAgentGoal(
         ctx,
         'research',
-        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${VERIFICATION_RULES}`,
+        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${verificationRules(ctx.edition)}`,
       ),
       temperature: 0.3,
       maxTokens: 6000,
@@ -836,7 +899,9 @@ export async function runProductDiscovery(
 ): Promise<ResearchDossier['products']> {
   const brief = operatorBrief(topic);
   const eventBound = eventStartOf(article) !== null;
-  const queries = [...new Set([`best ${keyword} australia`, `${keyword} price australia`])];
+  const market = editionMarket(ctx.edition);
+  const where = marketQuery(market);
+  const queries = [...new Set([`best ${keyword}${where}`, `${keyword} price${where}`])];
   const searches = await tavilySearchMany(queries, 5);
 
   const { products } = await chatJson<{ products: ResearchDossier['products'] }>(
@@ -846,7 +911,7 @@ export async function runProductDiscovery(
       system: withAgentGoal(
         ctx,
         'research',
-        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${VERIFICATION_RULES}`,
+        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${verificationRules(ctx.edition)}`,
       ),
       temperature: 0.2,
       search: true,
@@ -860,7 +925,7 @@ piece cannot recommend anything it cannot name. This pass fills that hole and
 nothing else - no facts, no prices beyond an approximate RRP, no review copy.
 
 RULES:
-- Real models, on sale in Australia now, named the way the retailer names them
+- Real models, on sale${market ? ` in ${market.place}` : ''} now, named the way the retailer names them
   ("Samsung Galaxy Z Fold 8", not "Samsung's latest foldable"). Check the
   evidence below or search before you file one.
 - amazonUrl: an Amazon PRODUCT page URL (amazon.com.au or amazon.com, containing

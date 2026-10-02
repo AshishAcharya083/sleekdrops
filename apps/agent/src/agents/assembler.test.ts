@@ -426,7 +426,7 @@ test('a commercial piece whose only links are healed publishes', async () => {
 });
 
 test('a link labelled the way the contract prescribes is healed from its slug', async () => {
-  // LINK_PLACEMENT_RULES tells the writer to put a "Where to buy" column in
+  // linkPlacementRules tells the writer to put a "Where to buy" column in
   // the comparison table (which sits above the per-product sections) and to
   // end each section with a CTA that says where it goes. Both are anchors
   // that name no product, so the slug - a product name kebab-cased - is what

@@ -124,16 +124,70 @@ ${goal}`;
 
 /**
  * A money figure as this edition writes one, for a prompt's example ("A$2,899"
- * in AUD). Null when the edition prints no currency amounts.
+ * in AUD, or "$2,899" with the narrow symbol a source would print). Null when
+ * the edition prints no currency amounts.
  */
-export function moneyExample(edition: Edition, amount: number): string | null {
+export function moneyExample(
+  edition: Edition,
+  amount: number,
+  currencyDisplay: 'symbol' | 'narrowSymbol' = 'symbol',
+): string | null {
   return edition.currency
     ? new Intl.NumberFormat('en', {
         style: 'currency',
         currency: edition.currency,
+        currencyDisplay,
         maximumFractionDigits: 0,
       }).format(amount)
     : null;
+}
+
+/** The country an edition is written for, in the forms a prompt needs it. */
+export interface EditionMarket {
+  /** ISO 3166 region, e.g. "AU". */
+  region: string;
+  /** e.g. "Australia". */
+  name: string;
+  /** The name after "in", e.g. "Australia", "the United Kingdom". */
+  place: string;
+  /** e.g. "Australian". */
+  adjective: string;
+  /** The short form a search query or a storefront carries, e.g. "AU", "UK". */
+  code: string;
+}
+
+const MARKET_ADJECTIVES: Readonly<Record<string, string>> = {
+  AU: 'Australian',
+  NZ: 'New Zealand',
+  GB: 'British',
+  IE: 'Irish',
+  US: 'American',
+  CA: 'Canadian',
+};
+const MARKET_CODES: Readonly<Record<string, string>> = { GB: 'UK' };
+const MARKET_PLACES: Readonly<Record<string, string>> = {
+  GB: 'the United Kingdom',
+  US: 'the United States',
+};
+
+/**
+ * The country an edition is written for, or null for one that serves readers
+ * anywhere. A country edition is named for its locale's region (the
+ * "Australia" edition writes en-AU). The name decides, not the locale alone: a
+ * Global edition writes en-GB without being written for British readers.
+ */
+export function editionMarket(edition: Edition): EditionMarket | null {
+  const region = new Intl.Locale(edition.locale).region;
+  if (!region) return null;
+  const name = new Intl.DisplayNames(['en'], { type: 'region' }).of(region);
+  if (!name || name !== edition.name) return null;
+  return {
+    region,
+    name,
+    place: MARKET_PLACES[region] ?? name,
+    adjective: MARKET_ADJECTIVES[region] ?? name,
+    code: MARKET_CODES[region] ?? region,
+  };
 }
 
 /**
@@ -174,12 +228,14 @@ Sources — non-negotiable:
  * get this — the writer and the editor work from the dossier, so nothing can
  * enter a draft that the research and review stages never saw.
  */
-export const VERIFICATION_RULES = `
+export function verificationRules(edition: Edition): string {
+  const market = editionMarket(edition);
+  return `
 You have live web access: \`web_search\` for ranked results, \`read_page\` to read
 one page's text. Use it to check, not to browse.
 
 - Verify the specifics the piece rests on: prices, model numbers, spec figures,
-  release dates, and whether a product is still sold in Australia. Your
+  release dates, and whether a product is still sold${market ? ` in ${market.place}` : ''}. Your
   training data is stale by a year or more; a search result is not.
 - Check what is most likely to be wrong first — anything priced, anything
   called "latest" or "new", anything carrying a year, anything discontinued.
@@ -193,8 +249,11 @@ one page's text. Use it to check, not to browse.
 - State the outcome, never the process. Correct what the search contradicts,
   drop or hedge what it cannot confirm, and never write "I searched for".
 `.trim();
+}
 
-export const LINK_PLACEMENT_RULES = `
+export function linkPlacementRules(edition: Edition): string {
+  const market = editionMarket(edition);
+  return `
 Affiliate link placement (the article earns nothing without these — but never
 link a product that has no /go/ slug in the provided list):
 1. First mention of a product inside each major section links its /go/ slug.
@@ -206,11 +265,12 @@ link a product that has no /go/ slug in the provided list):
 5. A CTA always says where it goes. Amazon's Associates policies forbid a
    button or link that leaves it unclear the reader is being sent to Amazon,
    so vary the wording but keep the destination: "check the price on Amazon",
-   "see it on Amazon", "view at Amazon AU" — never "find out more", "buy now",
+   "see it on Amazon", "view at Amazon${market ? ` ${market.code}` : ''}" — never "find out more", "buy now",
    "check the current price", the bare URL or "click here". The product name
    on its own is fine for the in-sentence first mention (rule 1).
 6. Beyond those spots, don't spam: one link per product per section is plenty.
 `.trim();
+}
 
 export const SEO_RULES = `
 SEO requirements:

@@ -31,17 +31,20 @@ import { loadPublishedCorpus } from '../content/corpus.js';
 import { structureBrief } from '../content/shapes.js';
 import {
   ANTI_SLOP_RULES,
+  editionMarket,
   editorialAngleBrief,
   GEO_RULES,
   keywordPlanBrief,
-  LINK_PLACEMENT_RULES,
+  linkPlacementRules,
+  moneyExample,
   SEO_RULES,
   type PromptContext,
   siteContext,
   SOURCE_DISCIPLINE,
-  VERIFICATION_RULES,
+  verificationRules,
   withAgentGoal,
 } from './context.js';
+import type { Edition } from '../platform/types.js';
 import type { ArticleRow, KeywordPlan, SeoReview } from '../pipeline/types.js';
 
 /** Issues the deterministic scan contributes, capped so it can't drown the model's. */
@@ -292,6 +295,19 @@ ground competently, and it is the verdict most drafts earn. Do not soften it.`,
   );
 }
 
+/** The audit's price examples in the edition's money, or none for an edition that quotes none. */
+function priceExamples(edition: Edition): string {
+  const price = moneyExample(edition, 229);
+  return price ? ` ("${price}", "down from ${moneyExample(edition, 299, 'narrowSymbol')}")` : '';
+}
+
+/** The availability claim worth a fact-check: in the edition's country, where it has one. */
+function availabilityClaim(edition: Edition): string {
+  const market = editionMarket(edition);
+  if (!market) return 'an availability claim';
+  return `${/^[AEIOU]/.test(market.adjective) ? 'an' : 'a'} ${market.adjective} availability claim`;
+}
+
 /**
  * Check every specific in the draft against the dossier. No web access on this
  * pass on purpose: the question is not whether a figure is true somewhere, it
@@ -318,7 +334,7 @@ and you must not fill a gap from memory.
 
 A specific is any of:
 - a number or measurement ("5.7 litres", "30 hours", "62 dB")
-- a price or a price movement ("A$229", "down from $299")
+- a price or a price movement${priceExamples(ctx.edition)}
 - a spec, model number or standard ("Bluetooth 5.4", "LDAC", "IP67")
 - a date, year or recency claim ("the 2026 model", "released in March")
 - an attributed statement ("Choice found...", "owners report...", "Sony says...")
@@ -426,7 +442,7 @@ export async function runSeoReviewer(
       system: withAgentGoal(
         ctx,
         'seo_review',
-        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${LINK_PLACEMENT_RULES}\n\n${SEO_RULES}\n\n${GEO_RULES}\n\n${ANTI_SLOP_RULES}\n\n${VERIFICATION_RULES}`,
+        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${linkPlacementRules(ctx.edition)}\n\n${SEO_RULES}\n\n${GEO_RULES}\n\n${ANTI_SLOP_RULES}\n\n${verificationRules(ctx.edition)}`,
       ),
       temperature: 0.2,
       maxTokens: 6000,
@@ -460,7 +476,7 @@ Score these dimensions 0-100 each:
    data and no measured result, does not score above 60 however clean it reads.
    Then FACT-CHECK the three or four claims that would do the most damage if
    wrong - the headline prices, the flagship spec, "the latest model", a
-   release year, an Australian availability claim - against a primary source
+   release year, ${availabilityClaim(ctx.edition)} - against a primary source
    with web_search / read_page. A claim the search contradicts is a
    high-severity issue with the correct figure in the fix. Say in the summary
    what you checked and what came back, and deduct nothing for claims you did

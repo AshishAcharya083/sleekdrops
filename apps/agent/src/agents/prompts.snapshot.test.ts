@@ -25,7 +25,8 @@ process.env.GCS_IMAGES_BUCKET = 'prompt-snapshot-bucket';
 const { UsageTracker } = await import('../llm/index.js');
 const { withModelStub } = await import('../llm/modelStub.js');
 const { promptContextFromSeed } = await import('./context.js');
-const { scoutRequest } = await import('./topicScout.js');
+const { runTopicScout } = await import('./topicScout.js');
+const { pool } = await import('../db/pool.js');
 const { runProductDiscovery, runResearcher } = await import('./researcher.js');
 const { runKeywordStrategist } = await import('./keywordStrategist.js');
 const { runAngleEditor } = await import('./angleEditor.js');
@@ -356,17 +357,22 @@ async function capture(name: string, run: () => Promise<unknown>): Promise<void>
 
 const tracker = () => new UsageTracker();
 
-// The scout's request is built from the avoid-list and the sweep it read. The
-// fixture was captured against an empty topics table and a sweep with no
-// search key, so those are the inputs here.
+// The fixture was captured against an empty topics table and a sweep with no
+// search key. The table is read through a stub rather than a live database, so
+// another test file's topics can never reach the avoid-list.
 test('scout', async () => {
-  await capture('scout', async () => {
-    const { chatJson } = await import('../llm/index.js');
-    const evidence = (await import('../tools/tavily.js')).formatSearches(
-      (await import('./topicScout.js')).scoutQueries(ctx).map((query) => ({ query, results: [] })),
-    );
-    await chatJson({ platformId: ctx.platform.id, model: MODEL, ...scoutRequest(ctx, [], evidence) });
+  const reads: Array<{ sql: string; params: unknown }> = [];
+  const query = mock.method(pool, 'query', async (sql: string, params?: unknown) => {
+    reads.push({ sql, params });
+    return { rows: [] };
   });
+  try {
+    await capture('scout', () => runTopicScout(ctx, MODEL, tracker()));
+  } finally {
+    query.mock.restore();
+  }
+  assert.deepEqual(reads.map((read) => read.params), [['sleekdrops']], 'one avoid-list read, scoped to SleekDrops');
+  assert.match(reads[0].sql, /FROM topics WHERE platform_id = \$1/);
 });
 
 test('research', async () => {

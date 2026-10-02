@@ -20,7 +20,9 @@ import { chatJson, requireKeys, UsageTracker } from '../llm/index.js';
 import { AUTHORS, authorById, defaultAuthorFor } from '../content/contract.js';
 import { getArticleShapes } from '../content/catalogue.js';
 import {
+  editionMarket,
   keywordPlanBrief,
+  moneyExample,
   operatorBrief,
   type PromptContext,
   siteContext,
@@ -54,6 +56,8 @@ export async function runAngleEditor(
   const planBrief = keywordPlanBrief(plan);
   const brief = operatorBrief(topic);
   const shapes = getArticleShapes(ctx.platform);
+  const thresholdPrice = moneyExample(ctx.edition, 300);
+  const market = editionMarket(ctx.edition);
 
   const angle = await chatJson<EditorialAngle>(
     {
@@ -74,13 +78,13 @@ ${JSON.stringify(article.research, null, 2)}
 What to decide:
 
 THESIS. One sentence someone could disagree with. "The Ninja is the only one
-of these worth buying above A$300, and the Dyson is not" is a thesis. "There
+of these worth buying ${thresholdPrice ? `above ${thresholdPrice}` : 'at full price'}, and the Dyson is not" is a thesis. "There
 are several good options depending on your needs" is not - it is the absence
 of one. The thesis must be provable from the dossier: point at the facts,
 complaints, failure modes or prices that carry it.
 
 READER. A situation, not a demographic. "Someone replacing a corded vacuum in
-a two-bedroom flat with no carpet" beats "Australian shoppers aged 25-45".
+a two-bedroom flat with no carpet" beats "${market ? `${market.adjective} ` : ''}shoppers aged 25-45".
 
 CONTRARIAN OR NON-OBVIOUS TAKE. The thing the evidence supports that a reader
 skimming the top three results would not come away with. Owner complaints and

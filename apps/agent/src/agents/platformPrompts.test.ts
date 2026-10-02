@@ -237,6 +237,9 @@ async function callsOf(
   return calls;
 }
 
+/** Text only an Australian edition, or SleekDrops itself, may carry. */
+const AUSTRALIAN = /SleekDrops|\bAUD\b|Sydney|Australia|\bAU\b|A\$/;
+
 const tracker = () => new UsageTracker();
 const goal = (agent: AgentId) => `Goal for the ${agent} stage.`;
 
@@ -250,7 +253,7 @@ test('siteContext is built from the platform and the edition', () => {
     assert.match(text, /Post types the pipeline may produce: guide, article\.\n- guide: .*\n- article: /);
     assert.doesNotMatch(text, /roundup/);
     assert.match(text, /one accountable entity, Testbrand Desk,/);
-    assert.doesNotMatch(text, /SleekDrops|\bAUD\b|Sydney/);
+    assert.doesNotMatch(text, AUSTRALIAN);
   } finally {
     mock.timers.reset();
   }
@@ -270,6 +273,8 @@ test('the scout searches the platform queries, then the edition queries', () => 
   assert.match(request.prompt ?? '', /content topics for Testbrand that are trending/);
   assert.match(request.prompt ?? '', /postType must be one of: guide, article\. category one of: AFL, NRL\./);
   assert.ok(request.system?.endsWith(goal('scout')));
+  assert.doesNotMatch(`${request.system}\n${request.prompt}`, AUSTRALIAN);
+  assert.match(request.prompt ?? '', /confirm they are current, still available, and not a rerun/);
 });
 
 test('every stage tells the model about this platform, with its goal', async () => {
@@ -286,7 +291,7 @@ test('every stage tells the model about this platform, with its goal', async () 
     for (const call of await callsOf(run)) {
       assert.match(call.system ?? '', /^Testbrand \(testbrand\.example\)/, `${agent} system text`);
       assert.ok(call.system?.endsWith(goal(agent)), `${agent} carries its goal`);
-      assert.doesNotMatch(`${call.system}\n${call.prompt}`, /SleekDrops|\bAUD\b|Sydney/, agent);
+      assert.doesNotMatch(`${call.system}\n${call.prompt}`, AUSTRALIAN, agent);
     }
   }
 });
@@ -322,6 +327,8 @@ test('an edition with no currency is never asked for one', async () => {
     researcher.runProductDiscovery(ctx, article(), null, 'tips', 'm', tracker()),
   );
   assert.match(discovery.prompt, /- approxPrice is always "": this edition quotes no currency amounts\./);
+  assert.doesNotMatch(`${discovery.system}\n${discovery.prompt}`, AUSTRALIAN);
+  assert.match(discovery.prompt, /### Search: "best tips"\n/);
 
   const [writer] = await callsOf(() => runWriter(ctx, article(), null, 'm', tracker()));
   assert.match(writer.prompt, /it is the manufacturer's RRP, labelled "RRP" with the year\./);
@@ -333,6 +340,22 @@ test('a currency edition writes its own money in the examples', async () => {
     researcher.runProductDiscovery(gbp, article(), null, 'tips', 'm', tracker()),
   );
   assert.match(discovery.prompt, /approxPrice is GBP and approximate \("about £2,899"\)/);
+});
+
+test('a country edition is told about its own country, not Australia', async () => {
+  const uk = {
+    ...ctx,
+    edition: { ...ctx.edition, id: 'uk', name: 'United Kingdom', currency: 'GBP', locale: 'en-GB' },
+  };
+  const [keyword] = await callsOf(() => runKeywordStrategist(uk, article(), null, 'm', tracker()));
+  assert.match(keyword.prompt, /- British buyers are the audience; include a UK-qualified variant if it is natural\./);
+  const [angleCall] = await callsOf(() => runAngleEditor(uk, article(), null, 'm', tracker()));
+  assert.match(angleCall.prompt, /worth buying above £300,/);
+  assert.match(angleCall.prompt, /"British shoppers aged 25-45"/);
+  assert.match(scoutRequest(uk, [], '').prompt ?? '', /actually on sale in the United Kingdom,/);
+  for (const call of [keyword, angleCall]) {
+    assert.doesNotMatch(`${call.system}\n${call.prompt}`, AUSTRALIAN);
+  }
 });
 
 test('assembly stamps the edition day, its currency and the platform lists', async () => {

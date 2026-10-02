@@ -12,9 +12,10 @@ import { parseOffsetTimestamp, slugify } from '../content/contract.js';
 import { getPostTypes } from '../content/catalogue.js';
 import {
   type PromptContext,
+  editionMarket,
   siteContext,
   SOURCE_DISCIPLINE,
-  VERIFICATION_RULES,
+  verificationRules,
   withAgentGoal,
 } from './context.js';
 import type { TopicSuggestion } from '../pipeline/types.js';
@@ -35,11 +36,12 @@ export function scoutRequest(
   evidence: string,
 ): Pick<ChatOptions, 'system' | 'temperature' | 'search' | 'prompt'> {
   const { platform } = ctx;
+  const market = editionMarket(ctx.edition);
   return {
     system: withAgentGoal(
       ctx,
       'scout',
-      `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${VERIFICATION_RULES}`,
+      `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${verificationRules(ctx.edition)}`,
     ),
     temperature: 0.8,
     search: true,
@@ -50,7 +52,7 @@ Rules:
 - Every topic must be grounded in the evidence — cite the source URLs you used.
 - Check before you propose. The sweep below is broad and a little stale by the
   time you read it: search the products or trends you are about to suggest and
-  confirm they are current, actually on sale in Australia, and not a rerun of
+  confirm they are current, ${market ? `actually on sale in ${market.place}` : 'still available'}, and not a rerun of
   something that peaked last year. A topic built on a dead product wastes the
   whole pipeline behind it.
 - Specific beats generic: "Best budget robot vacuums under $500 (2026)" beats "robot vacuums".

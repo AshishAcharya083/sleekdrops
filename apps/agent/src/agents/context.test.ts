@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ANTI_SLOP_RULES,
   authorVoiceBrief,
+  editionMarket,
   editorialAngleBrief,
   GEO_RULES,
   operatorBrief,
@@ -10,6 +11,7 @@ import {
 } from './context.js';
 import { AUTHORS, authorById } from '../content/contract.js';
 import { sleekdropsSeed } from '../platform/sleekdrops/index.js';
+import type { Edition } from '../platform/types.js';
 import type { EditorialAngle, TopicRow } from '../pipeline/types.js';
 
 const { platform } = promptContextFromSeed(sleekdropsSeed, 'au');
@@ -157,4 +159,35 @@ test('the voice rules name the house skeleton as a thing not to build', () => {
   assert.match(ANTI_SLOP_RULES, /NEVER BUILD THE HOUSE SKELETON/);
   assert.match(ANTI_SLOP_RULES, /No identical block under every heading/);
   assert.match(ANTI_SLOP_RULES, /No section that fires by reflex/);
+});
+
+test('a country edition is written for the country its name and locale share', () => {
+  const edition = (name: string, locale: string): Edition => ({
+    id: 'x',
+    platformId: 'p',
+    name,
+    timeZone: 'UTC',
+    currency: null,
+    locale,
+    scoutQueries: [],
+    complianceFooter: '',
+  });
+  const [au] = promptContextFromSeed(sleekdropsSeed, 'au').platform.editions;
+  assert.deepEqual(editionMarket(au), {
+    region: 'AU',
+    name: 'Australia',
+    place: 'Australia',
+    adjective: 'Australian',
+    code: 'AU',
+  });
+  assert.deepEqual(editionMarket(edition('United Kingdom', 'en-GB')), {
+    region: 'GB',
+    name: 'United Kingdom',
+    place: 'the United Kingdom',
+    adjective: 'British',
+    code: 'UK',
+  });
+  // en-GB spelling for readers anywhere is not a British edition.
+  assert.equal(editionMarket(edition('Global', 'en-GB')), null);
+  assert.equal(editionMarket(edition('Global', 'en')), null);
 });

@@ -621,7 +621,7 @@ export function goLinkSearchTerms(body: string): Map<string, GoLinkSearchTerm> {
  * A word the anchor and the slug share is the anchor talking about the product
  * rather than about the click, and that - not a list of call-to-action
  * phrasings to exclude - is the test. The link contract prescribes the
- * phrasings (LINK_PLACEMENT_RULES: "Check price on Amazon" table cells, "See
+ * phrasings (linkPlacementRules: "Check price on Amazon" table cells, "See
  * today's price on Amazon" CTAs, "view at Amazon AU"), so an anchor filter
  * would be excluding exactly what the writer was told to produce, and an
  * Amazon search for those words lands the reader on a page about nothing.
