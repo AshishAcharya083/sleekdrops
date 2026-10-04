@@ -8,7 +8,7 @@ import { NAV_ITEM_ATTRIBUTE } from '@lib/nav-experiment';
  * Sticky translucent header with brand, primary nav, and the theme-toggle
  * icon button. Pass `active` to underline the current page.
  */
-type NavId = 'home' | 'blog' | 'categories' | 'deals' | 'about' | 'contact';
+type NavId = 'home' | 'blog' | 'categories' | 'deals' | 'about' | 'how-we-rate' | 'contact';
 
 export interface Props {
   active?: NavId;
@@ -26,6 +26,8 @@ interface NavItem {
    * for the variant that says so, and puts it back if the flag flips.
    */
   experimentFeature?: string;
+  /** A standing document rather than a section: the mobile menu sets it apart. */
+  standing?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -34,7 +36,13 @@ const navItems: NavItem[] = [
   { id: 'categories', label: 'Categories', href: '/categories' },
   ...(hasActiveDeals ? [{ id: 'deals' as const, label: 'Deals', href: '/deals' }] : []),
   { id: 'about', label: 'About', href: '/about', experimentFeature: 'remove-about-page' },
+  { id: 'how-we-rate', label: 'How we rate', href: '/how-we-rate', standing: true },
   { id: 'contact', label: 'Contact', href: '/contact' },
+];
+const sectionItems = navItems.filter((item) => !item.standing);
+const standingItems: { id?: NavId; label: string; href: string }[] = [
+  { label: 'How we research', href: '/how-we-research' },
+  ...navItems.filter((item) => item.standing),
 ];
 ---
 <header class="site-header">
@@ -45,6 +53,7 @@ const navItems: NavItem[] = [
         <a
           href={item.href}
           class:list={[{ active: active === item.id }]}
+          aria-current={active === item.id ? 'page' : undefined}
           {...(item.experimentFeature ? { [NAV_ITEM_ATTRIBUTE]: item.experimentFeature } : {})}
         >{item.label}</a>
       ))}
@@ -77,16 +86,22 @@ const navItems: NavItem[] = [
     </div>
   </div>
   <nav id="mobile-navigation" class="mobile-nav" aria-label="Mobile primary" data-mobile-nav hidden>
-    {navItems.map((item) => (
+    {sectionItems.map((item) => (
       <a
         href={item.href}
         class:list={[{ active: active === item.id }]}
         aria-current={active === item.id ? 'page' : undefined}
       >{item.label}</a>
     ))}
-    {/* Set apart from the sections, because this is a standing document
-        rather than a place to browse. */}
-    <a class="nav-meta" href="/how-we-research">How we research</a>
+    {/* Set apart from the sections, because these are standing documents
+        rather than places to browse. */}
+    {standingItems.map((item) => (
+      <a
+        href={item.href}
+        class:list={['nav-meta', { active: item.id !== undefined && active === item.id }]}
+        aria-current={item.id !== undefined && active === item.id ? 'page' : undefined}
+      >{item.label}</a>
+    ))}
   </nav>
 </header>
 
@@ -191,10 +206,14 @@ const navItems: NavItem[] = [
       grid-column: 1 / -1;
       margin-top: 8px;
       border-top: 1px solid var(--hairline);
+      border-radius: 0;
       font-size: 13px;
       font-weight: 500;
       color: var(--muted);
     }
+    /* One rule above the group, not one per row. */
+    .mobile-nav a.nav-meta + a.nav-meta { margin-top: 0; border-top: 0; }
+    .mobile-nav a.nav-meta.active { color: var(--ink); font-weight: 700; background: transparent; }
   }
 </style>
 
