@@ -1,13 +1,19 @@
 ---
 import Button from '@components/ui/Button.astro';
 import StarRating from '@components/affiliate/StarRating.astro';
+import PaidLinkNote from '@components/affiliate/PaidLinkNote.astro';
+import ScoreExplainer from '@components/article/ScoreExplainer.astro';
 import { EVENTS } from '@lib/analytics';
-import type { ProductData } from '../../content/config';
+import { methodologyHref } from '@lib/methodology';
+import { scoreExplainer } from '@lib/score-explainer';
+import type { Author } from '@data/authors';
+import type { ProductData, ReviewUnitData } from '../../content/config';
 
 /**
  * Verdict — the "Quick Verdict" box that opens every review. Pairs the
- * product tagline with a numeric score, star row, and primary affiliate
- * CTA. Required by the review-quality rules in sleekdrops-cms/schema/.
+ * product tagline with a numeric score, its band, star row, and primary
+ * affiliate CTA, then explains the score underneath (ScoreExplainer).
+ * Required by the review-quality rules in sleekdrops-cms/schema/.
  *
  * The affiliate href is built from the post slug: every review post's
  * filename must match a key in sleekdrops-cms/data/affiliate-links.json.
@@ -15,15 +21,22 @@ import type { ProductData } from '../../content/config';
 export interface Props {
   product: ProductData;
   postSlug: string;
+  author: Pick<Author, 'name' | 'beat'>;
+  pubDate: Date;
+  updatedDate?: Date;
+  reviewUnit?: ReviewUnitData;
 }
-const { product, postSlug } = Astro.props;
+const { product, postSlug, author, pubDate, updatedDate, reviewUnit } = Astro.props;
 const href = `/go/${postSlug}`;
+const view = scoreExplainer({ slug: postSlug, product, reviewUnit, author, pubDate, updatedDate });
 ---
-<aside class="verdict">
-  <div>
-    <h3>Quick verdict</h3>
-    <p class="title">{product.tagline}</p>
-    <p class="desc">{product.brand} {product.name} — full breakdown below.</p>
+<aside class="verdict" aria-labelledby="verdict-heading">
+  <div class="v-lead">
+    <h3 class="v-eyebrow" id="verdict-heading">Quick verdict</h3>
+    <p class="v-title">{product.tagline}</p>
+    <p class="v-desc">{product.brand} {product.name} - full breakdown below.</p>
+  </div>
+  <div class="v-cta">
     <Button
       href={href}
       variant="accent"
@@ -33,40 +46,79 @@ const href = `/go/${postSlug}`;
     >
       See current price
     </Button>
+    <PaidLinkNote />
   </div>
-  <div class="score">
-    {/* Named for what it is built from. A bare number beside a product we earn
-        commission on reads as a test result nobody here ran; "research score",
-        linked to the page that says what goes into it, is the claim we can
-        actually stand behind. */}
-    <div class="score-num">{product.rating.toFixed(1)}<sup>&nbsp;/5</sup></div>
-    <StarRating rating={product.rating} />
-    <a class="score-label" href="/how-we-research#scores">Research score</a>
+  <div class="v-score">
+    <div class="score-line">
+      <span class="sr-only">{view.srSummary}</span>
+      <div class="score-num" aria-hidden="true">{view.score}<sup>&nbsp;/5</sup></div>
+      <span class="band" aria-hidden="true">{view.band.label}</span>
+    </div>
+    <div class="score-meta">
+      <StarRating rating={product.rating} />
+      {/* Named for what it is built from. A bare number beside a product we earn
+          commission on reads as a test result nobody here ran; "research score",
+          linked to the page that says what the bands mean, is the claim we can
+          actually stand behind. */}
+      <a class="score-label" href={methodologyHref('bands')}>Research score</a>
+    </div>
   </div>
+  <ScoreExplainer view={view} />
 </aside>
 
 <style>
+  /* Every rule is scoped under .verdict so ArticleBody's prose rules
+     (`.article-body h3`, `p`, `a`) cannot restyle the eyebrow, paragraphs,
+     links or the CTA. No font-size of its own: the box inherits the body's
+     18px, so its 68ch measure lines up with the prose beside it. */
   .verdict {
     background: var(--surface);
     border: 1px solid var(--hairline-strong);
     border-radius: 20px;
-    padding: 28px 32px;
+    padding: 28px 32px 8px;
     margin: 32px 0;
     display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 28px;
-    align-items: center;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 28px;
+    grid-template-areas:
+      'lead score'
+      'cta score'
+      'subs subs'
+      'facts facts'
+      'explain explain';
+    line-height: 1.55;
+    color: var(--ink-2);
   }
-  h3 {
+  .verdict .v-lead { grid-area: lead; min-width: 0; }
+  .verdict .v-cta { grid-area: cta; align-self: start; margin-top: 16px; }
+  .verdict .v-score { grid-area: score; align-self: center; text-align: right; min-width: 0; }
+  .verdict :global(.v-subs) { grid-area: subs; }
+  .verdict :global(.v-facts) { grid-area: facts; }
+  .verdict :global(.v-explain) { grid-area: explain; }
+
+  .verdict .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .verdict .v-eyebrow {
     margin: 0;
     font-family: var(--font-body);
     font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.18em;
-    color: var(--accent);
+    color: var(--accent-text);
+    line-height: 1.4;
   }
-  .title {
+  .verdict .v-title {
     font-family: var(--font-display);
     font-size: 28px;
     line-height: 1.15;
@@ -74,40 +126,110 @@ const href = `/go/${postSlug}`;
     color: var(--ink);
     margin: 8px 0 12px;
     font-weight: 400;
+    text-wrap: pretty;
   }
-  .desc {
-    font-size: 14px;
-    color: var(--muted);
-    margin: 0 0 16px;
-    max-width: 50ch;
+  .verdict .v-desc { font-size: 14px; line-height: 1.55; color: var(--muted); margin: 0; max-width: 50ch; }
+
+  .verdict .v-cta :global(.btn) { min-height: 44px; text-decoration: none; }
+  .verdict .v-cta :global(.btn-accent),
+  .verdict .v-cta :global(.btn-accent:hover) { color: #fff; }
+  .verdict .v-cta :global(.paid-link-note) { margin-top: 8px; }
+
+  /* Score column: decimal, denominator and band, then stars and the label */
+  .verdict .score-line {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    flex-wrap: nowrap;
   }
-  .score { text-align: right; }
-  .score-num {
+  .verdict .score-num {
     font-family: var(--font-display);
     font-size: 64px;
     line-height: 1;
     color: var(--ink);
     letter-spacing: -0.03em;
+    white-space: nowrap;
   }
-  .score-num sup {
+  .verdict .score-num sup {
     font-size: 22px;
     color: var(--muted);
     font-style: italic;
+    letter-spacing: 0;
   }
-  .score-label {
-    display: inline-block;
-    margin-top: 6px;
+  .verdict .band {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 4px 12px;
+    border-radius: var(--r-full);
+    border: 1px solid var(--ink);
+    color: var(--ink);
+    background: transparent;
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  .verdict .score-meta :global(.stars) { margin-top: 10px; }
+  .verdict .score-label {
+    display: block;
+    width: max-content;
+    margin: 6px 0 0 auto;
+    padding: 2px 0;
     font-family: var(--font-mono);
     font-size: 11px;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--muted);
+    text-decoration: underline;
     text-decoration-color: var(--hairline-strong);
+    text-decoration-thickness: auto;
+    text-underline-offset: 3px;
   }
-  .score-label:hover { color: var(--accent); }
+  .verdict .score-label:hover { color: var(--accent-text); text-decoration-color: var(--accent); }
 
+  @media (prefers-reduced-motion: reduce) {
+    .verdict .v-cta :global(.btn),
+    .verdict .v-cta :global(.btn .arrow) { transition: none; }
+    .verdict .v-cta :global(.btn-accent:hover) { transform: none; }
+  }
+
+  /* Phone: score, band and CTA lead the box; the facts follow */
   @media (max-width: 700px) {
-    .verdict { grid-template-columns: 1fr; }
-    .score { text-align: left; }
+    .verdict {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      padding: 22px 20px 4px;
+      border-radius: 16px;
+    }
+    .verdict .v-lead { display: contents; }
+    .verdict .v-eyebrow { order: 1; }
+    .verdict .v-score {
+      order: 2;
+      text-align: left;
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .verdict .v-title { order: 3; font-size: 24px; margin: 14px 0 8px; }
+    .verdict .v-desc { order: 4; }
+    .verdict .v-cta { order: 5; align-self: stretch; }
+    .verdict .v-cta :global(.btn) { width: 100%; justify-content: center; }
+    .verdict :global(.v-subs) { order: 6; }
+    .verdict :global(.v-facts) { order: 7; }
+    .verdict :global(.v-explain) { order: 8; }
+    .verdict .score-line { justify-content: flex-start; gap: 10px; }
+    .verdict .score-num { font-size: 52px; }
+    .verdict .score-num sup { font-size: 19px; }
+    .verdict .score-meta { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+    .verdict .score-meta :global(.stars) { margin-top: 0; }
+    .verdict .score-label { margin: 0; }
   }
 </style>

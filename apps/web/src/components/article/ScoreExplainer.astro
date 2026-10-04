@@ -1,0 +1,347 @@
+---
+import type { ScoreExplainerView } from '@lib/score-explainer';
+
+/**
+ * ScoreExplainer - what sits under the Quick Verdict's number: the weighted
+ * breakdown when a review records one, the facts behind the score (how the
+ * product was assessed, the method, who wrote it and when, and any revision
+ * that moved it), and a "How we scored this" disclosure whose summary already
+ * says the gist, so nothing needs opening to be understood.
+ *
+ * Its parts are the verdict box's own grid items - the wrapper is
+ * `display: contents` - so Verdict.astro places and reorders them; this
+ * component only draws them.
+ *
+ * The disclosure carries the analytics hook trust-analytics listens for, and
+ * renders closed: a `<details open>` fires `toggle` on load, which would count
+ * as an expansion nobody made.
+ */
+export interface Props {
+  view: ScoreExplainerView;
+}
+const { view } = Astro.props;
+const { provenance, method, byline, change, subScores, explainer } = view;
+---
+<div class="score-explainer">
+  {subScores && (
+    <div class="v-subs">
+      <h4 class="subs-h" id="score-breakdown-h">Score breakdown</h4>
+      <ul class="subs" aria-labelledby="score-breakdown-h">
+        {subScores.rows.map((row) => (
+          <li class="sub">
+            <span class="s-label">{row.label}</span>
+            <span class="s-weight">{row.weight}</span>
+            <span class="s-bar" aria-hidden="true"><span style={`width:${row.percent}%`} /></span>
+            <span class="s-score">{row.score}</span>
+          </li>
+        ))}
+      </ul>
+      <p class="subs-note">{subScores.note}</p>
+    </div>
+  )}
+
+  <dl class="v-facts">
+    <div class:list={['fact', 'fact-prov', { 'fact-sample': provenance.id === 'brand-sample' }]}>
+      <dt>Assessed</dt>
+      <dd><strong>{provenance.label}.</strong> {provenance.statement}</dd>
+    </div>
+    <div class="fact">
+      <dt>Method</dt>
+      <dd>
+        {method.version
+          ? <Fragment>Scored using <a href={method.href}>{method.label}</a></Fragment>
+          : <Fragment>{method.statement}{' '}<a href={method.href}>{method.linkText}</a></Fragment>}
+      </dd>
+    </div>
+    <div class="fact">
+      <dt>Written by</dt>
+      <dd>
+        {byline.name}{byline.beat && <span class="by-role"> · {byline.beat} beat</span>}
+        <span class="dates">
+          <span class="d">Published <time datetime={byline.published.iso}>{byline.published.text}</time></span>
+          {byline.updated && (
+            <Fragment>
+              {' '}<span class="sep" aria-hidden="true">·</span>{' '}
+              <span class="d">Updated <time datetime={byline.updated.iso}>{byline.updated.text}</time></span>
+            </Fragment>
+          )}
+        </span>
+      </dd>
+    </div>
+    {change && (
+      <div class="fact fact-changed">
+        <dt>{change.label}</dt>
+        <dd>
+          {change.handsOn && 'We had the unit in hand again on '}<time datetime={change.date.iso}>{change.date.text}</time>:
+          score moved <span class="delta"><s><span class="sr-only">from </span>{change.from}</s>&nbsp;<span aria-hidden="true">→</span><span class="sr-only"> to</span>&nbsp;{change.to}</span>
+          {change.reason}{change.handsOn ? '.' : ' - not tested in hand.'}
+          {' '}<a href={change.href}>Score changes</a>
+        </dd>
+      </div>
+    )}
+  </dl>
+
+  <details
+    class="v-explain"
+    data-score-explainer
+    data-score-explainer-props={JSON.stringify(explainer.hookProps)}
+  >
+    <summary>
+      <span>
+        <span class="ex-title">How we scored this</span>
+        <span class="ex-gist">{explainer.gist}</span>
+      </span>
+      <svg class="ex-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+    </summary>
+    <div class="ex-body">
+      {explainer.paragraphs.map((paragraph) => <p>{paragraph}</p>)}
+      <ul class="scale" aria-label="What each score band means">
+        {explainer.scale.map((row) => (
+          <li class:list={{ 'is-this': row.current }} aria-current={row.current ? 'true' : undefined}>
+            <span class="r">{row.range}</span>
+            <span class="w">{row.label}</span>
+            <span class="m">{row.meaning}{row.current && <span class="here">this product</span>}</span>
+          </li>
+        ))}
+      </ul>
+      <p class="ex-links">
+        <a href={explainer.methodHref}>Read the full method</a>
+        <a href={explainer.distributionHref}>See the spread of scores we give</a>
+      </p>
+    </div>
+  </details>
+</div>
+
+<style>
+  /* Every rule carries the wrapper class so it outweighs ArticleBody's prose
+     rules (`.article-body p`, `a`, `li`, `ul`), which would otherwise restyle
+     the facts, links and scale. */
+  .score-explainer { display: contents; }
+
+  .score-explainer .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Sub-scores, only when the review records them */
+  .score-explainer .v-subs {
+    margin: 24px 0 0;
+    padding: 18px 0 0;
+    border-top: 1px solid var(--hairline);
+  }
+  .score-explainer .subs-h {
+    margin: 0 0 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.55;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 400;
+  }
+  .score-explainer .subs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .score-explainer .sub {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 96px 120px 36px;
+    align-items: center;
+    column-gap: 14px;
+    font-size: 14px;
+    margin: 0;
+    line-height: 1.4;
+  }
+  .score-explainer .s-label { color: var(--ink-2); min-width: 0; }
+  .score-explainer .s-weight {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+    text-align: right;
+    white-space: nowrap;
+  }
+  .score-explainer .s-bar {
+    height: 4px;
+    border-radius: var(--r-full);
+    background: var(--surface-2);
+    overflow: hidden;
+    box-shadow: inset 0 0 0 1px var(--hairline);
+  }
+  .score-explainer .s-bar span { display: block; height: 100%; background: var(--ink); }
+  .score-explainer .s-score {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--ink);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .score-explainer .subs-note { margin: 10px 0 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+  /* Facts: short labelled lines under a hairline */
+  .score-explainer .v-facts {
+    margin: 24px 0 0;
+    padding: 18px 0 0;
+    border-top: 1px solid var(--hairline);
+    display: grid;
+    gap: 10px;
+  }
+  .score-explainer .v-subs + .v-facts { margin-top: 18px; }
+  .score-explainer .fact {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    column-gap: 16px;
+    align-items: baseline;
+    margin: 0;
+  }
+  .score-explainer dt {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .score-explainer dd { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink-2); min-width: 0; }
+  .score-explainer dd strong { color: var(--ink); font-weight: 700; }
+  .score-explainer dd a {
+    color: var(--ink);
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 3px;
+    white-space: nowrap;
+  }
+  .score-explainer dd a:hover { color: var(--accent-text); }
+  .score-explainer dd time {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .score-explainer .sep { color: var(--muted-2); margin: 0 2px; }
+  .score-explainer .by-role { color: var(--muted); }
+  .score-explainer .dates { display: block; }
+  .score-explainer .d { white-space: nowrap; }
+  .score-explainer .fact-prov dt { color: var(--ink); }
+  .score-explainer .fact-sample dt { color: var(--warning-text); }
+  .score-explainer .fact-changed dt { color: var(--accent-text); }
+  .score-explainer .delta {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .score-explainer .delta s { color: var(--muted); text-decoration-thickness: 1px; }
+
+  /* "How we scored this" - the summary already says the gist */
+  .score-explainer .v-explain { margin: 18px 0 0; border-top: 1px solid var(--hairline); }
+  .score-explainer .v-explain > summary {
+    list-style: none;
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 16px;
+    column-gap: 16px;
+    align-items: start;
+    padding: 14px 0;
+    min-height: 44px;
+    border-radius: var(--r-sm);
+  }
+  .score-explainer .v-explain > summary::-webkit-details-marker { display: none; }
+  .score-explainer .ex-title { display: block; font-size: 14px; font-weight: 700; color: var(--ink); line-height: 1.5; }
+  .score-explainer .ex-gist { display: block; font-size: 14px; line-height: 1.55; color: var(--muted); margin-top: 2px; }
+  .score-explainer .ex-chev {
+    width: 16px;
+    height: 16px;
+    margin-top: 3px;
+    stroke: var(--muted);
+    stroke-width: 1.8;
+    fill: none;
+    transition: transform var(--dur-base) var(--ease-out);
+  }
+  .score-explainer .v-explain > summary:hover .ex-title { color: var(--accent-text); }
+  .score-explainer .v-explain > summary:hover .ex-chev { stroke: var(--ink); }
+  .score-explainer .v-explain[open] .ex-chev { transform: rotate(180deg); }
+  .score-explainer .ex-body { padding: 0 32px 20px 0; font-size: 14px; line-height: 1.65; color: var(--ink-2); }
+  .score-explainer .ex-body p { margin: 0; font-size: 14px; line-height: 1.65; color: var(--ink-2); }
+  .score-explainer .ex-body p + p { margin-top: 10px; }
+  .score-explainer .scale {
+    list-style: none;
+    margin: 16px 0 0;
+    padding: 0;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    overflow: hidden;
+  }
+  .score-explainer .scale li {
+    display: grid;
+    grid-template-columns: 76px 104px minmax(0, 1fr);
+    column-gap: 12px;
+    align-items: baseline;
+    padding: 9px 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--muted);
+    border-top: 1px solid var(--hairline);
+    margin: 0;
+  }
+  .score-explainer .scale li:first-child { border-top: 0; }
+  .score-explainer .scale .r { font-family: var(--font-mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .score-explainer .scale .w {
+    font-weight: 700;
+    color: var(--ink-2);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .score-explainer .scale li.is-this { background: var(--surface-2); color: var(--ink-2); box-shadow: inset 3px 0 0 var(--ink); }
+  .score-explainer .scale li.is-this .r,
+  .score-explainer .scale li.is-this .w { color: var(--ink); }
+  .score-explainer .scale .here {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink);
+    margin-left: 6px;
+    white-space: nowrap;
+  }
+  .score-explainer .ex-links { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 12px; }
+  .score-explainer .ex-links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 4px;
+  }
+  .score-explainer .ex-links a:hover { color: var(--accent-text); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .score-explainer .ex-chev { transition: none; }
+  }
+
+  @media (max-width: 700px) {
+    .score-explainer .v-facts { margin-top: 22px; gap: 12px; }
+    .score-explainer .fact { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }
+    /* Published / Updated stack instead of wrapping mid-line, so no separator
+       dot is ever left hanging at a line break. */
+    .score-explainer .dates { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+    .score-explainer .sep { display: none; }
+    .score-explainer .sub { grid-template-columns: minmax(0, 1fr) 36px; row-gap: 4px; }
+    .score-explainer .s-weight { grid-column: 1; grid-row: 2; text-align: left; }
+    .score-explainer .s-bar { grid-column: 1 / -1; grid-row: 3; }
+    .score-explainer .s-score { grid-column: 2; grid-row: 1; }
+    .score-explainer .ex-body { padding-right: 0; }
+    .score-explainer .scale li { grid-template-columns: 72px minmax(0, 1fr); row-gap: 2px; }
+    .score-explainer .scale li .m { grid-column: 1 / -1; }
+  }
+</style>

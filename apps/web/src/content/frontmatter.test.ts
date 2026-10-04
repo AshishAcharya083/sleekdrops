@@ -379,3 +379,14 @@ test('provenance and the review-unit record may not tell two stories', () => {
   assert.equal(result.success, false);
   assert.deepEqual(result.error?.issues[0].path, ['product', 'provenance']);
 });
+
+test('a score change reaches the review, and one that leaves the printed score where it was is refused', () => {
+  const scoreChange = { date: '2026-09-28', from: 4.1, reason: 'after a firmware update fixed the dropouts' };
+  const parsed = blogFrontmatterSchema.parse(withProduct({ rating: 4.3, scoreChange }));
+  assert.equal(parsed.product?.scoreChange?.from, 4.1);
+  assert.equal(parsed.product?.scoreChange?.date.toISOString(), '2026-09-28T00:00:00.000Z');
+
+  const unmoved = blogFrontmatterSchema.safeParse(withProduct({ rating: 4.3, scoreChange: { ...scoreChange, from: 4.26 } }));
+  assert.equal(unmoved.success, false);
+  assert.deepEqual(unmoved.error?.issues[0].path, ['product', 'scoreChange']);
+});
