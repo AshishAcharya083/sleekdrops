@@ -1,5 +1,10 @@
 # Mediavine readiness and the GA4 outage — September 2026
 
+**Superseded, 2026-10-14.** The site has been resubmitted to AdSense, and the Mediavine swap described here was
+reverted (`git revert 34f4e1f`): the AdSense publisher tag, verification meta and `ads.txt` seller record are back,
+and the Journey wrapper is gone, because Journey requires exclusivity. The GA4 findings below still stand. To go
+back to Journey, revert that revert.
+
 **Status, 2026-09-28.** AdSense rejected sleekdrops.com for "low-value content". The site is being taken to
 **Journey by Mediavine** instead (publishers.mediavine.com/join routes any site under Mediavine's own threshold to
 Journey). Journey's minimum is **1,000 sessions from premium countries — the US, Canada, the UK and Australia — in

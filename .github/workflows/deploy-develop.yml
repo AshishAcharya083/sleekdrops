@@ -144,15 +144,13 @@ jobs:
           # Turning ads on here means changing this line and knowing why.
           PUBLIC_ADSENSE_CLIENT: ''
           # Develop is a code-only preview rendered against the SAME live
-          # editorial content as production. Content lives in Cloudflare D1,
-          # so the build needs the same D1 env vars as prod.
-          # Reused prod secrets on purpose — this is a test deploy target.
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          D1_DATABASE_ID: b98d83ac-a2a5-42cb-a367-0cb71b902670
-          CLOUDFLARE_D1_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
-          # Fallback while CLOUDFLARE_D1_TOKEN isn't set — works only if the
-          # Pages deploy token also has D1 read permission.
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # editorial content as production: the posts and affiliate links in
+          # the SleekDrops Supabase project, read by scripts/fetch-content.mjs
+          # through the Data API. Both values are public (the key can read
+          # published content and nothing else), so they are repository
+          # variables, shared with production and the PR build.
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
         run: pnpm --filter @sleekdrops/web build
 
       - name: Deploy to Cloudflare Pages (develop)
