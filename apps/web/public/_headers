@@ -9,25 +9,28 @@
 # breaks ad delivery). Script, frame, image and connection sources are any
 # https origin on purpose.
 #
-# They used to be a list of named hosts, and that is exactly what the ad
-# partner says not to do: programmatic advertising runs real-time auctions
-# across dozens of exchanges, and the winning bidder serves its creative,
-# pixels and redirects from a domain the last impression did not use. No
-# allowlist stays complete, and every gap is an ad that silently fails to
-# render. Mediavine's own guidance is a nonce-based `strict-dynamic` policy or
-# `upgrade-insecure-requests`; a static site cannot mint a per-response nonce,
-# so this is the latter, with the hygiene directives kept.
+# They used to be a list of named hosts, and that is exactly what breaks ad
+# delivery: AdSense fills a slot through a real-time auction, and the winning
+# buyer serves its creative, pixels and redirects from a domain the last
+# impression did not use. No allowlist stays complete - the AdSense list this
+# file once carried already missed the hosts Google's own consent message and
+# ad-quality checks load from - and every gap is an ad that silently fails to
+# render. Google's guidance for its ad tags is a nonce-based `strict-dynamic`
+# policy rather than a host list; a static site cannot mint a per-response
+# nonce, so this keeps the hygiene directives and `upgrade-insecure-requests`
+# instead.
 #
-# 'unsafe-inline' is in script-src because the theme bootstrap in SEOHead.astro
-# and the JSON-LD blocks in JsonLd.astro are inline; 'unsafe-eval' because the
-# partner lists it among what its stack may need. connect-src stays open because
-# the analytics and flag-delivery hosts are per-environment build settings this
-# static file cannot know.
+# 'unsafe-inline' is in script-src because the theme bootstrap in SEOHead.astro,
+# the Consent Mode defaults in GoogleConsent.astro and the JSON-LD blocks in
+# JsonLd.astro are inline; 'unsafe-eval' because third-party creatives served
+# through the auction may use it, and a creative the policy blocks fails just
+# as silently. connect-src stays open because the analytics and flag-delivery
+# hosts are per-environment build settings this static file cannot know.
 #
 # The three headers under the policy are the rest of the baseline: nosniff stops
 # a response being executed as a type it did not declare, Referrer-Policy keeps
 # the path of the page a visitor is reading out of the request that fetches an
-# ad (the origin still goes, which is what the partner needs), and HSTS keeps
+# ad (the origin still goes, which is what AdSense needs), and HSTS keeps
 # this site off plain HTTP for a year. The HSTS is deliberately narrow: no
 # `includeSubDomains`, because sibling hosts (images.sleekdrops.com,
 # go.sleekdrops.com) are served by other configs this file knows nothing about
