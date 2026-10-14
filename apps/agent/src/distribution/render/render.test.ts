@@ -31,7 +31,7 @@ const HANDS_ON = 'We tested these headphones for three weeks on the 7:12 and the
 
 const DEK =
   'The noise floor drops 12 dB on the 7:12, and the $399 Bose is the one to buy under $400. That is the whole finding.';
-const HERO = 'https://storage.googleapis.com/images/heroes/quiet-commutes.png';
+const HERO = 'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet-commutes.png';
 /** The site the post links to: the article's own platform's publish target. */
 const SITE = { siteUrl: 'https://sleekdrops.com' };
 
@@ -70,7 +70,7 @@ function cardStub(): { renderCard: CardRenderer; uploadCard: CardUploader; keys:
     renderCard: async () => ({ data: Buffer.from('card-bytes'), mimeType: 'image/png' }),
     uploadCard: async (objectName) => {
       keys.push(objectName);
-      return `https://storage.googleapis.com/images/${objectName}`;
+      return `https://example.supabase.co/storage/v1/object/public/images/${objectName}`;
     },
     keys,
   };
@@ -253,7 +253,7 @@ test('a hero we did not make is replaced by a card, never uploaded', async () =>
     });
 
     assert.notEqual(payload.imageUrl, HERO, `a ${source} hero is not ours to sublicense`);
-    assert.equal(payload.imageUrl, 'https://storage.googleapis.com/images/social/quiet-commutes-facebook.png');
+    assert.equal(payload.imageUrl, 'https://example.supabase.co/storage/v1/object/public/images/social/quiet-commutes-facebook.png');
     assert.deepEqual(card.keys, ['social/quiet-commutes-facebook.png']);
     assert.equal(payload.imageSource, source, 'the provenance still travels, for the panel');
     assert.equal(payload.placement, 'first_comment');
@@ -291,7 +291,7 @@ test('an article with no hero at all still gets a card', async () => {
   );
 
   assert.equal(payload.imageSource, null, 'there is no hero to report a provenance for');
-  assert.equal(payload.imageUrl, 'https://storage.googleapis.com/images/social/quiet-commutes-facebook.png');
+  assert.equal(payload.imageUrl, 'https://example.supabase.co/storage/v1/object/public/images/social/quiet-commutes-facebook.png');
   assert.equal(payload.expected.ogImage, null, 'nothing to wait for on the live page');
 });
 

@@ -98,7 +98,7 @@ test('every agent goal is keyed by a real agent id', () => {
 
 test('the publish target names environment variables, never values', () => {
   assert.deepEqual(platform.publishTarget, {
-    d1DatabaseIdEnv: 'PEAKODDS_D1_DATABASE_ID',
+    contentDatabaseUrlEnv: 'PEAKODDS_CONTENT_DATABASE_URL',
     githubRepoEnv: 'PEAKODDS_GITHUB_REPO',
     siteUrlEnv: 'PEAKODDS_SITE_URL',
     rebuildHookEnv: 'PEAKODDS_REBUILD_HOOK_URL',

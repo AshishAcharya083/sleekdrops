@@ -28,7 +28,8 @@ export type TopicClass = 'racing';
  * the variable named here at publish time.
  */
 export interface PublishTargetRef {
-  d1DatabaseIdEnv: string;
+  /** Holds the Postgres connection string of the database with the platform's posts and affiliate_links tables. */
+  contentDatabaseUrlEnv: string;
   githubRepoEnv: string;
   siteUrlEnv: string;
   /** null = repository_dispatch to the repo (SleekDrops today). */

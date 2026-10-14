@@ -51,8 +51,8 @@ const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to 
 if (reachable) await migrate();
 
 const TITLE = 'The headphones for a quiet commute';
-const HERO = 'https://storage.googleapis.com/images/heroes/quiet.png';
-const CARD = 'https://storage.googleapis.com/images/social/quiet-facebook.png';
+const HERO = 'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet.png';
+const CARD = 'https://example.supabase.co/storage/v1/object/public/images/social/quiet-facebook.png';
 
 const articles: string[] = [];
 const connections: string[] = [];
@@ -164,7 +164,7 @@ async function article(): Promise<DistributableArticle> {
 async function queued(): Promise<{ item: DistributionItem; pageId: string; connectionId: string }> {
   const connection = await connect();
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
   const [row] = await q<{ id: string }>(
     'SELECT id FROM distribution_queue WHERE slug = $1 AND channel_connection_id = $2',
     [piece.slug, connection.id],

@@ -7,15 +7,15 @@
 // N published bodies so the n-gram and opening-line metrics have something to
 // measure against.
 //
-// D1 is the store. Published content already lives there (the website builds
-// from the same table), which means no mirror to keep in sync and, more
-// usefully, that every article published before the scanner existed - the ones
-// the AdSense reviewer actually flagged - is in the corpus from day one.
+// The content store is the store. Published content already lives there (the
+// website builds from the same table), which means no mirror to keep in sync
+// and, more usefully, that every article published before the scanner existed -
+// the ones the AdSense reviewer actually flagged - is in the corpus from day one.
 //
 // All the I/O lives here on purpose: detectSlop stays synchronous, pure and
 // offline so it can run on every review round.
-import { fetchPublishedBodies } from '../tools/d1.js';
-import { resolveD1Target } from '../platform/publishTarget.js';
+import { fetchPublishedBodies } from '../tools/contentStore.js';
+import { resolveContentTarget } from '../platform/publishTarget.js';
 import { sleekdropsSeed } from '../platform/sleekdrops/index.js';
 import type { CorpusArticle } from './slop.js';
 
@@ -47,7 +47,7 @@ export interface LoadCorpusOptions {
 /**
  * The most recently published bodies, newest first.
  *
- * Never throws. Missing D1 credentials, a failed query or an empty site all
+ * Never throws. An unset content database, a failed query or an empty site all
  * come back as `[]` with one warning, and the scan simply skips its
  * cross-corpus metrics - a review round must not fail because the corpus was
  * unreachable.
@@ -63,7 +63,7 @@ export async function loadPublishedCorpus(
     // SleekDrops' until the review stages pass their platform in. Read off the
     // seed rather than the registry: publish targets are not editable,
     // and the scan stays usable with no database to hand.
-    const rows = await fetchPublishedBodies(resolveD1Target(sleekdropsSeed.platform), capped, excludeSlug);
+    const rows = await fetchPublishedBodies(resolveContentTarget(sleekdropsSeed.platform), capped, excludeSlug);
     return rows
       .filter((row) => typeof row.body_md === 'string' && row.body_md.trim() !== '')
       .map((row) => ({

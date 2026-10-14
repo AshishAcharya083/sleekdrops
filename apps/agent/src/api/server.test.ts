@@ -8,7 +8,8 @@ process.env.DATABASE_URL = 'postgres://unused:unused@127.0.0.1:1/unreachable';
 process.env.ADMIN_TOKEN = 'test-admin-token';
 // Declared (empty) so a developer's own .env can't switch hero-image storage on
 // mid-test - dotenv leaves keys that already exist in the environment alone.
-process.env.GCS_IMAGES_BUCKET = '';
+process.env.SUPABASE_URL = '';
+process.env.SUPABASE_SERVICE_ROLE_KEY = '';
 
 const { createApp } = await import('./server.js');
 const { TRACE_HEADER } = await import('./trace.js');
@@ -34,7 +35,7 @@ function fixturePlatform(id: string, overrides: Partial<Platform> = {}): Platfor
     scoutQueries: [],
     agentGoals: {},
     publishTarget: {
-      d1DatabaseIdEnv: 'D1_DATABASE_ID',
+      contentDatabaseUrlEnv: 'DATABASE_URL',
       githubRepoEnv: 'GITHUB_REPO',
       siteUrlEnv: 'SITE_URL',
       rebuildHookEnv: null,
@@ -468,7 +469,7 @@ test('a real image is refused with an actionable message when storage is unconfi
   });
 
   assert.equal(res.status, 503);
-  assert.match(((await res.json()) as { error: string }).error, /GCS_IMAGES_BUCKET/);
+  assert.match(((await res.json()) as { error: string }).error, /SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY/);
 });
 
 test('a topic hero-image drop with no file part is refused', async () => {

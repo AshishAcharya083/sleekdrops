@@ -79,7 +79,9 @@ Editorial rules (non-negotiable):
     // Each agent's goal is still the one its own prompt states.
     agentGoals: {},
     publishTarget: {
-      d1DatabaseIdEnv: 'D1_DATABASE_ID',
+      // Its posts and affiliate_links live in the pipeline's own database
+      // (migration 019), so the content database is DATABASE_URL itself.
+      contentDatabaseUrlEnv: 'DATABASE_URL',
       githubRepoEnv: 'GITHUB_REPO',
       siteUrlEnv: 'SITE_URL',
       // The rebuild is a repository_dispatch to GITHUB_REPO, not a hook URL.

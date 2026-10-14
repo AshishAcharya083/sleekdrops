@@ -25,7 +25,7 @@ const SOURCE_LABEL: Record<string, string> = {
   'admin-settings': 'set here in Settings',
   'env-oauth-token': 'from CLAUDE_CODE_OAUTH_TOKEN',
   'env-api-key': 'from an API key in the environment',
-  'vertex-adc': 'via the Cloud Run service account (Vertex ADC)',
+  'vertex-adc': 'via a GCP service account (Vertex ADC)',
 };
 
 /**
@@ -139,8 +139,8 @@ function PipelineSettings({ onSaved }: { onSaved?: () => void }) {
           hero when none is usable, which is why that one stage is pinned here —
           plus every other stage when the toggle below says so. Goes through Google
           ADK, with Google Search grounding on the stages that verify facts. Empty
-          fields fall back to apps/agent/.env; on Cloud Run the key is optional —
-          the service account bills Vertex AI directly. Values are stored in the
+          fields fall back to apps/agent/.env; where a GCP service account runs the
+          agent (Vertex ADC) the key is optional. Values are stored in the
           platform database — set ADMIN_TOKEN if the API is reachable by others.
           {engines?.gemini.configured && (
             <>
@@ -155,7 +155,7 @@ function PipelineSettings({ onSaved }: { onSaved?: () => void }) {
           <label>AI Studio API key</label>
           <input
             type="password"
-            placeholder="(from .env GEMINI_API_KEY, or Vertex ADC on Cloud Run)"
+            placeholder="(from .env GEMINI_API_KEY, or Vertex ADC)"
             value={llm.gemini_api_key ?? ''}
             onChange={(e) =>
               setSettings({ ...settings, llm: { ...llm, gemini_api_key: e.target.value } })
@@ -252,7 +252,7 @@ function PipelineSettings({ onSaved }: { onSaved?: () => void }) {
         >
           <option value="approval">approval — human approves before publishing (recommended)</option>
           <option value="auto">auto — publish to the live site without approval</option>
-          <option value="draft">draft — write to D1 as draft, never dispatch</option>
+          <option value="draft">draft — write the post as a draft, never dispatch</option>
         </select>
 
         <label>Max revision rounds</label>

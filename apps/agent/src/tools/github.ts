@@ -1,4 +1,4 @@
-// Rebuilds a platform's website after the publisher writes to D1: a POST to
+// Rebuilds a platform's website after the publisher writes its content: a POST to
 // the platform's deploy hook when it has one, else the `content-updated`
 // repository dispatch to its repo (same contract the old pipeline used).
 import { config } from '../config.js';

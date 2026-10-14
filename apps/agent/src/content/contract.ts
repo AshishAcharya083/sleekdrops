@@ -209,7 +209,7 @@ export function defaultAuthorFor(category: string): AuthorProfile {
  * what kind of evidence it is, 'unknown' included: a source the researcher
  * could not place is shown as such rather than quietly promoted.
  *
- * `publisher` stays optional so the posts already in D1 keep validating; the
+ * `publisher` stays optional so the posts already published keep validating; the
  * assembler always writes one (sources.ts falls back to the hostname).
  */
 export const SOURCE_DATE_RE = /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/;
@@ -424,7 +424,7 @@ export type Frontmatter = z.infer<typeof frontmatterSchema>;
 
 export const ASIN_RE = /^[A-Z0-9]{10}$/;
 
-// regions_json rides through D1 → fetch-content.mjs → the /go/ resolver, which
+// regions_json rides through affiliate_links → fetch-content.mjs → the /go/ resolver, which
 // spreads it into the link entry. Structured keys (network/search/asins) drive
 // the region-aware Amazon builder; any other key is a per-region literal URL.
 export const affiliateRegionsSchema = z

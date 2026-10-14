@@ -1,10 +1,13 @@
-// A PeakOdds article can never reach SleekDrops: not its D1 database, not its
-// rebuild, not its site, not its Facebook Page. Run against a database of this
-// file's own, so the PeakOdds fixture platform and the gate rows it flips
-// cannot be seen by - or see - any other suite's.
+// A PeakOdds article can never reach SleekDrops: not its content database, not
+// its rebuild, not its site, not its Facebook Page. Run against a database of
+// this file's own, so the PeakOdds fixture platform and the gate rows it flips
+// cannot be seen by - or see - any other suite's. That database is also
+// SleekDrops' content store (its publish target names DATABASE_URL), and
+// PeakOdds gets a second scratch database as its own.
 //
 // Every outside call is answered by a stub that records where it was sent;
-// the assertions are about those destinations.
+// the assertions are about those destinations, and about which database each
+// post row landed in.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -31,26 +34,43 @@ const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to 
 const scratchName = `agent_publish_target_${randomUUID().replaceAll('-', '')}`;
 const scratchUrl = new URL(liveUrl || 'postgres://localhost/unused');
 scratchUrl.pathname = `/${scratchName}`;
+const peakoddsUrl = new URL(scratchUrl.href);
+peakoddsUrl.pathname = `/${scratchName}_peakodds`;
 if (reachable) {
   await onServer(liveUrl, `CREATE DATABASE "${scratchName}"`);
+  await onServer(liveUrl, `CREATE DATABASE "${scratchName}_peakodds"`);
+  // PeakOdds' own content tables, as its site would define them: the same two
+  // tables, with the event columns an event-bound preview writes.
+  await onServer(
+    peakoddsUrl.href,
+    `CREATE TABLE posts (
+       slug TEXT PRIMARY KEY, status TEXT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL,
+       post_type TEXT NOT NULL, author TEXT NOT NULL, pub_date DATE NOT NULL,
+       frontmatter_json JSONB NOT NULL, body_md TEXT NOT NULL,
+       event_starts_at TIMESTAMPTZ, odds_as_at TIMESTAMPTZ,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+     );
+     CREATE TABLE affiliate_links (
+       slug TEXT PRIMARY KEY, default_url TEXT NOT NULL, regions_json JSONB, note TEXT,
+       expires_at DATE,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+     )`,
+  );
   process.env.DATABASE_URL = scratchUrl.href;
 }
 
 const SLEEKDROPS_ENV = {
-  D1_DATABASE_ID: 'sleekdrops-d1',
   GITHUB_REPO: 'example/sleekdrops',
   SITE_URL: 'https://sleekdrops.example',
   GITHUB_TOKEN: 'test-github-token',
 };
 const PEAKODDS_ENV = {
-  PEAKODDS_D1_DATABASE_ID: 'peakodds-d1',
+  PEAKODDS_CONTENT_DATABASE_URL: peakoddsUrl.href,
   PEAKODDS_GITHUB_REPO: 'example/peakodds',
   PEAKODDS_SITE_URL: 'https://peakodds.example',
   PEAKODDS_REBUILD_HOOK_URL: 'https://hooks.example/peakodds-deploy-secret',
 };
 process.env.ADMIN_TOKEN = 'test-admin-token';
-process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
-process.env.CLOUDFLARE_D1_TOKEN = 'test-d1-token';
 Object.assign(process.env, SLEEKDROPS_ENV, PEAKODDS_ENV);
 
 const { pool, q, setSetting } = await import('../db/pool.js');
@@ -58,6 +78,7 @@ const { migrate } = await import('../db/migrate.js');
 const { PLATFORM_SEEDS, seedPlatforms } = await import('./profiles.js');
 const { sleekdropsSeed } = await import('./sleekdrops/index.js');
 const { runPublisher } = await import('../agents/publisher.js');
+const { contentPool, endContentPools } = await import('../tools/contentStore.js');
 const { claimNextItem, enqueuePublishedArticle } = await import('../distribution/queue.js');
 const { processItem } = await import('../distribution/worker.js');
 const { connectChannel, ChannelAdminError } = await import('../distribution/admin.js');
@@ -84,7 +105,7 @@ if (reachable) {
       name: 'PeakOdds',
       monetisation: 'none',
       publishTarget: {
-        d1DatabaseIdEnv: 'PEAKODDS_D1_DATABASE_ID',
+        contentDatabaseUrlEnv: 'PEAKODDS_CONTENT_DATABASE_URL',
         githubRepoEnv: 'PEAKODDS_GITHUB_REPO',
         siteUrlEnv: 'PEAKODDS_SITE_URL',
         rebuildHookEnv: 'PEAKODDS_REBUILD_HOOK_URL',
@@ -114,8 +135,12 @@ if (reachable) {
 
 after(async () => {
   globalThis.fetch = realFetch;
+  await endContentPools();
   await pool.end();
-  if (reachable) await onServer(liveUrl, `DROP DATABASE IF EXISTS "${scratchName}" WITH (FORCE)`);
+  if (reachable) {
+    await onServer(liveUrl, `DROP DATABASE IF EXISTS "${scratchName}" WITH (FORCE)`);
+    await onServer(liveUrl, `DROP DATABASE IF EXISTS "${scratchName}_peakodds" WITH (FORCE)`);
+  }
 });
 
 // ── Outside calls, recorded ────────────────────────────────────────────────
@@ -134,16 +159,24 @@ function recordCalls(): Sent[] {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     sent.push({ url, method: init?.method ?? 'GET', body: String(init?.body ?? '') });
-    if (url.includes('api.cloudflare.com')) {
-      return Response.json({ success: true, result: [{ results: [] }] });
-    }
     if (url.includes('api.github.com')) return new Response(null, { status: 204 });
     return Response.json({});
   }) as typeof fetch;
   return sent;
 }
 
-const d1Calls = (sent: Sent[]) => sent.filter((call) => call.url.includes('api.cloudflare.com'));
+/** The posts row for `slug` in SleekDrops' content store and in PeakOdds', if any. */
+async function postRows(slug: string): Promise<{ sleekdrops: number; peakodds: number }> {
+  const count = async (target: { contentDatabaseUrl: string }) =>
+    Number(
+      (await contentPool(target).query<{ n: string }>('SELECT count(*) n FROM posts WHERE slug = $1', [slug]))
+        .rows[0].n,
+    );
+  return {
+    sleekdrops: await count({ contentDatabaseUrl: scratchUrl.href }),
+    peakodds: await count({ contentDatabaseUrl: peakoddsUrl.href }),
+  };
+}
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -207,37 +240,32 @@ async function withEnv<T>(overrides: Record<string, string | undefined>, run: ()
 
 // ── Publishing ─────────────────────────────────────────────────────────────
 
-test("a PeakOdds article is written to PeakOdds' D1 and rebuilds PeakOdds' site only", { skip }, async () => {
+test("a PeakOdds article is written to PeakOdds' content database and rebuilds PeakOdds' site only", { skip }, async () => {
   const sent = recordCalls();
-  const result = await runPublisher(await article(PEAKODDS));
+  const piece = await article(PEAKODDS);
+  const result = await runPublisher(piece);
 
   assert.equal(result.dispatched, true);
-  const d1 = d1Calls(sent);
-  assert.ok(d1.length > 0);
-  for (const call of d1) {
-    assert.match(call.url, /\/d1\/database\/peakodds-d1\/query$/);
-    assert.ok(!call.url.includes(SLEEKDROPS_ENV.D1_DATABASE_ID), 'never the SleekDrops database');
-  }
-  const rebuilds = sent.filter((call) => !call.url.includes('api.cloudflare.com'));
+  assert.deepEqual(await postRows(piece.slug!), { sleekdrops: 0, peakodds: 1 }, 'never the SleekDrops database');
   assert.deepEqual(
-    rebuilds.map((call) => [call.method, call.url]),
+    sent.map((call) => [call.method, call.url]),
     [['POST', PEAKODDS_ENV.PEAKODDS_REBUILD_HOOK_URL]],
     "PeakOdds' own deploy hook, and no dispatch to the SleekDrops repo",
   );
 });
 
-test("a SleekDrops article still goes to SleekDrops' D1 and repository dispatch", { skip }, async () => {
+test("a SleekDrops article still goes to SleekDrops' content database and repository dispatch", { skip }, async () => {
   const sent = recordCalls();
-  await runPublisher(await article(SLEEKDROPS));
+  const piece = await article(SLEEKDROPS);
+  // SleekDrops' posts table has no event columns: a statement naming them
+  // would fail here rather than pass unnoticed.
+  await runPublisher(piece);
 
-  for (const call of d1Calls(sent)) assert.match(call.url, /\/d1\/database\/sleekdrops-d1\/query$/);
-  const rebuilds = sent.filter((call) => !call.url.includes('api.cloudflare.com'));
+  assert.deepEqual(await postRows(piece.slug!), { sleekdrops: 1, peakodds: 0 });
   assert.deepEqual(
-    rebuilds.map((call) => call.url),
+    sent.map((call) => call.url),
     ['https://api.github.com/repos/example/sleekdrops/dispatches'],
   );
-  const post = d1Calls(sent).find((call) => call.body.includes('INSERT INTO posts'))!;
-  assert.doesNotMatch(post.body, /event_starts_at|odds_as_at/, "SleekDrops' posts table has no event columns");
 });
 
 test('a missing PeakOdds variable fails the publish, naming it, with nothing sent anywhere', { skip }, async () => {
@@ -251,20 +279,28 @@ test('a missing PeakOdds variable fails the publish, naming it, with nothing sen
       });
     });
     assert.deepEqual(sent, [], `${name} missing: SleekDrops' values are never used instead`);
+    assert.deepEqual(await postRows(piece.slug!), { sleekdrops: 0, peakodds: 0 });
   }
 });
 
 test("a PeakOdds target pointing at SleekDrops' database or site is refused", { skip }, async () => {
   for (const [name, value] of [
-    ['PEAKODDS_D1_DATABASE_ID', SLEEKDROPS_ENV.D1_DATABASE_ID],
+    ['PEAKODDS_CONTENT_DATABASE_URL', scratchUrl.href],
     ['PEAKODDS_SITE_URL', `${SLEEKDROPS_ENV.SITE_URL}/`],
   ]) {
     const sent = recordCalls();
     const piece = await article(PEAKODDS);
     await withEnv({ [name]: value }, async () => {
-      await assert.rejects(runPublisher(piece), new RegExp(`${name} names the same .* as sleekdrops`));
+      await assert.rejects(
+        runPublisher(piece),
+        (err: unknown) =>
+          err instanceof Error &&
+          new RegExp(`${name} names the same .* as sleekdrops`).test(err.message) &&
+          !err.message.includes(scratchName),
+      );
     });
-    assert.deepEqual(sent, [], 'nothing was written while the targets collide');
+    assert.deepEqual(sent, [], 'nothing was sent while the targets collide');
+    assert.deepEqual(await postRows(piece.slug!), { sleekdrops: 0, peakodds: 0 }, 'and nothing was written');
   }
 });
 
@@ -279,25 +315,32 @@ test('an event-bound preview is refused after kick-off, naming the event time', 
       /refusing to publish: the event this piece previews started at 2026-09-26T04:30:00\.000Z/,
     );
   }
-  assert.deepEqual(sent, [], 'not a single D1 write after kick-off');
+  assert.deepEqual(sent, [], 'no rebuild after kick-off');
+  assert.deepEqual(await postRows(piece.slug!), { sleekdrops: 0, peakodds: 0 }, 'and not a single post write');
 });
 
-test('an event-bound preview before kick-off carries its event fields to D1', { skip }, async () => {
+test('an event-bound preview before kick-off carries its event fields to its post row', { skip }, async () => {
   const kickOff = new Date('2026-09-26T04:30:00.000Z');
   const oddsAsAt = new Date('2026-09-25T22:00:00.000Z');
-  const sent = recordCalls();
+  recordCalls();
   const piece = await article(PEAKODDS, { eventStartsAt: kickOff, oddsAsAt, editionId: 'global' });
 
   await runPublisher(piece, { now: () => new Date(kickOff.getTime() - 3_600_000) });
 
-  const post = JSON.parse(d1Calls(sent).find((call) => call.body.includes('INSERT INTO posts'))!.body) as {
-    sql: string;
-    params: unknown[];
-  };
-  assert.match(post.sql, /event_starts_at = excluded\.event_starts_at/);
-  assert.match(post.sql, /odds_as_at = excluded\.odds_as_at/);
-  assert.ok(post.params.includes('2026-09-26T04:30:00.000Z'));
-  assert.ok(post.params.includes('2026-09-25T22:00:00.000Z'));
+  const { rows } = await contentPool({ contentDatabaseUrl: peakoddsUrl.href }).query<{
+    event_starts_at: Date;
+    odds_as_at: Date;
+  }>('SELECT event_starts_at, odds_as_at FROM posts WHERE slug = $1', [piece.slug]);
+  assert.equal(rows[0].event_starts_at.toISOString(), '2026-09-26T04:30:00.000Z');
+  assert.equal(rows[0].odds_as_at.toISOString(), '2026-09-25T22:00:00.000Z');
+
+  // A corrected kick-off reaches the row on the next pass, not only the first.
+  await q("UPDATE articles SET event_starts_at = '2026-09-26T05:00:00Z' WHERE id = $1", [piece.id]);
+  await runPublisher(piece, { now: () => new Date(kickOff.getTime() - 3_600_000) });
+  const { rows: again } = await contentPool({ contentDatabaseUrl: peakoddsUrl.href }).query<{
+    event_starts_at: Date;
+  }>('SELECT event_starts_at FROM posts WHERE slug = $1', [piece.slug]);
+  assert.equal(again[0].event_starts_at.toISOString(), '2026-09-26T05:00:00.000Z');
 });
 
 test('a corrected kick-off time rebuilds the site even when the text did not change', { skip }, async () => {
@@ -319,12 +362,12 @@ test('PeakOdds distribution is off until its gate row says otherwise', { skip },
   await q("DELETE FROM settings WHERE platform_id = $1 AND key = 'distribution_enabled'", [PEAKODDS]);
   const piece = await article(PEAKODDS);
 
-  const outcome = await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  const outcome = await enqueuePublishedArticle(piece, { postStatus: 'published' });
   assert.equal(outcome.skipped, 'disabled', 'no gate row means off');
   assert.deepEqual(await queuedFor(piece.id), []);
 
   await setSetting(PEAKODDS, 'distribution_enabled', false);
-  assert.equal((await enqueuePublishedArticle(piece, { d1Status: 'published' })).skipped, 'disabled');
+  assert.equal((await enqueuePublishedArticle(piece, { postStatus: 'published' })).skipped, 'disabled');
 });
 
 test("a platform's article is only ever queued for that platform's channels", { skip }, async () => {
@@ -334,13 +377,13 @@ test("a platform's article is only ever queued for that platform's channels", { 
   await setSetting(PEAKODDS, 'distribution_enabled', true);
   try {
     const peakoddsPiece = await article(PEAKODDS);
-    await enqueuePublishedArticle(peakoddsPiece, { d1Status: 'published' });
+    await enqueuePublishedArticle(peakoddsPiece, { postStatus: 'published' });
     const peakoddsQueue = (await queuedFor(peakoddsPiece.id)).map((row) => row.channel_connection_id);
     assert.ok(peakoddsQueue.includes(peakoddsPage.id));
     assert.ok(!peakoddsQueue.includes(sleekdropsPage.id), "never SleekDrops' Page");
 
     const sleekdropsPiece = await article(SLEEKDROPS);
-    await enqueuePublishedArticle(sleekdropsPiece, { d1Status: 'published' });
+    await enqueuePublishedArticle(sleekdropsPiece, { postStatus: 'published' });
     const sleekdropsQueue = (await queuedFor(sleekdropsPiece.id)).map((row) => row.channel_connection_id);
     assert.ok(sleekdropsQueue.includes(sleekdropsPage.id));
     assert.ok(!sleekdropsQueue.includes(peakoddsPage.id));
@@ -361,7 +404,7 @@ test('enqueue reads the platform off the article row, not off what it was handed
   const sleekdropsPage = await channel(SLEEKDROPS, provider);
   const piece = await article(PEAKODDS);
   await assert.rejects(
-    enqueuePublishedArticle({ ...piece, platform_id: SLEEKDROPS }, { d1Status: 'published' }),
+    enqueuePublishedArticle({ ...piece, platform_id: SLEEKDROPS }, { postStatus: 'published' }),
     /belongs to peakodds, not sleekdrops/,
   );
   assert.ok(!(await queuedFor(piece.id)).some((row) => row.channel_connection_id === sleekdropsPage.id));

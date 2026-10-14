@@ -1,7 +1,7 @@
 // The readiness gate: an item is handed to a provider only once the page it
 // points at is actually live and serving the right card.
 //
-// The site is a static build. `runPublisher` writes the post to D1 and asks
+// The site is a static build. `runPublisher` writes the post row and asks
 // GitHub to rebuild, and until that rebuild finishes the slug 404s - so a post
 // sent the instant the queue row appears sends an audience to a missing page,
 // and the link preview a network caches from that first fetch is the one it
