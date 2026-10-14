@@ -1,7 +1,9 @@
-# Local infrastructure for the SleekDrops agent platform (apps/agent).
-# PostgreSQL holds pipeline state: topics, articles, agent sessions, usage.
-# Published content still lives in Cloudflare D1 — Postgres is operational
-# state only, D1 is the publish target the website builds from.
+# Local infrastructure for the SleekDrops agent platform (apps/agent): a
+# throwaway Postgres for development. It holds what the SleekDrops Supabase
+# project holds in production - pipeline state (topics, articles, agent
+# sessions, usage) and the posts + affiliate_links tables a publish writes - so
+# publishing against it never reaches the live site. ./up.sh starts it only when
+# apps/agent/.env points DATABASE_URL here.
 services:
   postgres:
     image: postgres:16-alpine
