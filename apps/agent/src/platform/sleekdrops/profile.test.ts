@@ -61,7 +61,7 @@ test('one Australian edition, monetised through Amazon, blocking nothing', () =>
 
 test('the publish target names environment variables, and rebuilds by repository dispatch', () => {
   assert.deepEqual(platform.publishTarget, {
-    d1DatabaseIdEnv: 'D1_DATABASE_ID',
+    contentDatabaseUrlEnv: 'DATABASE_URL',
     githubRepoEnv: 'GITHUB_REPO',
     siteUrlEnv: 'SITE_URL',
     rebuildHookEnv: null,

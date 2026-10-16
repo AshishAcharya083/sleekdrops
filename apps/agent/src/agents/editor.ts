@@ -85,8 +85,8 @@ export function issuesForEditor(
 /**
  * The voice scan as the edit pass is shown it: the same scan the reviewer runs,
  * over the same corpus, so every finding the review could have failed on is one
- * the editor can act on. `corpus` is empty when D1 is unreachable, which drops
- * the cross-corpus metrics and nothing else.
+ * the editor can act on. `corpus` is empty when the content store is
+ * unreachable, which drops the cross-corpus metrics and nothing else.
  */
 export function voiceScanBrief(draft: string, corpus: CorpusDocument[]): string {
   return formatSlopReport(detectSlop(draft, { corpus }));

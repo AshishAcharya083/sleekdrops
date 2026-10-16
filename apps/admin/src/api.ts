@@ -539,9 +539,10 @@ export function setToken(token: string): void {
 
 /**
  * Where the agent API lives. Empty = same origin (the agent server serves
- * this SPA locally). The Cloudflare Pages build bakes in the Cloud Run URL
- * via VITE_API_BASE as the default; the header field (localStorage) can
- * still override it, e.g. with http://localhost:8787 for a local platform.
+ * this SPA locally). The Cloudflare Pages build bakes in a default via
+ * VITE_API_BASE (the AGENT_API_BASE repository variable, else
+ * http://localhost:8787 for the platform running on the operator's machine);
+ * the header field (localStorage) can still override it.
  */
 export function getApiBase(): string {
   const stored = localStorage.getItem('sleekdrops_api_base');

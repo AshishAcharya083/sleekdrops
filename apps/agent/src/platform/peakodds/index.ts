@@ -189,7 +189,7 @@ because someone paid for it.`,
         'Use a neutral sports image with no bookmaker branding, odds boards or anyone who could be under 18.',
     },
     publishTarget: {
-      d1DatabaseIdEnv: 'PEAKODDS_D1_DATABASE_ID',
+      contentDatabaseUrlEnv: 'PEAKODDS_CONTENT_DATABASE_URL',
       githubRepoEnv: 'PEAKODDS_GITHUB_REPO',
       siteUrlEnv: 'PEAKODDS_SITE_URL',
       rebuildHookEnv: 'PEAKODDS_REBUILD_HOOK_URL',

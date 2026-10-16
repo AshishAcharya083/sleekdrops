@@ -1,12 +1,12 @@
 // Topic Scout — finds trending topics we have NOT covered yet. Sweeps the
-// live web via Tavily, cross-checks against published D1 posts and every
+// live web via Tavily, cross-checks against published posts and every
 // previous suggestion, and writes new suggestions for the admin to approve.
 //
 // One run scouts one edition of one platform: the platform's own queries
 // first, then the edition's, and every suggestion is filed against both.
 import { q } from '../db/pool.js';
 import { chatJson, type ChatOptions, requireKeys, UsageTracker } from '../llm/index.js';
-import { fetchPublishedPosts } from '../tools/d1.js';
+import { fetchPublishedPosts } from '../tools/contentStore.js';
 import { formatSearches, tavilySearchMany } from '../tools/tavily.js';
 import { parseOffsetTimestamp, slugify } from '../content/contract.js';
 import { getPostTypes } from '../content/catalogue.js';
@@ -20,7 +20,7 @@ import {
   withAgentGoal,
 } from './context.js';
 import type { TopicSuggestion } from '../pipeline/types.js';
-import { resolveD1Target } from '../platform/publishTarget.js';
+import { resolveContentTarget } from '../platform/publishTarget.js';
 import { blockedTopicReason } from '../platform/topicRules.js';
 
 function normalizeTitle(title: string): string {
@@ -91,7 +91,7 @@ export async function runTopicScout(
   // alike).
   const [published, previous] = await Promise.all([
     Promise.resolve(platform)
-      .then(resolveD1Target)
+      .then(resolveContentTarget)
       .then(fetchPublishedPosts)
       .catch(() => [] as Array<{ slug: string; title: string }>),
     q<{ title: string }>(

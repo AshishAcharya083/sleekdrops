@@ -14,13 +14,18 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// No search, no D1 and no image upload: every external read fails fast and the
-// agents fall through to their empty-evidence paths, which is deterministic.
+// No search, no published content and no image upload: every external read
+// fails fast and the agents fall through to their empty-evidence paths, which
+// is deterministic. SleekDrops' content store is DATABASE_URL, so that is the
+// variable pinned empty - declared rather than deleted, so a developer's own
+// .env cannot fill it back in (dotenv leaves keys that already exist alone).
+// Otherwise the published corpus would be whatever posts other suites running
+// beside this one had just written. The one table read that remains, the
+// scout's topics, is answered by a stub below.
 delete process.env.TAVILY_API_KEY;
-delete process.env.CLOUDFLARE_ACCOUNT_ID;
-delete process.env.CLOUDFLARE_D1_TOKEN;
-delete process.env.D1_DATABASE_ID;
-process.env.GCS_IMAGES_BUCKET = 'prompt-snapshot-bucket';
+process.env.DATABASE_URL = '';
+process.env.SUPABASE_URL = 'https://prompt-snapshot.supabase.co';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'prompt-snapshot-key';
 
 const { UsageTracker } = await import('../llm/index.js');
 const { withModelStub } = await import('../llm/modelStub.js');

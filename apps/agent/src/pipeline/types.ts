@@ -718,7 +718,7 @@ export interface AffiliateLinkRow {
    * is deterministic, so the row for this slug may already belong to another
    * article that resolved it properly. The publisher therefore only inserts a
    * healed row where the slug is still free - a guess never overwrites a
-   * dossier-backed destination. Pipeline-side only: D1 has no such column.
+   * dossier-backed destination. Pipeline-side only: affiliate_links has no such column.
    */
   healed?: boolean;
   /**
@@ -727,7 +727,7 @@ export interface AffiliateLinkRow {
    * chose this URL, which is why it may point outside the Amazon marketplaces
    * the pipeline is allowed to build destinations for on its own.
    *
-   * Pipeline-side only, like `healed`: D1 has no such column.
+   * Pipeline-side only, like `healed`: affiliate_links has no such column.
    */
   manual?: boolean;
 }

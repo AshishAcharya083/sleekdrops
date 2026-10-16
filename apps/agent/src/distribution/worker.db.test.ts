@@ -50,7 +50,7 @@ after(async () => {
 });
 
 const TITLE = 'The headphones for a quiet commute';
-const HERO = 'https://storage.googleapis.com/images/heroes/quiet.png';
+const HERO = 'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet.png';
 
 /** The page a finished rebuild serves, as apps/web's SEOHead renders it. */
 const livePage = {
@@ -134,7 +134,7 @@ async function claimOwn(provider: string, slug: string): Promise<DistributionIte
 async function queued(provider: string): Promise<DistributionItem> {
   await connect(provider);
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
   const item = await claimOwn(provider, piece.slug!);
   assert.ok(item, 'the item was queued and due');
   return item;
@@ -297,7 +297,7 @@ test('a token that lives only in settings is redacted too', { skip }, async () =
   });
   await connect(provider.name, ref);
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   await storeCredential('sleekdrops', ref, secret);
   try {
@@ -347,7 +347,7 @@ test('a channel whose secret is configured nowhere stops asking', { skip }, asyn
   const provider = stub(async () => ({ remotePostId: 'never' }));
   const connection = await connect(provider.name, 'a-secret-nobody-set');
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
   const item = (await claimOwn(provider.name, piece.slug!))!;
 
   assert.equal(await processItem(item, { fetchPage: async () => livePage }), 'blocked');
@@ -370,7 +370,7 @@ test('a token pasted into settings wins over the environment', { skip }, async (
   });
   await connect(provider.name, ref);
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   await storeCredential('sleekdrops', ref, 'rotated-token-value');
   try {
@@ -392,7 +392,7 @@ test('one tick claims, gates and posts without any argument but the registry', {
   });
   await connect(provider.name);
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   assert.ok(registeredProviders().includes(provider.name), 'the loop finds its adapters here');
   const outcomes = await distributionTick({

@@ -7,7 +7,7 @@
 // (or hostile) file can't be served from our own domain as a hero image. SVG is
 // not on the list precisely because it can carry script.
 import { randomBytes } from 'node:crypto';
-import { uploadPublicImage } from './gcs.js';
+import { uploadPublicImage } from './storage.js';
 
 export const MAX_HERO_IMAGE_BYTES = 10 * 1024 * 1024;
 

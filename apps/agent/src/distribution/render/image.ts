@@ -16,7 +16,7 @@
 //      so the link preview carries the post instead of nothing carrying it
 import { createLogger } from '../../lib/log.js';
 import { generateImage } from '../../llm/genai.js';
-import { gcsConfigured, uploadPublicImage } from '../../tools/gcs.js';
+import { storageConfigured, uploadPublicImage } from '../../tools/storage.js';
 import type { DistributableArticle, HeroImageSource, LinkPlacement } from '../types.js';
 
 const log = createLogger('distribution');
@@ -103,8 +103,8 @@ export async function resolveImage(
   const slug = article.slug ?? article.id;
   // Nothing to upload to: skip the generation rather than pay for an image
   // that has nowhere to live.
-  if (!deps.uploadCard && !gcsConfigured()) {
-    log.warn('no social card rendered; GCS is not configured', { slug, channel });
+  if (!deps.uploadCard && !storageConfigured()) {
+    log.warn('no social card rendered; Supabase Storage is not configured', { slug, channel });
     return { imageUrl: null, imageSource, strategy: 'none', placement: 'in_body' };
   }
 

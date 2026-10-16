@@ -12,7 +12,7 @@ const devteamSink = analyticsEnv().key !== '';
 const meta = buildMeta({
   title: 'Privacy policy',
   description:
-    'How SleekDrops handles your data: anonymous analytics you can switch off, advertising consent handled by our advertising partner, minimal first-party storage, affiliate disclosure, and no sale of personal data.',
+    'How SleekDrops handles your data: anonymous analytics you can switch off, advertising consent handled by our advertising partners, minimal first-party storage, affiliate disclosure, and no sale of personal data.',
   pathname: '/privacy',
 });
 ---
@@ -20,11 +20,12 @@ const meta = buildMeta({
   {...meta}
   schema={buildCategorySchema('Privacy policy', '/privacy', meta.description)}
   screen="privacy"
+  allowAdvertising={false}
 >
   <LegalLayout
     eyebrow="Legal"
     titleHtml="Privacy <em>policy</em>."
-    updated="September 28, 2026"
+    updated="October 16, 2026"
     toc={[
       { href: '#summary',      label: 'Plain summary' },
       { href: '#scope',        label: 'Scope of this policy' },
@@ -46,7 +47,7 @@ const meta = buildMeta({
   >
     <div class="summary" id="summary">
       <strong>Plain summary</strong>
-      We host on Cloudflare and keep browser storage to a minimum. Anonymous, aggregate analytics is on by default, and you can switch it off at any time under <strong>Privacy preferences</strong> in the footer. Our advertising partner, Mediavine, manages advertising consent through its own consent notice where the law requires one. Most outbound product links are affiliate links, which may earn us a small commission at no extra cost to you.
+      We host on Cloudflare and keep browser storage to a minimum. Anonymous, aggregate analytics is on by default, and you can switch it off at any time under <strong>Privacy preferences</strong> in the footer. Where the law requires it, our advertising partners ask for your advertising consent themselves: Google through its certified consent platform, and Mediavine through its own consent notice. Most outbound product links are affiliate links, which may earn us a small commission at no extra cost to you.
     </div>
 
     <h2 id="scope">Scope of this <em>policy</em></h2>
@@ -71,7 +72,7 @@ const meta = buildMeta({
       <li>Respond to messages sent to our published email addresses;</li>
       <li>Comply with legal obligations and prevent fraud or abuse.</li>
     </ul>
-    <p>We do not use your data for automated decision-making, sell it to data brokers or train AI models on it. Our advertising partner may personalise ads only where your consent choices permit it; see <a href="#ads">Advertising partners</a>.</p>
+    <p>We do not use your data for automated decision-making, sell it to data brokers or train AI models on it. Our advertising partners, Google and Mediavine, may personalise ads only where your consent choices permit it; see <a href="#ads">Advertising partners</a>.</p>
 
     <h2 id="cookies">Cookies &amp; <em>tracking</em></h2>
     <p>We use cookies and similar technologies, including local and session storage on your device. With analytics switched off we store only two first-party items besides your privacy choice (below), and neither of them is a cookie:</p>
@@ -86,7 +87,7 @@ const meta = buildMeta({
       <li><code>sd-exp</code> in browser local storage, which records only which version of a page layout or wording you were shown so we can compare them in aggregate.</li>
     </ul>
     <p>These items exist only to make the anonymous analytics countable and are not used for advertising or cross-site tracking. Switching analytics off under <strong>Privacy preferences</strong> deletes <code>sd_sid</code>, <code>sd-exp</code> and Google Analytics' <code>_ga</code> cookies immediately, sends an updated denied signal through Google Consent Mode v2 and stops further measurement.</p>
-    <p>Amazon may set its own cookies on <strong>the destination retailer's domain</strong> after you follow an affiliate link. Our advertising partner, Mediavine, sets cookies and similar technologies of its own to serve and measure advertising, and shows a consent notice where the law requires one; what it collects and how to opt out is set out under <a href="#ads">Advertising partners</a>.</p>
+    <p>Amazon may set its own cookies on <strong>the destination retailer's domain</strong> after you follow an affiliate link. Google AdSense uses its own certified consent platform to collect and honour advertising choices where required. Its message provides controls for personalised advertising, non-personalised advertising and consent withdrawal. Mediavine, our other advertising partner, sets cookies and similar technologies of its own to serve and measure advertising, and shows its own consent notice where the law requires one; what it collects and how to opt out is set out under <a href="#ads">Advertising partners</a>.</p>
 
     <h2 id="affiliate">Affiliate <em>disclosure</em></h2>
     <p>In accordance with the United States Federal Trade Commission's 16 CFR Part 255 ("Guides Concerning the Use of Endorsements and Testimonials in Advertising"), we disclose the following:</p>
@@ -97,7 +98,12 @@ const meta = buildMeta({
     <p>For full details on how we choose what to link to, how we research, and how affiliate links are labelled, see the <a href="/disclaimer">Affiliate disclaimer</a>.</p>
 
     <h2 id="ads">Advertising <em>partners</em></h2>
-    <p>SleekDrops works with <strong>Journey by Mediavine</strong> to serve the display advertising on this site, and with no other programmatic advertising network. Mediavine's own notice follows, reproduced as it requires. The consent notice it describes is shown where the law requires one, and the "Update Privacy Settings" and "Do Not Sell or Share My Information" controls it refers to are added to the foot of the page by Mediavine where they apply.</p>
+    <p>SleekDrops works with two advertising partners, Google AdSense and Journey by Mediavine. Each asks for advertising consent through its own notice where the law requires one - for Google, the Google-certified consent message in the EEA, UK and Switzerland - and we will update this policy before adding another network:</p>
+    <ul>
+      <li><strong>Google AdSense</strong> (USA / global) — uses cookies and similar technologies to serve, measure and protect advertising. Depending on your consent choices, ads may be personalised or non-personalised. You can review Google's practices in its <a href="https://policies.google.com/privacy" rel="noopener nofollow" target="_blank">privacy policy</a> and manage personalisation in <a href="https://myadcenter.google.com/" rel="noopener nofollow" target="_blank">My Ad Center</a>.</li>
+      <li><strong>Journey by Mediavine</strong> (USA / global) — serves and measures display advertising, and is an independent controller of what it collects. Its own notice follows below, reproduced as Mediavine requires; the "Update Privacy Settings" and "Do Not Sell or Share My Information" controls it refers to are added to the foot of the page by Mediavine where they apply.</li>
+    </ul>
+    <p>The publisher tag is present so Google's consent platform can display before an ad request. Google then applies the consent choices to storage and ad serving. The privacy-policy page itself contains no AdSense publisher tag or consent-message tag.</p>
 
     <div class="mediavine-privacy-notice">
       <h2>Mediavine Advertising Privacy Notice v. 1.2</h2>
@@ -178,7 +184,7 @@ const meta = buildMeta({
       {devteamSink && <li><strong>DevTeam Analytics</strong> - anonymous product analytics for the non-production preview. The live sleekdrops.com build blocks this sink.</li>}
       <li><strong>Google Analytics 4</strong> (USA / global) — aggregate traffic measurement, on by default and switched off under <strong>Privacy preferences</strong>. We send page paths rather than full URLs so query strings never reach Google. Privacy policy: <a href="https://policies.google.com/privacy" rel="noopener nofollow" target="_blank">policies.google.com/privacy</a>.</li>
       <li><strong>Amazon Associates</strong> — an affiliate network and independent controller that may receive limited information, such as a referring URL and cookie ID, after you follow an affiliate link to Amazon.</li>
-      <li><strong>Mediavine</strong> (USA / global) — our advertising partner, which serves and measures the display advertising on this site and is an independent controller of what it collects; see <a href="#ads">Advertising partners</a> for its notice, its partners and the opt-out tools it provides.</li>
+      <li><strong>Mediavine</strong> (USA / global) — one of our two advertising partners, which serves and measures display advertising through Journey by Mediavine and is an independent controller of what it collects; see <a href="#ads">Advertising partners</a> for its notice, its partners and the opt-out tools it provides.</li>
     </ul>
 
     <h2 id="retention">Data <em>retention</em></h2>
@@ -221,7 +227,7 @@ const meta = buildMeta({
     <p>We do not sell personal information in the traditional sense. See <a href="#do-not-sell">Do Not Sell or Share</a> below for details on what constitutes a "sale" under the CPRA and how to opt out.</p>
 
     <h2 id="do-not-sell">Do Not Sell or Share My <em>Personal Information</em></h2>
-    <p>SleekDrops does not sell your personal information for monetary consideration. Some laws may treat personalised-advertising data as a “share.” You can decline personalised advertising through Mediavine's consent notice where it is shown, through the opt-out tools listed in its notice above, or with a Global Privacy Control signal; and you can switch off our separate analytics category under <strong>Privacy preferences</strong>.</p>
+    <p>SleekDrops does not sell your personal information for monetary consideration. Some laws may treat personalised-advertising data as a “share.” You can decline personalised advertising in Google's consent message or My Ad Center, through Mediavine's consent notice where it is shown or the opt-out tools listed in its notice above, or with a Global Privacy Control signal; and you can disable our separate analytics category under <strong>Privacy preferences</strong>.</p>
     <p>To opt out of any such sharing, or to exercise any other privacy right, email <a href="mailto:privacy@sleekdrops.com">privacy@sleekdrops.com</a> with the subject line "Privacy Request." We honour the Global Privacy Control (GPC) signal where technically feasible.</p>
 
     <h2 id="changes">Changes to this <em>policy</em></h2>

@@ -24,7 +24,7 @@ const PAGE = 'https://sleekdrops.com/blog/quiet-commutes';
 
 const expected: RenderedPayload['expected'] = {
   ogTitle: 'The headphones for a quiet commute',
-  ogImage: 'https://storage.googleapis.com/images/heroes/quiet-commutes.png',
+  ogImage: 'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet-commutes.png',
 };
 
 /** The tags apps/web's SEOHead actually renders, in its own order. */
@@ -69,7 +69,7 @@ test('the hero the post was rendered against has to be the hero the page serves'
   assert.match(missing.ready ? '' : missing.reason, /no og:image/);
 
   const other = evaluateReadiness(
-    { status: 200, body: page({ image: 'https://storage.googleapis.com/images/heroes/old.png' }) },
+    { status: 200, body: page({ image: 'https://example.supabase.co/storage/v1/object/public/images/heroes/old.png' }) },
     expected,
     PAGE,
   );

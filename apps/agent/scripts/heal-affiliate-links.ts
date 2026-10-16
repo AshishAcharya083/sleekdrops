@@ -1,4 +1,4 @@
-// One-off migration: rewrite every affiliate_links row in D1 into the
+// One-off migration: rewrite every SleekDrops affiliate_links row into the
 // region-aware Amazon shape the /go/ resolver now understands:
 //   regions_json = { network:'amazon', search:<term>, asins?:{ au:'B0..' } }
 //
@@ -12,8 +12,11 @@
 //         pnpm tsx scripts/heal-affiliate-links.ts --force   # re-verify healed rows too
 import { AMAZON_MARKETPLACES, amazonSearchUrl, parseAmazonUrl } from '../src/content/contract.js';
 import type { AmazonRegion } from '../src/content/contract.js';
+import { pool } from '../src/db/pool.js';
+import { resolveContentTarget } from '../src/platform/publishTarget.js';
+import { sleekdropsSeed } from '../src/platform/sleekdrops/index.js';
 import { verifyAmazonProductUrl } from '../src/tools/amazon.js';
-import { d1Query } from '../src/tools/d1.js';
+import { contentQuery } from '../src/tools/contentStore.js';
 
 const DRY = process.argv.includes('--dry');
 const FORCE = process.argv.includes('--force');
@@ -21,9 +24,11 @@ const FORCE = process.argv.includes('--force');
 interface Row {
   slug: string;
   default_url: string;
-  regions_json: string | null;
+  regions_json: Record<string, unknown> | null;
   note: string | null;
 }
+
+const target = resolveContentTarget(sleekdropsSeed.platform);
 
 /** Product search term from the note ("<product>, Amazon …") or the slug. */
 function searchTermFor(row: Row): string {
@@ -38,19 +43,15 @@ function usedBy(row: Row): string | null {
   return m ? m[1] : null;
 }
 
-const rows = await d1Query<Row>(
+const rows = await contentQuery<Row>(
+  target,
   'SELECT slug, default_url, regions_json, note FROM affiliate_links ORDER BY slug',
 );
-console.log(`${rows.length} affiliate link row(s) in D1${DRY ? ' — DRY RUN' : ''}\n`);
+console.log(`${rows.length} affiliate link row(s)${DRY ? ' — DRY RUN' : ''}\n`);
 
 let healed = 0;
 for (const row of rows) {
-  let regions: Record<string, unknown> = {};
-  try {
-    regions = row.regions_json ? JSON.parse(row.regions_json) : {};
-  } catch {
-    /* malformed → rebuild from scratch */
-  }
+  const regions: Record<string, unknown> = row.regions_json ?? {};
   if (regions.network === 'amazon' && !FORCE) {
     console.log(`  = ${row.slug}: already region-aware, skipping (--force to re-verify)`);
     continue;
@@ -108,10 +109,11 @@ for (const row of rows) {
   );
 
   if (!DRY) {
-    await d1Query(
+    await contentQuery(
+      target,
       `UPDATE affiliate_links
-       SET default_url = ?1, regions_json = ?2, note = ?3, updated_at = datetime('now')
-       WHERE slug = ?4`,
+       SET default_url = $1, regions_json = $2::jsonb, note = $3, updated_at = now()
+       WHERE slug = $4`,
       [next.default_url, next.regions_json, next.note, row.slug],
     );
   }
@@ -125,3 +127,5 @@ if (!DRY && healed > 0) {
       'trigger a site rebuild (push to develop/main or content-updated dispatch) to serve the healed rows.',
   );
 }
+
+await pool.end();

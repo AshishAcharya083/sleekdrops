@@ -61,14 +61,14 @@ test('an operator-dropped hero image lands in frontmatter with its alt text', as
   const { frontmatter } = await runAssembler(
     ctx,
     article({
-      hero_image_url: 'https://storage.googleapis.com/sleekdrops-images/heroes/uploads/article-x-ab12cd34.jpg',
+      hero_image_url: 'https://example.supabase.co/storage/v1/object/public/sleekdrops-images/heroes/uploads/article-x-ab12cd34.jpg',
       hero_alt: 'Ninja air fryer on a kitchen bench',
     }),
   );
 
   assert.equal(
     frontmatter.heroImage,
-    'https://storage.googleapis.com/sleekdrops-images/heroes/uploads/article-x-ab12cd34.jpg',
+    'https://example.supabase.co/storage/v1/object/public/sleekdrops-images/heroes/uploads/article-x-ab12cd34.jpg',
   );
   assert.equal(frontmatter.heroAlt, 'Ninja air fryer on a kitchen bench');
 });
@@ -77,23 +77,23 @@ test('it outranks an image the agent found on an earlier pass', async () => {
   const { frontmatter } = await runAssembler(
     ctx,
     article({
-      hero_image_url: 'https://storage.googleapis.com/bucket/mine.jpg',
+      hero_image_url: 'https://example.supabase.co/storage/v1/object/public/bucket/mine.jpg',
       hero_alt: 'Mine',
-      frontmatter: { heroImage: 'https://storage.googleapis.com/bucket/agent-found.jpg', heroAlt: 'Theirs' },
+      frontmatter: { heroImage: 'https://example.supabase.co/storage/v1/object/public/bucket/agent-found.jpg', heroAlt: 'Theirs' },
     }),
   );
 
-  assert.equal(frontmatter.heroImage, 'https://storage.googleapis.com/bucket/mine.jpg');
+  assert.equal(frontmatter.heroImage, 'https://example.supabase.co/storage/v1/object/public/bucket/mine.jpg');
   assert.equal(frontmatter.heroAlt, 'Mine');
 });
 
 test('without one, an image the agent already found is carried through re-assembly', async () => {
   const { frontmatter } = await runAssembler(
     ctx,
-    article({ frontmatter: { heroImage: 'https://storage.googleapis.com/bucket/agent-found.jpg', heroAlt: 'Theirs' } }),
+    article({ frontmatter: { heroImage: 'https://example.supabase.co/storage/v1/object/public/bucket/agent-found.jpg', heroAlt: 'Theirs' } }),
   );
 
-  assert.equal(frontmatter.heroImage, 'https://storage.googleapis.com/bucket/agent-found.jpg');
+  assert.equal(frontmatter.heroImage, 'https://example.supabase.co/storage/v1/object/public/bucket/agent-found.jpg');
   assert.equal(frontmatter.heroAlt, 'Theirs');
 });
 
@@ -102,10 +102,10 @@ test('an operator image with no alt text leaves heroAlt off entirely', async () 
   // string, and a null would fail the site build.
   const { frontmatter } = await runAssembler(
     ctx,
-    article({ hero_image_url: 'https://storage.googleapis.com/bucket/mine.jpg', hero_alt: null }),
+    article({ hero_image_url: 'https://example.supabase.co/storage/v1/object/public/bucket/mine.jpg', hero_alt: null }),
   );
 
-  assert.equal(frontmatter.heroImage, 'https://storage.googleapis.com/bucket/mine.jpg');
+  assert.equal(frontmatter.heroImage, 'https://example.supabase.co/storage/v1/object/public/bucket/mine.jpg');
   assert.equal('heroAlt' in frontmatter, false);
 });
 
@@ -709,7 +709,7 @@ test('a piece with no product in it carries no review-unit disclosure', async ()
 });
 
 test('a launch link that is not a web URL is dropped, and the article still assembles', async () => {
-  // The dossier in D1 may have been filed before the researcher gated this
+  // The dossier on file may have been filed before the researcher gated this
   // field, and the launch notice renders it as an outbound link - so the
   // assembler checks it again rather than failing the whole article on the
   // schema (or worse, publishing a `javascript:` href).

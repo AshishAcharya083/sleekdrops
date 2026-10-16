@@ -1,4 +1,4 @@
-// Assembler — turns the approved draft into the exact D1 payload: validated
+// Assembler — turns the approved draft into the exact post payload: validated
 // frontmatter JSON + affiliate_links rows for every /go/ slug in the body.
 // Affiliate destinations are built 100% deterministically from the dossier —
 // no LLM touches a URL. Each row is region-aware: a liveness-verified ASIN for
@@ -295,8 +295,8 @@ export async function runAssembler(
   // where there was no unit. Silence is what the ACCC's reviews sweep found
   // most often, and "we were not sent one" is the disclosure a reader of a
   // no-sponsored-posts site is owed. A piece with no product in it is the one
-  // case where the sentence is noise rather than disclosure. Posts already in
-  // D1 carry none of this and render exactly as they did until they are next
+  // case where the sentence is noise rather than disclosure. Posts already
+  // live carry none of this and render exactly as they did until they are next
   // re-assembled.
   const unit = article.research?.reviewUnit ?? null;
   // A benefit actually received is disclosed wherever it lands: a loaned or

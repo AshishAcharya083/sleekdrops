@@ -17,6 +17,7 @@ apps/web/public/robots.txt
 apps/web/public/llms.txt
 apps/web/public/llms-full.txt
 apps/web/functions/_data/
+apps/web/.content-cache/
 apps/web/.d1-cache/
 apps/web/.cms-cache/
 apps/web/src/content/blog/

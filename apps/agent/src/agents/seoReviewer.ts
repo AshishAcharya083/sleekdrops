@@ -422,8 +422,8 @@ export async function runSeoReviewer(
   // The scan reads the published corpus too, so repetition is measured against
   // the rest of the site and not just inside this draft. The article's own slug
   // is excluded: a republish or a feedback round would otherwise score as a
-  // near-duplicate of itself. loadPublishedCorpus never throws - without D1 it
-  // returns [] and the cross-corpus metrics are simply skipped.
+  // near-duplicate of itself. loadPublishedCorpus never throws - without the
+  // content store it returns [] and the cross-corpus metrics are simply skipped.
   const corpus = await loadPublishedCorpus({ excludeSlug: article.slug });
   const slop = detectSlop(draft, { corpus });
   const slopReport = formatSlopReport(slop);

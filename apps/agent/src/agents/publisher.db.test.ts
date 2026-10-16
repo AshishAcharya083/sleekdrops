@@ -1,5 +1,5 @@
-// What the publisher is allowed to overwrite in D1, and what it must only ever
-// do once.
+// What the publisher is allowed to overwrite in the content store, and what it
+// must only ever do once.
 //
 // `affiliate_links` is one site-wide slug → destination map, and a product
 // slug is deterministic (normaliseDossier slugifies the product name), so two
@@ -14,15 +14,14 @@
 // publish that are only true the first time: the publication date the site
 // prints, and the rebuild dispatch.
 //
-// The D1 REST call is stubbed; the SQL the publisher builds is the subject.
+// SleekDrops' content store is the test database itself (its publish target
+// names DATABASE_URL), so these read back the real posts and affiliate_links
+// rows. Only the GitHub rebuild dispatch is stubbed.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
-process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
-process.env.D1_DATABASE_ID = 'test-database';
-process.env.CLOUDFLARE_D1_TOKEN = 'test-d1-token';
 process.env.GITHUB_TOKEN = 'test-github-token';
 process.env.GITHUB_REPO = 'example/sleekdrops';
 process.env.SITE_URL = 'https://sleekdrops.com';
@@ -45,80 +44,67 @@ if (reachable) await migrate();
 
 const realFetch = globalThis.fetch;
 const created: string[] = [];
+const postSlugs: string[] = [];
+const linkSlugs: string[] = [];
 after(async () => {
   globalThis.fetch = realFetch;
-  if (reachable && created.length > 0) {
-    await q('DELETE FROM articles WHERE id = ANY($1)', [created]);
+  if (reachable) {
+    if (created.length > 0) await q('DELETE FROM articles WHERE id = ANY($1)', [created]);
+    if (postSlugs.length > 0) await q('DELETE FROM posts WHERE slug = ANY($1)', [postSlugs]);
+    if (linkSlugs.length > 0) await q('DELETE FROM affiliate_links WHERE slug = ANY($1)', [linkSlugs]);
+    await pool.end();
   }
-  if (reachable) await pool.end();
 });
 
-interface D1Capture {
-  /** Every statement the publisher sent to D1, in order. */
-  statements: Array<{ sql: string; params: unknown[] }>;
-  /** How many site rebuilds it asked GitHub for. */
-  dispatches: number;
+interface Dispatches {
+  /** How many site rebuilds the publisher asked GitHub for. */
+  count: number;
 }
 
-function captureD1(): D1Capture {
-  const capture: D1Capture = { statements: [], dispatches: 0 };
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).includes('api.cloudflare.com')) {
-      capture.statements.push(JSON.parse(String(init?.body)) as { sql: string; params: unknown[] });
-      return Response.json({ success: true, result: [{ results: [] }] });
-    }
-    // The content-updated repository dispatch.
-    capture.dispatches += 1;
+/** Answer the content-updated repository dispatch, and count it. */
+function captureDispatches(): Dispatches {
+  const dispatches: Dispatches = { count: 0 };
+  globalThis.fetch = (async () => {
+    dispatches.count += 1;
     return new Response(null, { status: 204 });
   }) as typeof fetch;
-  return capture;
+  return dispatches;
 }
 
-/**
- * The same D1, holding the post already: what the delete route reads before it
- * removes it. Everything else answers empty, as above.
- */
-function captureD1Holding(body: string): D1Capture {
-  const capture: D1Capture = { statements: [], dispatches: 0 };
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).includes('api.cloudflare.com')) {
-      const statement = JSON.parse(String(init?.body)) as { sql: string; params: unknown[] };
-      capture.statements.push(statement);
-      const held = statement.sql.startsWith('SELECT body_md FROM posts WHERE slug');
-      return Response.json({ success: true, result: [{ results: held ? [{ body_md: body }] : [] }] });
-    }
-    capture.dispatches += 1;
-    return new Response(null, { status: 204 });
-  }) as typeof fetch;
-  return capture;
+/** A product slug no other test, or an earlier run, has written. */
+function productSlug(): string {
+  const slug = `sony-wh-1000xm6-${randomUUID().slice(0, 8)}`;
+  linkSlugs.push(slug);
+  return slug;
 }
 
-/** The posts upsert out of one capture, with its bound parameters. */
-function postsWrite(capture: D1Capture): { sql: string; params: unknown[] } {
-  return capture.statements.find((statement) => statement.sql.includes('INSERT INTO posts'))!;
+function resolvedLink(slug: string): AffiliateLinkRow {
+  return {
+    slug,
+    default_url: 'https://www.amazon.com.au/s?k=Sony%20WH-1000XM6',
+    regions_json: { network: 'amazon', search: 'Sony WH-1000XM6', asins: { au: 'B0DGHJKL12' } },
+    note: 'Sony WH-1000XM6 — ASIN B0DGHJKL12 (au, verified 2026-09-14), used by best-anc-headphones',
+  };
 }
 
-const PUB_DATE_PARAM = 6;
+function healedLink(slug: string): AffiliateLinkRow {
+  return {
+    slug,
+    default_url: 'https://www.amazon.com.au/s?k=Sony%20WH-1000XM6%20healed',
+    regions_json: { network: 'amazon', search: 'Sony WH-1000XM6 healed' },
+    healed: true,
+    note: 'Sony WH-1000XM6 - healed from anchor text, no dossier product behind it, used by quiet-commutes',
+  };
+}
 
-const resolved: AffiliateLinkRow = {
-  slug: 'sony-wh-1000xm6',
-  default_url: 'https://www.amazon.com.au/s?k=Sony%20WH-1000XM6',
-  regions_json: { network: 'amazon', search: 'Sony WH-1000XM6', asins: { au: 'B0DGHJKL12' } },
-  note: 'Sony WH-1000XM6 — ASIN B0DGHJKL12 (au, verified 2026-09-14), used by best-anc-headphones',
-};
-
-const healed: AffiliateLinkRow = {
-  slug: 'sony-wh-1000xm6',
-  default_url: 'https://www.amazon.com.au/s?k=Sony%20WH-1000XM6',
-  regions_json: { network: 'amazon', search: 'Sony WH-1000XM6' },
-  healed: true,
-  note: 'Sony WH-1000XM6 - healed from anchor text, no dossier product behind it, used by quiet-commutes',
-};
-
-const BODY = 'The [Sony WH-1000XM6](/go/sony-wh-1000xm6) is the one.';
+function bodyFor(link: string): string {
+  return `The [Sony WH-1000XM6](/go/${link}) is the one.`;
+}
 
 /** A real row, because the publisher now reads and stamps its own columns. */
 async function article(links: AffiliateLinkRow[], fields: Record<string, unknown> = {}): Promise<ArticleRow> {
+  const slug = `quiet-commutes-${randomUUID().slice(0, 8)}`;
+  postSlugs.push(slug);
   const [row] = await q<ArticleRow>(
     `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status,
                            draft_md, frontmatter, affiliate_links, seo_review)
@@ -126,8 +112,8 @@ async function article(links: AffiliateLinkRow[], fields: Record<string, unknown
      RETURNING *`,
     [
       'The headphones for a quiet commute',
-      `quiet-commutes-${randomUUID().slice(0, 8)}`,
-      fields.draft_md ?? BODY,
+      slug,
+      fields.draft_md ?? bodyFor(links[0]?.slug ?? 'nothing'),
       JSON.stringify(
         fields.frontmatter ?? {
           title: 'The headphones for a quiet commute',
@@ -159,106 +145,167 @@ async function reload(id: string): Promise<ArticleRow> {
   return row;
 }
 
-test('a healed row only fills a slug nothing has claimed', { skip }, async () => {
-  const capture = captureD1();
-  await runPublisher(await article([healed]));
+interface LivePost {
+  status: string;
+  title: string;
+  category: string;
+  post_type: string;
+  author: string;
+  pub_date: string;
+  frontmatter_json: Record<string, unknown>;
+  body_md: string;
+}
 
-  const affiliate = capture.statements[0].sql;
-  assert.match(affiliate, /INSERT INTO affiliate_links/);
-  assert.match(affiliate, /ON CONFLICT \(slug\) DO NOTHING/);
-  assert.doesNotMatch(affiliate, /DO UPDATE/);
+/** Every row the site would build for this slug - so "exactly one" can be asserted. */
+async function livePosts(slug: string): Promise<LivePost[]> {
+  return q<LivePost>(
+    `SELECT status, title, category, post_type, author, to_char(pub_date, 'YYYY-MM-DD') pub_date,
+            frontmatter_json, body_md
+       FROM posts WHERE slug = $1`,
+    [slug],
+  );
+}
+
+async function storedLink(slug: string): Promise<{ default_url: string; regions_json: unknown; note: string | null }> {
+  const [row] = await q<{ default_url: string; regions_json: unknown; note: string | null }>(
+    'SELECT default_url, regions_json, note FROM affiliate_links WHERE slug = $1',
+    [slug],
+  );
+  return row;
+}
+
+test('the post row carries the frontmatter and body the site builds from', { skip }, async () => {
+  captureDispatches();
+  const link = productSlug();
+  const row = await article([resolvedLink(link)]);
+  await runPublisher(row);
+
+  const [post] = await livePosts(row.slug!);
+  assert.equal(post.status, 'published');
+  assert.equal(post.title, 'The headphones for a quiet commute');
+  assert.equal(post.category, 'Tech');
+  assert.equal(post.post_type, 'guide');
+  assert.equal(post.author, 'desk');
+  assert.equal(post.pub_date, '2026-09-14');
+  // Stored as JSONB, so it reads back as the object it was, not as text.
+  assert.deepEqual(post.frontmatter_json, {
+    title: 'The headphones for a quiet commute',
+    author: 'desk',
+    pubDate: '2026-09-14',
+  });
+  assert.equal(post.body_md, bodyFor(link));
+  // The /go/ slug the body links to has its row, or the site build fails.
+  assert.deepEqual((await storedLink(link)).regions_json, resolvedLink(link).regions_json);
+});
+
+test('a healed row only fills a slug nothing has claimed', { skip }, async () => {
+  captureDispatches();
+  const link = productSlug();
+
+  // Nothing holds the slug yet: the healed row fills it.
+  await runPublisher(await article([healedLink(link)]));
+  assert.equal((await storedLink(link)).default_url, healedLink(link).default_url);
+
+  // A properly resolved row takes the slug over...
+  await runPublisher(await article([resolvedLink(link)]));
+  // ...and a later healed guess for the same product leaves it alone.
+  await runPublisher(await article([healedLink(link)]));
+
+  const stored = await storedLink(link);
+  assert.equal(stored.default_url, resolvedLink(link).default_url);
+  assert.deepEqual(stored.regions_json, resolvedLink(link).regions_json);
+  assert.equal(stored.note, resolvedLink(link).note);
 });
 
 test('a dossier-backed row still refreshes the destination it owns', { skip }, async () => {
-  const capture = captureD1();
-  await runPublisher(await article([resolved]));
+  captureDispatches();
+  const link = productSlug();
+  await runPublisher(await article([resolvedLink(link)]));
 
-  const affiliate = capture.statements[0].sql;
-  assert.match(affiliate, /ON CONFLICT \(slug\) DO UPDATE SET/);
-  assert.match(affiliate, /default_url = excluded\.default_url/);
-  assert.match(affiliate, /regions_json = excluded\.regions_json/);
+  const refreshed: AffiliateLinkRow = {
+    ...resolvedLink(link),
+    regions_json: { network: 'amazon', search: 'Sony WH-1000XM6', asins: { au: 'B0DGHJKL12', us: 'B0DGHJKL99' } },
+    note: 'Sony WH-1000XM6 — ASINs re-verified 2026-10-01, used by best-anc-headphones',
+  };
+  await runPublisher(await article([refreshed]));
+
+  const stored = await storedLink(link);
+  assert.deepEqual(stored.regions_json, refreshed.regions_json);
+  assert.equal(stored.note, refreshed.note);
 });
 
 // ── Re-entry ───────────────────────────────────────────────────────────────
-// Retry-forward re-enters publish. The D1 writes were always slug upserts, so
-// the live row is genuinely idempotent; what was not idempotent is everything
-// that is only true the first time.
+// Retry-forward re-enters publish. The content writes were always slug
+// upserts, so the live row is genuinely idempotent; what was not idempotent is
+// everything that is only true the first time.
 
 test('publish entered twice leaves one live post and one rebuild', { skip }, async () => {
-  const row = await article([resolved]);
-  const first = captureD1();
+  const row = await article([resolvedLink(productSlug())]);
+  const first = captureDispatches();
   const published = await runPublisher(row);
 
   assert.equal(published.dispatched, true);
-  assert.equal(first.dispatches, 1);
-  const firstWrite = postsWrite(first);
-  assert.match(firstWrite.sql, /ON CONFLICT \(slug\) DO UPDATE SET/);
+  assert.equal(first.count, 1);
 
   // Second pass over unchanged content, on the row as the worker re-reads it.
-  const second = captureD1();
+  const second = captureDispatches();
   const again = await runPublisher(await reload(row.id));
 
   assert.equal(again.dispatched, false, 'a repeat pass must not rebuild the site again');
-  assert.equal(second.dispatches, 0);
+  assert.equal(second.count, 0);
   // Still one live row: the same slug, upserted, not a second insert.
-  const secondWrite = postsWrite(second);
-  assert.equal(secondWrite.params[0], row.slug);
-  assert.match(secondWrite.sql, /ON CONFLICT \(slug\) DO UPDATE SET/);
-  assert.equal(secondWrite.params[PUB_DATE_PARAM], firstWrite.params[PUB_DATE_PARAM]);
+  const posts = await livePosts(row.slug!);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].pub_date, '2026-09-14');
 });
 
 test('a repeat pass never re-stamps the publication date', { skip }, async () => {
-  const first = captureD1();
-  const row = await article([resolved]);
+  captureDispatches();
+  const row = await article([resolvedLink(productSlug())]);
   await runPublisher(row);
-  assert.equal(postsWrite(first).params[PUB_DATE_PARAM], '2026-09-14');
+  assert.equal((await livePosts(row.slug!))[0].pub_date, '2026-09-14');
   assert.equal(await storedPubDate(row.id), '2026-09-14');
 
   // A later pass whose frontmatter carries a newer date: the stored one wins,
   // because a reader must not see the publication date move under a retry.
   await q(`UPDATE articles SET frontmatter = frontmatter || '{"pubDate": "2026-10-01"}'::jsonb
             WHERE id = $1`, [row.id]);
-  const second = captureD1();
   await runPublisher(await reload(row.id));
 
-  assert.equal(postsWrite(second).params[PUB_DATE_PARAM], '2026-09-14');
+  assert.equal((await livePosts(row.slug!))[0].pub_date, '2026-09-14');
   assert.equal(await storedPubDate(row.id), '2026-09-14');
 });
 
 test('a publish of genuinely new content rebuilds the site again', { skip }, async () => {
-  const row = await article([resolved]);
-  captureD1();
+  const row = await article([resolvedLink(productSlug())]);
+  captureDispatches();
   await runPublisher(row);
 
   await q("UPDATE articles SET draft_md = draft_md || ' Updated after an edit pass.' WHERE id = $1", [
     row.id,
   ]);
-  const second = captureD1();
+  const second = captureDispatches();
   const again = await runPublisher(await reload(row.id));
 
   assert.equal(again.dispatched, true);
-  assert.equal(second.dispatches, 1);
+  assert.equal(second.count, 1);
+  assert.match((await livePosts(row.slug!))[0].body_md, /Updated after an edit pass\.$/);
 });
 
 test('a failed dispatch is retried rather than recorded as delivered', { skip }, async () => {
-  const row = await article([resolved]);
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).includes('api.cloudflare.com')) {
-      return Response.json({ success: true, result: [{ results: [] }] });
-    }
-    return new Response('rate limited', { status: 429 });
-  }) as typeof fetch;
+  const row = await article([resolvedLink(productSlug())]);
+  globalThis.fetch = (async () => new Response('rate limited', { status: 429 })) as typeof fetch;
 
   await assert.rejects(runPublisher(row), /repository_dispatch failed/);
   assert.equal((await reload(row.id)).published_digest, null, 'nothing was marked as pushed live');
 
-  const retry = captureD1();
+  const retry = captureDispatches();
   assert.equal((await runPublisher(await reload(row.id))).dispatched, true);
-  assert.equal(retry.dispatches, 1);
+  assert.equal(retry.count, 1);
 });
 
 test('a stale review stops the publish even when it was already queued', { skip }, async () => {
-  const row = await article([resolved], { seo_review: { score: 80, pass: true, issues: [] } });
+  const row = await article([resolvedLink(productSlug())], { seo_review: { score: 80, pass: true, issues: [] } });
   const session = async (agent: string, minutesAgo: number) =>
     q(
       `INSERT INTO agent_sessions (platform_id, article_id, agent, status, kind, started_at, ended_at)
@@ -270,18 +317,18 @@ test('a stale review stops the publish even when it was already queued', { skip 
   // A retry regenerated the draft after the review that approved it.
   await session('writer', 5);
 
-  const capture = captureD1();
+  const dispatches = captureDispatches();
   await assert.rejects(
     runPublisher(await reload(row.id)),
     /seo_review is out of date - the draft changed after the last review\. Re-run seo_review before publishing\./,
   );
-  assert.equal(capture.statements.length, 0, 'nothing reached D1');
-  assert.equal(capture.dispatches, 0);
+  assert.equal((await livePosts(row.slug!)).length, 0, 'nothing reached the site');
+  assert.equal(dispatches.count, 0);
 });
 
 test('parking a post as a draft and publishing it again rebuilds the site', { skip }, async () => {
-  const row = await article([resolved]);
-  captureD1();
+  const row = await article([resolvedLink(productSlug())]);
+  captureDispatches();
   await runPublisher(row);
 
   // The draft pass is asked for directly rather than by flipping the
@@ -289,24 +336,26 @@ test('parking a post as a draft and publishing it again rebuilds the site', { sk
   // file shares this database and `node --test` runs them concurrently, so a
   // suite that flipped it would be flipping it under the pipeline suites too -
   // the image stage reads it to choose between waiting_approval and queued.
-  const parked = captureD1();
+  const parked = captureDispatches();
   assert.equal(
-    (await runPublisher(await reload(row.id), { publishMode: 'draft' })).d1Status,
+    (await runPublisher(await reload(row.id), { publishMode: 'draft' })).postStatus,
     'draft',
   );
-  assert.equal(parked.dispatches, 0, 'a draft pass never rebuilds the site');
+  assert.equal(parked.count, 0, 'a draft pass never rebuilds the site');
+  assert.equal((await livePosts(row.slug!))[0].status, 'draft');
 
-  const relive = captureD1();
+  const relive = captureDispatches();
   // The text has not changed, but the live row has: it went from draft back to
   // published, and the site has to be rebuilt to carry it again.
   assert.equal((await runPublisher(await reload(row.id))).dispatched, true);
-  assert.equal(relive.dispatches, 1);
+  assert.equal(relive.count, 1);
+  assert.equal((await livePosts(row.slug!))[0].status, 'published');
 });
 
 // ── Cancel ─────────────────────────────────────────────────────────────────
 // Publish is the stage that hangs on an external service, which is when an
 // operator reaches for cancel. Nothing the publisher does is an article write
-// the claim guard could drop for it - the post goes live in D1 and the site is
+// the claim guard could drop for it - the post goes live and the site is
 // rebuilt - so the claim is what it has to read for itself.
 
 /** The claim a worker holds while it runs the publish stage. */
@@ -323,59 +372,66 @@ async function claimForPublish(id: string): Promise<ArticleRow> {
 }
 
 test('an article cancelled mid-publish never reaches the live site', { skip }, async () => {
-  const row = await claimForPublish((await article([resolved])).id);
+  const link = productSlug();
+  const row = await claimForPublish((await article([resolvedLink(link)])).id);
   assert.deepEqual(await cancelArticle(row.id), { ok: true, pending: true });
 
-  const capture = captureD1();
+  const dispatches = captureDispatches();
   await assert.rejects(runPublisher(row), /lease lost/);
 
-  assert.equal(capture.statements.length, 0, 'nothing reached D1');
-  assert.equal(capture.dispatches, 0);
+  assert.equal((await livePosts(row.slug!)).length, 0, 'nothing reached the site');
+  assert.equal(await storedLink(link), undefined, 'not even its affiliate link');
+  assert.equal(dispatches.count, 0);
   const after = await reload(row.id);
   assert.equal(after.pub_date, null, 'and no publish receipt was stamped on the cancelled row');
   assert.equal(after.published_digest, null);
 });
 
-test('a cancel that lands while D1 is answering stops the post going live', { skip }, async () => {
-  const row = await claimForPublish((await article([resolved])).id);
+test('a cancel that lands while the content store is answering stops the post going live', { skip }, async () => {
+  const row = await claimForPublish((await article([resolvedLink(productSlug())])).id);
+  const dispatches = captureDispatches();
 
-  const statements: string[] = [];
-  let dispatches = 0;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).includes('api.cloudflare.com')) {
-      statements.push((JSON.parse(String(init?.body)) as { sql: string }).sql);
-      // The operator cancels while the affiliate write is in flight - the
-      // window that matters, because D1 is what a wedged publish is waiting on.
+  // The operator cancels while the affiliate write is in flight - the window
+  // that matters, because the content store is what a wedged publish is
+  // waiting on. The write goes through the pipeline's own pool, so that is
+  // where the cancel is slipped in.
+  const realQuery = pool.query;
+  const intercept = (async (...args: unknown[]) => {
+    if (typeof args[0] === 'string' && args[0].includes('INSERT INTO affiliate_links')) {
       await cancelArticle(row.id);
-      return Response.json({ success: true, result: [{ results: [] }] });
     }
-    dispatches += 1;
-    return new Response(null, { status: 204 });
-  }) as typeof fetch;
+    return (realQuery as (...a: unknown[]) => Promise<unknown>).apply(pool, args);
+  }) as typeof pool.query;
+  pool.query = intercept;
+  try {
+    await assert.rejects(runPublisher(row), /lease lost/);
+  } finally {
+    pool.query = realQuery;
+  }
 
-  await assert.rejects(runPublisher(row), /lease lost/);
-
-  assert.ok(
-    statements.every((sql) => !sql.includes('INSERT INTO posts')),
+  assert.equal(
+    (await livePosts(row.slug!)).length,
+    0,
     'the push itself is re-checked against the claim, not just the start of the stage',
   );
-  assert.equal(dispatches, 0);
+  assert.equal(dispatches.count, 0);
 });
 
 // ── Delete and restore ─────────────────────────────────────────────────────
 
-test('a post deleted from D1 rebuilds the site when it is published again', { skip }, async () => {
+test('a deleted post rebuilds the site when it is published again', { skip }, async () => {
   const app = createApp();
-  const row = await article([resolved]);
-  const first = captureD1();
+  const link = productSlug();
+  const row = await article([resolvedLink(link)]);
+  const first = captureDispatches();
   await runPublisher(row);
-  assert.equal(first.dispatches, 1);
+  assert.equal(first.count, 1);
 
   // The operator's recovery path: remove the post, then publish it again. The
   // dispatch gate is a digest of what was last pushed live, so deleting the
   // post it describes has to clear it - otherwise the re-publish computes the
   // same digest, skips the rebuild, and the page stays missing from the site.
-  captureD1Holding(BODY);
+  captureDispatches();
   const removed = await app.fetch(
     new Request(`http://localhost/api/published/${row.slug}`, {
       method: 'DELETE',
@@ -383,11 +439,15 @@ test('a post deleted from D1 rebuilds the site when it is published again', { sk
     }),
   );
   assert.equal(removed.status, 200);
+  assert.equal((await livePosts(row.slug!)).length, 0, 'the post is gone from the site');
+  // Its pipeline-authored link went with it: no remaining post links to it.
+  assert.deepEqual((await removed.json()).removedLinks, [link]);
   assert.equal((await reload(row.id)).published_digest, null);
 
-  const restored = captureD1();
+  const restored = captureDispatches();
   assert.equal((await runPublisher(await reload(row.id))).dispatched, true);
-  assert.equal(restored.dispatches, 1);
+  assert.equal(restored.count, 1);
+  assert.equal((await livePosts(row.slug!)).length, 1);
   // The date the piece was first published survives the round trip: restoring
   // a post is not publishing it on a new day.
   assert.equal(await storedPubDate(row.id), '2026-09-14');

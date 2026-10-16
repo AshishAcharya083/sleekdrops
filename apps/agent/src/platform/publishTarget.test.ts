@@ -6,14 +6,14 @@ import assert from 'node:assert/strict';
 
 process.env.DATABASE_URL = 'postgres://unused:unused@127.0.0.1:1/unreachable';
 
-const { resolvePublishTarget, resolveD1Target, resolveSiteTarget, PublishTargetError } = await import(
+const { resolvePublishTarget, resolveContentTarget, resolveSiteTarget, PublishTargetError } = await import(
   './publishTarget.js'
 );
 
 const sleekdrops = {
   id: 'sleekdrops',
   publishTarget: {
-    d1DatabaseIdEnv: 'D1_DATABASE_ID',
+    contentDatabaseUrlEnv: 'DATABASE_URL',
     githubRepoEnv: 'GITHUB_REPO',
     siteUrlEnv: 'SITE_URL',
     rebuildHookEnv: null,
@@ -22,7 +22,7 @@ const sleekdrops = {
 const peakodds = {
   id: 'peakodds',
   publishTarget: {
-    d1DatabaseIdEnv: 'PEAKODDS_D1_DATABASE_ID',
+    contentDatabaseUrlEnv: 'PEAKODDS_CONTENT_DATABASE_URL',
     githubRepoEnv: 'PEAKODDS_GITHUB_REPO',
     siteUrlEnv: 'PEAKODDS_SITE_URL',
     rebuildHookEnv: 'PEAKODDS_REBUILD_HOOK_URL',
@@ -30,11 +30,11 @@ const peakodds = {
 };
 
 const ENV = {
-  D1_DATABASE_ID: 'sleekdrops-d1',
+  DATABASE_URL: 'postgres://sleekdrops:sleekdrops-pw@db.example:5432/postgres',
   GITHUB_REPO: 'example/sleekdrops',
   SITE_URL: 'https://sleekdrops.example/',
   GITHUB_TOKEN: 'ghp-test',
-  PEAKODDS_D1_DATABASE_ID: 'peakodds-d1',
+  PEAKODDS_CONTENT_DATABASE_URL: 'postgresql://peakodds:peakodds-pw@db.example:5432/peakodds',
   PEAKODDS_GITHUB_REPO: 'example/peakodds',
   PEAKODDS_SITE_URL: 'https://peakodds.example',
   PEAKODDS_REBUILD_HOOK_URL: 'https://hooks.example/deploy-secret',
@@ -57,7 +57,7 @@ function withEnv(overrides: Record<string, string | undefined>, run: () => void)
 test('SleekDrops rebuilds by repository dispatch to its own repo', () => {
   withEnv({}, () => {
     assert.deepEqual(resolvePublishTarget(sleekdrops), {
-      d1DatabaseId: 'sleekdrops-d1',
+      contentDatabaseUrl: 'postgres://sleekdrops:sleekdrops-pw@db.example:5432/postgres',
       githubRepo: 'example/sleekdrops',
       siteUrl: 'https://sleekdrops.example',
       rebuildHookUrl: null,
@@ -68,7 +68,7 @@ test('SleekDrops rebuilds by repository dispatch to its own repo', () => {
 test('PeakOdds resolves only its own variables, and rebuilds through its deploy hook', () => {
   withEnv({}, () => {
     assert.deepEqual(resolvePublishTarget(peakodds), {
-      d1DatabaseId: 'peakodds-d1',
+      contentDatabaseUrl: 'postgresql://peakodds:peakodds-pw@db.example:5432/peakodds',
       githubRepo: 'example/peakodds',
       siteUrl: 'https://peakodds.example',
       rebuildHookUrl: 'https://hooks.example/deploy-secret',
@@ -85,8 +85,8 @@ test('a missing variable throws its name, and nothing falls back to SleekDrops',
       });
     });
   }
-  withEnv({ PEAKODDS_D1_DATABASE_ID: '  ' }, () => {
-    assert.throws(() => resolveD1Target(peakodds), /PEAKODDS_D1_DATABASE_ID is not set/);
+  withEnv({ PEAKODDS_CONTENT_DATABASE_URL: '  ' }, () => {
+    assert.throws(() => resolveContentTarget(peakodds), /PEAKODDS_CONTENT_DATABASE_URL is not set/);
   });
 });
 
@@ -106,11 +106,23 @@ test('a malformed value is refused without echoing it', () => {
   withEnv({ PEAKODDS_GITHUB_REPO: 'peakodds' }, () => {
     assert.throws(() => resolvePublishTarget(peakodds), /PEAKODDS_GITHUB_REPO must be owner\/repo/);
   });
+  // A D1 database id left over from before the move is the likely mistake.
+  withEnv({ PEAKODDS_CONTENT_DATABASE_URL: 'b98d83ac-a2a5-42cb-a367-0cb71b902670' }, () => {
+    assert.throws(
+      () => resolveContentTarget(peakodds),
+      (err: unknown) =>
+        err instanceof PublishTargetError &&
+        /PEAKODDS_CONTENT_DATABASE_URL must be a postgres:\/\/ connection string/.test(err.message) &&
+        !err.message.includes('b98d83ac'),
+    );
+  });
 });
 
 test('the partial resolvers need only their own variable', () => {
   withEnv({ PEAKODDS_GITHUB_REPO: undefined, PEAKODDS_REBUILD_HOOK_URL: undefined }, () => {
-    assert.deepEqual(resolveD1Target(peakodds), { d1DatabaseId: 'peakodds-d1' });
+    assert.deepEqual(resolveContentTarget(peakodds), {
+      contentDatabaseUrl: 'postgresql://peakodds:peakodds-pw@db.example:5432/peakodds',
+    });
     assert.deepEqual(resolveSiteTarget(peakodds), { siteUrl: 'https://peakodds.example' });
   });
 });

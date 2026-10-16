@@ -1,5 +1,16 @@
 # Mediavine readiness and the GA4 outage — September 2026
 
+**Superseded, 2026-10-16: AdSense and Journey now coexist.** The owner is applying to both partners, so the
+site carries both integrations at once. The AdSense publisher tag, verification meta and `ads.txt` seller record
+(restored on 2026-10-14 by `git revert 34f4e1f`) stay, and the Journey pieces described here are back beside them:
+the head wrapper from `PUBLIC_MEDIAVINE_SITE_ID` (production only; empty until Journey issues an id), the
+`journey-content` / `journey-sidebar` landmarks (the static 300px rail switches on only when that id is set), Journey's
+issued file published in `ads.txt` alongside the Google record, and the Mediavine Advertising Privacy Notice v. 1.2
+on the privacy page next to the Google wording. Not restored: this document's Consent Mode change in `ga.ts`
+(AdSense's region defaults stay) and the removal of the AdSense units. Journey's exclusivity rule still applies
+once it serves ads: the day one partner launches, remove the other (see `apps/web/ads/README.md`). The GA4
+findings below still stand.
+
 **Status, 2026-09-28.** AdSense rejected sleekdrops.com for "low-value content". The site is being taken to
 **Journey by Mediavine** instead (publishers.mediavine.com/join routes any site under Mediavine's own threshold to
 Journey). Journey's minimum is **1,000 sessions from premium countries — the US, Canada, the UK and Australia — in

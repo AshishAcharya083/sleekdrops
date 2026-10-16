@@ -1,5 +1,5 @@
 // The trust surface where it actually lands: a real Postgres row in, the
-// frontmatter JSONB the publisher ships to D1 out.
+// frontmatter JSONB the publisher ships to the site out.
 //
 // assembler.test.ts proves the derivation in memory. It cannot prove that the
 // researcher's tiered facts survive the `research` JSONB round trip, that

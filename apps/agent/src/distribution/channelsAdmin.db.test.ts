@@ -724,7 +724,7 @@ test("a network's own placement setting is writable and wins at enqueue", { skip
 
   await q(`UPDATE channel_connections SET status = 'active' WHERE id = $1`, [channelId]);
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
   const [row] = await q<{ placement: string }>(
     'SELECT placement FROM distribution_queue WHERE slug = $1 AND channel_connection_id = $2',
     [piece.slug, channelId],

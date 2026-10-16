@@ -464,8 +464,8 @@ export const executeStage: StageExecutor = async (article, stage, model, tracker
       // time; the queue is unique on (slug, channel) and every later pass is a
       // no-op. A draft enqueues nothing, on the same reading of the publish
       // mode that keeps `dispatchContentUpdated` from firing for one.
-      const distribution = await enqueuePublishedArticle(article, { d1Status: result.d1Status });
-      summary = `${result.slug} → D1 as '${result.d1Status}'${result.dispatched ? ', site rebuild dispatched' : ''}; ${describeEnqueue(distribution)}`;
+      const distribution = await enqueuePublishedArticle(article, { postStatus: result.postStatus });
+      summary = `${result.slug} → site as '${result.postStatus}'${result.dispatched ? ', site rebuild dispatched' : ''}; ${describeEnqueue(distribution)}`;
       next = { stage: 'done', status: 'done' };
       break;
     }

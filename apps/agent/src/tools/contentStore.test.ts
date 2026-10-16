@@ -4,7 +4,7 @@
 // photo swap from taking a published page down with it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { patchHeroFrontmatter } from './d1.js';
+import { patchHeroFrontmatter } from './contentStore.js';
 
 const post = {
   title: 'The best cordless stick vacuums',
@@ -16,11 +16,11 @@ const post = {
 
 test('sets the hero and leaves every other key alone', () => {
   const out = patchHeroFrontmatter(JSON.stringify(post), {
-    heroImage: 'https://storage.googleapis.com/sleekdrops-images/heroes/uploads/post-x-ab12cd34.jpg',
+    heroImage: 'https://example.supabase.co/storage/v1/object/public/images/heroes/uploads/post-x-ab12cd34.jpg',
     heroAlt: 'A stick vacuum on floorboards',
   });
 
-  assert.equal(out.heroImage, 'https://storage.googleapis.com/sleekdrops-images/heroes/uploads/post-x-ab12cd34.jpg');
+  assert.equal(out.heroImage, 'https://example.supabase.co/storage/v1/object/public/images/heroes/uploads/post-x-ab12cd34.jpg');
   assert.equal(out.heroAlt, 'A stick vacuum on floorboards');
   assert.equal(out.title, post.title);
   assert.deepEqual(out.tags, post.tags);
@@ -30,10 +30,10 @@ test('sets the hero and leaves every other key alone', () => {
 test('replaces the hero an older post already had', () => {
   const out = patchHeroFrontmatter(
     JSON.stringify({ ...post, heroImage: 'https://images.sleekdrops.com/old.jpg', heroAlt: 'Old' }),
-    { heroImage: 'https://storage.googleapis.com/bucket/new.jpg', heroAlt: 'New' },
+    { heroImage: 'https://example.supabase.co/storage/v1/object/public/images/new.jpg', heroAlt: 'New' },
   );
 
-  assert.equal(out.heroImage, 'https://storage.googleapis.com/bucket/new.jpg');
+  assert.equal(out.heroImage, 'https://example.supabase.co/storage/v1/object/public/images/new.jpg');
   assert.equal(out.heroAlt, 'New');
 });
 
@@ -42,11 +42,11 @@ test('an image with no alt text drops the stale alt rather than nulling it', () 
   // optional string — the build would break on the next content fetch.
   const out = patchHeroFrontmatter(
     JSON.stringify({ ...post, heroImage: 'https://images.sleekdrops.com/old.jpg', heroAlt: 'Old' }),
-    { heroImage: 'https://storage.googleapis.com/bucket/new.jpg', heroAlt: null },
+    { heroImage: 'https://example.supabase.co/storage/v1/object/public/images/new.jpg', heroAlt: null },
   );
 
   assert.equal('heroAlt' in out, false);
-  assert.equal(out.heroImage, 'https://storage.googleapis.com/bucket/new.jpg');
+  assert.equal(out.heroImage, 'https://example.supabase.co/storage/v1/object/public/images/new.jpg');
 });
 
 test('clearing the hero removes both keys, not the rest of the post', () => {
@@ -66,4 +66,18 @@ test('malformed frontmatter throws instead of being overwritten', () => {
   assert.throws(() => patchHeroFrontmatter('{not json', { heroImage: 'https://x/y.jpg', heroAlt: null }), /not valid JSON/);
   assert.throws(() => patchHeroFrontmatter('[1,2]', { heroImage: 'https://x/y.jpg', heroAlt: null }), /not an object/);
   assert.throws(() => patchHeroFrontmatter('null', { heroImage: 'https://x/y.jpg', heroAlt: null }), /not an object/);
+});
+
+test('takes the frontmatter as the object a JSONB column reads back as', () => {
+  const stored = { ...post, heroImage: 'https://images.sleekdrops.com/old.jpg', heroAlt: 'Old' };
+  const out = patchHeroFrontmatter(stored, {
+    heroImage: 'https://example.supabase.co/storage/v1/object/public/images/new.jpg',
+    heroAlt: 'New',
+  });
+
+  assert.equal(out.heroImage, 'https://example.supabase.co/storage/v1/object/public/images/new.jpg');
+  assert.equal(out.heroAlt, 'New');
+  assert.equal(out.title, post.title);
+  // A copy: the row read back is not mutated under its caller.
+  assert.equal(stored.heroImage, 'https://images.sleekdrops.com/old.jpg');
 });
