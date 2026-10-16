@@ -447,7 +447,7 @@ export function provenanceCopy(
     const returned = formatSourceDate(unit.returned);
     return {
       label: 'How we got this unit',
-      lead: `${supplier} lent us this unit for testing.`,
+      lead: `${supplier} lent us this unit for this review.`,
       detail:
         `${returned ? `We returned it in ${returned}. ` : ''}We paid nothing for it, and ${supplier} had no input into this page.`,
       independence,
