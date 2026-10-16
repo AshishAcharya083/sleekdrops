@@ -1,0 +1,34 @@
+---
+import { adsEnv } from '@lib/ads-env';
+
+/**
+ * Journey by Mediavine's script wrapper - the whole of the Journey integration,
+ * beside the AdSense publisher tag in GoogleConsent.astro while the site
+ * applies to both partners.
+ *
+ * One tag in the head of every page is all Journey asks of a custom-built site:
+ * its wrapper finds the article body and the sidebar by the `journey-content`
+ * and `journey-sidebar` landmarks (ArticleBody.astro, blog/[slug].astro), places
+ * and refreshes its units itself, and shows its own consent notice where the
+ * law requires one. Nothing here is consent-gated by the site, because the
+ * partner owns that decision end to end; the site's Privacy preferences dialog
+ * decides analytics only.
+ *
+ * It sits in the head, as Mediavine asks, and ahead of the analytics bundle:
+ * the wrapper is what loads Journey's consent platform, so it has to be on the
+ * page before Google Analytics reads a Consent Mode signal from it.
+ *
+ * The attributes are the ones Mediavine issues and must not be optimised away:
+ * `data-noptimize` and `data-cfasync` tell minifiers and Cloudflare's Rocket
+ * Loader to leave the tag alone, and their crawler checks for the tag as issued.
+ *
+ * Renders nothing on a build without a site id - which today is every build,
+ * because Journey issues the id only once it approves the site - and on every
+ * preview and local `pnpm dev` (see `@lib/ads-env`). Journey requires
+ * exclusivity once it serves ads, so the day it launches the AdSense tag goes.
+ */
+const { mediavineScriptSrc } = adsEnv();
+---
+{mediavineScriptSrc && (
+  <script is:inline type="text/javascript" async="async" data-noptimize="1" data-cfasync="false" src={mediavineScriptSrc}></script>
+)}

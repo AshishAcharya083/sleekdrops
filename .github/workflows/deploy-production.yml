@@ -127,6 +127,27 @@ jobs:
           PUBLIC_ADSENSE_SLOT_ARTICLE_END: ${{ vars.ADSENSE_SLOT_ARTICLE_END }}
           PUBLIC_ADSENSE_SLOT_SIDEBAR: ${{ vars.ADSENSE_SLOT_SIDEBAR }}
           PUBLIC_ADSENSE_SLOT_FEED: ${{ vars.ADSENSE_SLOT_FEED }}
+          # Journey by Mediavine - this site's id, the `<id>` in the script
+          # wrapper `//scripts.scriptwrapper.com/tags/<id>.js` issued in the
+          # Journey dashboard (Settings → Ad Setup) once the site is approved.
+          # Public: it ships in the markup every visitor downloads, so it is an
+          # environment *variable* rather than a secret.
+          #
+          # It coexists with the AdSense publisher id above while the site
+          # applies to both partners. Journey requires exclusivity once it
+          # serves ads - no other ad tag, no other seller in ads.txt - so the
+          # day one partner launches, the other's variable is emptied.
+          #
+          # Production only. The wrapper is issued for sleekdrops.com and works
+          # nowhere else; `src/lib/ads-env.ts` discards the id on any other
+          # deployment and deploy-develop.yml pins it empty. An empty value
+          # loads no Journey wrapper at all.
+          PUBLIC_MEDIAVINE_SITE_ID: ${{ vars.MEDIAVINE_SITE_ID }}
+          # Optional: fetch Journey's authorised-sellers file from this URL at
+          # build time instead of publishing the committed copy at
+          # apps/web/ads/ads.txt. Either way it is published alongside the
+          # AdSense record. Production only; see apps/web/ads/README.md.
+          ADS_TXT_URL: ${{ vars.ADS_TXT_URL }}
           # Used by apps/web/scripts/fetch-content.mjs to read posts +
           # affiliate links from the SleekDrops Supabase project during the
           # prebuild step. Both are public - the publishable key can read

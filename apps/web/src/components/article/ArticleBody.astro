@@ -19,10 +19,18 @@
  *
  * Both units render nothing at all unless the build has ids for them and the
  * visitor opted in to advertising; see src/components/ads/AdUnit.astro.
+ *
+ * It is also Journey by Mediavine's `journey-content` landmark: Journey's
+ * wrapper (src/components/ads/MediavineScript.astro) looks for that class on
+ * the element whose *immediate* children are the article's paragraphs, headings
+ * and figures, and places its in-content units between them itself - which is
+ * why the class sits on this wrapper and not on the page's `<main>` or
+ * `<article>`, and why it must appear once per page. The class does nothing on
+ * a build without a Mediavine site id.
  */
 import AdUnit from '@components/ads/AdUnit.astro';
 ---
-<div class="article-body" data-article-body>
+<div class="article-body journey-content" data-article-body>
   <slot />
   <AdUnit placement="articleMid" />
   <AdUnit placement="articleEnd" />

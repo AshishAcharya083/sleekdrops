@@ -4,6 +4,7 @@ import Header from '@components/layout/Header.astro';
 import Footer from '@components/layout/Footer.astro';
 import PrivacyPreferences from '@components/layout/PrivacyPreferences.astro';
 import GoogleConsent from '@components/ads/GoogleConsent.astro';
+import MediavineScript from '@components/ads/MediavineScript.astro';
 import '@styles/tokens.css';
 import '@styles/global.css';
 import type { Thing, WithContext } from 'schema-dts';
@@ -56,6 +57,11 @@ const pageView = screen
   <head>
     <SEOHead {...meta} schema={schema} />
     {allowAdvertising && <GoogleConsent />}
+    {/* Journey by Mediavine's wrapper, on every page as Journey asks (the
+        AdSense opt-out above is Google's rule for its own tag). It loads
+        Journey's consent notice, so it stays ahead of the analytics bundle in
+        the body. Renders nothing on a build without a Mediavine site id. */}
+    <MediavineScript />
   </head>
   <body class="page" data-page-view={pageView ? JSON.stringify(pageView) : undefined}>
     {progress && <div class="progress-bar" aria-hidden="true" />}

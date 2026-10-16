@@ -143,6 +143,14 @@ jobs:
           # together, which is what a preview deploy should publish: nothing.
           # Turning ads on here means changing this line and knowing why.
           PUBLIC_ADSENSE_CLIENT: ''
+          # Journey by Mediavine - pinned EMPTY for the publisher id's reason
+          # above, and deliberately not read from `vars.MEDIAVINE_SITE_ID`: the
+          # wrapper is issued for sleekdrops.com and, in Mediavine's words, can
+          # only be used on the site it was generated for, and the id is the
+          # same account-wide, so a repo-level variable is the natural mistake.
+          # An empty value loads no Journey wrapper and publishes no seller
+          # record, which is what a preview deploy should publish: nothing.
+          PUBLIC_MEDIAVINE_SITE_ID: ''
           # Develop is a code-only preview rendered against the SAME live
           # editorial content as production: the posts and affiliate links in
           # the SleekDrops Supabase project, read by scripts/fetch-content.mjs

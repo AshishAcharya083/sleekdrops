@@ -10,9 +10,11 @@
 # https origin on purpose.
 #
 # They used to be a list of named hosts, and that is exactly what breaks ad
-# delivery: AdSense fills a slot through a real-time auction, and the winning
-# buyer serves its creative, pixels and redirects from a domain the last
-# impression did not use. No allowlist stays complete - the AdSense list this
+# delivery: AdSense - and Journey by Mediavine, the other partner the site is
+# set up for while it applies to both - fills a slot through a real-time
+# auction, and the winning buyer serves its creative, pixels and redirects from
+# a domain the last impression did not use. Mediavine's own guidance is explicit
+# that a domain allowlist breaks programmatic delivery for the same reason. No allowlist stays complete - the AdSense list this
 # file once carried already missed the hosts Google's own consent message and
 # ad-quality checks load from - and every gap is an ad that silently fails to
 # render. Google's guidance for its ad tags is a nonce-based `strict-dynamic`

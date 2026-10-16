@@ -1,5 +1,7 @@
 /**
- * The publisher id as the build reads it.
+ * The two ad partners' ids as the build reads them: the AdSense publisher id
+ * and the Journey by Mediavine site id, which coexist while the site applies to
+ * both.
  *
  * `scripts/generate-ads-txt.mjs` validates the same variable against the same
  * pattern before it will publish an ads.txt naming that seller, and the two have
@@ -17,7 +19,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { publisherId, publisherIdForDeployment } from './ads-env.ts';
+import {
+  MEDIAVINE_SCRIPT_ORIGIN,
+  mediavineScriptSrc,
+  mediavineSiteId,
+  mediavineSiteIdForDeployment,
+  publisherId,
+  publisherIdForDeployment,
+} from './ads-env.ts';
 
 /** A deploy workflow, read as text from the repo root. */
 const workflow = (name: string): string =>
@@ -92,4 +101,83 @@ test('the production deploy still reads its publisher id from configuration', ()
     workflow('deploy-production.yml'),
     /PUBLIC_ADSENSE_CLIENT:\s*\$\{\{\s*vars\.ADSENSE_CLIENT\s*\}\}/,
   );
+});
+
+const SITE = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+
+test('a Mediavine site id is passed through, whitespace and all', () => {
+  assert.equal(mediavineSiteId(SITE), SITE);
+  assert.equal(mediavineSiteId(`  ${SITE}\n`), SITE);
+  assert.equal(mediavineSiteId('sleekdrops-journey-2026'), 'sleekdrops-journey-2026');
+});
+
+test('an unconfigured build has no Mediavine site id', () => {
+  assert.equal(mediavineSiteId(undefined), '');
+  assert.equal(mediavineSiteId(''), '');
+  assert.equal(mediavineSiteId('   '), '');
+});
+
+test('anything that cannot be a wrapper path segment reads as unconfigured', () => {
+  // Each of these would be written into a <script src> on every page: a path
+  // that escapes the tags directory, a quote that breaks out of the attribute,
+  // or a value too short to be an id at all.
+  [
+    '../other-site',
+    'abc',
+    `${SITE}.js`,
+    `${SITE}?x=1`,
+    'id with spaces',
+    '"><script>alert(1)</script>',
+    `${SITE}\n${SITE}`,
+  ].forEach((raw) => {
+    assert.equal(mediavineSiteId(raw), '', `${JSON.stringify(raw)} is not a site id`);
+  });
+});
+
+test('the Journey wrapper is requested from the partner origin, from the id alone', () => {
+  assert.equal(mediavineScriptSrc(SITE), `${MEDIAVINE_SCRIPT_ORIGIN}/tags/${SITE}.js`);
+  assert.equal(mediavineScriptSrc(''), '');
+  assert.match(MEDIAVINE_SCRIPT_ORIGIN, /^https:\/\//, 'the wrapper is loaded over https only');
+});
+
+test('only production may expose the Mediavine site id', () => {
+  assert.equal(mediavineSiteIdForDeployment('production', SITE), SITE);
+  assert.equal(mediavineSiteIdForDeployment('preview', SITE), '');
+});
+
+test('the two partners are configured independently', () => {
+  // Coexistence: each id is read from its own variable through its own rule,
+  // so either partner can be live while the other's id is still empty.
+  const publisher = 'ca-pub-1234567890123456';
+  assert.equal(publisherId(SITE), '', 'a Mediavine id is never read as a publisher id');
+  assert.equal(publisherIdForDeployment('production', publisher), publisher);
+  assert.equal(mediavineSiteIdForDeployment('production', ''), '');
+  assert.equal(publisherIdForDeployment('production', ''), '');
+  assert.equal(mediavineSiteIdForDeployment('production', SITE), SITE);
+});
+
+/**
+ * The develop deploy must load no Journey wrapper either, and must not be able
+ * to acquire the site id by inheritance - for the publisher id's reason: the
+ * wrapper is issued for `sleekdrops.com`, `sleekdrops.pages.dev` is a domain
+ * the partner has not approved, and the id is the same account-wide, so a
+ * repo-level `MEDIAVINE_SITE_ID` is the natural mistake.
+ */
+test('the develop deploy pins the Mediavine site id empty rather than reading a variable', () => {
+  const develop = workflow('deploy-develop.yml');
+  const assignment = /^\s*PUBLIC_MEDIAVINE_SITE_ID:\s*(.*)$/m.exec(develop);
+  assert.ok(assignment, 'deploy-develop.yml no longer sets PUBLIC_MEDIAVINE_SITE_ID at all');
+  assert.match(
+    assignment[1].trim(),
+    /^(''|"")$/,
+    'develop must pin PUBLIC_MEDIAVINE_SITE_ID to the empty string - a vars.* lookup ' +
+      'here inherits any repo- or org-level MEDIAVINE_SITE_ID that is ever added',
+  );
+  assert.doesNotMatch(develop, /ADS_TXT_URL/, 'a preview publishes no seller record');
+});
+
+test('the production deploy reads its Mediavine site id and ads.txt source from configuration', () => {
+  const production = workflow('deploy-production.yml');
+  assert.match(production, /PUBLIC_MEDIAVINE_SITE_ID:\s*\$\{\{\s*vars\.MEDIAVINE_SITE_ID\s*\}\}/);
+  assert.match(production, /ADS_TXT_URL:\s*\$\{\{\s*vars\.ADS_TXT_URL\s*\}\}/);
 });
