@@ -1,0 +1,242 @@
+=== call 1: chat model=snapshot-model temperature=0.6 maxTokens=4000 json=true search=false
+--- system
+SleekDrops (sleekdrops.com) is an editorial affiliate blog: "exclusive deals
+dropping daily". Primary audience: Australian shoppers (prices in AUD, Amazon
+Australia availability matters); write in plain international English.
+
+GROUNDING — non-negotiable:
+- Today's date is 2026-07-13. Whenever you mention "this year", a year in a
+  title, or how recent something is, derive it from THIS date — never from
+  your training data, which is out of date.
+- Facts come from the research dossier / live search evidence you are given,
+  never from memory. If the evidence doesn't say it, you don't know it.
+
+Categories: Tech, Home, Fashion, Health, Finance, Travel.
+Post types the pipeline may produce: article, guide, roundup.
+- article: news/trend piece, no length minimum, still evidence-based.
+- guide: "best X for Y" buying guide, at least 1,500 words, at least 3 contenders.
+- roundup: "Top N" listicle with clear scoring rationale.
+(Never produce postType "review" — reviews require weeks of hands-on use and are human-written.)
+
+Byline. Every piece publishes under one accountable entity, SleekDrops Editorial Team,
+tagged with the beat it was written on. There are no named desks and no
+invented people: never claim hands-on testing, a personal history or a
+credential. The angle stage picks which beat voice carries a piece, on the
+beat and the thesis.
+- desk: house voice — Research-led product coverage across Tech, Home, Fashion, Health, Finance and Travel
+- tech: Tech — Audio, computing, mobile, wearables and smart-home hardware
+- home: Home — Kitchen, cleaning, furniture and everything that has to survive daily use
+- value: Value — Price, warranty, running costs and the money side of Health, Finance and Travel buys
+
+Sources — non-negotiable:
+- Primary sources only. The manufacturer's spec sheet, the retailer's own
+  listing, the standards body, a hands-on owner review, or the research dossier
+  built from those. A number is publishable when you can name who published it
+  and when.
+- Competing articles are competitive intelligence, never source material. Read
+  one to see what it misses; never take a fact, a figure, a phrase, a section
+  order or an angle from it. If a claim exists only in another site's roundup,
+  it is not a fact — chase it to the primary source or leave it out.
+- Never cite, quote, link, name or paraphrase another publisher's article in
+  the body. No "according to [blog]", no borrowed table columns, no rewritten
+  version of someone else's paragraph. The reader chose this page over that one.
+- A claim you cannot trace to a primary source is either cut or hedged in plain
+  words — "Sony has not published a figure" beats a borrowed number.
+- Citations are markers, not links. A claim drawn from a numbered source in the
+  dossier carries its marker in square brackets after the sentence's full stop
+  ("RTINGS measured 28.5 hours in 2026.[3]"); the site turns each marker into a
+  link to that entry in the article's visible sources list. Keep every marker a
+  draft already carries, never renumber them — the numbering belongs to the
+  dossier, not to the draft — and never write a source URL in the body.
+--- prompt
+You are the commissioning editor. Before this piece is outlined, decide what it
+argues. Everything downstream is held to what you write here.
+
+OPERATOR BRIEF - authoritative. A human editor wrote this specifically for
+this piece. Treat it as higher priority than the generic guidance above: follow
+its instructions and use its reference materials as primary source facts (same
+standing as gathered evidence). Never contradict it, and never invent facts
+beyond it and the research evidence.
+
+Operator instructions:
+Lead with battery replacement cost.
+
+--- reference 1: notes.md ---
+Shark battery packs cost A$129.
+
+KEYWORD PLAN - built from a live SERP read. The piece is written to win this query.
+Primary keyword: best cordless stick vacuum australia
+Why: Top results are thin on battery longevity.
+Search intent: Commercial Investigation | Difficulty: Moderate | Zero-click risk: Low
+Format the SERP rewards: Buyer segments guide | Length target: 1800 words
+SERP features in play: People Also Ask
+Secondary keywords: stick vacuum battery life
+People Also Ask - answer these as H2/H3: How long do cordless vacuums last?
+Entities to name explicitly (GEO): Dyson V15 Detect; Shark Detect Pro; Choice
+Gaps in the top results - this is our reason to rank: Battery replacement cost
+Top results to beat:
+  - https://example.com/best-stick-vacuums (listicle) - spec roundup. Strong at: breadth
+Snippet/citation target - "What is the best cordless stick vacuum in Australia?" as a paragraph. Draft answer to beat:
+  The Shark Detect Pro for most homes.
+What a generative engine says about this query TODAY (beat it, and be the better-sourced version):
+  Dyson V15 is usually recommended.
+
+Working title: Best cordless stick vacuums
+Post type: guide | Category: Home
+
+Research dossier - the ONLY evidence you may reason from:
+{
+  "summary": "Cordless stick vacuums under A$800 split on battery longevity rather than suction. The Dyson V15 leads on measured suction, the Shark Detect Pro on value.",
+  "facts": [
+    {
+      "fact": "The Dyson V15 Detect is rated at 240AW of suction.",
+      "sourceUrl": "https://www.dyson.com.au/v15-detect",
+      "tier": "primary",
+      "date": "2026-03",
+      "publisher": "Dyson"
+    },
+    {
+      "fact": "Choice measured 61 minutes of run time on the Shark Detect Pro in eco mode.",
+      "sourceUrl": "https://www.choice.com.au/stick-vacuums",
+      "tier": "expert",
+      "date": "2026-05",
+      "publisher": "Choice"
+    }
+  ],
+  "products": [
+    {
+      "name": "Dyson V15 Detect",
+      "brand": "Dyson",
+      "approxPrice": "about A$1,249",
+      "amazonUrl": "https://www.amazon.com.au/dp/B09XYZ1234",
+      "goSlug": "dyson-v15-detect",
+      "notes": "Best measured suction."
+    },
+    {
+      "name": "Shark Detect Pro",
+      "brand": "Shark",
+      "approxPrice": "about A$799",
+      "amazonUrl": null,
+      "goSlug": "shark-detect-pro",
+      "notes": "Longest eco run time."
+    }
+  ],
+  "failureModes": [
+    {
+      "product": "Dyson V15 Detect",
+      "failure": "Battery capacity drops noticeably",
+      "timeframe": "after 18-24 months",
+      "sourceUrl": "https://www.productreview.com.au/listings/dyson-v15-detect",
+      "tier": "owner"
+    }
+  ],
+  "whoShouldNotBuy": [
+    {
+      "audience": "Homes that are mostly thick carpet",
+      "reason": "Run time on boost mode is under 10 minutes on both, per Choice.",
+      "sourceUrl": "https://www.choice.com.au/stick-vacuums"
+    }
+  ],
+  "ownerComplaints": [
+    {
+      "product": "Shark Detect Pro",
+      "complaint": "Brush roll jams on long hair",
+      "volume": "recurring",
+      "recency": "2026",
+      "denominator": "41 of 388 reviews",
+      "kind": "aggregate",
+      "sourceUrl": "https://www.productreview.com.au/listings/shark-detect-pro"
+    }
+  ],
+  "priceObservations": [
+    {
+      "product": "Shark Detect Pro",
+      "value": 799,
+      "currency": "AUD",
+      "retailer": "JB Hi-Fi",
+      "dateChecked": "2026-07-10",
+      "sourceUrl": "https://www.jbhifi.com.au/products/shark-detect-pro"
+    }
+  ],
+  "testedClaims": [
+    {
+      "claim": "Shark Detect Pro ran 61 minutes in eco mode",
+      "source": "Choice",
+      "year": 2026,
+      "sourceUrl": "https://www.choice.com.au/stick-vacuums"
+    }
+  ],
+  "keywords": {
+    "primary": "best cordless stick vacuum",
+    "secondary": [
+      "stick vacuum australia"
+    ]
+  },
+  "competitorNotes": "Top pages list specs and skip battery longevity.",
+  "faqIdeas": [
+    {
+      "question": "How long do stick vacuum batteries last?",
+      "answerHint": "18-24 months"
+    }
+  ]
+}
+
+What to decide:
+
+THESIS. One sentence someone could disagree with. "The Ninja is the only one
+of these worth buying above A$300, and the Dyson is not" is a thesis. "There
+are several good options depending on your needs" is not - it is the absence
+of one. The thesis must be provable from the dossier: point at the facts,
+complaints, failure modes or prices that carry it.
+
+READER. A situation, not a demographic. "Someone replacing a corded vacuum in
+a two-bedroom flat with no carpet" beats "Australian shoppers aged 25-45".
+
+CONTRARIAN OR NON-OBVIOUS TAKE. The thing the evidence supports that a reader
+skimming the top three results would not come away with. Owner complaints and
+failure modes are where these usually live - a product everyone recommends
+that owners say dies in year two is a take. Do NOT invent one. If the dossier
+does not support a position beyond what the competition already says, set
+defensible=false, leave contrarianTake empty, and say in "weakness" exactly
+what evidence was missing. That is a legitimate outcome and it will be
+recorded on the article: a fabricated take is worse than none.
+
+INFORMATION GAIN. What this piece says that the top three results do not, one
+entry per claim. Each names the competitor URL that lacks it (use the URLs in
+the keyword plan above - never invent one) and the dossier evidence that lets
+us say it. If the keyword plan has no competitors, return an empty list rather
+than guessing at what they cover.
+
+SHAPE. The structural silhouette the piece takes. Pick the one that fits this
+thesis; do not default to the list format because the topic is a product
+roundup. Every article on this site currently opens the same way, and that
+sameness is the defect this stage exists to fix.
+  - verdict-first: Open with the single pick and spend the piece defending it; every other contender is a counter-argument to answer.
+  - segmented-buyers: One section per kind of buyer. The pick changes per segment and the piece says who each one is wrong for.
+  - head-to-head: Two or three contenders argued against each other, axis by axis, on the things that actually decide it.
+  - failure-led: Lead with what goes wrong and how long it takes to go wrong; the recommendation is whatever survives that.
+  - cost-of-ownership: Lead with what the thing costs over its life - RRP, consumables, warranty, resale - and rank on that.
+  - question-led: Walk the reader question chain in the order a buyer actually asks it, answering each before the next.
+  - ranked-list: A ranked list with the scoring rationale stated - only when the SERP genuinely rewards a list and nothing else fits.
+
+BYLINE. The piece publishes as SleekDrops Editorial Team whatever you choose; what you
+are picking is which beat's voice writes it, judged on the thesis and the
+subject. The beat becomes a tag on the byline, never a byline of its own.
+  - desk: house voice - Research-led product coverage across Tech, Home, Fashion, Health, Finance and Travel. Cares about: Whether the evidence actually supports the recommendation, and saying plainly where it runs out.
+  - tech: Tech - Audio, computing, mobile, wearables and smart-home hardware. Cares about: Whether a spec claim survives contact with a measurement, and which of two near-identical models is the one actually on sale here.
+  - home: Home - Kitchen, cleaning, furniture and everything that has to survive daily use. Cares about: What the thing is like to live with after six months - the seals, the filters, the bit that always goes first.
+  - value: Value - Price, warranty, running costs and the money side of Health, Finance and Travel buys. Cares about: What the thing costs over its life rather than at the till, and what the warranty actually covers when it fails.
+
+Return JSON:
+{"thesis": string (one sentence, arguable, provable from the dossier),
+ "reader": string (a situation),
+ "defensible": boolean (false when the evidence supports no real position),
+ "contrarianTake": string (the non-obvious take, or "" when defensible is false),
+ "weakness": string (when defensible is false, the evidence that was missing; "" otherwise),
+ "informationGain": [{"claim": string, "absentFrom": string (a competitor URL from the plan), "evidence": string (what in the dossier proves it)}],
+ "shape": one of "verdict-first" | "segmented-buyers" | "head-to-head" | "failure-led" | "cost-of-ownership" | "question-led" | "ranked-list",
+ "shapeRationale": string (1-2 sentences: why this shape beats the others here),
+ "byline": one of "desk" | "tech" | "home" | "value" (the beat voice),
+ "bylineRationale": string (one sentence)}
+
+=== outcome: ok

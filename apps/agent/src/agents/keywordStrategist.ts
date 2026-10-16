@@ -14,7 +14,14 @@
 // writing a brief.
 import { chatJson, requireKeys, UsageTracker } from '../llm/index.js';
 import { formatSerps, tavilySerpMany } from '../tools/tavily.js';
-import { GEO_RULES, operatorBrief, siteContext } from './context.js';
+import {
+  editionMarket,
+  GEO_RULES,
+  operatorBrief,
+  type PromptContext,
+  siteContext,
+  withAgentGoal,
+} from './context.js';
 import type { ArticleRow, KeywordPlan, TopicRow } from '../pipeline/types.js';
 
 /** How many candidates get a live SERP read. Each one is a Tavily call. */
@@ -24,7 +31,19 @@ const DIFFICULTY = new Set(['Easy', 'Moderate', 'Hard']);
 const RISK = new Set(['Low', 'Medium', 'High']);
 const SNIPPET_FORMATS = new Set(['paragraph', 'list', 'table']);
 
+/** Who the queries are for: the edition's country, or readers anywhere. */
+function audienceRule(ctx: PromptContext): string {
+  const market = editionMarket(ctx.edition);
+  if (!market) {
+    return 'Readers anywhere are the audience; keep a country out of a query unless the topic has one.';
+  }
+  // "an AU", "a UK": the article follows how the code's first letter is said.
+  const article = /^[AEFHILMNORSX]/.test(market.code) ? 'an' : 'a';
+  return `${market.adjective} buyers are the audience; include ${article} ${market.code}-qualified variant if it is natural.`;
+}
+
 export async function runKeywordStrategist(
+  ctx: PromptContext,
   article: ArticleRow,
   topic: TopicRow | null,
   model: string,
@@ -42,8 +61,9 @@ export async function runKeywordStrategist(
   // the expensive judgement happens after we have seen the results.
   const { candidates } = await chatJson<{ candidates: string[] }>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: siteContext(),
+      system: withAgentGoal(ctx, 'keyword', siteContext(ctx)),
       temperature: 0.4,
       prompt: `Propose the search queries this piece could realistically be built to win.
 
@@ -58,7 +78,7 @@ Rules:
 - Mix head terms with long-tail. A specific query we can win beats a fat one we can't.
 - Include at least one commercial-investigation phrasing ("best X for Y", "X vs Y")
   and at least one question phrasing, when they fit the topic.
-- Australian buyers are the audience; include an AU-qualified variant if it is natural.
+- ${audienceRule(ctx)}
 - No brand-name-only queries: we cannot outrank the manufacturer's own page.
 
 Return JSON {"candidates": string[]} — ${CANDIDATES_TO_CHECK + 3} to ${CANDIDATES_TO_CHECK + 6} queries, best first.`,
@@ -81,8 +101,9 @@ Return JSON {"candidates": string[]} — ${CANDIDATES_TO_CHECK + 3} to ${CANDIDA
 
   const plan = await chatJson<KeywordPlan>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: `${siteContext()}\n\n${GEO_RULES}`,
+      system: withAgentGoal(ctx, 'keyword', `${siteContext(ctx)}\n\n${GEO_RULES}`),
       temperature: 0.3,
       maxTokens: 8000,
       prompt: `You are a senior SEO strategist. Pick the ONE keyword this piece is built to

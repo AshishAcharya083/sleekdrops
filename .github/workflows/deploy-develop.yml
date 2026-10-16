@@ -71,8 +71,8 @@ jobs:
           # Develop is held at the same code level as main and renders the same
           # pages from the same live editorial content, so left indexable it is a
           # complete second copy of the site competing with the real one for its
-          # own rankings - and, to an ad network's reviewer, duplicated content
-          # on a domain the account does not own.
+          # own rankings - and, to an AdSense reviewer, duplicated content on a
+          # domain the account does not own.
           #
           # Only the exact string `production` is indexable, so this line going
           # missing fails safe. The reverse - production's line going missing and
@@ -95,7 +95,7 @@ jobs:
           # name. Public: it ships in the JS bundle every visitor downloads, so
           # it is a repo/environment *variable* rather than a secret.
           #
-          # Per environment for the reason the ad partner's id is: one property
+          # Per environment for the reason the AdSense ids are: one property
           # receiving both sites means every figure production is judged on -
           # sessions, conversion rate, the affiliate click-through - is inflated
           # by preview traffic, and nothing in GA4 can separate the two after the
@@ -114,33 +114,51 @@ jobs:
           # feature falls back to its code-side default.
           PUBLIC_DEVTEAM_FLAGS_HOST: ${{ vars.DEVTEAM_FLAGS_HOST }}
           PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY: ${{ secrets.DEVTEAM_FLAGS_CLIENT_KEY }}
-          # Journey by Mediavine - the ad partner's site id. Develop is pinned
-          # EMPTY, and deliberately does not read `vars.MEDIAVINE_SITE_ID`. Read
-          # through a variable, this environment inherits any repo-level or
-          # org-level `MEDIAVINE_SITE_ID` that anyone ever adds - and adding one
-          # is the natural mistake, because the id really is the same for the
-          # whole account, so scoping it per environment looks redundant until
-          # you know why it is not.
+          # Google AdSense - publisher id (ca-pub-...) + one slot id per placement.
+          # All public: they ship in the ad markup every visitor downloads, so they
+          # are repo *variables* rather than secrets. Held in repo settings for the
+          # same reason as the keys above - they are minted per environment in the
+          # AdSense console, and a value from the wrong environment reports its
+          # revenue against the wrong property while the page looks healthy.
           #
-          # Why it is not: the wrapper is issued for sleekdrops.com and, in
-          # Mediavine's words, can only be used on the site it was generated
-          # for. sleekdrops.pages.dev is a different domain the partner has not
-          # approved, and develop tracks main closely enough that the code is
-          # otherwise identical, so this line is the entire difference between
-          # the two. An empty value serves no ads and publishes no ads.txt,
-          # which is what a preview deploy should publish: nothing. Turning ads
-          # on here means changing this line and knowing why.
+          # An empty publisher id disables ads silently: no partner script, no
+          # ads.txt, nothing to consent to.
+          #
+          # Develop is pinned EMPTY, and deliberately does not read
+          # `vars.ADSENSE_CLIENT`. Read through a variable, this environment
+          # inherits any repo-level or org-level `ADSENSE_CLIENT` that anyone
+          # ever adds - and adding one is the natural mistake, because the
+          # publisher id really is the same for the whole account, so scoping it
+          # per environment looks redundant until you know why it is not.
+          #
+          # Why it is not: sleekdrops.pages.dev is a different domain from
+          # sleekdrops.com and is not in the AdSense account's Sites list.
+          # Publishing the publisher id there puts a /ads.txt and a
+          # google-adsense-account tag on an unlisted domain claiming the
+          # account, which is exactly the shape of a review failure - and
+          # develop tracks main closely enough that the code is otherwise
+          # identical, so this line is the entire difference between the two.
+          #
+          # An empty value disables ads, ads.txt and the verification tag
+          # together, which is what a preview deploy should publish: nothing.
+          # Turning ads on here means changing this line and knowing why.
+          PUBLIC_ADSENSE_CLIENT: ''
+          # Journey by Mediavine - pinned EMPTY for the publisher id's reason
+          # above, and deliberately not read from `vars.MEDIAVINE_SITE_ID`: the
+          # wrapper is issued for sleekdrops.com and, in Mediavine's words, can
+          # only be used on the site it was generated for, and the id is the
+          # same account-wide, so a repo-level variable is the natural mistake.
+          # An empty value loads no Journey wrapper and publishes no seller
+          # record, which is what a preview deploy should publish: nothing.
           PUBLIC_MEDIAVINE_SITE_ID: ''
           # Develop is a code-only preview rendered against the SAME live
-          # editorial content as production. Content lives in Cloudflare D1,
-          # so the build needs the same D1 env vars as prod.
-          # Reused prod secrets on purpose — this is a test deploy target.
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          D1_DATABASE_ID: b98d83ac-a2a5-42cb-a367-0cb71b902670
-          CLOUDFLARE_D1_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
-          # Fallback while CLOUDFLARE_D1_TOKEN isn't set — works only if the
-          # Pages deploy token also has D1 read permission.
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # editorial content as production: the posts and affiliate links in
+          # the SleekDrops Supabase project, read by scripts/fetch-content.mjs
+          # through the Data API. Both values are public (the key can read
+          # published content and nothing else), so they are repository
+          # variables, shared with production and the PR build.
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
         run: pnpm --filter @sleekdrops/web build
 
       - name: Deploy to Cloudflare Pages (develop)

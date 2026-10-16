@@ -5,14 +5,16 @@
 //      stock-site overlays / promo text?).
 //   2. GENERATE: if nothing usable is found, generate a clean 16:9 editorial
 //      hero with the Gemini image model.
-// Whatever wins is uploaded to our own GCS bucket and the public URL goes into
-// frontmatter (heroImage/heroAlt) — never a hotlink to someone else's server.
+// Whatever wins is uploaded to our own Supabase Storage bucket and the public
+// URL goes into frontmatter (heroImage/heroAlt) — never a hotlink to someone
+// else's server.
 //
 // This stage degrades, never blocks: any failure returns heroImage null and
 // the site keeps rendering its cover-fill fallback.
 import { generateImage, visionJson } from '../llm/genai.js';
-import { gcsConfigured, uploadPublicImage } from '../tools/gcs.js';
+import { storageConfigured, uploadPublicImage } from '../tools/storage.js';
 import { tavilyImageSearch } from '../tools/tavily.js';
+import { agentGoalBlock, type PromptContext } from './context.js';
 import type { HeroImageSource } from '../distribution/types.js';
 import type { ArticleRow } from '../pipeline/types.js';
 
@@ -67,14 +69,16 @@ async function download(url: string): Promise<{ data: Buffer; mimeType: string }
 }
 
 export async function runImageAgent(
+  ctx: PromptContext,
   article: ArticleRow,
   visionModel: string,
 ): Promise<ImageResult> {
-  if (!gcsConfigured()) {
+  if (!storageConfigured()) {
     return {
       heroImage: null,
       heroAlt: null,
-      summary: 'skipped — GCS_IMAGES_BUCKET not configured; cover fill will render instead',
+      summary:
+        'skipped — Supabase Storage not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY); cover fill will render instead',
       source: null,
     };
   }
@@ -97,7 +101,7 @@ export async function runImageAgent(
       checked += 1;
       if (checked > 8) break; // vision checks aren't free — bound the sweep
       try {
-        const verdict = await visionJson<VisionVerdict>(visionModel, img, `You are vetting a candidate hero image for an article titled "${title}".
+        const verdict = await visionJson<VisionVerdict>(ctx.platform.id, visionModel, img, `You are vetting a candidate hero image for an article titled "${title}".
 Image search context: "${hit.description || query}".
 
 Return JSON:
@@ -126,11 +130,13 @@ Return JSON:
 
   // ── 2. GENERATE: fall back to the image model ────────────────────────────
   try {
+    const goal = ctx.platform.agentGoals.image?.trim();
     const generated = await generateImage(
+      ctx.platform.id,
       `Photorealistic editorial hero photograph for a consumer product article titled "${title}".
 ${topProducts.length > 0 ? `Feature: ${topProducts.join(' and ')}.` : ''}
 Wide 16:9 composition, natural lighting, clean uncluttered background, magazine quality.
-Absolutely NO text, NO logos, NO watermarks, NO people's faces.`,
+Absolutely NO text, NO logos, NO watermarks, NO people's faces.${goal ? `\n\n${agentGoalBlock(ctx, goal)}` : ''}`,
     );
     const url = await uploadPublicImage(
       `heroes/${slug}.${EXT[generated.mimeType] ?? 'png'}`,

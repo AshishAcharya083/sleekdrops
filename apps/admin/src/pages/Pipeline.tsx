@@ -21,8 +21,10 @@ import {
   fmtTime,
   groupAttempts,
   isLeaseLapsed,
+  isEventExpired,
   isRetryableRun,
   isTestableStage,
+  offersEnabled,
   outOfDateStages,
   OUT_OF_DATE_LABEL,
   readTestStageResult,
@@ -42,10 +44,10 @@ import {
   untestableStageHint,
 } from '../api';
 import { toApiError, type ApiError } from '../api-error';
-import { ApiErrorBanner, Badge, Elapsed, OutOfDateBadge } from '../components';
+import { ApiErrorBanner, Badge, Elapsed, ExpiredBadge, OutOfDateBadge } from '../components';
 import { failureNote } from '../failure';
 import { HeroImageField } from '../HeroImageField';
-import { usePoll } from '../hooks';
+import { usePlatform, usePoll } from '../hooks';
 import { Offers } from './Offers';
 
 const LANES: Array<{ title: string; stages: string[] }> = [
@@ -63,6 +65,7 @@ export function Pipeline({
   openArticleId?: string | null;
   onOpened?: () => void;
 } = {}) {
+  const platform = usePlatform();
   const { data, error, refresh } = usePoll<ArticleList>('/api/articles');
   const [openId, setOpenId] = useState<string | null>(openArticleId ?? null);
   // The offer screens take over the tab rather than stacking a second overlay
@@ -104,6 +107,7 @@ export function Pipeline({
                     <Badge value={a.stage} />
                     <Badge value={a.status} />
                     <FailureBadge article={a} />
+                    {isEventExpired(a.event_starts_at) && <ExpiredBadge />}
                     {a.seo_score && <span className="badge">SEO {a.seo_score}</span>}
                     {a.hero_image_url && <span className="badge violet">🖼️ hero</span>}
                   </div>
@@ -124,7 +128,7 @@ export function Pipeline({
           id={openId}
           onClose={() => setOpenId(null)}
           onChanged={refresh}
-          onOpenOffers={() => setOffersFor(openId)}
+          onOpenOffers={offersEnabled(platform) ? () => setOffersFor(openId) : null}
         />
       )}
     </>
@@ -508,7 +512,8 @@ function ArticlePanel({
   id: string;
   onClose: () => void;
   onChanged: () => void;
-  onOpenOffers: () => void;
+  /** Null on a platform with no monetisation: it has no offers to review. */
+  onOpenOffers: (() => void) | null;
 }) {
   const [detail, setDetail] = useState<ArticleDetail | null>(null);
   // Classified, so a refused action names its own cause: the agent's sentence
@@ -867,21 +872,23 @@ function ArticlePanel({
               </div>
             )}
 
-            <div className="section">
-              <h2>
-                Offer coverage{' '}
-                <button className="btn secondary small" onClick={onOpenOffers}>
-                  review offers
-                </button>
-              </h2>
-              <div className="card">
-                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                  Which products in this card carry a commissionable link and a dated price, and
-                  which fall back to a search. A launch-window SKU is in no feed and cannot be
-                  polled, so an offer only gets there by hand.
-                </p>
+            {onOpenOffers && (
+              <div className="section">
+                <h2>
+                  Offer coverage{' '}
+                  <button className="btn secondary small" onClick={onOpenOffers}>
+                    review offers
+                  </button>
+                </h2>
+                <div className="card">
+                  <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                    Which products in this card carry a commissionable link and a dated price, and
+                    which fall back to a search. A launch-window SKU is in no feed and cannot be
+                    polled, so an offer only gets there by hand.
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
             {article.affiliate_links && article.affiliate_links.length > 0 && (
               <div className="section">

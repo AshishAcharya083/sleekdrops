@@ -12,7 +12,7 @@
 // A provider therefore reads the payload and sends it. It never writes copy.
 import { createLogger } from '../../lib/log.js';
 import { MONETISED_INTENTS } from '../../content/contract.js';
-import { expectedOpenGraph, storeRenderedPayload, taggedUrl } from '../queue.js';
+import { expectedOpenGraph, storeRenderedPayload, taggedUrl, type SiteTarget } from '../queue.js';
 import { channelSpec, placementFor, type ChannelSpec } from './channels.js';
 import {
   AFFILIATE_DISCLOSURE,
@@ -63,7 +63,8 @@ export function needsDisclosure(article: DistributableArticle): boolean {
 }
 
 /**
- * Compose one post for one channel.
+ * Compose one post for one channel, linking to the article on `target` - its
+ * own platform's site.
  *
  * The order of work matters: the image is resolved first because it can take
  * the first-comment placement away, the placement then decides the cue and the
@@ -75,6 +76,7 @@ export function needsDisclosure(article: DistributableArticle): boolean {
  */
 export async function render(
   article: DistributableArticle,
+  target: SiteTarget,
   channel: string | ChannelSpec,
   placement: LinkPlacement,
   deps: RenderDeps = {},
@@ -85,7 +87,7 @@ export async function render(
 
   const image = await resolveImage(article, spec.name, placementFor(spec, placement), deps);
   const resolved = image.placement;
-  const url = taggedUrl(slug, spec.name, resolved);
+  const url = taggedUrl(target, slug, spec.name, resolved);
 
   const cue = resolved === 'first_comment' ? FIRST_COMMENT_CUE : null;
   const disclosure = needsDisclosure(article) ? AFFILIATE_DISCLOSURE : null;
@@ -94,6 +96,7 @@ export async function render(
   const frontmatter = article.frontmatter ?? {};
   const copy = await writeHeadline(
     {
+      platformId: article.platform_id,
       title: typeof frontmatter.title === 'string' ? frontmatter.title : article.title,
       dek: typeof frontmatter.dek === 'string' ? frontmatter.dek : '',
       keyword: article.keyword_plan?.primaryKeyword ?? '',
@@ -139,10 +142,11 @@ export async function render(
 export async function renderForItem(
   item: DistributionItem,
   article: DistributableArticle,
+  target: SiteTarget,
   deps: RenderDeps = {},
 ): Promise<RenderedPayload> {
   if (item.payload?.renderedAt) return item.payload;
-  const payload = await render(article, item.provider, item.placement, deps);
+  const payload = await render(article, target, item.provider, item.placement, deps);
   await storeRenderedPayload(item.id, payload);
   return payload;
 }

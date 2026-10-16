@@ -22,8 +22,8 @@
  * That record holds one decision per purpose category, and this module acts on
  * exactly one of them - `analytics`. The advertising category is written here
  * too, because a single record is what keeps the categories in step, but it is
- * retained only for backwards compatibility. The advertising partner's consent
- * platform owns the advertising decision.
+ * retained only for backwards compatibility. Google's certified CMP owns the
+ * advertising decision.
  *
  * Two sinks hang off that one gate and off one payload. `send()` scrubs an event
  * once and hands the result to the DevTeam client and, through the `./ga`
@@ -122,6 +122,10 @@ export const EVENTS = {
   copyLinkClicked: 'Copy Link Clicked',
   lightboxOpened: 'Image Lightbox Opened',
   tocLinkClicked: 'TOC Link Clicked',
+  // Trust surfaces, dispatched by chrome.ts from DOM hooks via ./trust-analytics.
+  methodologyViewed: 'Methodology Viewed',
+  scoreExplainerExpanded: 'Score Explainer Expanded',
+  trustBadgeClicked: 'Trust Badge Clicked',
 } as const;
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
@@ -523,8 +527,8 @@ export function trackPageView(props?: EventProps): void {
 /**
  * The analytics consent decision in force for this document, or null while the
  * visitor has not made one. Read by the preferences dialog so reopening it shows
- * what is actually in effect rather than the default. Advertising consent is
- * managed separately by the advertising partner's consent platform.
+ * what is actually in effect rather than the opt-in default. Advertising
+ * consent is managed separately by Google's certified CMP.
  */
 export function consentStatus(): ConsentStatus | null {
   const decision = scope().decision;
@@ -536,7 +540,7 @@ export function consentStatus(): ConsentStatus | null {
  *
  * The record is the only place a category is decided, so this is the one writer:
  * the legacy advertising field has no runtime effect here and stays denied;
- * the advertising partner's consent platform owns that separate decision.
+ * Google's certified CMP owns that separate decision.
  */
 export function setConsent(grants: ConsentGrants): void {
   writeConsent(grants);

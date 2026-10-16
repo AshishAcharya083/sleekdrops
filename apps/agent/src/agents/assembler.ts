@@ -1,4 +1,4 @@
-// Assembler — turns the approved draft into the exact D1 payload: validated
+// Assembler — turns the approved draft into the exact post payload: validated
 // frontmatter JSON + affiliate_links rows for every /go/ slug in the body.
 // Affiliate destinations are built 100% deterministically from the dossier —
 // no LLM touches a URL. Each row is region-aware: a liveness-verified ASIN for
@@ -20,17 +20,17 @@ import {
   estimateReadTime,
   goLinkSearchTerms,
   goSlugsIn,
-  HOME_CURRENCY,
   isWebUrl,
   MONETISED_INTENTS,
   pickCover,
-  todayInSydney,
   validateArticle,
 } from '../content/contract.js';
 import { pageClaims, pickEvidence } from '../content/claims.js';
+import { appendComplianceFooter, complianceProblems, previewOddsAsAt } from '../content/compliance.js';
 import { offerLinkRow, pickOfferFrom } from '../content/offers.js';
 import { articleSources, stripUnresolvedCitations } from '../content/sources.js';
 import { productSearchTerm, verifyAmazonProductUrl } from '../tools/amazon.js';
+import { editionToday, type PromptContext } from './context.js';
 import type { AffiliateLinkRow, ArticleRow, ProductOffer } from '../pipeline/types.js';
 
 export interface AssembledArticle {
@@ -43,6 +43,8 @@ export interface AssembledArticle {
   /** Slugs linked to an Amazon search built from the draft's own words. */
   healedSlugs: string[];
   droppedSlugs: string[];
+  /** For a preview, when the stalest price in its picks table was seen (ISO 8601); unset otherwise. */
+  oddsAsAt?: string;
 }
 
 /**
@@ -65,7 +67,23 @@ function uniqueEntities(entities: string[]): string[] {
   return [...seen];
 }
 
+const HEADLINE_FIELDS: Array<[key: string, name: string]> = [
+  ['title', 'title'],
+  ['dek', 'dek'],
+  ['tags', 'tags'],
+  ['heroAlt', 'hero alt text'],
+];
+
+function headlineComplianceProblems(frontmatter: Record<string, unknown>, ctx: PromptContext): string[] {
+  return HEADLINE_FIELDS.flatMap(([key, name]) => {
+    const value = frontmatter[key];
+    const text = Array.isArray(value) ? value.join(', ') : typeof value === 'string' ? value : '';
+    return text ? complianceProblems(text, ctx).map((problem) => `${name}: ${problem}`) : [];
+  });
+}
+
 export async function runAssembler(
+  ctx: PromptContext,
   article: ArticleRow,
   offers: ProductOffer[] = [],
 ): Promise<AssembledArticle> {
@@ -76,7 +94,7 @@ export async function runAssembler(
   // The audience's day, not the server's: every date stamped below is a
   // calendar day this publication states - the pubDate, the review stamp, and
   // the day an offer's price is judged current against.
-  const today = todayInSydney();
+  const today = editionToday(ctx.edition);
   const offerBySlug = new Map(offers.map((offer) => [offer.go_slug, offer]));
 
   // The deterministic parts never go through the LLM. A re-assembly (e.g. the
@@ -277,8 +295,8 @@ export async function runAssembler(
   // where there was no unit. Silence is what the ACCC's reviews sweep found
   // most often, and "we were not sent one" is the disclosure a reader of a
   // no-sponsored-posts site is owed. A piece with no product in it is the one
-  // case where the sentence is noise rather than disclosure. Posts already in
-  // D1 carry none of this and render exactly as they did until they are next
+  // case where the sentence is noise rather than disclosure. Posts already
+  // live carry none of this and render exactly as they did until they are next
   // re-assembled.
   const unit = article.research?.reviewUnit ?? null;
   // A benefit actually received is disclosed wherever it lands: a loaned or
@@ -297,11 +315,22 @@ export async function runAssembler(
       ...(unit?.returned ? { returned: unit.returned } : {}),
     };
   }
-  frontmatter.currency = HOME_CURRENCY;
+  // An edition that quotes no currency amounts states none.
+  if (ctx.edition.currency) frontmatter.currency = ctx.edition.currency;
 
   // Anything left is a genuine contract violation (schema, raw merchant URL,
-  // non-approved merchant destination).
-  const problems = validateArticle(body, frontmatter, finalLinks);
+  // non-approved merchant destination, a category or post type the platform
+  // does not publish).
+  const problems = [
+    ...validateArticle(body, frontmatter, finalLinks, ctx.platform),
+    ...complianceProblems(body, ctx, {
+      postType: article.post_type,
+      sourceUrls: sources.map((source) => source.url),
+    }),
+    // The headline and dek are model-written too, and the most visible text
+    // on the page and in every distribution post.
+    ...headlineComplianceProblems(frontmatter, ctx),
+  ];
   if (problems.length > 0) {
     throw new Error(`assembly validation failed:\n- ${problems.join('\n- ')}`);
   }
@@ -311,8 +340,14 @@ export async function runAssembler(
   // launch-window piece settles its commission 6-12+ weeks after the traffic,
   // so nobody can tell at publish time what a page earns. It is the page
   // failing to do what a "which should I buy" piece exists to do.
+  // A platform that carries no affiliate links has nothing to click by design.
   const intent = article.keyword_plan?.intent;
-  if (finalLinks.length === 0 && intent && MONETISED_INTENTS.has(intent)) {
+  if (
+    ctx.platform.monetisation !== 'none' &&
+    finalLinks.length === 0 &&
+    intent &&
+    MONETISED_INTENTS.has(intent)
+  ) {
     throw new Error(
       `no affiliate links for a ${intent} piece: the dossier carried ${products.length} product(s), ` +
         `the draft linked ${slugsInBody.length} /go/ slug(s), and healing recovered ` +
@@ -322,5 +357,18 @@ export async function runAssembler(
     );
   }
 
-  return { frontmatter, affiliateLinks: finalLinks, body, offerSlugs, healedSlugs, droppedSlugs };
+  const oddsAsAt = article.post_type === 'preview' ? previewOddsAsAt(body) : null;
+  // Appended from the edition's data after every check, so no model ever
+  // writes - or gets to reword - the responsible-gambling notice.
+  body = appendComplianceFooter(body, ctx.edition);
+
+  return {
+    frontmatter,
+    affiliateLinks: finalLinks,
+    body,
+    offerSlugs,
+    healedSlugs,
+    droppedSlugs,
+    ...(oddsAsAt ? { oddsAsAt } : {}),
+  };
 }

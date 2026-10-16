@@ -27,6 +27,7 @@ const { assertEvidenceSufficient, checkEvidence, normaliseDossier } = await impo
 );
 
 import type { ArticleRow, ResearchDossier } from './types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 const reachable = await pool
   .query('SELECT 1')
@@ -41,13 +42,13 @@ if (reachable) await migrate();
 
 /** The admin panel can store a Claude token too; if one is there, stand down. */
 const credentialled =
-  reachable && (await getSetting<{ claude_token?: string }>('llm', {})).claude_token;
+  reachable && (await getSetting<{ claude_token?: string }>(SLEEKDROPS_PLATFORM_ID, 'llm', {})).claude_token;
 const modelSkip = credentialled
   ? 'the database carries a Claude token - this test must not reach a live model'
   : skip;
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 
 after(async () => {
   if (reachable) await pool.end();
@@ -103,8 +104,10 @@ function richDossier(): ResearchDossier {
 }
 
 async function insertArticle(fields: Record<string, unknown> = {}): Promise<ArticleRow> {
-  const keys = ['title', 'category', 'post_type', ...Object.keys(fields)];
+  const keys = ['platform_id', 'edition_id', 'title', 'category', 'post_type', ...Object.keys(fields)];
   const values = [
+    'sleekdrops',
+    'au',
     `Best cordless stick vacuums ${randomUUID().slice(0, 8)}`,
     'Home',
     'guide',
@@ -127,7 +130,7 @@ test('a stage that throws leaves the card failed, explained and unclaimed', { sk
   // dossier is whatever the thrown message says. Driving it with a stage that
   // refuses to start (a Claude model with no credential) proves that route
   // against a real row without a live model or a live Tavily.
-  await setSetting('models', { researcher: 'claude-opus-4-6' });
+  await setSetting(SLEEKDROPS_PLATFORM_ID, 'models', { researcher: 'claude-opus-4-6' });
   const article = await insertArticle({
     stage: 'research', status: 'running', claimed_by: 'test-worker', claimed_at: new Date(),
   });
@@ -135,7 +138,7 @@ test('a stage that throws leaves the card failed, explained and unclaimed', { sk
   try {
     await runStage(article);
   } finally {
-    await setSetting('models', {});
+    await setSetting(SLEEKDROPS_PLATFORM_ID, 'models', {});
   }
 
   const failed = await reload(article.id);

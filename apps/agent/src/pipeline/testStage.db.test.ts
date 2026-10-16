@@ -42,8 +42,8 @@ after(async () => {
 
 async function seed(): Promise<ArticleRow> {
   const [row] = await q<ArticleRow>(
-    `INSERT INTO articles (title, category, post_type, stage, status, draft_md, attempt)
-     VALUES ('Test-stage budget card', 'Tech', 'guide', 'assemble', 'failed', 'A draft.', 3)
+    `INSERT INTO articles (platform_id, edition_id, title, category, post_type, stage, status, draft_md, attempt)
+     VALUES ('sleekdrops', 'au', 'Test-stage budget card', 'Tech', 'guide', 'assemble', 'failed', 'A draft.', 3)
      RETURNING *`,
   );
   created.push(row.id);

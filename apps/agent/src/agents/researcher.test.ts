@@ -12,7 +12,11 @@ import {
   sweepUntilSufficient,
 } from './researcher.js';
 import { EvidenceGateError } from '../content/evidence.js';
+import { editionMarket } from './context.js';
+import { sleekdropsSeed } from '../platform/sleekdrops/index.js';
 import type { ArticleRow, ResearchDossier } from '../pipeline/types.js';
+
+const AU = editionMarket({ ...sleekdropsSeed.editions[0], platformId: sleekdropsSeed.platform.id });
 
 const complete: ResearchDossier = {
   summary: 'The 2026 Galaxy Z line, and which of the three to buy.',
@@ -84,6 +88,7 @@ test('every stratum gets queries, even the ones the planner skipped', () => {
   const planned = planStrata(
     { primary: ['dyson v15 specifications'], owner: [] },
     'Best cordless stick vacuums',
+    AU,
   );
 
   assert.deepEqual(
@@ -96,28 +101,59 @@ test('every stratum gets queries, even the ones the planner skipped', () => {
   assert.ok(planned.every((s) => s.queries.length > 0));
 });
 
+test('the Australia edition re-sweeps its own retailers and owner corpus', () => {
+  const planned = resweepPlan(
+    ['primary', 'owner', 'price', 'competing'].map((stratum) => ({ stratum, label: '', have: 0, need: 1, fix: '' })),
+    'iPhone 18 Pro',
+    AU,
+  );
+  assert.deepEqual(planned.map((p) => p.queries), [
+    ['iPhone 18 Pro official specifications press release', 'iPhone 18 Pro RRP australia official announcement'],
+    ['iPhone 18 Pro problems reddit owners', 'iPhone 18 Pro productreview.com.au reviews complaints'],
+    ['iPhone 18 Pro price australia jb hi-fi officeworks', 'iPhone 18 Pro australia launch price rrp'],
+    ['best iPhone 18 Pro australia', 'iPhone 18 Pro review comparison which to buy'],
+  ]);
+  assert.match(planned[2].brief, /^named Australian retailer listings/);
+});
+
+test('an edition for readers anywhere is not sent to Australian sources', () => {
+  const planned = planStrata({}, 'Best cordless stick vacuums', null);
+  const owner = planned.find((s) => s.key === 'owner');
+  assert.doesNotMatch(owner?.brief ?? '', /productreview|Choice|Bunnings|OzBargain/i);
+  assert.doesNotMatch(JSON.stringify(planned.map((s) => s.queries)), /australia|productreview/i);
+  assert.equal(planned[3].brief.startsWith('named retailer listings'), true);
+  assert.equal(planned[3].queries[0], 'Best cordless stick vacuums price');
+  const resweep = resweepPlan(
+    ['primary', 'owner', 'price', 'competing'].map((stratum) => ({ stratum, label: '', have: 0, need: 1, fix: '' })),
+    'iPhone 18 Pro',
+    null,
+  );
+  assert.doesNotMatch(JSON.stringify(resweep), /australia|productreview|jb hi-fi|officeworks/i);
+});
+
 test('a planner reply wrapped in the old "queries" key is still read', () => {
   const planned = planStrata(
     { queries: { owner: ['v15 clutch failure reddit', 'v15 battery 6 months'] } },
     'Best cordless stick vacuums',
+    AU,
   );
   assert.deepEqual(planned[2].queries, ['v15 clutch failure reddit', 'v15 battery 6 months']);
 });
 
 test('a planner reply of the wrong shape falls back rather than searching nothing', () => {
   for (const reply of [null, ['a', 'b'], { queries: ['a', 'b'] }, 'nope']) {
-    const planned = planStrata(reply, 'Beef tallow skincare');
+    const planned = planStrata(reply, 'Beef tallow skincare', AU);
     assert.ok(planned.every((s) => s.queries.length > 0), `${JSON.stringify(reply)} left a stratum blank`);
   }
 });
 
 test('a stratum takes at most two queries, and blank ones do not count', () => {
-  const planned = planStrata({ expert: ['  ', 'a', 'b', 'c', 42] }, 'x');
+  const planned = planStrata({ expert: ['  ', 'a', 'b', 'c', 42] }, 'x', AU);
   assert.deepEqual(planned[1].queries, ['a', 'b']);
 });
 
 test('evidence reaches the synthesis prompt under its own stratum heading', () => {
-  const planned = planStrata({ owner: ['v15 clutch failure reddit'] }, 'x');
+  const planned = planStrata({ owner: ['v15 clutch failure reddit'] }, 'x', AU);
   const grouped = groupEvidence(planned, [
     {
       query: 'v15 clutch failure reddit',
@@ -229,6 +265,7 @@ test('the re-sweep asks the strata that were thin, and no others', () => {
       { stratum: 'expert', label: 'y', have: 0, need: 1, fix: '' },
     ],
     'iPhone 18 Pro',
+    AU,
   );
   assert.deepEqual(planned.map((p) => p.key), ['expert']);
   assert.equal(planned[0].queries.length, 2);

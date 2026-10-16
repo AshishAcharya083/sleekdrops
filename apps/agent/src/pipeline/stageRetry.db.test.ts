@@ -9,21 +9,21 @@
 // to run these.
 //
 // The publish stage is the vehicle: it is deterministic, needs no model, and
-// its only outside dependency is `fetch` to Cloudflare D1 - so a fault can be
-// injected at the network boundary, which is exactly where a transport fault
-// comes from in production, without stubbing any of our own code.
+// its one network call is `fetch` to GitHub for the site rebuild (the post
+// itself is written to this same database) - so a fault can be injected at the
+// network boundary, which is exactly where a transport fault comes from in
+// production, without stubbing any of our own code.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
-// Before config.js is read. Publishing needs D1 configured to get as far as
-// the fetch we are about to fault; the values are never sent anywhere,
-// because every fetch in this file is answered locally.
-process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
-process.env.D1_DATABASE_ID = 'test-database';
-process.env.CLOUDFLARE_D1_TOKEN = 'test-token';
+// Before config.js is read. Publishing needs a rebuild target configured to
+// get as far as the fetch we are about to fault; the token is never sent
+// anywhere, because every fetch in this file is answered locally.
 process.env.GITHUB_TOKEN = 'test-token';
+process.env.GITHUB_REPO = 'example/sleekdrops';
+process.env.SITE_URL = 'https://sleekdrops.com';
 // A Claude credential would turn the genuine-failure case below into a live
 // model call from a test suite that must never make one.
 delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -36,6 +36,7 @@ const { MAX_STAGE_ATTEMPTS, stageRetryDelayMs } = await import('./failures.js');
 const { createApp } = await import('../api/server.js');
 
 import type { ArticleRow } from './types.js';
+import { SLEEKDROPS_PLATFORM_ID } from '../platform/sleekdrops/index.js';
 
 /**
  * The two columns migration 015 adds. Declared here rather than on ArticleRow:
@@ -54,38 +55,37 @@ if (reachable) await migrate();
 
 /** The admin panel can store a Claude token too; if one is there, stand down. */
 const credentialled =
-  reachable && (await getSetting<{ claude_token?: string }>('llm', {})).claude_token;
+  reachable && (await getSetting<{ claude_token?: string }>(SLEEKDROPS_PLATFORM_ID, 'llm', {})).claude_token;
 const modelSkip = credentialled
   ? 'the database carries a Claude token - this test must not reach a live model'
   : skip;
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 const realFetch = globalThis.fetch;
+const postSlugs: string[] = [];
 
 after(async () => {
   globalThis.fetch = realFetch;
-  if (reachable) await pool.end();
+  if (reachable) {
+    if (postSlugs.length > 0) await q('DELETE FROM posts WHERE slug = ANY($1)', [postSlugs]);
+    await pool.end();
+  }
 });
 
-/** A D1 reply that means "written". */
-const d1Ok = (): Response =>
-  new Response(JSON.stringify({ success: true, result: [{ results: [] }] }), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  });
+/** GitHub's reply to a repository dispatch it accepted. */
+const dispatched = (): Response => new Response(null, { status: 204 });
 
 /**
- * Answer every outbound request from the test, never the network. `answer`
- * sees the D1 calls only; the site-rebuild dispatch that follows a successful
- * publish is accepted as GitHub would accept it.
+ * Answer every outbound request from the test, never the network. The publish
+ * stage's one call is the site-rebuild dispatch, and `answer` decides what
+ * each attempt at it gets.
  */
 function stubFetch(answer: (call: number) => Response | never): number[] {
   const calls: number[] = [];
   globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
     const url = String(args[0]);
-    if (url.startsWith('https://api.github.com/')) return new Response(null, { status: 204 });
-    assert.match(url, /api\.cloudflare\.com/, 'the publish stage talks to D1 and GitHub, nothing else');
+    assert.match(url, /^https:\/\/api\.github\.com\//, 'the publish stage calls GitHub and nothing else');
     calls.push(calls.length + 1);
     return answer(calls.length);
   }) as typeof fetch;
@@ -94,7 +94,10 @@ function stubFetch(answer: (call: number) => Response | never): number[] {
 
 async function insertPublishable(fields: Record<string, unknown> = {}): Promise<ArticleRow> {
   const slug = `best-stick-vacuums-${randomUUID().slice(0, 8)}`;
+  postSlugs.push(slug);
   const row = {
+    platform_id: 'sleekdrops',
+    edition_id: 'au',
     title: 'Best cordless stick vacuums',
     category: 'Home',
     post_type: 'guide',
@@ -102,6 +105,9 @@ async function insertPublishable(fields: Record<string, unknown> = {}): Promise<
     status: 'running',
     claimed_by: 'test-worker',
     claimed_at: new Date(),
+    // A running row with no live lease is lapsed to any other db test file's
+    // reaper, which would re-queue it before runStage's heartbeat starts.
+    lease_expires_at: new Date(Date.now() + 10 * 60_000),
     slug,
     draft_md: '# Best cordless stick vacuums\n\nA body.',
     frontmatter: JSON.stringify({ title: 'Best cordless stick vacuums', author: 'desk' }),
@@ -126,10 +132,10 @@ const sessionsFor = async (id: string) =>
 
 test('a transient fault costs a retry, not the card', { skip }, async () => {
   const article = await insertPublishable();
-  // A dropped connection on the first attempt, a working D1 on the second.
+  // A dropped connection on the first attempt, a working GitHub on the second.
   stubFetch((call) => {
     if (call === 1) throw new TypeError('fetch failed', { cause: new Error('ECONNRESET') });
-    return d1Ok();
+    return dispatched();
   });
   const waits: number[] = [];
 
@@ -191,11 +197,11 @@ test('a transient fault that never clears fails the card, bounded and labelled',
 
 test('a genuine failure fails the card on the first attempt, message intact', { skip }, async () => {
   const article = await insertPublishable();
-  // D1 answering 400 is the API rejecting what we sent, not a wobble.
+  // GitHub answering 422 is the API rejecting what we sent, not a wobble.
   const calls = stubFetch(
     () =>
-      new Response(JSON.stringify({ success: false, errors: [{ message: 'no such table: posts' }] }), {
-        status: 400,
+      new Response(JSON.stringify({ message: 'Invalid request. No event_type specified.' }), {
+        status: 422,
         headers: { 'content-type': 'application/json' },
       }),
   );
@@ -207,7 +213,7 @@ test('a genuine failure fails the card on the first attempt, message intact', { 
   assert.equal(failed.status, 'failed');
   assert.equal(failed.failure_class, 'genuine');
   assert.equal(failed.stage_attempts, 1);
-  assert.match(failed.error ?? '', /no such table: posts/);
+  assert.match(failed.error ?? '', /repository_dispatch failed \(HTTP 422\): .*No event_type specified/);
   assert.equal(calls.length, 1, 'a genuine failure is not retried');
   assert.deepEqual(waits, [], 'and nothing is waited out');
 

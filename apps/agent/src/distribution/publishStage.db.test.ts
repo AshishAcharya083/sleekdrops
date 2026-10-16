@@ -1,7 +1,8 @@
 // The pipeline stages that feed distribution, driven the way the worker
 // drives them: `executeStage` on a real article row, against the real
-// database. The D1 REST call and the GitHub dispatch are stubbed - everything
-// else, including the enqueue, is the code the worker runs.
+// database, which is also where the post itself is written (SleekDrops'
+// content store). Only the GitHub dispatch is stubbed - everything else,
+// including the enqueue, is the code the worker runs.
 //
 // This is the contract the card exists for: publish is re-entered by
 // /api/articles/:id/republish, by a retry-from-stage and by the editorial
@@ -11,10 +12,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
-process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
-process.env.D1_DATABASE_ID = 'test-database';
-process.env.CLOUDFLARE_D1_TOKEN = 'test-d1-token';
+process.env.SITE_URL = 'https://sleekdrops.com';
 process.env.GITHUB_TOKEN = 'test-github-token';
+process.env.GITHUB_REPO = 'example/sleekdrops';
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
@@ -37,10 +37,10 @@ if (reachable) await migrate();
 
 const PROVIDER = `stub-publish-${randomUUID().slice(0, 8)}`;
 const TITLE = 'The headphones for a quiet commute';
-const HERO = 'https://storage.googleapis.com/images/heroes/quiet.png';
+const HERO = 'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet.png';
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 
 const realFetch = globalThis.fetch;
 const articles: string[] = [];
@@ -50,18 +50,16 @@ after(async () => {
   globalThis.fetch = realFetch;
   if (reachable) {
     await q('DELETE FROM channel_connections WHERE id = ANY($1)', [connections]);
+    await q('DELETE FROM posts WHERE slug IN (SELECT slug FROM articles WHERE id = ANY($1))', [articles]);
     await q('DELETE FROM articles WHERE id = ANY($1)', [articles]);
   }
   await pool.end();
 });
 
-/** D1 and the repository dispatch, answered locally. */
-function stubCloudflareAndGithub(): { dispatches: number } {
+/** The repository dispatch, answered locally. */
+function stubGithub(): { dispatches: number } {
   const capture = { dispatches: 0 };
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    if (String(input).includes('api.cloudflare.com')) {
-      return Response.json({ success: true, result: [{ results: [] }] });
-    }
+  globalThis.fetch = (async () => {
     capture.dispatches += 1;
     return new Response(null, { status: 204 });
   }) as typeof fetch;
@@ -70,8 +68,8 @@ function stubCloudflareAndGithub(): { dispatches: number } {
 
 async function connect(): Promise<string> {
   const [row] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref)
-     VALUES ($1, $2, 'stub-publish-token') RETURNING id`,
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref)
+     VALUES ('sleekdrops', $1, $2, 'stub-publish-token') RETURNING id`,
     [PROVIDER, `page-${randomUUID().slice(0, 8)}`],
   );
   connections.push(row.id);
@@ -80,9 +78,9 @@ async function connect(): Promise<string> {
 
 async function article(fields: { heroImageSource?: HeroImageSource } = {}): Promise<ArticleRow> {
   const [row] = await q<ArticleRow>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, draft_md,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, draft_md,
                            frontmatter, affiliate_links, hero_image_source)
-     VALUES ($1, $2, 'Tech', 'guide', 'publish', 'queued', 'The body.', $3::jsonb, '[]'::jsonb, $4)
+     VALUES ('sleekdrops', 'au', $1, $2, 'Tech', 'guide', 'publish', 'queued', 'The body.', $3::jsonb, '[]'::jsonb, $4)
      RETURNING *`,
     [
       TITLE,
@@ -111,7 +109,7 @@ async function itemsFor(slug: string, connectionId: string): Promise<Distributio
 test('publish stage entered three times queues one item per channel', { skip }, async () => {
   const connection = await connect();
   const row = await article();
-  stubCloudflareAndGithub();
+  stubGithub();
 
   const first = await executeStage(row, 'publish', null, new UsageTracker());
   assert.match(first.summary, /queued for \d+ channel\(s\)/);
@@ -140,7 +138,7 @@ test('the endpoints that re-enter publish cannot post the same piece twice', { s
   // inline social post would have fired once per pass.
   const connection = await connect();
   const row = await article();
-  stubCloudflareAndGithub();
+  stubGithub();
 
   await executeStage(row, 'publish', null, new UsageTracker());
   const [first] = await itemsFor(row.slug!, connection);
@@ -185,7 +183,7 @@ test('the endpoints that re-enter publish cannot post the same piece twice', { s
 test('an item already in flight is not reset by a republish', { skip }, async () => {
   const connection = await connect();
   const row = await article();
-  stubCloudflareAndGithub();
+  stubGithub();
   await executeStage(row, 'publish', null, new UsageTracker());
 
   const [item] = await itemsFor(row.slug!, connection);
@@ -204,15 +202,15 @@ test('an item already in flight is not reset by a republish', { skip }, async ()
 test('a draft publish pass enqueues nothing', { skip }, async () => {
   const connection = await connect();
   const row = await article();
-  const capture = stubCloudflareAndGithub();
+  const capture = stubGithub();
 
   // The draft pass is asked for directly rather than by flipping the global
   // `publish_mode` setting - every *.db.test.ts file shares this database and
   // `node --test` runs them concurrently. These two lines are what the publish
   // stage does, with the publisher's own reading of the mode.
   const result = await runPublisher(row, { publishMode: 'draft' });
-  assert.equal(result.d1Status, 'draft');
-  const outcome = await enqueuePublishedArticle(row, { d1Status: result.d1Status });
+  assert.equal(result.postStatus, 'draft');
+  const outcome = await enqueuePublishedArticle(row, { postStatus: result.postStatus });
 
   assert.equal(outcome.skipped, 'draft');
   assert.equal(capture.dispatches, 0, 'the same guard the rebuild dispatch is behind');
@@ -222,7 +220,7 @@ test('a draft publish pass enqueues nothing', { skip }, async () => {
 test('the queued payload carries the hero provenance the publish stage stored', { skip }, async () => {
   const connection = await connect();
   const row = await article({ heroImageSource: 'found' });
-  stubCloudflareAndGithub();
+  stubGithub();
 
   await executeStage(row, 'publish', null, new UsageTracker());
   const [item] = await itemsFor(row.slug!, connection);
@@ -233,9 +231,9 @@ test('the queued payload carries the hero provenance the publish stage stored', 
 
 test('the image stage records an operator hero as operator-supplied', { skip }, async () => {
   const [row] = await q<ArticleRow>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, frontmatter,
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter,
                            hero_image_url, hero_alt)
-     VALUES ($1, $2, 'Tech', 'guide', 'image', 'queued', $3::jsonb, $4, 'A commuter train')
+     VALUES ('sleekdrops', 'au', $1, $2, 'Tech', 'guide', 'image', 'queued', $3::jsonb, $4, 'A commuter train')
      RETURNING *`,
     [
       TITLE,

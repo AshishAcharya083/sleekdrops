@@ -302,6 +302,9 @@ const NEW_EVENT_PAYLOADS: Record<string, EventProps> = {
     slug: 'brand-15',
     brand: 'Brand',
   },
+  'Methodology Viewed': { method_version: '1.0' },
+  'Score Explainer Expanded': { slug: 'harman-kardon-luna-2', band: 'strong' },
+  'Trust Badge Clicked': { slug: 'ninja-blast', placement: 'deal-card', badge_kind: 'review-score' },
 };
 
 for (const [event, props] of Object.entries(NEW_EVENT_PAYLOADS)) {
@@ -309,6 +312,26 @@ for (const [event, props] of Object.entries(NEW_EVENT_PAYLOADS)) {
     assert.deepEqual(scrub(props), props);
   });
 }
+
+test('the trust-surface dimensions survive while anything else riding with them is dropped', () => {
+  const out = scrub({
+    slug: 'ninja-blast',
+    placement: 'deal-detail',
+    badge_kind: 'review-score',
+    band: 'excellent',
+    method_version: '1.0',
+    email: 'jordan@example.com',
+    note: 'it was cheaper in July',
+    reviewer: 'Jordan Alvarez',
+  });
+  assert.deepEqual(out, {
+    slug: 'ninja-blast',
+    placement: 'deal-detail',
+    badge_kind: 'review-score',
+    band: 'excellent',
+    method_version: '1.0',
+  });
+});
 
 test('the handled-error attributes survive alongside the diagnostic fields', () => {
   const props = {

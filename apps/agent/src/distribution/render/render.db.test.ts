@@ -25,6 +25,8 @@ const { render, renderForItem, AFFILIATE_DISCLOSURE, FIRST_COMMENT_CUE } =
 import type { CopyWriter } from './copy.js';
 import type { DistributableArticle, DistributionItem, DistributionQueueRow } from '../types.js';
 
+const SITE = { siteUrl: 'https://sleekdrops.com' };
+
 const reachable = await pool
   .query('SELECT 1')
   .then(() => true)
@@ -55,8 +57,8 @@ after(async () => {
 
 async function connect(provider: string): Promise<string> {
   const [row] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref)
-     VALUES ($1, $2, 'test-channel-token')
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref)
+     VALUES ('sleekdrops', $1, $2, 'test-channel-token')
      RETURNING id`,
     [provider, `account-${randomUUID().slice(0, 8)}`],
   );
@@ -71,8 +73,8 @@ async function publishedArticle(fields: {
 }): Promise<DistributableArticle> {
   const [row] = await q<{ id: string }>(
     `INSERT INTO articles
-       (title, slug, category, post_type, stage, status, frontmatter, keyword_plan, hero_image_source)
-     VALUES ('The headphones for a quiet commute', $1, 'Tech', 'guide', 'publish', 'queued',
+       (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter, keyword_plan, hero_image_source)
+     VALUES ('sleekdrops', 'au', 'The headphones for a quiet commute', $1, 'Tech', 'guide', 'publish', 'queued',
              $2::jsonb, $3::jsonb, $4)
      RETURNING id`,
     [
@@ -80,7 +82,7 @@ async function publishedArticle(fields: {
       JSON.stringify({
         title: 'The headphones for a quiet commute',
         dek: 'The noise floor drops 12 dB on the 7:12, and the $399 Bose is the one to buy under $400.',
-        heroImage: 'https://storage.googleapis.com/images/heroes/quiet.png',
+        heroImage: 'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet.png',
       }),
       JSON.stringify({ primaryKeyword: 'best noise cancelling headphones', intent: fields.intent }),
       fields.heroSource,
@@ -106,7 +108,7 @@ const writeCopy: CopyWriter = async () =>
 
 const renderCard = async () => ({ data: Buffer.from('card-bytes'), mimeType: 'image/png' });
 const uploadCard = async (objectName: string) =>
-  `https://storage.googleapis.com/images/${objectName}`;
+  `https://example.supabase.co/storage/v1/object/public/images/${objectName}`;
 
 test('a queued item renders from its own article row', { skip }, async () => {
   const connection = await connect(PROVIDER);
@@ -115,18 +117,18 @@ test('a queued item renders from its own article row', { skip }, async () => {
     intent: 'Commercial Investigation',
   });
 
-  await enqueuePublishedArticle(article, { d1Status: 'published' });
+  await enqueuePublishedArticle(article, { postStatus: 'published' });
   const item = await queuedItem(article.slug!, connection);
   assert.equal(item.provider, PROVIDER);
   assert.equal(item.placement, 'first_comment', 'the configured default');
 
-  const payload = await renderForItem(item, article, { writeCopy, renderCard, uploadCard });
+  const payload = await renderForItem(item, article, SITE, { writeCopy, renderCard, uploadCard });
 
   assert.ok(payload.caption.includes(FIRST_COMMENT_CUE), 'the row is placed in a first comment');
   assert.ok(payload.caption.includes(AFFILIATE_DISCLOSURE), 'the stored intent is a monetised one');
   assert.equal(
     payload.imageUrl,
-    'https://storage.googleapis.com/images/heroes/quiet.png',
+    'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet.png',
     'the stored hero_image_source says we made this one',
   );
   assert.equal(payload.placement, 'first_comment');
@@ -143,7 +145,7 @@ test('what the first attempt composed is what every later one posts', { skip }, 
   const connection = await connect(PROVIDER);
   const article = await publishedArticle({ heroSource: 'found', intent: 'Transactional' });
 
-  await enqueuePublishedArticle(article, { d1Status: 'published' });
+  await enqueuePublishedArticle(article, { postStatus: 'published' });
   const item = await queuedItem(article.slug!, connection);
 
   // Both calls a render pays for, counted: the copy completion runs warm and
@@ -162,8 +164,8 @@ test('what the first attempt composed is what every later one posts', { skip }, 
     uploadCard,
   };
 
-  const first = await renderForItem(item, article, counted);
-  const retry = await renderForItem(await queuedItem(article.slug!, connection), article, counted);
+  const first = await renderForItem(item, article, SITE, counted);
+  const retry = await renderForItem(await queuedItem(article.slug!, connection), article, SITE, counted);
 
   assert.ok(first.renderedAt, 'the renderer stamps what it produced');
   assert.deepEqual(retry, first, 'the retry sends the post an operator already saw');
@@ -174,11 +176,11 @@ test('a placement the renderer had to move moves on the row too', { skip }, asyn
   const connection = await connect(PROVIDER);
   const article = await publishedArticle({ heroSource: 'found', intent: 'Informational' });
 
-  await enqueuePublishedArticle(article, { d1Status: 'published' });
+  await enqueuePublishedArticle(article, { postStatus: 'published' });
   const item = await queuedItem(article.slug!, connection);
   assert.equal(item.placement, 'first_comment');
 
-  const payload = await renderForItem(item, article, {
+  const payload = await renderForItem(item, article, SITE, {
     writeCopy,
     renderCard: async () => {
       throw new Error('image model returned no image data');
@@ -196,10 +198,10 @@ test('an unmonetised article on a found hero renders neither', { skip }, async (
   const connection = await connect(PROVIDER);
   const article = await publishedArticle({ heroSource: 'found', intent: 'Informational' });
 
-  await enqueuePublishedArticle(article, { d1Status: 'published' });
+  await enqueuePublishedArticle(article, { postStatus: 'published' });
   const item = await queuedItem(article.slug!, connection);
 
-  const payload = await render(article, item.provider, item.placement, {
+  const payload = await render(article, SITE, item.provider, item.placement, {
     writeCopy,
     renderCard,
     uploadCard,
@@ -209,7 +211,7 @@ test('an unmonetised article on a found hero renders neither', { skip }, async (
   assert.equal(payload.imageSource, 'found', 'the provenance came off the column');
   assert.notEqual(
     payload.imageUrl,
-    'https://storage.googleapis.com/images/heroes/quiet.png',
+    'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet.png',
     "someone else's photograph is never what we hand the network",
   );
   assert.match(payload.imageUrl ?? '', /\/social\//, 'a card we rendered went instead');

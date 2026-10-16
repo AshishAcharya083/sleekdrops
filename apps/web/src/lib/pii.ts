@@ -82,6 +82,12 @@ const ALLOWED_PROPS = new Set<string>([
   // structural dimensions the platform reads, so they have to survive the scrub.
   'event_id',
   'visit_id',
+  // Trust surfaces: the score band an explainer was opened beside, the
+  // registry kind of a clicked badge, and the scoring-method version. All three
+  // are closed vocabularies from src/lib/trust.ts.
+  'band',
+  'badge_kind',
+  'method_version',
 ]);
 
 /**

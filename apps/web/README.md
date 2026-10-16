@@ -9,11 +9,11 @@ SleekDrops.com is a quietly opinionated publication. Picture a senior product re
 
 ## What this project is
 
-The Astro frontend that renders SleekDrops.com. Editorial content lives in a Cloudflare D1 database (`sleekdrops-content`), fetched at build time. This repo holds the framework, components, layouts, and structural data (authors, categories, deals, promos).
+The Astro frontend that renders SleekDrops.com. Editorial content lives in the SleekDrops Supabase project (`posts` and `affiliate_links` tables, hero images in its `images` storage bucket), fetched at build time. This repo holds the framework, components, layouts, and structural data (authors, categories, deals, promos).
 
 Two audiences read this codebase:
 
-- **Editorial / content agents.** You don't work here — you write rows to the D1 `posts` and `affiliate_links` tables (database `sleekdrops-content`). A post goes live when its `status` flips to `published` and a rebuild runs.
+- **Editorial / content agents.** You don't work here — you write rows to the Supabase `posts` and `affiliate_links` tables. A post goes live when its `status` flips to `published` and a rebuild runs.
 - **Engineering.** Layouts, components, build pipeline, design tokens. Start with **[AGENTS.md](./AGENTS.md)**.
 
 ---
@@ -52,11 +52,11 @@ Categories: **Tech · Home · Fashion · Health · Finance · Travel.**
 - **Always disclose.** Every page with an affiliate link shows `AffiliateDisclosure`. Outbound CTAs carry `rel="sponsored nofollow"`.
 - **Never fabricate prices.** Refresh `updatedAt` when prices change.
 - **Always set `expiresAt`.** Stale deals fall out of the live list automatically.
-- **All affiliate destinations** go through `/go/<slug>` — the slug-to-URL map lives in the D1 `affiliate_links` table.
+- **All affiliate destinations** go through `/go/<slug>` — the slug-to-URL map lives in the Supabase `affiliate_links` table.
 
 ### Content publishing flow
 
-Editorial content lives in **Cloudflare D1** (database `sleekdrops-content`). Publishing = flipping a post's `status` to `published`, then firing a `content-updated` repository dispatch (or pushing to main / running the workflow manually). The build reads published posts and affiliate links from D1, writes posts into `src/content/blog/`, generates the affiliate redirect data for the `/go/*` Pages Function (`functions/go/[slug].js`, which is geo- and network-aware — see `docs/automation.md`), and ships. End-to-end: ~90 seconds.
+Editorial content lives in **Supabase** (project SleekDrops, tables `posts` and `affiliate_links`). Publishing = flipping a post's `status` to `published`, then firing a `content-updated` repository dispatch (or pushing to main / running the workflow manually). The build reads published posts and affiliate links from Supabase, writes posts into `src/content/blog/`, generates the affiliate redirect data for the `/go/*` Pages Function (`functions/go/[slug].js`, which is geo- and network-aware — see `docs/automation.md`), and ships. End-to-end: ~90 seconds.
 
 ---
 
@@ -68,6 +68,6 @@ Quickstart:
 
 ```bash
 pnpm install
-pnpm dev          # fetches content from D1, then http://localhost:4321
+pnpm dev          # fetches content from Supabase, then http://localhost:4321
 pnpm build        # full production build
 ```

@@ -45,6 +45,9 @@ const ALLOWED_PROPS = new Set<string>([
   'stage',
   'status',
   'attempt',
+  'platform_id',
+  'edition_id',
+  'version',
   // request dimensions
   'method',
   'http_status',
@@ -58,6 +61,7 @@ const ALLOWED_PROPS = new Set<string>([
   'feedback_length',
   'instructions_provided',
   'hero_image_provided',
+  'event_bound',
   'value_present',
   // settings dimensions (enums, counts and set/not-set flags only)
   'publish_mode',

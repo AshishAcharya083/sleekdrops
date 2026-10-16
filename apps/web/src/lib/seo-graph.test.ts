@@ -420,8 +420,14 @@ test('a review post links its Product and Review through the same graph', () => 
   assert.equal('aggregateRating' in product, false);
 
   const review = node(schema, 'Review');
-  assert.deepEqual(review.itemReviewed, { '@id': productId });
-  assert.deepEqual(review.author, { '@id': 'https://sleekdrops.com/author/desk#byline' });
+  assert.deepEqual(review.itemReviewed, {
+    '@id': productId,
+    name: 'Harman Kardon Luna 2',
+  });
+  assert.deepEqual(review.author, {
+    '@id': 'https://sleekdrops.com/author/desk#byline',
+    name: 'SleekDrops Editorial Team',
+  });
   // The one editorial rating stays on the Review, where it belongs.
   assert.deepEqual(review.reviewRating, {
     '@type': 'Rating',
@@ -435,6 +441,63 @@ test('a review post links its Product and Review through the same graph', () => 
     node(schema, 'Article')['@id'],
     'https://sleekdrops.com/blog/harman-kardon-luna-2#article',
   );
+});
+
+test('a review is one attributed, dated Review and never an aggregate built from itself', () => {
+  const revised = {
+    ...reviewPost,
+    data: { ...reviewPost.data, updatedDate: new Date('2026-09-12T00:00:00Z') },
+  } as unknown as BlogPost;
+  const schema = buildReviewSchema(revised, author);
+
+  // One review is not "the average of multiple ratings", so nothing in the
+  // graph - on any node, under either spelling - claims an aggregate.
+  const json = JSON.stringify(schema);
+  assert.doesNotMatch(json, /aggregateRating|AggregateRating|reviewCount|ratingCount/);
+  assert.equal(nodes(schema).filter((n) => n['@type'] === 'Review').length, 1);
+
+  const review = node(schema, 'Review');
+  const reviewer = review.author as Node;
+  assert.equal(reviewer['@id'], 'https://sleekdrops.com/author/desk#byline');
+  assert.equal(reviewer.name, author.name);
+  // The byline the Review points at is in the same graph, under the same name.
+  const byline = nodes(schema).find((n) => n['@id'] === reviewer['@id']);
+  assert.equal(byline?.['@type'], 'Organization');
+  assert.equal(byline?.name, author.name);
+
+  // The Review carries the same dates the page and the article declare.
+  assert.equal(review.datePublished, '2026-05-30T00:00:00.000Z');
+  assert.equal(review.dateModified, '2026-09-12T00:00:00.000Z');
+  const article = node(schema, 'Article');
+  assert.equal(article.datePublished, review.datePublished);
+  assert.equal(article.dateModified, review.dateModified);
+});
+
+test('a never-revised review is modified on the day it was published, not on build day', () => {
+  const review = node(buildReviewSchema(reviewPost, author), 'Review');
+  assert.equal(review.datePublished, '2026-05-30T00:00:00.000Z');
+  assert.equal(review.dateModified, '2026-05-30T00:00:00.000Z');
+});
+
+test('a review names the method version it was scored under, and only when it recorded one', () => {
+  const versioned = {
+    ...reviewPost,
+    data: { ...reviewPost.data, product: { ...reviewPost.data.product, methodVersion: '1.0' } },
+  } as unknown as BlogPost;
+  const review = node(buildReviewSchema(versioned, author), 'Review');
+  assert.deepEqual(review.isBasedOn, {
+    '@type': 'CreativeWork',
+    '@id': 'https://sleekdrops.com/how-we-rate#method-v1-0',
+    name: 'Method v1.0',
+    version: '1.0',
+    url: 'https://sleekdrops.com/how-we-rate#method-v1-0',
+    publisher: { '@id': 'https://sleekdrops.com/#organization' },
+  });
+
+  // A legacy review recorded no version; it is not stamped with the current one.
+  const legacy = node(buildReviewSchema(reviewPost, author), 'Review');
+  assert.equal('isBasedOn' in legacy, false);
+  assert.doesNotMatch(JSON.stringify(buildReviewSchema(reviewPost, author)), /how-we-rate/);
 });
 
 test('buildPostSchema sends a review post to the Product graph and everything else to the Article one', () => {

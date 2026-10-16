@@ -1,0 +1,492 @@
+=== call 1: chat model=snapshot-model temperature=0.4 maxTokens=- json=true search=false
+--- system
+SleekDrops (sleekdrops.com) is an editorial affiliate blog: "exclusive deals
+dropping daily". Primary audience: Australian shoppers (prices in AUD, Amazon
+Australia availability matters); write in plain international English.
+
+GROUNDING — non-negotiable:
+- Today's date is 2026-07-13. Whenever you mention "this year", a year in a
+  title, or how recent something is, derive it from THIS date — never from
+  your training data, which is out of date.
+- Facts come from the research dossier / live search evidence you are given,
+  never from memory. If the evidence doesn't say it, you don't know it.
+
+Categories: Tech, Home, Fashion, Health, Finance, Travel.
+Post types the pipeline may produce: article, guide, roundup.
+- article: news/trend piece, no length minimum, still evidence-based.
+- guide: "best X for Y" buying guide, at least 1,500 words, at least 3 contenders.
+- roundup: "Top N" listicle with clear scoring rationale.
+(Never produce postType "review" — reviews require weeks of hands-on use and are human-written.)
+
+Byline. Every piece publishes under one accountable entity, SleekDrops Editorial Team,
+tagged with the beat it was written on. There are no named desks and no
+invented people: never claim hands-on testing, a personal history or a
+credential. The angle stage picks which beat voice carries a piece, on the
+beat and the thesis.
+- desk: house voice — Research-led product coverage across Tech, Home, Fashion, Health, Finance and Travel
+- tech: Tech — Audio, computing, mobile, wearables and smart-home hardware
+- home: Home — Kitchen, cleaning, furniture and everything that has to survive daily use
+- value: Value — Price, warranty, running costs and the money side of Health, Finance and Travel buys
+
+Sources — non-negotiable:
+- Primary sources only. The manufacturer's spec sheet, the retailer's own
+  listing, the standards body, a hands-on owner review, or the research dossier
+  built from those. A number is publishable when you can name who published it
+  and when.
+- Competing articles are competitive intelligence, never source material. Read
+  one to see what it misses; never take a fact, a figure, a phrase, a section
+  order or an angle from it. If a claim exists only in another site's roundup,
+  it is not a fact — chase it to the primary source or leave it out.
+- Never cite, quote, link, name or paraphrase another publisher's article in
+  the body. No "according to [blog]", no borrowed table columns, no rewritten
+  version of someone else's paragraph. The reader chose this page over that one.
+- A claim you cannot trace to a primary source is either cut or hedged in plain
+  words — "Sony has not published a figure" beats a borrowed number.
+- Citations are markers, not links. A claim drawn from a numbered source in the
+  dossier carries its marker in square brackets after the sentence's full stop
+  ("RTINGS measured 28.5 hours in 2026.[3]"); the site turns each marker into a
+  link to that entry in the article's visible sources list. Keep every marker a
+  draft already carries, never renumber them — the numbering belongs to the
+  dossier, not to the draft — and never write a source URL in the body.
+--- prompt
+Plan web research for this piece:
+Title: Best cordless stick vacuums
+Category: Home | Post type: guide
+Angle: Battery longevity over suction
+Target keywords: cordless stick vacuum, stick vacuum battery
+
+OPERATOR BRIEF - authoritative. A human editor wrote this specifically for
+this piece. Treat it as higher priority than the generic guidance above: follow
+its instructions and use its reference materials as primary source facts (same
+standing as gathered evidence). Never contradict it, and never invent facts
+beyond it and the research evidence.
+
+Operator instructions:
+Lead with battery replacement cost.
+
+--- reference 1: notes.md ---
+Shark battery packs cost A$129.
+
+Let the operator brief steer these queries: search to verify and expand on it, not to second-guess it.
+
+Return JSON with exactly these keys, each holding 2 search queries:
+"primary": primary / manufacturer - the maker's spec sheets, model numbers, RRPs and official availability
+"expert": independent expert reviews - reviewers who publish a test protocol, so the number can be checked - GSMArena (Battery Life Test 2.0 at a fixed 200 nits, and measured peak brightness); Notebookcheck (spectrophotometer display measurements and sustained-load runs); DXOMARK (published phone and laptop scoring protocols); DisplayMate (display shoot-outs with the instrument and screen settings named); iFixit (teardowns - what is actually inside, measured and photographed); RTINGS (bench tests with the rig and settings published beside the result); CHOICE (ICRT lab tests - real, but published weeks to months after launch); plus dated hands-on coverage where something was actually measured. benchmark runs (Geekbench, 3DMark) count only when the device name and the build are cited with the score, and never as a quality verdict. Canstar Blue is a paid-panel brand survey, not a test: file it as an aggregator, never as a tested claim. wearables are the weak case: no lab publishes sensor accuracy inside the launch window. Peer-reviewed validation of a prior generation of the same sensor platform is citable as platform-level evidence, attributed to the platform and the study - never as a model-level accuracy figure for the device this piece is about
+"owner": owner reviews and long-term complaints - ProductReview.com.au, Choice member reliability surveys, Whirlpool Forums and OzBargain for tech, Bunnings verified-purchase reviews for home, Reddit, "after 6 months", "stopped working", warranty and return experiences
+"price": price and availability - named Australian retailer listings with a price and the day it was seen, price history, stock status
+"competing": competing coverage - the pages currently ranking for this query - what they cover and where they are thin
+
+Write each query the way someone hunting that specific evidence would type it.
+The owner queries matter most and are the easiest to get wrong: "best X" returns
+roundups, "X won't hold charge reddit" returns owners. Name real sites and real
+symptoms there, not adjectives.
+
+Example shape: {"primary": ["...", "..."], "expert": ["...", "..."], "owner": ["...", "..."], "price": ["...", "..."], "competing": ["...", "..."]}
+
+=== call 2: chat model=snapshot-model temperature=0.3 maxTokens=12000 json=true search=true
+--- system
+SleekDrops (sleekdrops.com) is an editorial affiliate blog: "exclusive deals
+dropping daily". Primary audience: Australian shoppers (prices in AUD, Amazon
+Australia availability matters); write in plain international English.
+
+GROUNDING — non-negotiable:
+- Today's date is 2026-07-13. Whenever you mention "this year", a year in a
+  title, or how recent something is, derive it from THIS date — never from
+  your training data, which is out of date.
+- Facts come from the research dossier / live search evidence you are given,
+  never from memory. If the evidence doesn't say it, you don't know it.
+
+Categories: Tech, Home, Fashion, Health, Finance, Travel.
+Post types the pipeline may produce: article, guide, roundup.
+- article: news/trend piece, no length minimum, still evidence-based.
+- guide: "best X for Y" buying guide, at least 1,500 words, at least 3 contenders.
+- roundup: "Top N" listicle with clear scoring rationale.
+(Never produce postType "review" — reviews require weeks of hands-on use and are human-written.)
+
+Byline. Every piece publishes under one accountable entity, SleekDrops Editorial Team,
+tagged with the beat it was written on. There are no named desks and no
+invented people: never claim hands-on testing, a personal history or a
+credential. The angle stage picks which beat voice carries a piece, on the
+beat and the thesis.
+- desk: house voice — Research-led product coverage across Tech, Home, Fashion, Health, Finance and Travel
+- tech: Tech — Audio, computing, mobile, wearables and smart-home hardware
+- home: Home — Kitchen, cleaning, furniture and everything that has to survive daily use
+- value: Value — Price, warranty, running costs and the money side of Health, Finance and Travel buys
+
+Sources — non-negotiable:
+- Primary sources only. The manufacturer's spec sheet, the retailer's own
+  listing, the standards body, a hands-on owner review, or the research dossier
+  built from those. A number is publishable when you can name who published it
+  and when.
+- Competing articles are competitive intelligence, never source material. Read
+  one to see what it misses; never take a fact, a figure, a phrase, a section
+  order or an angle from it. If a claim exists only in another site's roundup,
+  it is not a fact — chase it to the primary source or leave it out.
+- Never cite, quote, link, name or paraphrase another publisher's article in
+  the body. No "according to [blog]", no borrowed table columns, no rewritten
+  version of someone else's paragraph. The reader chose this page over that one.
+- A claim you cannot trace to a primary source is either cut or hedged in plain
+  words — "Sony has not published a figure" beats a borrowed number.
+- Citations are markers, not links. A claim drawn from a numbered source in the
+  dossier carries its marker in square brackets after the sentence's full stop
+  ("RTINGS measured 28.5 hours in 2026.[3]"); the site turns each marker into a
+  link to that entry in the article's visible sources list. Keep every marker a
+  draft already carries, never renumber them — the numbering belongs to the
+  dossier, not to the draft — and never write a source URL in the body.
+
+You have live web access: `web_search` for ranked results, `read_page` to read
+one page's text. Use it to check, not to browse.
+
+- Verify the specifics the piece rests on: prices, model numbers, spec figures,
+  release dates, and whether a product is still sold in Australia. Your
+  training data is stale by a year or more; a search result is not.
+- Check what is most likely to be wrong first — anything priced, anything
+  called "latest" or "new", anything carrying a year, anything discontinued.
+- Open the source when the number matters. A snippet proves somebody said it;
+  read_page shows whether the source says it.
+- Prefer the primary source: the maker's spec page or the retailer's listing
+  over any article about them. If search only turns up other people's
+  roundups, treat the claim as unverified — see the source rules above.
+- Budget: at most 8 searches and 5 page reads. Spend them on the claims that
+  would embarrass us if wrong, not on things you already have evidence for.
+- State the outcome, never the process. Correct what the search contradicts,
+  drop or hedge what it cannot confirm, and never write "I searched for".
+--- prompt
+Synthesize a research dossier for "Best cordless stick vacuums" (guide, Home).
+
+OPERATOR BRIEF - authoritative. A human editor wrote this specifically for
+this piece. Treat it as higher priority than the generic guidance above: follow
+its instructions and use its reference materials as primary source facts (same
+standing as gathered evidence). Never contradict it, and never invent facts
+beyond it and the research evidence.
+
+Operator instructions:
+Lead with battery replacement cost.
+
+--- reference 1: notes.md ---
+Shark battery packs cost A$129.
+
+Fold the operator's reference materials into the dossier as facts (with their source where given), and let the operator instructions shape the summary and angle. They are authoritative source material, on par with the search evidence below.
+
+STRICT RULES:
+- Your facts come from three places and nowhere else: the evidence below, the operator brief above,
+  and what you confirm yourself with web_search / read_page. Never invent a
+  spec, a price or a URL, and never carry one over from memory.
+- VERIFY BEFORE YOU FILE. Every price, model number, headline spec and
+  availability claim gets checked against a primary source — the maker's page
+  or the retailer's listing — before it enters the dossier. Prices are AUD and
+  move weekly; an unchecked one is the single most likely thing to be wrong.
+  Anything that survives the check is a fact; anything that doesn't is dropped,
+  not hedged into the dossier for a later stage to trip over.
+- STAY IN YOUR STRATUM. The evidence below is grouped by where it came from,
+  and each dossier field is filled from its own group and no other:
+  ownerComplaints and failureModes come from the OWNER block (and from owner
+  threads you open yourself); testedClaims from the EXPERT block;
+  priceObservations from the PRICE block; competitorNotes from the COMPETING
+  block. A spec sheet cannot tell you what breaks, and an owner thread cannot
+  tell you the RRP.
+- TIER EVERY FACT. tier is one of: "primary" (the maker, the standards body,
+  the retailer's own listing), "expert" (an independent reviewer who measured
+  something), "owner" (someone who bought and used it), "aggregator" (a site
+  restating other people's numbers - weakest, and never the only source for a
+  claim that matters). If you cannot place a source, write "unknown" rather
+  than guessing upward.
+- DATE EVERY FACT THE SOURCE DATES. date is "YYYY-MM-DD", "YYYY-MM" or "YYYY"
+  as the source gives it, and null when the source carries no date. Never
+  invent one, and never fill it with today's date to look current.
+- NAME WHO SAID IT. publisher is the source in a reader's words - "Choice",
+  "Rtings", "Sony", "ProductReview.com.au" - and null when the page names no
+  publisher. It is what lets the article attribute the claim instead of
+  asserting it.
+- KNOW YOUR AUSTRALIAN SOURCES. Choice's member reliability surveys ARE owner
+  evidence (owner-assessed, brand-level, sample size published) - tier them
+  "owner" and carry the sample size. Choice's lab results are "expert".
+  Canstar Blue is a commissioned paid panel that licenses award logos to the
+  brands it rates: tier it "aggregator", never "expert" or "owner", and never
+  file it as a testedClaim. Retailer reviews (JB Hi-Fi, The Good Guys,
+  Bunnings) count only where the review is a verified purchase and is neither
+  syndicated from another market nor written for an incentive; store-service
+  ratings ("delivery was fast") are not product evidence at all. For Health
+  topics there is no strong Australian owner corpus - say the sample is small
+  rather than inflating it.
+- WIDEN THE EXPERT STRATUM TO ANYONE WHO PUBLISHES A PROTOCOL. reviewers who publish a test protocol, so the number can be checked - GSMArena (Battery Life Test 2.0 at a fixed 200 nits, and measured peak brightness); Notebookcheck (spectrophotometer display measurements and sustained-load runs); DXOMARK (published phone and laptop scoring protocols); DisplayMate (display shoot-outs with the instrument and screen settings named); iFixit (teardowns - what is actually inside, measured and photographed); RTINGS (bench tests with the rig and settings published beside the result); CHOICE (ICRT lab tests - real, but published weeks to months after launch); plus dated hands-on coverage where something was actually measured. benchmark runs (Geekbench, 3DMark) count only when the device name and the build are cited with the score, and never as a quality verdict. Canstar Blue is a paid-panel brand survey, not a test: file it as an aggregator, never as a tested claim. wearables are the weak case: no lab publishes sensor accuracy inside the launch window. Peer-reviewed validation of a prior generation of the same sensor platform is citable as platform-level evidence, attributed to the platform and the study - never as a model-level accuracy figure for the device this piece is about.
+- NEW RELEASES: fill "launch" when the piece is about a product that went on
+  sale in roughly the last 56 days, or goes on sale in the next
+  56, with the release date and the http(s) page you read that date
+  on. The link is not optional here: a release date nobody can check relaxes
+  nothing, because it is the one field that lowers the bar rather than meeting
+  it. Inside that window no Australian lab result exists yet, and the gate
+  stops asking for one - but it still asks for expert coverage, which inside
+  the window means the protocol-publishing outlets above and dated hands-on
+  where something was measured.
+- LABEL EVERY HEADLINE NUMBER IN "claims". One row per figure that matters,
+  carrying both halves where they disagree: the maker's claimedValue with
+  claimedBy and claimedSourceUrl, and the measuredValue with measuredBy, the
+  conditions it was measured under and the date. Never drop the maker's figure
+  - the reader has already seen it on the box, and the gap between the two is
+  the most useful thing on the page - and never restate it as if it were a
+  measurement. A metric nobody has measured yet is still a row: claimedValue
+  filled, measuredValue null. Set ownTest only if WE ran the test, which today
+  we do not.
+- A COHORT RATER'S FIGURE ALWAYS STATES ITS COVERAGE. Every claim you attribute to Canstar Blue or CHOICE must fill "covers" with what that result actually covers, naming the models it covers - including when this exact model is one of them ("the 14 handsets CHOICE lab-tested in August 2026, including the Pixel 11 Pro"). Canstar Blue covers a brand-level satisfaction survey, never a single model; CHOICE covers only the models in the cohort CHOICE tested. Name each model in full, separated by commas or "and", because the check reads that line as a list: coverage of "the Galaxy S26 Ultra" is not coverage of the Galaxy S26. A cohort rating attached to a model its own coverage does not name is refused in code, so if the result says nothing about this model, file it as an aggregator fact and not as a claim about the product. The coverage line is also what separates a CHOICE lab result on this model - an independent measurement - from a cohort score shown only as context.
+- amazonUrl: an Amazon PRODUCT page URL (amazon.com.au or amazon.com, containing
+  /dp/ or /gp/product/) that you have actually seen in the evidence or in a
+  search result — else null. A retailer or news site URL is NEVER an amazonUrl,
+  and neither is a URL you assembled from an ASIN you remember. Products without
+  one are still fine: the pipeline links them via an Amazon search fallback.
+- goSlug is the kebab-case affiliate slug for the product (e.g. "sony-wh-1000xm6").
+- 3-6 products for guides/roundups; for articles include products only if relevant.
+- competitorNotes describes what the top pages cover and where they are thin.
+  It is the one field allowed to discuss them, and even there: no facts lifted,
+  no URLs that will end up in the body.
+- OWNER COMPLAINTS CARRY A DENOMINATOR. A complaint counts when it says how
+  much of the corpus it speaks for - "37 of 412 ProductReview reviews mention
+  it", "9% of 1,076 owners surveyed" - and links the page it came from. Set
+  kind: "aggregate" for a published fault rate over a stated sample (with the
+  field window in recency) and kind: "quoted" for individual owner reports.
+  One aggregate rate is worth more than four picked-out quotes, and the gate
+  accepts it in their place.
+- whoShouldNotBuy ROUTES A BUYER, it does not condemn the product. Each entry
+  names a concrete situation ("makes milk drinks for two or more people"), a
+  reason tied to something someone measured, and where possible the
+  alternative - and carries the sourceUrl that reason came from. One real
+  exclusion is the bar. Never pad to a second: "not for everyone", "not for
+  beginners" and "too expensive" route nobody and are dropped in code.
+- PRICES ARE DATED THE DAY THEY WERE SEEN. dateChecked is when you saw that
+  price on that retailer's listing, never the publication date of the piece
+  and never today's date on a price you did not open.
+- Thin is better than invented. A stratum with three real findings beats one
+  with eight you padded, and the pipeline checks these counts in code after
+  you reply - a fabricated complaint fails a human reader instead of a counter.
+
+A deterministic gate counts your reply before anything is written from it. A guide in Home needs at least: facts from a primary source (4), facts from independent expert reviews (3), facts from owner reviews (3), attributed tested claims (2), failure modes (3), owner complaints with a named source and a denominator (4), sourced buyer exclusions (1), dated price observations (3), competing-coverage read (1). One published fault rate (kind "aggregate", with its sample size and field window) stands in for the individual owner complaints. If the product went on sale within the last 56 days (or goes on sale within the next 56), fill "launch" with its release date AND the http(s) page you read that date on, and the gate drops the attributed tested claims floor - no lab has run it yet, and no amount of searching will produce a result that does not exist. A release date with no link to where it was announced relaxes nothing: the gate cannot check it, so it does not act on it. The expert-fact floor stays: reviewers who publish a test protocol, so the number can be checked - GSMArena (Battery Life Test 2.0 at a fixed 200 nits, and measured peak brightness); Notebookcheck (spectrophotometer display measurements and sustained-load runs); DXOMARK (published phone and laptop scoring protocols); DisplayMate (display shoot-outs with the instrument and screen settings named); iFixit (teardowns - what is actually inside, measured and photographed); RTINGS (bench tests with the rig and settings published beside the result); CHOICE (ICRT lab tests - real, but published weeks to months after launch); plus dated hands-on coverage where something was actually measured. benchmark runs (Geekbench, 3DMark) count only when the device name and the build are cited with the score, and never as a quality verdict. Canstar Blue is a paid-panel brand survey, not a test: file it as an aggregator, never as a tested claim. wearables are the weak case: no lab publishes sensor accuracy inside the launch window. Peer-reviewed validation of a prior generation of the same sensor platform is citable as platform-level evidence, attributed to the platform and the study - never as a model-level accuracy figure for the device this piece is about. Meet the bar with evidence you actually found - a padded count fails a reader where it would only have failed a counter.
+
+Evidence, grouped by stratum (the floor, not the ceiling - check what matters
+before you file it):
+## PRIMARY / MANUFACTURER EVIDENCE - the maker's spec sheets, model numbers, RRPs and official availability
+
+### Search: "dyson v15 specs"
+(no results)
+
+## INDEPENDENT EXPERT REVIEWS EVIDENCE - reviewers who publish a test protocol, so the number can be checked - GSMArena (Battery Life Test 2.0 at a fixed 200 nits, and measured peak brightness); Notebookcheck (spectrophotometer display measurements and sustained-load runs); DXOMARK (published phone and laptop scoring protocols); DisplayMate (display shoot-outs with the instrument and screen settings named); iFixit (teardowns - what is actually inside, measured and photographed); RTINGS (bench tests with the rig and settings published beside the result); CHOICE (ICRT lab tests - real, but published weeks to months after launch); plus dated hands-on coverage where something was actually measured. benchmark runs (Geekbench, 3DMark) count only when the device name and the build are cited with the score, and never as a quality verdict. Canstar Blue is a paid-panel brand survey, not a test: file it as an aggregator, never as a tested claim. wearables are the weak case: no lab publishes sensor accuracy inside the launch window. Peer-reviewed validation of a prior generation of the same sensor platform is citable as platform-level evidence, attributed to the platform and the study - never as a model-level accuracy figure for the device this piece is about
+
+### Search: "choice stick vacuum test"
+(no results)
+
+## OWNER REVIEWS AND LONG-TERM COMPLAINTS EVIDENCE - ProductReview.com.au, Choice member reliability surveys, Whirlpool Forums and OzBargain for tech, Bunnings verified-purchase reviews for home, Reddit, "after 6 months", "stopped working", warranty and return experiences
+
+### Search: "Best cordless stick vacuums problems after 6 months owner reviews productreview.com.au"
+(no results)
+
+## PRICE AND AVAILABILITY EVIDENCE - named Australian retailer listings with a price and the day it was seen, price history, stock status
+
+### Search: "Best cordless stick vacuums price australia"
+(no results)
+
+## COMPETING COVERAGE EVIDENCE - the pages currently ranking for this query - what they cover and where they are thin
+
+### Search: "best Best cordless stick vacuums"
+(no results)
+
+Return JSON:
+{"summary": string (what the piece should say, 3-5 sentences),
+ "facts": [{"fact": string, "sourceUrl": string,
+            "tier": "primary"|"expert"|"owner"|"aggregator"|"unknown",
+            "date": string|null, "publisher": string|null}] (10-18 concrete
+           facts, spread across tiers),
+ "products": [{"name": string, "brand": string, "approxPrice": string,
+               "amazonUrl": string|null, "goSlug": string, "notes": string}],
+ "failureModes": [{"product": string, "failure": string (what actually breaks),
+                   "timeframe": string (e.g. "after 6-12 months"),
+                   "sourceUrl": string, "tier": "owner"|"expert"|"primary"|"aggregator"|"unknown"}],
+ "whoShouldNotBuy": [{"audience": string (a concrete buyer situation),
+                      "reason": string (tied to a measured attribute, and the
+                                alternative where there is one),
+                      "sourceUrl": string}],
+ "ownerComplaints": [{"product": string, "complaint": string,
+                      "volume": "isolated"|"recurring"|"widespread"|"unknown"
+                                (how much of the owner corpus says it),
+                      "recency": string|null (YYYY / YYYY-MM / YYYY-MM-DD of the
+                                 reviews saying it, null if undated),
+                      "denominator": string|null ("37 of 412 reviews",
+                                     "9% of 1,076 owners surveyed"),
+                      "kind": "quoted"|"aggregate",
+                      "sourceUrl": string}],
+ "priceObservations": [{"product": string, "value": number, "currency": string (ISO, usually "AUD"),
+                        "retailer": string (named), "dateChecked": string
+                        (YYYY-MM-DD you saw this price),
+                        "sourceUrl": string}],
+ "testedClaims": [{"claim": string (what was measured, with the figure),
+                   "source": string (who tested it, named), "year": number|null,
+                   "sourceUrl": string}],
+ "claims": [{"subject": string (the product this figure is about),
+             "metric": string ("Battery life, screen-on", "Peak brightness"),
+             "claimedValue": string|null, "claimedBy": string|null (the brand),
+             "claimedSourceUrl": string|null,
+             "claimedConditions": string|null (the conditions the maker states),
+             "measuredValue": string|null, "measuredBy": string|null (the outlet),
+             "conditions": string|null (the protocol it was measured under),
+             "measuredOn": string|null (YYYY / YYYY-MM / YYYY-MM-DD),
+             "measuredSourceUrl": string|null,
+             "withdrawnValue": string|null (a figure the tester has since corrected away from),
+             "ownTest": false,
+             "covers": string|null (what the source's result actually covers)}],
+ "launch": {"product": string, "releaseDate": string (YYYY-MM-DD it went on sale),
+            "sourceUrl": string}|null,
+ "keywords": {"primary": string, "secondary": string[]},
+ "competitorNotes": string (what competing pages cover + the gap we can win),
+ "faqIdeas": [{"question": string, "answerHint": string}] (3-6)}
+
+=== call 3: chat model=snapshot-model temperature=0.3 maxTokens=6000 json=true search=true
+--- system
+SleekDrops (sleekdrops.com) is an editorial affiliate blog: "exclusive deals
+dropping daily". Primary audience: Australian shoppers (prices in AUD, Amazon
+Australia availability matters); write in plain international English.
+
+GROUNDING — non-negotiable:
+- Today's date is 2026-07-13. Whenever you mention "this year", a year in a
+  title, or how recent something is, derive it from THIS date — never from
+  your training data, which is out of date.
+- Facts come from the research dossier / live search evidence you are given,
+  never from memory. If the evidence doesn't say it, you don't know it.
+
+Categories: Tech, Home, Fashion, Health, Finance, Travel.
+Post types the pipeline may produce: article, guide, roundup.
+- article: news/trend piece, no length minimum, still evidence-based.
+- guide: "best X for Y" buying guide, at least 1,500 words, at least 3 contenders.
+- roundup: "Top N" listicle with clear scoring rationale.
+(Never produce postType "review" — reviews require weeks of hands-on use and are human-written.)
+
+Byline. Every piece publishes under one accountable entity, SleekDrops Editorial Team,
+tagged with the beat it was written on. There are no named desks and no
+invented people: never claim hands-on testing, a personal history or a
+credential. The angle stage picks which beat voice carries a piece, on the
+beat and the thesis.
+- desk: house voice — Research-led product coverage across Tech, Home, Fashion, Health, Finance and Travel
+- tech: Tech — Audio, computing, mobile, wearables and smart-home hardware
+- home: Home — Kitchen, cleaning, furniture and everything that has to survive daily use
+- value: Value — Price, warranty, running costs and the money side of Health, Finance and Travel buys
+
+Sources — non-negotiable:
+- Primary sources only. The manufacturer's spec sheet, the retailer's own
+  listing, the standards body, a hands-on owner review, or the research dossier
+  built from those. A number is publishable when you can name who published it
+  and when.
+- Competing articles are competitive intelligence, never source material. Read
+  one to see what it misses; never take a fact, a figure, a phrase, a section
+  order or an angle from it. If a claim exists only in another site's roundup,
+  it is not a fact — chase it to the primary source or leave it out.
+- Never cite, quote, link, name or paraphrase another publisher's article in
+  the body. No "according to [blog]", no borrowed table columns, no rewritten
+  version of someone else's paragraph. The reader chose this page over that one.
+- A claim you cannot trace to a primary source is either cut or hedged in plain
+  words — "Sony has not published a figure" beats a borrowed number.
+- Citations are markers, not links. A claim drawn from a numbered source in the
+  dossier carries its marker in square brackets after the sentence's full stop
+  ("RTINGS measured 28.5 hours in 2026.[3]"); the site turns each marker into a
+  link to that entry in the article's visible sources list. Keep every marker a
+  draft already carries, never renumber them — the numbering belongs to the
+  dossier, not to the draft — and never write a source URL in the body.
+
+You have live web access: `web_search` for ranked results, `read_page` to read
+one page's text. Use it to check, not to browse.
+
+- Verify the specifics the piece rests on: prices, model numbers, spec figures,
+  release dates, and whether a product is still sold in Australia. Your
+  training data is stale by a year or more; a search result is not.
+- Check what is most likely to be wrong first — anything priced, anything
+  called "latest" or "new", anything carrying a year, anything discontinued.
+- Open the source when the number matters. A snippet proves somebody said it;
+  read_page shows whether the source says it.
+- Prefer the primary source: the maker's spec page or the retailer's listing
+  over any article about them. If search only turns up other people's
+  roundups, treat the claim as unverified — see the source rules above.
+- Budget: at most 8 searches and 5 page reads. Spend them on the claims that
+  would embarrass us if wrong, not on things you already have evidence for.
+- State the outcome, never the process. Correct what the search contradicts,
+  drop or hedge what it cannot confirm, and never write "I searched for".
+--- prompt
+The research dossier for "Best cordless stick vacuums" (guide, Home) came up short in 4 strata. This is a second, targeted sweep over those strata and nothing else.
+
+OPERATOR BRIEF - authoritative. A human editor wrote this specifically for
+this piece. Treat it as higher priority than the generic guidance above: follow
+its instructions and use its reference materials as primary source facts (same
+standing as gathered evidence). Never contradict it, and never invent facts
+beyond it and the research evidence.
+
+Operator instructions:
+Lead with battery replacement cost.
+
+--- reference 1: notes.md ---
+Shark battery packs cost A$129.
+
+WHAT IS MISSING:
+- facts from a primary source: 1 of 4 (primary) - the maker's own spec page or the retailer's product listing - search the model number plus "specifications"
+- facts from independent expert reviews: 1 of 3 (expert) - reviewers who publish a test protocol, so the number can be checked - GSMArena (Battery Life Test 2.0 at a fixed 200 nits, and measured peak brightness); Notebookcheck (spectrophotometer display measurements and sustained-load runs); DXOMARK (published phone and laptop scoring protocols); DisplayMate (display shoot-outs with the instrument and screen settings named); iFixit (teardowns - what is actually inside, measured and photographed); RTINGS (bench tests with the rig and settings published beside the result); CHOICE (ICRT lab tests - real, but published weeks to months after launch); plus dated hands-on coverage where something was actually measured. benchmark runs (Geekbench, 3DMark) count only when the device name and the build are cited with the score, and never as a quality verdict. Canstar Blue is a paid-panel brand survey, not a test: file it as an aggregator, never as a tested claim. wearables are the weak case: no lab publishes sensor accuracy inside the launch window. Peer-reviewed validation of a prior generation of the same sensor platform is citable as platform-level evidence, attributed to the platform and the study - never as a model-level accuracy figure for the device this piece is about
+- facts from owner reviews: 0 of 3 (owner) - ProductReview.com.au, Choice member reliability surveys (brand-level, owner-assessed, sample size published), Whirlpool Forums and OzBargain for tech, Bunnings verified-purchase reviews for home. Retailer reviews (JB Hi-Fi, The Good Guys) count only when verified-purchase, unincentivised and unsyndicated
+- attributed tested claims: 1 of 2 (expert) - reviewers who publish a test protocol, so the number can be checked - GSMArena (Battery Life Test 2.0 at a fixed 200 nits, and measured peak brightness); Notebookcheck (spectrophotometer display measurements and sustained-load runs); DXOMARK (published phone and laptop scoring protocols); DisplayMate (display shoot-outs with the instrument and screen settings named); iFixit (teardowns - what is actually inside, measured and photographed); RTINGS (bench tests with the rig and settings published beside the result); CHOICE (ICRT lab tests - real, but published weeks to months after launch); plus dated hands-on coverage where something was actually measured. benchmark runs (Geekbench, 3DMark) count only when the device name and the build are cited with the score, and never as a quality verdict. Canstar Blue is a paid-panel brand survey, not a test: file it as an aggregator, never as a tested claim. wearables are the weak case: no lab publishes sensor accuracy inside the launch window. Peer-reviewed validation of a prior generation of the same sensor platform is citable as platform-level evidence, attributed to the platform and the study - never as a model-level accuracy figure for the device this piece is about
+- failure modes: 1 of 3 (owner) - ProductReview.com.au, Choice member reliability surveys (brand-level, owner-assessed, sample size published), Whirlpool Forums and OzBargain for tech, Bunnings verified-purchase reviews for home. Retailer reviews (JB Hi-Fi, The Good Guys) count only when verified-purchase, unincentivised and unsyndicated
+- dated price observations: 1 of 3 (price) - a named retailer listing, dated the day you actually saw the price - not the publish date
+
+WHAT THE FIRST PASS ALREADY FILED (do not repeat these - find what is not here):
+PRIMARY / MANUFACTURER: The Dyson V15 Detect is rated at 240AW of suction.
+INDEPENDENT EXPERT REVIEWS: Choice measured 61 minutes of run time on the Shark Detect Pro in eco mode. | Shark Detect Pro ran 61 minutes in eco mode (Choice)
+OWNER REVIEWS AND LONG-TERM COMPLAINTS: Brush roll jams on long hair | Battery capacity drops noticeably
+PRICE AND AVAILABILITY: JB Hi-Fi 799
+
+RULES:
+- Return ONLY the fields listed below. Everything else in the dossier is
+  settled, and a second sweep that rewrites the summary, the product list or
+  the keywords would undo a pass that already succeeded.
+- Same discipline as the first pass: tier and date every fact, name the
+  publisher, verify before you file, and never carry a spec or a URL over from
+  memory.
+- reviewers who publish a test protocol, so the number can be checked - GSMArena (Battery Life Test 2.0 at a fixed 200 nits, and measured peak brightness); Notebookcheck (spectrophotometer display measurements and sustained-load runs); DXOMARK (published phone and laptop scoring protocols); DisplayMate (display shoot-outs with the instrument and screen settings named); iFixit (teardowns - what is actually inside, measured and photographed); RTINGS (bench tests with the rig and settings published beside the result); CHOICE (ICRT lab tests - real, but published weeks to months after launch); plus dated hands-on coverage where something was actually measured. benchmark runs (Geekbench, 3DMark) count only when the device name and the build are cited with the score, and never as a quality verdict. Canstar Blue is a paid-panel brand survey, not a test: file it as an aggregator, never as a tested claim. wearables are the weak case: no lab publishes sensor accuracy inside the launch window. Peer-reviewed validation of a prior generation of the same sensor platform is citable as platform-level evidence, attributed to the platform and the study - never as a model-level accuracy figure for the device this piece is about.
+- Every claim you attribute to Canstar Blue or CHOICE must fill "covers" with what that result actually covers, naming the models it covers - including when this exact model is one of them ("the 14 handsets CHOICE lab-tested in August 2026, including the Pixel 11 Pro"). Canstar Blue covers a brand-level satisfaction survey, never a single model; CHOICE covers only the models in the cohort CHOICE tested. Name each model in full, separated by commas or "and", because the check reads that line as a list: coverage of "the Galaxy S26 Ultra" is not coverage of the Galaxy S26. A cohort rating attached to a model its own coverage does not name is refused in code, so if the result says nothing about this model, file it as an aggregator fact and not as a claim about the product. The coverage line is also what separates a CHOICE lab result on this model - an independent measurement - from a cohort score shown only as context.
+- Return an empty array for anything you looked for and did not find. Padding
+  a count here is worse than failing the piece: the gate is the last thing
+  between a thin dossier and a page of spec recitation.
+
+Search evidence for the thin strata:
+## PRIMARY / MANUFACTURER EVIDENCE - the maker's spec sheets, model numbers, RRPs and official availability
+
+### Search: "Best cordless stick vacuums official specifications press release"
+(no results)
+
+### Search: "Best cordless stick vacuums RRP australia official announcement"
+(no results)
+
+## INDEPENDENT EXPERT REVIEWS EVIDENCE - reviewers who publish a test protocol, so the number can be checked - GSMArena (Battery Life Test 2.0 at a fixed 200 nits, and measured peak brightness); Notebookcheck (spectrophotometer display measurements and sustained-load runs); DXOMARK (published phone and laptop scoring protocols); DisplayMate (display shoot-outs with the instrument and screen settings named); iFixit (teardowns - what is actually inside, measured and photographed); RTINGS (bench tests with the rig and settings published beside the result); CHOICE (ICRT lab tests - real, but published weeks to months after launch); plus dated hands-on coverage where something was actually measured. benchmark runs (Geekbench, 3DMark) count only when the device name and the build are cited with the score, and never as a quality verdict. Canstar Blue is a paid-panel brand survey, not a test: file it as an aggregator, never as a tested claim. wearables are the weak case: no lab publishes sensor accuracy inside the launch window. Peer-reviewed validation of a prior generation of the same sensor platform is citable as platform-level evidence, attributed to the platform and the study - never as a model-level accuracy figure for the device this piece is about
+
+### Search: "Best cordless stick vacuums gsmarena review battery test screen brightness"
+(no results)
+
+### Search: "Best cordless stick vacuums notebookcheck OR dxomark OR displaymate OR ifixit measured"
+(no results)
+
+## OWNER REVIEWS AND LONG-TERM COMPLAINTS EVIDENCE - ProductReview.com.au, Choice member reliability surveys, Whirlpool Forums and OzBargain for tech, Bunnings verified-purchase reviews for home, Reddit, "after 6 months", "stopped working", warranty and return experiences
+
+### Search: "Best cordless stick vacuums problems reddit owners"
+(no results)
+
+### Search: "Best cordless stick vacuums productreview.com.au reviews complaints"
+(no results)
+
+## PRICE AND AVAILABILITY EVIDENCE - named Australian retailer listings with a price and the day it was seen, price history, stock status
+
+### Search: "Best cordless stick vacuums price australia jb hi-fi officeworks"
+(no results)
+
+### Search: "Best cordless stick vacuums australia launch price rrp"
+(no results)
+
+Return JSON with only these keys:
+{"facts": [{"fact": string, "sourceUrl": string, "tier": "primary"|"expert"|"owner"|"aggregator"|"unknown", "date": string|null, "publisher": string|null}],
+ "testedClaims": [{"claim": string, "source": string, "year": number|null, "sourceUrl": string}],
+ "claims": [{"subject": string, "metric": string, "claimedValue": string|null, "claimedBy": string|null, "claimedSourceUrl": string|null, "claimedConditions": string|null, "measuredValue": string|null, "measuredBy": string|null, "conditions": string|null, "measuredOn": string|null, "measuredSourceUrl": string|null, "withdrawnValue": string|null, "ownTest": false, "covers": string|null}],
+ "failureModes": [{"product": string, "failure": string, "timeframe": string, "sourceUrl": string, "tier": "owner"|"expert"|"primary"|"aggregator"|"unknown"}],
+ "ownerComplaints": [{"product": string, "complaint": string, "volume": "isolated"|"recurring"|"widespread"|"unknown", "recency": string|null, "denominator": string|null, "kind": "quoted"|"aggregate", "sourceUrl": string}],
+ "whoShouldNotBuy": [{"audience": string, "reason": string, "sourceUrl": string}],
+ "priceObservations": [{"product": string, "value": number, "currency": string, "retailer": string, "dateChecked": string, "sourceUrl": string}]}
+
+=== outcome: threw: Evidence is too thin to write a guide from - facts from a primary source 1/4, facts from independent expert reviews 1/3, facts from owner reviews 0/3, attributed tested claims 1/2, failure modes 1/3, dated price observations 1/3.

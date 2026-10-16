@@ -1,6 +1,8 @@
-# SleekDrops agent platform → Cloud Run.
+# SleekDrops agent platform, for any container host.
 # One container: admin API + worker + scheduler + the built admin panel,
 # run with tsx exactly like ./up.sh does locally (migrations live in src/).
+# Give it the same environment as apps/agent/.env: DATABASE_URL (the Supabase
+# Session pooler URI), SUPABASE_SERVICE_ROLE_KEY, and the engine keys.
 #
 # The admin panel is copied in PREBUILT — run this first:
 #   pnpm --filter @sleekdrops/admin build
@@ -28,8 +30,8 @@ COPY apps/admin/dist apps/admin/dist
 
 ENV NODE_ENV=production
 EXPOSE 8787
-# node itself is PID 1, not pnpm: Cloud Run sends SIGTERM to PID 1 only, and
-# pnpm answers it by exiting without passing it on, which kills the agent
-# before its shutdown handler can hand its claims back to the queue.
+# node itself is PID 1, not pnpm: a container runtime sends SIGTERM to PID 1
+# only, and pnpm answers it by exiting without passing it on, which kills the
+# agent before its shutdown handler can hand its claims back to the queue.
 WORKDIR /app/apps/agent
 CMD ["node", "--import", "tsx", "src/index.ts"]

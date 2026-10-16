@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
 import type { ScoutQueueStatus, Topic } from '../api';
-import { api, fmtTime } from '../api';
-import { ApiErrorBanner, Badge } from '../components';
-import { usePoll } from '../hooks';
+import { api, findEdition, fmtTime } from '../api';
+import { ApiErrorBanner, Badge, EditionEvent } from '../components';
+import { usePlatform, usePoll } from '../hooks';
 import { ManualTopicDrawer } from './ManualTopicDrawer';
 
 export function Topics() {
+  const platform = usePlatform();
   const { data, error, refresh } = usePoll<{ topics: Topic[] }>('/api/topics');
   const { data: queue, refresh: refreshQueue } = usePoll<ScoutQueueStatus>('/api/scout/queue');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -50,6 +51,14 @@ export function Topics() {
       setBusy(null);
     }
   };
+
+  const editionEvent = (t: Topic) => (
+    <EditionEvent
+      editionId={t.edition_id}
+      edition={findEdition(platform, t.edition_id)}
+      eventStartsAt={t.event_starts_at}
+    />
+  );
 
   const openNew = () => {
     setEditingDraft(null);
@@ -140,6 +149,7 @@ export function Topics() {
                     <span className="badge violet">✍️ Manual</span>
                     <Badge value="draft" />
                   </div>
+                  <div className="kw">{editionEvent(t)}</div>
                   {t.instructions && <div className="why clamp-2">{t.instructions}</div>}
                   {(t.research_notes.length > 0 || t.hero_image_url) && (
                     <div className="draft-attach-note">
@@ -187,6 +197,7 @@ export function Topics() {
                 <div className="kw">
                   <Badge value={t.category} />
                   <Badge value={t.post_type} />
+                  {editionEvent(t)}
                   {(t.keywords ?? []).slice(0, 5).map((k) => (
                     <span className="badge" key={k}>
                       {k}
@@ -217,6 +228,7 @@ export function Topics() {
                   <th>Topic</th>
                   <th>Category</th>
                   <th>Type</th>
+                  <th>Edition / event</th>
                   <th>Status</th>
                   <th>When</th>
                 </tr>
@@ -232,6 +244,7 @@ export function Topics() {
                     </td>
                     <td>{t.category}</td>
                     <td>{t.post_type}</td>
+                    <td>{editionEvent(t)}</td>
                     <td>
                       <Badge value={t.status} />
                     </td>

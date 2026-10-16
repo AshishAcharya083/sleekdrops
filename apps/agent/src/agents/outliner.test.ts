@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { finaliseBrief } from './outliner.js';
-import { shapeById } from '../content/shapes.js';
+import { shapeById } from '../content/catalogue.js';
 import type { ArticleShape } from '../content/shapes.js';
 import type { ArticleRow, ContentBrief, KeywordPlan } from '../pipeline/types.js';
 
@@ -83,6 +83,9 @@ test('the brief carries the shape downstream', () => {
   });
   assert.equal(brief.structureShape?.id, 'ranked-list');
   assert.equal(brief.structureShape?.faq, 'required');
+  // The one-liner stays in the catalogue: a brief that carried it would read
+  // differently to the writer than every brief recorded before shapes had one.
+  assert.equal(Object.hasOwn(brief.structureShape ?? {}, 'description'), false);
 });
 
 test('the deterministic post-processing survives the rewrite', () => {

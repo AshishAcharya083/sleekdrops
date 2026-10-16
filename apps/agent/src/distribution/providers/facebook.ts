@@ -30,9 +30,14 @@
 // Authorization header rather than a query parameter, the one call whose
 // subject is the token itself (debug_token) is never quoted in a message, and
 // every error and log line the adapter writes is scrubbed of it.
+//
+// Posting is organic only. No call here creates, boosts or promotes an ad, and
+// the Graph client refuses any path outside the handful of Page, post and
+// token endpoints below - so a paid placement cannot be reached by accident.
 import { config } from '../../config.js';
 import { getSetting, q, setSetting } from '../../db/pool.js';
 import { createLogger } from '../../lib/log.js';
+import { siteTargetFor } from '../../platform/publishTarget.js';
 import {
   findConnection,
   getConnection,
@@ -91,7 +96,7 @@ export const REQUIRED_SCOPES = 'pages_manage_posts, pages_read_engagement and pa
  */
 const INSIGHT_METRICS = ['post_impressions', 'post_clicks', 'post_reactions_by_type_total'];
 
-/** Where the API's own verdict on the monthly link cap is remembered. */
+/** Where the API's own verdict on the monthly link cap is remembered, per platform. */
 export const BODY_LINK_BUDGET_SETTING = 'facebook_body_link_budget';
 
 /** One Page's exhausted month, as the settings row holds it. */
@@ -147,11 +152,30 @@ interface GraphCall {
 }
 
 /**
+ * Every Graph path this adapter may call: the token and Page lookups, and a
+ * Page's or post's own feed, photos, comments and insights. An ads account
+ * (`act_...`) or any promotion edge is outside it, which is what keeps every
+ * post organic.
+ */
+const ORGANIC_PATH =
+  /^(?:debug_token|me|me\/accounts|oauth\/access_token|(?!act_)[\w-]+(?:\/(?:feed|photos|comments|insights))?)$/;
+
+/** Whether `path` is one of the organic Page calls above. */
+export function isOrganicGraphPath(path: string): boolean {
+  return ORGANIC_PATH.test(path);
+}
+
+/**
  * One Graph call. Parameters go in the query on a GET and in a form body on a
  * POST, and the credential authorising the call goes in neither: it is a bearer
  * header, so a URL that ends up in a log or an error carries no token.
  */
 async function graph<T>(call: GraphCall, rt: Runtime): Promise<T> {
+  if (!isOrganicGraphPath(call.path)) {
+    throw new PermanentProviderError(
+      `refusing the Facebook Graph call ${call.path}: distribution posts organically and never calls an ads or promotion endpoint`,
+    );
+  }
   const method = call.method ?? 'GET';
   const url = new URL(`${GRAPH_HOST}/${config.facebook.graphVersion}/${call.path}`);
   const params = new URLSearchParams(call.params ?? {});
@@ -281,12 +305,23 @@ async function bodyLinksUsed(pageId: string): Promise<number> {
 }
 
 /**
+ * The platform this Page posts for, whose settings row keeps its budget. A Page
+ * is connected for one platform only (channels.ts upsertConnection).
+ */
+async function pagePlatform(pageId: string): Promise<string> {
+  const connection = await findConnection(FACEBOOK_PROVIDER, pageId);
+  if (!connection) throw new Error(`facebook Page ${pageId} is not connected for any platform`);
+  return connection.platform_id;
+}
+
+/**
  * This Page's body-link allowance for the month, as the panel shows it and as
  * the ladder checks it: spent once the count reaches the cap, or once Meta
  * itself refused a link this month, whichever came first.
  */
 async function bodyLinkBudget(pageId: string, now: Date): Promise<LinkBudget> {
-  const state = await getSetting<BudgetState>(BODY_LINK_BUDGET_SETTING, {});
+  const platformId = await pagePlatform(pageId);
+  const state = await getSetting<BudgetState>(platformId, BODY_LINK_BUDGET_SETTING, {});
   const used = await bodyLinksUsed(pageId);
   const cap = config.facebook.bodyLinkCap;
   return { used, cap, exhausted: state[pageId]?.month === monthKey(now) || used >= cap };
@@ -305,13 +340,14 @@ async function bodyLinkAvailable(pageId: string, now: Date): Promise<boolean> {
  */
 async function recordBudgetExhausted(pageId: string, now: Date): Promise<void> {
   const month = monthKey(now);
-  const state = await getSetting<BudgetState>(BODY_LINK_BUDGET_SETTING, {});
+  const platformId = await pagePlatform(pageId);
+  const state = await getSetting<BudgetState>(platformId, BODY_LINK_BUDGET_SETTING, {});
   const next: BudgetState = {};
   for (const [page, entry] of Object.entries(state ?? {})) {
     if (entry?.month === month) next[page] = entry;
   }
   next[pageId] = { month, exhaustedAt: now.toISOString() };
-  await setSetting(BODY_LINK_BUDGET_SETTING, next);
+  await setSetting(platformId, BODY_LINK_BUDGET_SETTING, next);
 }
 
 // ── What this adapter is allowed to post ────────────────────────────────────
@@ -339,7 +375,7 @@ export interface PayloadRenderer {
 async function distributableArticle(item: DistributionItem): Promise<DistributableArticle | null> {
   if (!item.articleId) return null;
   const [row] = await q<DistributableArticle>(
-    `SELECT id, slug, title, frontmatter, hero_image_url, hero_image_source, keyword_plan
+    `SELECT id, platform_id, slug, title, frontmatter, hero_image_url, hero_image_source, keyword_plan
        FROM articles WHERE id = $1`,
     [item.articleId],
   );
@@ -354,12 +390,14 @@ async function distributableArticle(item: DistributionItem): Promise<Distributab
 const databaseRenderer: PayloadRenderer = {
   async forItem(item) {
     const article = await distributableArticle(item);
-    return article ? renderForItem(item, article) : item.payload;
+    if (!article) return item.payload;
+    return renderForItem(item, article, await siteTargetFor(article.platform_id));
   },
   async forPlacement(item, placement) {
     const article = await distributableArticle(item);
     if (!article) return null;
-    const payload = await render(article, FACEBOOK_PROVIDER, placement);
+    const target = await siteTargetFor(article.platform_id);
+    const payload = await render(article, target, FACEBOOK_PROVIDER, placement);
     await storeRenderedPayload(item.id, payload);
     return payload;
   },

@@ -33,7 +33,7 @@ const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to 
 if (reachable) await migrate();
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 
 after(async () => {
   if (reachable) await pool.end();
@@ -41,6 +41,8 @@ after(async () => {
 
 async function insertArticle(fields: Record<string, unknown> = {}): Promise<ArticleRow> {
   const row = {
+    platform_id: 'sleekdrops',
+    edition_id: 'au',
     title: `Best cordless stick vacuums ${randomUUID().slice(0, 8)}`,
     category: 'Home',
     post_type: 'guide',

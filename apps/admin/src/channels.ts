@@ -388,8 +388,3 @@ export function disconnectQueueNote(counts: { pending: number; held: number }): 
   }
   return notes.join(' ');
 }
-
-/** Where the article sits on the live site, for the row's title link. */
-export function articleUrl(slug: string): string {
-  return `https://sleekdrops.com/blog/${slug}/`;
-}

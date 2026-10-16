@@ -3,6 +3,8 @@ import { EVENTS, captureError, log, track } from '../analytics';
 import type { LinkPlacement, Settings } from '../api';
 import { api } from '../api';
 import { providerLabel } from '../channels';
+import { usePlatform } from '../hooks';
+import { PlatformProfileEditor } from './PlatformProfile';
 
 // Every agent that runs a prompt, and therefore has a model worth overriding.
 // `assembler` and `publisher` run deterministic code; `image_agent` is pinned
@@ -23,10 +25,25 @@ const SOURCE_LABEL: Record<string, string> = {
   'admin-settings': 'set here in Settings',
   'env-oauth-token': 'from CLAUDE_CODE_OAUTH_TOKEN',
   'env-api-key': 'from an API key in the environment',
-  'vertex-adc': 'via the Cloud Run service account (Vertex ADC)',
+  'vertex-adc': 'via a GCP service account (Vertex ADC)',
 };
 
-export function SettingsPage() {
+/**
+ * Everything here belongs to the selected platform: the engine and pipeline
+ * settings below, and the profile its prompts are built from.
+ */
+export function SettingsPage({ onSaved }: { onSaved?: () => void } = {}) {
+  return (
+    <>
+      <PipelineSettings onSaved={onSaved} />
+      <PlatformProfileEditor />
+    </>
+  );
+}
+
+/** `onSaved` lets the shell re-read what it shows per platform, e.g. Channels. */
+function PipelineSettings({ onSaved }: { onSaved?: () => void }) {
+  const platform = usePlatform();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -69,6 +86,7 @@ export function SettingsPage() {
       });
       setSettings(next);
       setSaved(true);
+      onSaved?.();
       track(EVENTS.settingsSaved, shape);
       log('info', 'platform settings saved', shape);
       setTimeout(() => setSaved(false), 2500);
@@ -89,6 +107,9 @@ export function SettingsPage() {
 
   return (
     <div className="card">
+      <p className="muted" style={{ marginTop: 0 }}>
+        Settings for <strong>{platform.name}</strong>. The other platforms keep their own.
+      </p>
       {engineBroken && (
         <div className="warn-banner">
           {engine === 'claude' ? (
@@ -118,8 +139,8 @@ export function SettingsPage() {
           hero when none is usable, which is why that one stage is pinned here —
           plus every other stage when the toggle below says so. Goes through Google
           ADK, with Google Search grounding on the stages that verify facts. Empty
-          fields fall back to apps/agent/.env; on Cloud Run the key is optional —
-          the service account bills Vertex AI directly. Values are stored in the
+          fields fall back to apps/agent/.env; where a GCP service account runs the
+          agent (Vertex ADC) the key is optional. Values are stored in the
           platform database — set ADMIN_TOKEN if the API is reachable by others.
           {engines?.gemini.configured && (
             <>
@@ -134,7 +155,7 @@ export function SettingsPage() {
           <label>AI Studio API key</label>
           <input
             type="password"
-            placeholder="(from .env GEMINI_API_KEY, or Vertex ADC on Cloud Run)"
+            placeholder="(from .env GEMINI_API_KEY, or Vertex ADC)"
             value={llm.gemini_api_key ?? ''}
             onChange={(e) =>
               setSettings({ ...settings, llm: { ...llm, gemini_api_key: e.target.value } })
@@ -231,7 +252,7 @@ export function SettingsPage() {
         >
           <option value="approval">approval — human approves before publishing (recommended)</option>
           <option value="auto">auto — publish to the live site without approval</option>
-          <option value="draft">draft — write to D1 as draft, never dispatch</option>
+          <option value="draft">draft — write the post as a draft, never dispatch</option>
         </select>
 
         <label>Max revision rounds</label>
@@ -267,7 +288,7 @@ export function SettingsPage() {
           <label htmlFor="distribution-enabled">Distribution enabled</label>
           <select
             id="distribution-enabled"
-            value={String(settings.distribution_enabled ?? true)}
+            value={String(settings.distribution_enabled ?? false)}
             onChange={(e) =>
               setSettings({ ...settings, distribution_enabled: e.target.value === 'true' })
             }

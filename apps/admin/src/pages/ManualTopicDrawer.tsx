@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { EVENTS, captureError, track } from '../analytics';
 import type { ManualTopicPayload, ReferenceMaterial, Topic } from '../api';
-import { api, apiUpload, TOPIC_CATEGORIES, TOPIC_POST_TYPES } from '../api';
+import { api, apiUpload, findEdition, isoToZonedInput, zonedInputToIso } from '../api';
 import { HeroImageField } from '../HeroImageField';
+import { usePlatform } from '../hooks';
 
 const MAX_REFERENCES = 5;
 const MAX_REFERENCE_BYTES = 2 * 1024 * 1024;
@@ -26,10 +27,14 @@ export function ManualTopicDrawer({
   onClose: () => void;
   onSaved: (message: string) => void;
 }) {
+  const platform = usePlatform();
   const [title, setTitle] = useState('');
   const [instructions, setInstructions] = useState('');
-  const [category, setCategory] = useState<string>(TOPIC_CATEGORIES[0]);
-  const [postType, setPostType] = useState<string>(TOPIC_POST_TYPES[0]);
+  const [category, setCategory] = useState<string>(platform.categories[0] ?? '');
+  const [postType, setPostType] = useState<string>(platform.post_types[0] ?? '');
+  const [editionId, setEditionId] = useState<string>(platform.editions[0]?.id ?? '');
+  // Wall time in the edition's zone, as the datetime-local input holds it.
+  const [eventStart, setEventStart] = useState('');
   const [files, setFiles] = useState<FileRef[]>([]);
   const [pastes, setPastes] = useState<string[]>([]);
   // Hero image: picked now, uploaded once the draft row exists to hang it off.
@@ -56,6 +61,10 @@ export function ManualTopicDrawer({
     setInstructions(editing.instructions ?? '');
     setCategory(editing.category);
     setPostType(editing.post_type);
+    setEditionId(editing.edition_id);
+    setEventStart(
+      isoToZonedInput(editing.event_starts_at, findEdition(platform, editing.edition_id)?.time_zone ?? 'UTC'),
+    );
     setFiles(
       (editing.research_notes ?? []).map((r) => ({
         name: r.name,
@@ -72,9 +81,13 @@ export function ManualTopicDrawer({
 
   const nonEmptyPastes = useMemo(() => pastes.filter((p) => p.trim() !== ''), [pastes]);
   const referenceCount = files.length + nonEmptyPastes.length;
+  const edition = findEdition(platform, editionId);
+  const timeZone = edition?.time_zone ?? 'UTC';
+  const eventStartsAt = eventStart ? zonedInputToIso(eventStart, timeZone) : null;
+  const eventInvalid = eventStart !== '' && eventStartsAt === null;
   const titleInvalid = titleTouched && title.trim() === '';
-  const formValid = title.trim() !== '' && !fileError;
-  const issues = (titleInvalid ? 1 : 0) + (fileError ? 1 : 0);
+  const formValid = title.trim() !== '' && !fileError && !eventInvalid;
+  const issues = (titleInvalid ? 1 : 0) + (fileError ? 1 : 0) + (eventInvalid ? 1 : 0);
 
   const buildReferences = (): ReferenceMaterial[] => [
     ...files.map((f) => ({ name: f.name, content: f.content })),
@@ -123,8 +136,10 @@ export function ManualTopicDrawer({
   const resetForm = () => {
     setTitle('');
     setInstructions('');
-    setCategory(TOPIC_CATEGORIES[0]);
-    setPostType(TOPIC_POST_TYPES[0]);
+    setCategory(platform.categories[0] ?? '');
+    setPostType(platform.post_types[0] ?? '');
+    setEditionId(platform.editions[0]?.id ?? '');
+    setEventStart('');
     setFiles([]);
     setPastes([]);
     setShowPaste(false);
@@ -144,6 +159,8 @@ export function ManualTopicDrawer({
     mode: savedId ? 'edit' : 'create',
     category,
     post_type: postType,
+    edition_id: editionId,
+    event_bound: eventStartsAt !== null,
     reference_count: referenceCount,
     instructions_provided: instructions.trim() !== '',
     hero_image_provided: Boolean(heroFile ?? heroUrl),
@@ -179,6 +196,8 @@ export function ManualTopicDrawer({
       instructions: instructions.trim(),
       category,
       post_type: postType,
+      edition_id: editionId,
+      ...(eventStartsAt ? { event_starts_at: eventStartsAt } : {}),
       hero_alt: heroAlt.trim(),
       references: buildReferences(),
     };
@@ -333,7 +352,7 @@ export function ManualTopicDrawer({
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
                   >
-                    {TOPIC_CATEGORIES.map((c) => (
+                    {platform.categories.map((c) => (
                       <option key={c} value={c}>
                         {c}
                       </option>
@@ -348,7 +367,7 @@ export function ManualTopicDrawer({
                     value={postType}
                     onChange={(e) => setPostType(e.target.value)}
                   >
-                    {TOPIC_POST_TYPES.map((p) => (
+                    {platform.post_types.map((p) => (
                       <option key={p} value={p}>
                         {p}
                       </option>
@@ -356,6 +375,43 @@ export function ManualTopicDrawer({
                   </select>
                 </div>
               </div>
+
+              <div className="select-row">
+                <div className="field">
+                  <label htmlFor="mt-edition">Edition</label>
+                  <select
+                    id="mt-edition"
+                    className="select"
+                    value={editionId}
+                    disabled={platform.editions.length < 2}
+                    onChange={(e) => setEditionId(e.target.value)}
+                  >
+                    {platform.editions.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="mt-event">
+                    Event start <span className="opt">OPTIONAL</span>
+                  </label>
+                  <input
+                    id="mt-event"
+                    type="datetime-local"
+                    className={`input${eventInvalid ? ' invalid' : ''}`}
+                    value={eventStart}
+                    onChange={(e) => setEventStart(e.target.value)}
+                  />
+                  {eventInvalid && <div className="field-error">Give a full date and time.</div>}
+                </div>
+              </div>
+              <p className="field-hint">
+                Event time is in {timeZone}, the {edition?.name ?? 'edition'} time zone. Set it only
+                for a piece tied to a fixture: no stage starts within 6 hours of kick-off, and once
+                it has passed the piece is not published and is marked Expired.
+              </p>
 
               <HeroImageField
                 url={heroUrl}

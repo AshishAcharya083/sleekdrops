@@ -50,8 +50,8 @@ export const config = {
   // resolve PGHOST/PGPORT/... itself" - see db/pool.ts.
   databaseUrl: env('DATABASE_URL'),
 
-  // Google AI Studio key — bills the GCP project it belongs to, so Google
-  // Cloud credits apply. On Cloud Run, Vertex ADC replaces the key entirely.
+  // Google AI Studio key — bills the Google project it belongs to. Vertex ADC
+  // (below) replaces the key entirely where a GCP service account is available.
   geminiApiKey: env('GEMINI_API_KEY'),
   geminiModelDefault: env('MODEL_DEFAULT', 'gemini-2.5-flash').replace(/^google\//, ''),
   vertex: {
@@ -72,35 +72,30 @@ export const config = {
 
   tavilyApiKey: env('TAVILY_API_KEY'),
 
-  // Hero-image storage. The bucket must allow public reads (allUsers →
-  // Storage Object Viewer); uploaded objects are served from
-  // https://storage.googleapis.com/<bucket>/<object>. Empty = image stage
-  // skips itself and articles keep the generated cover fills.
-  gcs: {
-    imagesBucket: env('GCS_IMAGES_BUCKET'),
-    // Override when serving through a CDN / custom domain instead.
-    publicBase: env('GCS_PUBLIC_BASE', 'https://storage.googleapis.com'),
-  },
-
-  d1: {
-    accountId: env('CLOUDFLARE_ACCOUNT_ID'),
-    databaseId: env('D1_DATABASE_ID'),
-    token: env('CLOUDFLARE_D1_TOKEN') || env('CLOUDFLARE_API_TOKEN'),
+  /**
+   * Hero-image storage: the public bucket of the SleekDrops Supabase project.
+   * Uploaded objects are served from
+   * <url>/storage/v1/object/public/<bucket>/<object>. Without the URL and the
+   * service-role key the image stage skips itself and articles keep the
+   * generated cover fills.
+   *
+   * Which database a publish writes to is not here: it is each platform's own
+   * publish target, read from the variables its profile names - see
+   * platform/publishTarget.ts.
+   */
+  supabase: {
+    url: env('SUPABASE_URL').replace(/\/+$/, ''),
+    // The service_role key, or a new-style sb_secret_… key. A credential.
+    serviceRoleKey: env('SUPABASE_SERVICE_ROLE_KEY'),
+    imagesBucket: env('SUPABASE_IMAGES_BUCKET', 'images'),
   },
 
   github: {
     token: env('GITHUB_TOKEN'),
-    repo: env('GITHUB_REPO', 'AshishAcharya083/sleekdrops'),
   },
 
-  /**
-   * Social distribution. The site URL is where the readiness gate looks for a
-   * published slug before an item is handed to a provider, so it must be the
-   * origin the rebuild actually deploys to - the same default apps/web's
-   * astro.config.mjs carries, overridable with SITE_URL for a preview.
-   */
+  /** Social distribution. Each platform's site URL is part of its publish target. */
   distribution: {
-    siteUrl: env('SITE_URL', 'https://sleekdrops.com').replace(/\/+$/, ''),
     pollMs: positiveNumber('DISTRIBUTION_POLL_MS', 15_000),
     /**
      * How often posted items are checked for a due insights reading. Coarse on

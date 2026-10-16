@@ -11,12 +11,12 @@ on:
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
-  # Fired whenever editorial content changes in the D1 database (a post's
-  # status flips to 'published', or affiliate_links rows change). Anything
-  # with a GitHub token can trigger it:
+  # Fired whenever editorial content changes in Supabase (a post's status
+  # flips to 'published', or affiliate_links rows change). Anything with a
+  # GitHub token can trigger it:
   #   POST /repos/AshishAcharya083/sleekdrops/dispatches
   #   {"event_type": "content-updated"}
-  # The apps/agent publisher calls this after its D1 writes.
+  # The apps/agent publisher calls this after its content writes.
   repository_dispatch:
     types: [content-updated]
   workflow_dispatch:
@@ -94,7 +94,7 @@ jobs:
           # name. Public: it ships in the JS bundle every visitor downloads, so
           # it is a repo/environment *variable* rather than a secret.
           #
-          # Per environment for the reason the ad partner's id is: one property
+          # Per environment for the reason the AdSense ids are: one property
           # receiving both sites means every figure production is judged on -
           # sessions, conversion rate, the affiliate click-through - is inflated
           # by preview traffic, and nothing in GA4 can separate the two after the
@@ -113,31 +113,48 @@ jobs:
           # back to its code-side default.
           PUBLIC_DEVTEAM_FLAGS_HOST: ${{ vars.DEVTEAM_FLAGS_HOST }}
           PUBLIC_DEVTEAM_FLAGS_CLIENT_KEY: ${{ secrets.DEVTEAM_FLAGS_CLIENT_KEY }}
+          # Google AdSense - publisher id (ca-pub-...) + one slot id per placement.
+          # All public: they ship in the ad markup every visitor downloads, so they
+          # are repo *variables* rather than secrets. Held in repo settings for the
+          # same reason as the keys above - they are minted per environment in the
+          # AdSense console, and a value from the wrong environment reports its
+          # revenue against the wrong property while the page looks healthy.
+          #
+          # An empty publisher id disables ads silently: no partner script, no
+          # ads.txt, nothing to consent to.
+          PUBLIC_ADSENSE_CLIENT: ${{ vars.ADSENSE_CLIENT }}
+          PUBLIC_ADSENSE_SLOT_ARTICLE_MID: ${{ vars.ADSENSE_SLOT_ARTICLE_MID }}
+          PUBLIC_ADSENSE_SLOT_ARTICLE_END: ${{ vars.ADSENSE_SLOT_ARTICLE_END }}
+          PUBLIC_ADSENSE_SLOT_SIDEBAR: ${{ vars.ADSENSE_SLOT_SIDEBAR }}
+          PUBLIC_ADSENSE_SLOT_FEED: ${{ vars.ADSENSE_SLOT_FEED }}
           # Journey by Mediavine - this site's id, the `<id>` in the script
           # wrapper `//scripts.scriptwrapper.com/tags/<id>.js` issued in the
           # Journey dashboard (Settings → Ad Setup) once the site is approved.
           # Public: it ships in the markup every visitor downloads, so it is an
           # environment *variable* rather than a secret.
           #
+          # It coexists with the AdSense publisher id above while the site
+          # applies to both partners. Journey requires exclusivity once it
+          # serves ads - no other ad tag, no other seller in ads.txt - so the
+          # day one partner launches, the other's variable is emptied.
+          #
           # Production only. The wrapper is issued for sleekdrops.com and works
           # nowhere else; `src/lib/ads-env.ts` discards the id on any other
           # deployment and deploy-develop.yml pins it empty. An empty value
-          # serves no ads and loads no partner script at all.
+          # loads no Journey wrapper at all.
           PUBLIC_MEDIAVINE_SITE_ID: ${{ vars.MEDIAVINE_SITE_ID }}
-          # Optional: fetch the partner's authorised-sellers file from this URL
-          # at build time instead of publishing the committed copy at
-          # apps/web/ads/ads.txt. Production only; see apps/web/ads/README.md.
+          # Optional: fetch Journey's authorised-sellers file from this URL at
+          # build time instead of publishing the committed copy at
+          # apps/web/ads/ads.txt. Either way it is published alongside the
+          # AdSense record. Production only; see apps/web/ads/README.md.
           ADS_TXT_URL: ${{ vars.ADS_TXT_URL }}
           # Used by apps/web/scripts/fetch-content.mjs to read posts +
-          # affiliate links from Cloudflare D1 during the prebuild step. The
-          # database id is not a secret; CLOUDFLARE_D1_TOKEN needs
-          # "Account → D1 → Read".
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          D1_DATABASE_ID: b98d83ac-a2a5-42cb-a367-0cb71b902670
-          CLOUDFLARE_D1_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
-          # Fallback while CLOUDFLARE_D1_TOKEN isn't set — works only if the
-          # Pages deploy token also has D1 read permission.
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # affiliate links from the SleekDrops Supabase project during the
+          # prebuild step. Both are public - the publishable key can read
+          # published content and nothing else - so they are repository
+          # variables rather than secrets.
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
         run: pnpm --filter @sleekdrops/web build
 
       - name: Deploy to Cloudflare Pages (production)

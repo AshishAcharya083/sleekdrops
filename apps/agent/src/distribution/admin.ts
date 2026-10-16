@@ -7,12 +7,20 @@
 // secret is present and where it came from, never what it is. And nothing here
 // names a network: a second provider shows up in these views, and connects
 // through them, by registering an adapter.
+//
+// A channel belongs to one platform. Its credential, placement and budget are
+// that platform's, and an account another platform already posts through
+// cannot be connected again here.
 import { q } from '../db/pool.js';
 import { createLogger } from '../lib/log.js';
+import { PublishTargetError, siteTargetFor } from '../platform/publishTarget.js';
 import {
+  ChannelOwnedElsewhereError,
   credentialSource,
+  findConnection,
   getConnection,
   isChannelTokenRef,
+  listAllConnections,
   listConnections,
   recordTokenExpiry,
   redactToken,
@@ -254,7 +262,8 @@ export async function overridePlacement(
   >(
     `SELECT item.status, item.slug, item.provider,
             CASE WHEN article.id IS NULL THEN NULL ELSE json_build_object(
-              'id', article.id, 'slug', article.slug, 'title', article.title,
+              'id', article.id, 'platform_id', article.platform_id,
+              'slug', article.slug, 'title', article.title,
               'frontmatter', article.frontmatter, 'hero_image_url', article.hero_image_url,
               'hero_image_source', article.hero_image_source, 'keyword_plan', article.keyword_plan
             ) END AS article
@@ -270,8 +279,13 @@ export async function overridePlacement(
       'the article behind this item has been deleted, so the post cannot be re-composed for another placement',
     );
   }
+  const site = await siteTargetFor(current.article.platform_id).catch((err: unknown) => {
+    // The platform's site URL is not configured: the operator's to fix.
+    throw err instanceof PublishTargetError ? new ChannelAdminError(409, err.message) : err;
+  });
   const payload = renderPayload(
     { ...current.article, slug: current.slug },
+    site,
     current.provider,
     placement,
   );
@@ -341,8 +355,8 @@ async function channelView(
   now: Date,
 ): Promise<ChannelView> {
   const [source, placement, linkBudget] = await Promise.all([
-    credentialSource(connection.token_ref, connection.provider),
-    configuredPlacement(connection.provider),
+    credentialSource(connection.platform_id, connection.token_ref, connection.provider),
+    configuredPlacement(connection.platform_id, connection.provider),
     linkBudgetFor(connection),
   ]);
   return {
@@ -363,8 +377,12 @@ async function channelView(
   };
 }
 
-export async function channelViews(now: Date = new Date()): Promise<ChannelView[]> {
-  const [connections, counts] = await Promise.all([listConnections(), queueCountsByChannel()]);
+/** Every channel of `platformId`, as the Channels list renders it. */
+export async function channelViews(platformId: string, now: Date = new Date()): Promise<ChannelView[]> {
+  const [connections, counts] = await Promise.all([
+    listConnections(platformId),
+    queueCountsByChannel(),
+  ]);
   return Promise.all(connections.map((connection) => channelView(connection, counts, now)));
 }
 
@@ -402,13 +420,16 @@ async function authenticateWith(provider: string, token: string): Promise<AuthTo
  * operator typed that another account's connection already reads is refused
  * rather than suffixed: storing under it would silently replace that
  * channel's token with this one.
+ *
+ * Checked across every platform: a name maps to one environment variable
+ * whichever platform's channel reads it.
  */
 async function chooseTokenRef(
   provider: string,
   externalAccountId: string,
   requested: string | null,
 ): Promise<string> {
-  const connections = await listConnections();
+  const connections = await listAllConnections();
   const isThisAccount = (connection: ChannelConnectionRow) =>
     connection.provider === provider && connection.external_account_id === externalAccountId;
   if (requested) {
@@ -433,13 +454,14 @@ async function chooseTokenRef(
 }
 
 /**
- * Connect an account from a pasted credential, or from a secret the deployment
- * already mounts when only its name is given. The network is asked who the
- * credential posts as before anything is stored, so a wrong or unscoped token
- * is refused with the network's reason instead of becoming a channel that
- * fails every post.
+ * Connect an account for `platformId` from a pasted credential, or from a
+ * secret the deployment already mounts when only its name is given. The
+ * network is asked who the credential posts as before anything is stored, so a
+ * wrong or unscoped token is refused with the network's reason instead of
+ * becoming a channel that fails every post - and so is an account another
+ * platform already posts through.
  */
-export async function connectChannel(input: {
+export async function connectChannel(platformId: string, input: {
   provider?: unknown;
   token?: unknown;
   tokenRef?: unknown;
@@ -467,7 +489,7 @@ export async function connectChannel(input: {
 
   let token = pasted;
   if (!token) {
-    const mounted = requestedRef ? await resolveCredential(requestedRef, provider) : null;
+    const mounted = requestedRef ? await resolveCredential(platformId, requestedRef, provider) : null;
     if (!mounted) {
       throw new ChannelAdminError(
         400,
@@ -480,9 +502,15 @@ export async function connectChannel(input: {
   }
 
   const details = await authenticateWith(provider, token);
+  // Before anything is stored: refused later, the pasted token would be left
+  // in this platform's credentials for an account it does not own.
+  const owner = await findConnection(provider, details.externalAccountId);
+  if (owner && owner.platform_id !== platformId) {
+    throw ownedElsewhere(new ChannelOwnedElsewhereError(provider, details.externalAccountId, owner.platform_id));
+  }
   const tokenRef = await chooseTokenRef(provider, details.externalAccountId, requestedRef || null);
   if (pasted) {
-    await storeCredential(tokenRef, details.accessToken);
+    await storeCredential(platformId, tokenRef, details.accessToken);
   } else if (details.accessToken !== token) {
     // The mounted secret is a user token the network exchanged for an account
     // token. Writing the exchanged one into the database would quietly move
@@ -493,13 +521,20 @@ export async function connectChannel(input: {
     );
   }
   const row = await upsertConnection({
+    platformId,
     provider,
     externalAccountId: details.externalAccountId,
     displayName: details.displayName || null,
     tokenRef,
     expiresInSeconds: details.expiresIn,
+  }).catch((err: unknown) => {
+    throw err instanceof ChannelOwnedElsewhereError ? ownedElsewhere(err) : err;
   });
   return viewOf(row.id);
+}
+
+function ownedElsewhere(err: ChannelOwnedElsewhereError): ChannelAdminError {
+  return new ChannelAdminError(409, err.message);
 }
 
 /**
@@ -522,7 +557,7 @@ export async function replaceCredential(id: string, token: unknown): Promise<Cha
         `(${connection.external_account_id}) - connect it as a new channel instead`,
     );
   }
-  await storeCredential(connection.token_ref, details.accessToken);
+  await storeCredential(connection.platform_id, connection.token_ref, details.accessToken);
   await recordTokenExpiry(id, details.expiresIn);
   if (details.displayName) {
     await q('UPDATE channel_connections SET display_name = $2 WHERE id = $1', [
@@ -554,16 +589,20 @@ export async function disconnectChannel(id: string): Promise<{
   if (!connection) throw new ChannelAdminError(404, 'no channel with that id');
   await setConnectionStatus(id, 'disabled');
 
-  const sharing = (await listConnections()).some(
+  // Pasted credentials are kept per platform, so only this platform's other
+  // channels can be sharing the one about to be forgotten.
+  const sharing = (await listConnections(connection.platform_id)).some(
     (other) =>
       other.id !== id && other.token_ref === connection.token_ref && other.status !== 'disabled',
   );
-  const before = await credentialSource(connection.token_ref, connection.provider);
+  const source = () =>
+    credentialSource(connection.platform_id, connection.token_ref, connection.provider);
+  const before = await source();
   let credentialRemoved = false;
   if (!sharing && before === 'panel') {
-    await removeCredential(connection.token_ref);
+    await removeCredential(connection.platform_id, connection.token_ref);
     credentialRemoved = true;
   }
-  const after = await credentialSource(connection.token_ref, connection.provider);
+  const after = await source();
   return { channel: await viewOf(id), credentialRemoved, environmentSecret: after === 'environment' };
 }

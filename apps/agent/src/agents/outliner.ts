@@ -14,19 +14,22 @@
 // visible in the admin panel, instead of whatever the outliner improvised.
 import { chatJson, requireKeys, UsageTracker } from '../llm/index.js';
 import { authorById, defaultAuthorFor, slugify } from '../content/contract.js';
-import { selectShape, structureBrief } from '../content/shapes.js';
-import type { ArticleShape } from '../content/shapes.js';
+import { selectShape, shapeRecord, structureBrief } from '../content/shapes.js';
+import type { ShapeRecord } from '../content/shapes.js';
 import {
   editorialAngleBrief,
   GEO_RULES,
   keywordPlanBrief,
+  type PromptContext,
   SEO_RULES,
   siteContext,
   SOURCE_DISCIPLINE,
+  withAgentGoal,
 } from './context.js';
 import type { ArticleRow, ContentBrief, KeywordPlan } from '../pipeline/types.js';
 
 export async function runOutliner(
+  ctx: PromptContext,
   article: ArticleRow,
   model: string,
   tracker: UsageTracker,
@@ -34,8 +37,9 @@ export async function runOutliner(
   const plan = article.keyword_plan;
   const planBrief = keywordPlanBrief(plan);
   const angle = article.editorial_angle;
-  const angleBrief = editorialAngleBrief(angle);
+  const angleBrief = editorialAngleBrief(angle, ctx.platform);
   const shape = selectShape({
+    platform: ctx.platform,
     postType: article.post_type,
     angle,
     winningFormat: plan?.winningFormat,
@@ -46,8 +50,13 @@ export async function runOutliner(
 
   const brief = await chatJson<ContentBrief>(
     {
+      platformId: ctx.platform.id,
       model,
-      system: `${siteContext()}\n\n${SOURCE_DISCIPLINE}\n\n${SEO_RULES}\n\n${GEO_RULES}`,
+      system: withAgentGoal(
+        ctx,
+        'outline',
+        `${siteContext(ctx)}\n\n${SOURCE_DISCIPLINE}\n\n${SEO_RULES}\n\n${GEO_RULES}`,
+      ),
       temperature: 0.5,
       maxTokens: 8000,
       prompt: `Create the SEO content brief for this piece.
@@ -55,7 +64,7 @@ export async function runOutliner(
 Working title: ${article.title}
 Post type: ${article.post_type} | Category: ${article.category}
 ${angleBrief ? `\n${angleBrief}\n` : ''}${planBrief ? `\n${planBrief}\n` : ''}
-${structureBrief(shape)}
+${structureBrief(shape, ctx.platform)}
 
 Research dossier:
 ${JSON.stringify(article.research, null, 2)}
@@ -112,7 +121,7 @@ Return JSON:
 }
 
 /** What to ask the model for under "faq", given the shape's rule. */
-function faqInstruction(shape: ArticleShape, plan: KeywordPlan | null): string {
+function faqInstruction(shape: ShapeRecord, plan: KeywordPlan | null): string {
   if (shape.faq === 'omit') {
     return '[] (this shape carries no FAQ — the questions are the body of the piece)';
   }
@@ -135,7 +144,7 @@ function faqInstruction(shape: ArticleShape, plan: KeywordPlan | null): string {
  */
 export function finaliseBrief(
   brief: ContentBrief,
-  opts: { article: ArticleRow; plan: KeywordPlan | null; shape: ArticleShape },
+  opts: { article: ArticleRow; plan: KeywordPlan | null; shape: ShapeRecord },
 ): ContentBrief {
   const { article, plan, shape } = opts;
 
@@ -155,7 +164,7 @@ export function finaliseBrief(
   // The record of decision travels with the brief: the writer and the SEO
   // reviewer both serialise the whole brief into their prompt, so this is what
   // carries the shape downstream without either of them loading anything.
-  brief.structureShape = shape;
+  brief.structureShape = shapeRecord(shape);
   return brief;
 }
 
@@ -167,7 +176,7 @@ export function finaliseBrief(
  */
 function enforcePassageBudget(
   sections: ContentBrief['sections'],
-  shape: ArticleShape,
+  shape: ShapeRecord,
 ): ContentBrief['sections'] {
   const list = (Array.isArray(sections) ? sections : []).filter((s) => s?.heading?.trim());
   const answerKinds = new Set(
@@ -197,7 +206,7 @@ function enforcePassageBudget(
  */
 function enforceFaqRule(
   faq: ContentBrief['faq'],
-  shape: ArticleShape,
+  shape: ShapeRecord,
   plan: KeywordPlan | null,
 ): ContentBrief['faq'] {
   if (shape.faq === 'omit') return [];

@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
+process.env.SITE_URL = 'https://sleekdrops.com';
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
@@ -57,8 +58,8 @@ async function connect(
   fields: { status?: string; expiresAt?: string | null; provider?: string } = {},
 ): Promise<string> {
   const [row] = await q<{ id: string }>(
-    `INSERT INTO channel_connections (provider, external_account_id, token_ref, status, expires_at)
-     VALUES ($1, $2, 'test-channel-token', $3, $4)
+    `INSERT INTO channel_connections (platform_id, provider, external_account_id, token_ref, status, expires_at)
+     VALUES ('sleekdrops', $1, $2, 'test-channel-token', $3, $4)
      RETURNING id`,
     [
       fields.provider ?? PROVIDER,
@@ -73,27 +74,28 @@ async function connect(
 
 async function article(): Promise<DistributableArticle> {
   const [row] = await q<{ id: string; slug: string }>(
-    `INSERT INTO articles (title, slug, category, post_type, stage, status, frontmatter)
-     VALUES ('The headphones for a quiet commute', $1, 'Tech', 'guide', 'publish', 'queued', $2::jsonb)
+    `INSERT INTO articles (platform_id, edition_id, title, slug, category, post_type, stage, status, frontmatter)
+     VALUES ('sleekdrops', 'au', 'The headphones for a quiet commute', $1, 'Tech', 'guide', 'publish', 'queued', $2::jsonb)
      RETURNING id, slug`,
     [
       `quiet-commutes-${randomUUID().slice(0, 8)}`,
       JSON.stringify({
         title: 'The headphones for a quiet commute',
         dek: 'Four weeks on the 7:12, ranked.',
-        heroImage: 'https://storage.googleapis.com/images/heroes/quiet.png',
+        heroImage: 'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet.png',
       }),
     ],
   );
   articles.push(row.id);
   return {
     id: row.id,
+    platform_id: 'sleekdrops',
     slug: row.slug,
     title: 'The headphones for a quiet commute',
     frontmatter: {
       title: 'The headphones for a quiet commute',
       dek: 'Four weeks on the 7:12, ranked.',
-      heroImage: 'https://storage.googleapis.com/images/heroes/quiet.png',
+      heroImage: 'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet.png',
     },
     hero_image_url: null,
     hero_image_source: 'generated',
@@ -122,7 +124,7 @@ test('publishing the same article again queues nothing new', { skip }, async () 
   const [first, second] = [await connect(), await connect()];
   const piece = await article();
 
-  const initial = await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  const initial = await enqueuePublishedArticle(piece, { postStatus: 'published' });
   assert.ok(initial.created >= 2, 'both connected channels got an item');
 
   const queued = await itemsFor(piece.slug!);
@@ -135,7 +137,7 @@ test('publishing the same article again queues nothing new', { skip }, async () 
   // The publish stage is re-entered by a republish, by a retry-from-stage and
   // by the editorial feedback loop. Every one of those is this call again.
   for (let pass = 0; pass < 3; pass++) {
-    await enqueuePublishedArticle(piece, { d1Status: 'published' });
+    await enqueuePublishedArticle(piece, { postStatus: 'published' });
   }
   const after = await itemsFor(piece.slug!);
   assert.deepEqual(
@@ -153,7 +155,7 @@ test('publishing the same article again queues nothing new', { skip }, async () 
 test('the unique key is the database, not the read-then-write', { skip }, async () => {
   const connection = await connect();
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   // Two publish passes racing each other both reach the INSERT; one of them
   // has to lose, and it has to lose in the database.
@@ -171,19 +173,19 @@ test('a draft never enqueues', { skip }, async () => {
   await connect();
   const piece = await article();
 
-  const outcome = await enqueuePublishedArticle(piece, { d1Status: 'draft' });
+  const outcome = await enqueuePublishedArticle(piece, { postStatus: 'draft' });
   assert.deepEqual(outcome, { created: 0, alreadyQueued: 0, skipped: 'draft' });
   const [row] = await q<{ n: string }>(
     'SELECT count(*) n FROM distribution_queue WHERE slug = $1',
     [piece.slug],
   );
-  assert.equal(row.n, '0', 'a piece parked in D1 as a draft has nowhere to send a reader');
+  assert.equal(row.n, '0', 'a piece parked as a draft has nowhere to send a reader');
 });
 
 test('an article with no slug has no destination to post', { skip }, async () => {
   await connect();
   const piece = await article();
-  assert.deepEqual(await enqueuePublishedArticle({ ...piece, slug: null }, { d1Status: 'published' }), {
+  assert.deepEqual(await enqueuePublishedArticle({ ...piece, slug: null }, { postStatus: 'published' }), {
     created: 0,
     alreadyQueued: 0,
     skipped: 'no-slug',
@@ -195,7 +197,7 @@ test('a disconnected channel is not queued for', { skip }, async () => {
   const reauth = await connect({ status: 'needs_reauth' });
   const piece = await article();
 
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
   const queued = await itemsFor(piece.slug!);
   assert.equal(queued.some((row) => row.channel_connection_id === disabled), false);
   assert.equal(queued.some((row) => row.channel_connection_id === reauth), false);
@@ -204,14 +206,14 @@ test('a disconnected channel is not queued for', { skip }, async () => {
 test('the payload is rendered once, at enqueue', { skip }, async () => {
   await connect();
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   const [row] = await itemsFor(piece.slug!);
   assert.equal(row.placement, 'first_comment', 'the setting default, per the link-cap reading');
   assert.equal(row.payload.expected.ogTitle, 'The headphones for a quiet commute');
   assert.equal(
     row.payload.imageUrl,
-    'https://storage.googleapis.com/images/heroes/quiet.png',
+    'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet.png',
     'a hero we generated is ours to upload',
   );
   assert.match(row.payload.url, /utm_source=stub-queue/);
@@ -235,7 +237,7 @@ test('a claim takes one due item and spends no attempt', { skip }, async () => {
   const provider = uniqueProvider();
   await connect({ provider });
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   const claimed = await claimOwn(provider, piece.slug!);
   assert.ok(claimed, 'the item was due');
@@ -250,7 +252,7 @@ test('an item waiting out a backoff is not due yet', { skip }, async () => {
   const provider = uniqueProvider();
   const connection = await connect({ provider });
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   const claimed = (await claimOwn(provider, piece.slug!))!;
   await releaseItem(claimed.id, 900, 'waiting for the site: HTTP 404');
@@ -266,7 +268,7 @@ test('work for a channel whose token has lapsed is left alone', { skip }, async 
   const provider = uniqueProvider();
   await connect({ provider, expiresAt: new Date(Date.now() - 3_600_000).toISOString() });
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   assert.equal(
     await claimNextItem([provider]),
@@ -279,7 +281,7 @@ test('an item for a provider with no adapter installed is never claimed', { skip
   const provider = uniqueProvider();
   await connect({ provider });
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   assert.equal(await claimNextItem([]), null);
   assert.equal(await claimNextItem(['some-other-network']), null);
@@ -289,7 +291,7 @@ test('an item stranded by a dead worker comes back, its attempt already spent', 
   const provider = uniqueProvider();
   const connection = await connect({ provider });
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   const claimed = (await claimOwn(provider, piece.slug!))!;
   const attempts = await startPostAttempt(claimed.id);
@@ -311,7 +313,7 @@ test('a posted item is never taken back by recovery', { skip }, async () => {
   const provider = uniqueProvider();
   const connection = await connect({ provider });
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   const claimed = (await claimOwn(provider, piece.slug!))!;
   await startPostAttempt(claimed.id);

@@ -9,9 +9,8 @@ import type {
   QueueItemDetail,
   RecoveryOutcome,
 } from '../api';
-import { api, fmtTime } from '../api';
+import { api, fmtTime, siteArticleUrl } from '../api';
 import {
-  articleUrl,
   bulkOutcomeMessage,
   channelBadge,
   channelName,
@@ -35,7 +34,7 @@ import {
   type Tone,
 } from '../channels';
 import { ApiErrorBanner } from '../components';
-import { usePoll } from '../hooks';
+import { usePlatform, usePoll } from '../hooks';
 
 const BANNER_CLASS: Record<Tone, string> = {
   info: 'info-banner',
@@ -662,9 +661,11 @@ function QueueRow({
   onRecover: (action: BulkAction) => void;
   onOpen: () => void;
 }) {
+  const platform = usePlatform();
   const action = recoveryAction(item);
   const reason = rowReason(item);
   const title = item.title ?? item.slug;
+  const url = siteArticleUrl(platform.id, item.slug);
   const resolvedAway = item.payload.renderedAt && item.payload.placement !== item.placement;
   return (
     <tr>
@@ -686,9 +687,13 @@ function QueueRow({
       </td>
       <td className="q-title">
         <span className="q-headline">{title}</span>
-        <a className="mono q-slug" href={articleUrl(item.slug)} target="_blank" rel="noreferrer">
-          {item.slug}
-        </a>
+        {url ? (
+          <a className="mono q-slug" href={url} target="_blank" rel="noreferrer">
+            {item.slug}
+          </a>
+        ) : (
+          <span className="mono q-slug">{item.slug}</span>
+        )}
       </td>
       <td>
         <StatusBadge spec={queueStatusBadge(item)} live={item.status === 'posting'} />

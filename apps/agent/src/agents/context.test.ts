@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 import {
   ANTI_SLOP_RULES,
   authorVoiceBrief,
-  EDITORIAL_RULES,
+  editionMarket,
   editorialAngleBrief,
   GEO_RULES,
   operatorBrief,
+  promptContextFromSeed,
 } from './context.js';
 import { AUTHORS, authorById } from '../content/contract.js';
+import { sleekdropsSeed } from '../platform/sleekdrops/index.js';
+import type { Edition } from '../platform/types.js';
 import type { EditorialAngle, TopicRow } from '../pipeline/types.js';
+
+const { platform } = promptContextFromSeed(sleekdropsSeed, 'au');
+const EDITORIAL_RULES = platform.editorialRules;
 
 const baseTopic: TopicRow = {
   id: '00000000-0000-0000-0000-000000000000',
@@ -78,11 +84,11 @@ const angle: EditorialAngle = {
 };
 
 test('editorialAngleBrief is empty when no angle was recorded', () => {
-  assert.equal(editorialAngleBrief(null), '');
+  assert.equal(editorialAngleBrief(null, platform), '');
 });
 
 test('editorialAngleBrief carries the thesis, the gain and the shape as an instruction', () => {
-  const brief = editorialAngleBrief(angle);
+  const brief = editorialAngleBrief(angle, platform);
   assert.match(brief, /Thesis: The Dyson is the wrong buy above A\$1,000\./);
   assert.match(brief, /The clutch fails inside 12 months\./);
   assert.match(brief, /absent from https:\/\/choice\.com\.au\/v/);
@@ -91,12 +97,15 @@ test('editorialAngleBrief carries the thesis, the gain and the shape as an instr
 });
 
 test('a piece with no defensible take tells the writer so, in as many words', () => {
-  const brief = editorialAngleBrief({
-    ...angle,
-    defensible: false,
-    contrarianTake: '',
-    weakness: 'The dossier carried no owner complaints.',
-  });
+  const brief = editorialAngleBrief(
+    {
+      ...angle,
+      defensible: false,
+      contrarianTake: '',
+      weakness: 'The dossier carried no owner complaints.',
+    },
+    platform,
+  );
   assert.match(brief, /NO DEFENSIBLE CONTRARIAN TAKE/);
   assert.match(brief, /The dossier carried no owner complaints\./);
   assert.match(brief, /Do not manufacture one/);
@@ -109,7 +118,7 @@ test('a voice brief carries one beat, never the roster', () => {
   // break up.
   const home = authorById('home');
   assert.ok(home);
-  const brief = authorVoiceBrief(home);
+  const brief = authorVoiceBrief(home, platform);
   assert.match(brief, /publishes as SleekDrops Editorial Team - Home \(beat id: home\)/);
   assert.ok(brief.includes(home.voice.specimen), 'the specimen is what the draft is matched against');
   assert.match(brief, /Never reuse its facts/, 'a specimen is texture, not a source');
@@ -150,4 +159,35 @@ test('the voice rules name the house skeleton as a thing not to build', () => {
   assert.match(ANTI_SLOP_RULES, /NEVER BUILD THE HOUSE SKELETON/);
   assert.match(ANTI_SLOP_RULES, /No identical block under every heading/);
   assert.match(ANTI_SLOP_RULES, /No section that fires by reflex/);
+});
+
+test('a country edition is written for the country its name and locale share', () => {
+  const edition = (name: string, locale: string): Edition => ({
+    id: 'x',
+    platformId: 'p',
+    name,
+    timeZone: 'UTC',
+    currency: null,
+    locale,
+    scoutQueries: [],
+    complianceFooter: '',
+  });
+  const [au] = promptContextFromSeed(sleekdropsSeed, 'au').platform.editions;
+  assert.deepEqual(editionMarket(au), {
+    region: 'AU',
+    name: 'Australia',
+    place: 'Australia',
+    adjective: 'Australian',
+    code: 'AU',
+  });
+  assert.deepEqual(editionMarket(edition('United Kingdom', 'en-GB')), {
+    region: 'GB',
+    name: 'United Kingdom',
+    place: 'the United Kingdom',
+    adjective: 'British',
+    code: 'UK',
+  });
+  // en-GB spelling for readers anywhere is not a British edition.
+  assert.equal(editionMarket(edition('Global', 'en-GB')), null);
+  assert.equal(editionMarket(edition('Global', 'en')), null);
 });

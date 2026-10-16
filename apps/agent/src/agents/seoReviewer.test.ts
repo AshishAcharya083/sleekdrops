@@ -152,7 +152,7 @@ test('cross-corpus scan findings fold through like any other finding', () => {
 });
 
 test('an unavailable corpus leaves the review exactly where an in-isolation scan does', () => {
-  // loadPublishedCorpus returns [] when D1 is unreachable, so a review round
+  // loadPublishedCorpus returns [] when the content store is unreachable, so a review round
   // has to survive that as an ordinary scan rather than a degraded one.
   assert.deepEqual(
     finalizeReview(verdict(), detectSlop(CLEAN, { corpus: [] }), passingAudits()),

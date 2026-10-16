@@ -19,7 +19,10 @@ const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
 const { createApp } = await import('../api/server.js');
 const { finaliseBrief } = await import('../agents/outliner.js');
-const { selectShape, structureBrief } = await import('../content/shapes.js');
+const { selectShape, shapeRecord, structureBrief } = await import('../content/shapes.js');
+const { promptContextFromSeed } = await import('../agents/context.js');
+const { sleekdropsSeed } = await import('../platform/sleekdrops/index.js');
+const { platform } = promptContextFromSeed(sleekdropsSeed, 'au');
 
 import type { ArticleRow, ContentBrief, EditorialAngle, KeywordPlan } from './types.js';
 
@@ -32,7 +35,7 @@ const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to 
 if (reachable) await migrate();
 
 const app = createApp();
-const AUTH = { Authorization: 'Bearer test-admin-token' };
+const AUTH = { Authorization: 'Bearer test-admin-token', 'X-Platform': 'sleekdrops' };
 
 after(async () => {
   if (reachable) await pool.end();
@@ -40,6 +43,8 @@ after(async () => {
 
 async function insertArticle(fields: Record<string, unknown> = {}): Promise<ArticleRow> {
   const row = {
+    platform_id: 'sleekdrops',
+    edition_id: 'au',
     title: `Best cordless stick vacuums ${randomUUID().slice(0, 8)}`,
     category: 'Home',
     post_type: 'guide',
@@ -102,7 +107,8 @@ test('the shape survives JSONB and reaches the panel whole', { skip }, async () 
   // The admin panel renders these fields straight out of the column. A round
   // trip that flattened `sections` or dropped the passage budget would only
   // ever show up here.
-  const shape = selectShape({ postType: 'guide', angle: angle('failure-led') });
+  // As the runner records it: the structure, with the one-liner left in the catalogue.
+  const shape = shapeRecord(selectShape({ platform, postType: 'guide', angle: angle('failure-led') }));
   const article = await insertArticle({
     stage: 'write',
     status: 'queued',
@@ -123,7 +129,7 @@ test('the shape survives JSONB and reaches the panel whole', { skip }, async () 
 
   // The shape read back off the wire is what a prompt gets built from, so
   // build one from it rather than from the object we wrote.
-  const brief = structureBrief(seen.structure_shape);
+  const brief = structureBrief(seen.structure_shape, platform);
   assert.match(brief, /"Problem-first diagnostic" shape \(failure-led\)/);
   assert.match(brief, /Open on the failure/);
   assert.match(brief, /3 extractable answers/);
@@ -135,6 +141,7 @@ test('the brief carries the shape into the writer and reviewer prompts', { skip 
   // matters is that it is still there after the outline column round trip.
   const article = await insertArticle({ stage: 'write', status: 'queued' });
   const shape = selectShape({
+    platform,
     postType: 'guide',
     angle: angle('failure-led'),
     winningFormat: 'Ranked listicle',
@@ -144,7 +151,7 @@ test('the brief carries the shape into the writer and reviewer prompts', { skip 
   await q('UPDATE articles SET outline = $2, structure_shape = $3 WHERE id = $1', [
     article.id,
     JSON.stringify(brief),
-    JSON.stringify(shape),
+    JSON.stringify(brief.structureShape),
   ]);
 
   const [row] = await q<ArticleRow>('SELECT * FROM articles WHERE id = $1', [article.id]);
@@ -170,5 +177,5 @@ test('articles outlined before the library existed read back with no shape', { s
   );
   const { article: seen } = (await res.json()) as { article: ArticleRow };
   assert.equal(seen.structure_shape, null);
-  assert.equal(structureBrief(seen.structure_shape), '', 'no shape means no structure block');
+  assert.equal(structureBrief(seen.structure_shape, platform), '', 'no shape means no structure block');
 });

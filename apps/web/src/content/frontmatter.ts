@@ -14,6 +14,14 @@
 
 import { z } from 'astro/zod';
 
+import {
+  METHOD_VERSION_IDS,
+  PROVENANCES,
+  productBadgeProblems,
+  provenanceFromAcquisition,
+  subScoreProblems,
+} from '../lib/trust.ts';
+
 /**
  * Embedded product data for `postType: review` posts.
  * Replaces the old src/data/products.ts module — review structured data now
@@ -40,7 +48,13 @@ export const productSchema = z.object({
   price: z.string().min(1),
   /** Pre-formatted previous price for a sale badge. */
   priceWas: z.string().optional(),
-  /** Optional CTA badge ("Editor's choice", "Best value"). */
+  /**
+   * A badge kind from the registry in src/lib/trust.ts (today only
+   * "review-score": the review's own rating is its evidence). A string that
+   * is not a registry kind is a legacy label ("Editor's choice") from before
+   * the registry: it still validates so older posts keep building, and is
+   * never printed.
+   */
   badge: z.string().optional(),
   /** 3–5 genuine pros. */
   pros: z.array(z.string().min(1)).min(3).max(5),
@@ -48,6 +62,33 @@ export const productSchema = z.object({
   cons: z.array(z.string().min(1)).min(2).max(4),
   /** Optional key→value spec table. */
   specs: z.record(z.string()).optional(),
+  // Trust fields. Optional so the reviews published before them keep
+  // validating; a review without them reads against the general method and
+  // the honest fallback provenance (see src/lib/trust.ts).
+  /** The scoring method version `rating` was given under. */
+  methodVersion: z.enum(METHOD_VERSION_IDS).optional(),
+  /** How the product was assessed. */
+  provenance: z.enum(PROVENANCES).optional(),
+  /** A weighted breakdown of `rating`; when present it must add up to it. */
+  subScores: z
+    .array(
+      z.object({
+        label: z.string().min(1),
+        score: z.number().min(1).max(5),
+        weight: z.number().positive().max(1),
+      }),
+    )
+    .min(2)
+    .optional(),
+}).superRefine((product, ctx) => {
+  const issue = (path: string, message: string) =>
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+  if (product.subScores) {
+    for (const message of subScoreProblems(product.rating, product.subScores)) issue('subScores', message);
+  }
+  if (product.badge !== undefined) {
+    for (const message of productBadgeProblems(product.badge)) issue('badge', message);
+  }
 });
 
 export type ProductData = z.infer<typeof productSchema>;
@@ -338,6 +379,16 @@ export const blogFrontmatterSchema = z
   .refine(
     (data) => data.postType !== 'review' || data.product !== undefined,
     { message: "postType: 'review' requires a `product` object in frontmatter" },
+  )
+  .refine(
+    (data) =>
+      data.product?.provenance === undefined ||
+      data.reviewUnit === undefined ||
+      data.product.provenance === provenanceFromAcquisition(data.reviewUnit.acquisition),
+    {
+      message: '`product.provenance` and `reviewUnit.acquisition` describe the same unit and must agree',
+      path: ['product', 'provenance'],
+    },
   );
 
 export type BlogFrontmatter = z.infer<typeof blogFrontmatterSchema>;

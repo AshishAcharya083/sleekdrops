@@ -7,12 +7,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normaliseAngle } from './angleEditor.js';
+import { sleekdropsSeed } from '../platform/sleekdrops/index.js';
 import type { EditorialAngle } from '../pipeline/types.js';
 
 const opts = {
   postType: 'guide',
   category: 'Home',
   competitorUrls: ['https://choice.com.au/vacuums', 'https://canstarblue.com.au/vacuums'],
+  shapes: sleekdropsSeed.platform.articleShapes,
 };
 
 /** A well-formed angle, for the fields a test isn't exercising. */
@@ -66,7 +68,7 @@ test('an unknown shape falls back on the post type, not on one house shape', () 
 });
 
 test('a shape borrowed from Object.prototype is not a shape', () => {
-  // `'constructor' in ARTICLE_SHAPES` is true, and a shape that resolved to a
+  // `'constructor' in {}` is true, and a shape that resolved to a
   // function would be rendered into four prompts as one.
   for (const shape of ['constructor', '__proto__', 'toString']) {
     const out = normaliseAngle(angle({ shape: shape as EditorialAngle['shape'] }), opts);
