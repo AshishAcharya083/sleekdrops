@@ -1,0 +1,1019 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import LegalLayout from '@components/article/LegalLayout.astro';
+import Button from '@components/ui/Button.astro';
+import ChangelogList from '@components/methodology/ChangelogList.astro';
+import LowScoreList from '@components/methodology/LowScoreList.astro';
+import ScoreChangeTable from '@components/methodology/ScoreChangeTable.astro';
+import { categories } from '@data/categories';
+import type { CategorySlug } from '@data/categories-types';
+import { SCORE_CHANGES, scoreChangesNewestFirst } from '@data/score-changes';
+import { contactHref, CONTACT } from '@data/site';
+import { formatLong, formatMedium } from '@lib/format';
+import {
+  CHANGELOG_VISIBLE,
+  LOW_SCORES_VISIBLE,
+  INDEPENDENCE_RULES,
+  NOT_TESTED_STATEMENT,
+  SCORE_CHANGES_VISIBLE,
+  SCORING_SUMMARY,
+  badgeAnchor,
+  bandRange,
+  categoryAnchor,
+  dayAsDate,
+  foldAfter,
+  formatShare,
+  methodChangelog,
+  methodVersionAnchor,
+  methodologyUpdated,
+  nextVersions,
+  publishedScoresEffect,
+  scoreBandAnchor,
+  scoreChangeCountLabel,
+  scoreChangeWhy,
+  scoreDistribution,
+  type MethodologySection,
+} from '@lib/methodology';
+import { getAllPosts } from '@lib/posts';
+import { buildCategorySchema, buildMeta } from '@lib/seo';
+import { FAST_REVIEW_INTERVAL_DAYS, reviewIntervalDays } from '@lib/sources';
+import {
+  BADGE_KINDS,
+  BADGE_REGISTRY,
+  CURRENT_METHOD_VERSION,
+  FALLBACK_PROVENANCE,
+  METHOD_VERSIONS,
+  PROVENANCES,
+  PROVENANCE_COPY,
+  SCORE_BANDS,
+  SUB_SCORE_TOLERANCE,
+  badgeClaim,
+  formatScore,
+  methodLabel,
+  reviewScoreClaim,
+  scoreBand,
+  type BadgeKind,
+  type DealBadge,
+} from '@lib/trust';
+
+/**
+ * The standing page every score and badge links to: what the scale means,
+ * the scores we have actually given, how a product is assessed, the dated
+ * method changelog, the badge glossary and the mechanism behind independence.
+ *
+ * Everything quotable is rendered from src/lib/trust.ts and
+ * src/lib/methodology.ts rather than typed here, so the page cannot describe a
+ * scale, provenance or badge the code does not apply. Every count, date and
+ * state below is computed at build time, and each section has a designed state
+ * for when there is nothing to count yet.
+ */
+
+const months = (days: number) => Math.round(days / 30);
+const daysLabel = (days: number) => `${days} ${days === 1 ? 'day' : 'days'}`;
+const joinList = (items: string[]) =>
+  items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+
+// --- Scores given -------------------------------------------------------------
+
+const posts = await getAllPosts();
+const scoredReviews = posts.flatMap((post) =>
+  post.data.postType === 'review' && post.data.product
+    ? [{ slug: post.slug, title: post.data.title, rating: post.data.product.rating }]
+    : [],
+);
+const distribution = scoreDistribution(scoredReviews.map((review) => review.rating));
+const hasScores = distribution.count > 0;
+const modalBand = distribution.bands.reduce((top, entry) => (entry.count > top.count ? entry : top));
+const skewsTop = hasScores && modalBand.band.id === SCORE_BANDS[0].id;
+const builtOn = formatLong(new Date());
+
+// A high average is only believable next to the low scores we did publish, so
+// every review scored below the Strong band is listed and linked, lowest first.
+const strongBand = SCORE_BANDS.find((band) => band.id === 'strong')!;
+const belowStrong = scoredReviews
+  .filter((review) => scoreBand(review.rating).min < strongBand.min)
+  .sort((a, b) => a.rating - b.rating);
+const lowScores = foldAfter(belowStrong, LOW_SCORES_VISIBLE);
+
+// --- The annotated example ----------------------------------------------------
+
+const EXAMPLE_RATING = 4.4;
+const exampleBand = scoreBand(EXAMPLE_RATING);
+const currentVersion = METHOD_VERSIONS.find((entry) => entry.version === CURRENT_METHOD_VERSION)!;
+const currentAnchor = methodVersionAnchor(CURRENT_METHOD_VERSION);
+
+// --- Changelog and score changes ----------------------------------------------
+
+const scoreChanges = scoreChangesNewestFirst(SCORE_CHANGES);
+const changelog = methodChangelog().map((entry) => ({
+  ...entry,
+  effect: publishedScoresEffect(entry, distribution.count, scoreChanges),
+}));
+const versionLog = foldAfter(changelog, CHANGELOG_VISIBLE);
+const titleBySlug = new Map(posts.map((post) => [post.slug, post.data.title]));
+const scoreChangeRows = scoreChanges.map((change) => {
+  const title = titleBySlug.get(change.slug);
+  if (title === undefined) {
+    throw new Error(`score-changes.ts: a ${change.date} change names "${change.slug}", which is not a published post`);
+  }
+  return { change, title, why: scoreChangeWhy(change) };
+});
+const changeLog = foldAfter(scoreChangeRows, SCORE_CHANGES_VISIBLE);
+const updated = formatLong(dayAsDate(methodologyUpdated(METHOD_VERSIONS, scoreChanges)));
+const next = nextVersions(CURRENT_METHOD_VERSION);
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+const NUMBER_WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const inWords = (count: number) => NUMBER_WORDS[count] ?? String(count);
+
+// --- Badge glossary -----------------------------------------------------------
+
+// Sample evidence for each kind's specimen, filled through the registry's own
+// claim templates.
+const SPECIMEN_DAY = '2026-10-02';
+const specimens: { [K in BadgeKind]: Extract<DealBadge, { kind: K }> } = {
+  'review-score': {
+    kind: 'review-score',
+    evidence: { reviewSlug: 'example-review', rating: EXAMPLE_RATING },
+    checkedAt: SPECIMEN_DAY,
+  },
+  'honest-negative': {
+    kind: 'honest-negative',
+    evidence: { note: 'It was cheaper in July.' },
+    checkedAt: SPECIMEN_DAY,
+  },
+  'lowest-price': {
+    kind: 'lowest-price',
+    evidence: { price: 'A$449', previousLowest: 'A$479', observations: 12 },
+    checkedAt: SPECIMEN_DAY,
+  },
+  'below-average': {
+    kind: 'below-average',
+    evidence: { price: 'A$408', average: 'A$449', below: 'A$41', observations: 30 },
+    checkedAt: SPECIMEN_DAY,
+  },
+};
+
+const scoreWindow = BADGE_REGISTRY['review-score'].windowDays;
+const skipWindow = BADGE_REGISTRY['honest-negative'].windowDays;
+
+/**
+ * What each kind claims, what is checked, over what window and when it comes
+ * down. Typed against the registry, so a kind added there cannot reach a page
+ * without this glossary saying what it means.
+ */
+const glossary: Record<BadgeKind, { claims: string; checks: string; window: string; expires: string; needs: string; issued?: string }> = {
+  'review-score': {
+    claims: 'This is the score our review gave the product, and the band it falls in.',
+    checks: 'That the review is published and the score matches it exactly. The badge links to the review.',
+    window: `As long as the review is inside its re-check cadence: ${months(scoreWindow)} months, or ${months(FAST_REVIEW_INTERVAL_DAYS)} months in the faster-moving categories.`,
+    expires: 'When the review falls overdue for its re-check, is re-scored, or is withdrawn.',
+    needs: 'a published review',
+  },
+  'honest-negative': {
+    claims: "The product may be good, but we would hold off buying at today's price, for the reason written in the badge.",
+    checks: 'That a person checked the price on the date the badge prints, and wrote down why we are saying skip.',
+    window: `${daysLabel(skipWindow)} from the check date, which the badge always prints.`,
+    expires: `${daysLabel(skipWindow)} after the check. A price call goes stale fast, so it never reads as permanent.`,
+    needs: 'a dated price check',
+    issued: 'Issued, used rarely',
+  },
+  'lowest-price': {
+    claims: "No price we recorded for this product in the last 90 days was lower than today's.",
+    checks: "Today's price, the lowest earlier price, and at least two recorded price checks inside the 90 days.",
+    window: 'The 90 days of recorded price checks before today.',
+    expires: `${daysLabel(BADGE_REGISTRY['lowest-price'].windowDays)} after the check, because a price can move the next day.`,
+    needs: 'a dated record of prices over time',
+  },
+  'below-average': {
+    claims: "Today's price is this many dollars under the average of the prices we recorded over 30 days.",
+    checks: "Today's price, the average, and at least two recorded price checks the average is worked out from.",
+    window: 'The 30 days of recorded price checks before today.',
+    expires: `${daysLabel(BADGE_REGISTRY['below-average'].windowDays)} after the check, because a price can move the next day.`,
+    needs: 'a dated record of prices over time',
+  },
+};
+
+const badgeKinds = BADGE_KINDS.map((kind) => BADGE_REGISTRY[kind]);
+const issuedLabels = badgeKinds.filter((badge) => badge.enabled).map((badge) => badge.label);
+const offKinds = badgeKinds.filter((badge) => !badge.enabled);
+const offNeeds = [...new Set(offKinds.map((badge) => glossary[badge.kind].needs))];
+
+// --- Page ---------------------------------------------------------------------
+
+const toc: { id: MethodologySection | 'summary'; label: string }[] = [
+  { id: 'summary', label: 'Plain summary' },
+  { id: 'bands', label: 'The scale' },
+  { id: 'distribution', label: 'Scores we have given' },
+  { id: 'assessment', label: 'How we assess products' },
+  { id: 'changelog', label: 'Method changelog' },
+  { id: 'badges', label: 'Badge glossary' },
+  { id: 'independence', label: 'Independence' },
+  { id: 'corrections', label: 'Corrections and score changes' },
+  { id: 'categories', label: 'By category' },
+];
+
+const meta = buildMeta({
+  title: 'How we rate',
+  description:
+    'What a SleekDrops score means: the five bands, every score we have given, how products are assessed (we do not test them), the dated method changelog, the badge glossary and how independence is enforced.',
+  pathname: '/how-we-rate',
+});
+---
+<BaseLayout
+  {...meta}
+  schema={buildCategorySchema('How we rate', '/how-we-rate', meta.description)}
+  active="how-we-rate"
+  screen="how-we-rate"
+>
+  <LegalLayout
+    eyebrow="Scoring method"
+    titleHtml="How we <em>rate</em>."
+    updated={updated}
+    toc={toc.map((item) => ({ href: `#${item.id}`, label: item.label }))}
+  >
+    <div class="rate">
+      <p class="method-line">
+        <a class="method-chip" href={`#${currentAnchor}`}>
+          <b>{methodLabel(CURRENT_METHOD_VERSION)}</b>
+          <span class="sep" aria-hidden="true">·</span>
+          <span>in effect since {formatMedium(dayAsDate(currentVersion.date))}</span>
+        </a>
+      </p>
+      <div class="summary" id="summary">
+        <strong>Plain summary</strong>
+        {SCORING_SUMMARY} Each one links back to this page.{' '}
+        {!hasScores
+          ? 'Most products we write up tend to score highly; once reviews are scored, the distribution below will show exactly how highly, so you can read any score in context.'
+          : skewsTop
+            ? `Most products we write up score highly, and the distribution below shows exactly how highly, so you can read a ${formatScore(EXAMPLE_RATING)} in context.`
+            : `The distribution below shows how our scores spread, so you can read a ${formatScore(EXAMPLE_RATING)} in context.`}
+        <div class="anatomy">
+          <div class="anatomy-score" role="img" aria-label={`Example: ${formatScore(EXAMPLE_RATING)} out of 5, band ${exampleBand.label}`}>
+            <span class="anatomy-num" aria-hidden="true">{formatScore(EXAMPLE_RATING)}<sup>&nbsp;/5</sup></span>
+            <span class="band-word" aria-hidden="true">{exampleBand.label}</span>
+          </div>
+          <div class="anatomy-meta">
+            <a href={`#${currentAnchor}`}>{methodLabel(CURRENT_METHOD_VERSION)}</a>
+            <a href="#assessment">{PROVENANCE_COPY[FALLBACK_PROVENANCE].label}</a>
+            <span>Reviewed {formatMedium(dayAsDate(currentVersion.date))}</span>
+          </div>
+          <ol class="anatomy-key">
+            <li><span class="n" aria-hidden="true">1</span><span><b>The score.</b> Out of 5, in tenths. The denominator is always shown.</span></li>
+            <li><span class="n" aria-hidden="true">2</span><span><b>The band.</b> One word for what the number means. <a href="#bands">See the scale</a>.</span></li>
+            <li><span class="n" aria-hidden="true">3</span><span><b>The method version.</b> Which rules the score was given under. <a href="#changelog">See the changelog</a>.</span></li>
+            <li><span class="n" aria-hidden="true">4</span><span><b>How we got the product.</b> Today the answer is always: we did not hold it. <a href="#assessment">See how we assess</a>.</span></li>
+          </ol>
+        </div>
+      </div>
+
+      <h2 id="bands">The <em>scale</em></h2>
+      <p>Five bands, each with one word and what it means for you. They are written for the way we actually score, which is generously at the top: we mostly research products that independent coverage has already shortlisted, so a weak score here is rare and worth taking seriously.</p>
+      <table class="bands">
+        <thead><tr><th scope="col">Score</th><th scope="col">Band</th><th scope="col">What it means</th></tr></thead>
+        <tbody>
+          {SCORE_BANDS.map((band) => (
+            <tr id={scoreBandAnchor(band.id)} class:list={{ 'is-example': band.id === exampleBand.id }}>
+              <td class="range">{bandRange(band)}</td>
+              <td class="label"><span class="band-word">{band.label}</span></td>
+              <td class="meaning"><strong>{band.meaning}</strong></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p>Read the band and the written verdict together. A decimal is a summary, not a measurement, and the difference between 4.6 and 4.7 is a judgement call rather than a gap you could test.</p>
+
+      <h2 id="distribution">Scores we have <em>given</em></h2>
+      <p>
+        {!hasScores
+          ? 'Once reviews are scored and published, this section shows the spread of scores by band, counted the same way. Nothing is scored yet, so there is nothing to count.'
+          : skewsTop
+            ? 'Our average is high, and we would rather show you why than let it sit unexplained. This is every published review score, by band, counted when the site was last built.'
+            : 'This is every published review score, by band, counted when the site was last built.'}
+      </p>
+      <figure class="dist">
+        <div class="dist-head">
+          <h3>Published review scores, by band</h3>
+          <div class="dist-stats">
+            <span><b>{distribution.count}</b> {distribution.count === 1 ? 'review' : 'reviews'}</span>
+            {distribution.average !== undefined && <span>average <b>{formatScore(distribution.average)}</b></span>}
+            {distribution.median !== undefined && <span>median <b>{formatScore(distribution.median)}</b></span>}
+          </div>
+        </div>
+        {hasScores ? (
+          <>
+            <ul class="dist-rows">
+              {distribution.bands.map(({ band, count, share }) => (
+                <li class="dist-row">
+                  <span class="who"><b>{band.label}</b><span>{bandRange(band)}</span></span>
+                  <span class="dist-track" aria-hidden="true">
+                    {count > 0 && <span class="dist-bar" style={`--w:${(share * 100).toFixed(1)}%`} />}
+                  </span>
+                  <span class="val">{count} <span>· {formatShare(share)}</span></span>
+                </li>
+              ))}
+            </ul>
+            <figcaption class="dist-foot">
+              {formatShare(modalBand.share)} of reviews land in the {modalBand.band.label} band.{' '}
+              {skewsTop && `That is mostly selection: we start from products that independent testers already rate, so we rarely write up one we would tell you to avoid. Every score we did publish below ${formatScore(strongBand.min)} is listed under this chart, so you can check the low end for yourself. It also means the band, not the decimal, is what separates a strong pick from an excellent one. `}
+              Counted from all {plural(distribution.count, 'published review', 'published reviews')} on {builtOn}.
+            </figcaption>
+          </>
+        ) : (
+          <div class="dist-empty">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16" /><path d="M7 16V9" /><path d="M12 16V5" /><path d="M17 16v-4" /></svg>
+            <div>
+              <p>No scored reviews are published yet.</p>
+              <p>The spread of scores appears here as soon as the first review with a score goes live.</p>
+            </div>
+          </div>
+        )}
+      </figure>
+      {hasScores && (
+        <div class="low-scores">
+          <h3>Every score we published below {formatScore(strongBand.min)}</h3>
+          {belowStrong.length === 0 ? (
+            <p>None. Every published review scores {formatScore(strongBand.min)} or higher.</p>
+          ) : (
+            <>
+              <LowScoreList reviews={lowScores.shown} />
+              {lowScores.folded.length > 0 && (
+                <details class="fold low-more">
+                  <summary>
+                    <span class="fold-label">Show {lowScores.folded.length} more</span>
+                    <span class="chev" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" /></svg></span>
+                  </summary>
+                  <LowScoreList reviews={lowScores.folded} />
+                </details>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      <h2 id="assessment">How we assess <em>products</em></h2>
+      <p class="plain-statement">{NOT_TESTED_STATEMENT}</p>
+      <p>Every review states how we got the product, at the top and again next to its score. There are three possible answers, and these are the exact words a review uses:</p>
+      <ul class="prov-list">
+        {PROVENANCES.map((provenance, index) => (
+          <li class:list={['prov-item', { 'is-current': provenance === FALLBACK_PROVENANCE }]}>
+            <span class="k">{String(index + 1).padStart(2, '0')}</span>
+            <span class="v">
+              <strong>{PROVENANCE_COPY[provenance].label}</strong>
+              <span>{PROVENANCE_COPY[provenance].statement}</span>
+              {provenance === FALLBACK_PROVENANCE && <span class="prov-now">What a review says today</span>}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p>A review that records nothing falls back to {PROVENANCE_COPY[FALLBACK_PROVENANCE].label}, because claiming a unit we never held is the failure we most want to avoid. The full evidence standard, including which sources count and how often we re-check them, is on <a href="/how-we-research">how we research</a>.</p>
+      <p>We give one score and explain it in writing. When a review also shows a breakdown into weighted sub-scores, the weights add up to 100% and the breakdown works out to the headline score to within {SUB_SCORE_TOLERANCE}. A breakdown that does not add up cannot be published.</p>
+
+      <h2 id="changelog">Method <em>changelog</em></h2>
+      <p>Every score records the method version it was given under. When the method changes, the version number changes and the change is logged here with its date. Old scores keep their version, so a score from last year is never silently re-judged by this year's rules.</p>
+      <table class="version-rules">
+        <thead><tr><th scope="col">Version step</th><th scope="col">What triggers it</th><th scope="col">What happens to published scores</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>{CURRENT_METHOD_VERSION} → {next.major}</code></td>
+            <td data-label="What triggers it">A change to the bands, to what a score weighs, or to the order those things count in.</td>
+            <td data-label="What happens to published scores">They keep their old version. A review is re-scored only when it is next re-checked, and is then labelled with the new version and its old score.</td>
+          </tr>
+          <tr>
+            <td><code>{CURRENT_METHOD_VERSION} → {next.minor}</code></td>
+            <td data-label="What triggers it">A clearer explanation, a new category section, or a fix to this page that changes no score.</td>
+            <td data-label="What happens to published scores">Nothing. No score can move in a minor version.</td>
+          </tr>
+        </tbody>
+      </table>
+      <ChangelogList entries={versionLog.shown} />
+      {versionLog.folded.length > 0 && (
+        <details class="fold log-older" data-fold-anchors>
+          <summary>
+            <span class="fold-label">
+              Show {plural(versionLog.folded.length, 'earlier version', 'earlier versions')}
+              <span class="meta">v{versionLog.folded[0].version}{versionLog.folded.length > 1 && ` – v${versionLog.folded.at(-1)!.version}`}</span>
+            </span>
+            <span class="chev" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" /></svg></span>
+          </summary>
+          <ChangelogList entries={versionLog.folded} nested />
+        </details>
+      )}
+
+      <h2 id="badges">Badge <em>glossary</em></h2>
+      <p>Every badge on SleekDrops is a statement of fact we can check, never an endorsement word. There are {inWords(badgeKinds.length)} kinds. Here is each one: what it claims, what we check before it appears, over what window, and when it comes down.</p>
+      {offKinds.length > 0 && (
+        <p class="off-note">
+          <strong>Not currently issued: {joinList(offKinds.map((badge) => badge.label))}.</strong>{' '}
+          {offKinds.length === 1 ? 'It needs' : 'They need'} {joinList(offNeeds)}, and we do not keep one yet. Until we do, the badges you can see are {joinList(issuedLabels)}. The others are listed so you know exactly what they will mean when they appear.
+        </p>
+      )}
+      <ul class="badges">
+        {badgeKinds.map((badge) => (
+          <li class:list={['badge-entry', { 'is-off': !badge.enabled }]} id={badgeAnchor(badge.kind)}>
+            <div class="badge-top">
+              {badge.kind === 'review-score' ? (
+                <span class="sd-badge" role="img" aria-label={`${reviewScoreClaim(EXAMPLE_RATING)}, ${exampleBand.label}`}>
+                  <span class="num" aria-hidden="true">{formatScore(EXAMPLE_RATING)}<small>/5</small></span>
+                  <span aria-hidden="true">{reviewScoreClaim(EXAMPLE_RATING).replace(`${formatScore(EXAMPLE_RATING)}/5`, '').trim()}</span>
+                  <span class="band" aria-hidden="true">{exampleBand.label}</span>
+                </span>
+              ) : (
+                <span class:list={['sd-badge', badge.kind === 'honest-negative' ? 'sd-badge--skip' : 'sd-badge--price']}>
+                  {badge.kind === 'honest-negative' && (
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" /><path d="M8 5v3.5" /><path d="M8 11h.01" /></svg>
+                  )}
+                  {badge.kind === 'lowest-price' && (
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4l5 5 3-3 4 4" /></svg>
+                  )}
+                  {badge.kind === 'below-average' && (
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v11" /><path d="M4 9l4 4 4-4" /></svg>
+                  )}
+                  {badgeClaim(specimens[badge.kind])}
+                </span>
+              )}
+              {badge.enabled ? (
+                <span class="status status--live">
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7" /></svg>{glossary[badge.kind].issued ?? 'Issued'}
+                </span>
+              ) : (
+                <span class="status status--off">
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" /><path d="M4 12l8-8" /></svg>Not currently issued
+                </span>
+              )}
+            </div>
+            <h3>{badge.label}</h3>
+            <dl class="facts">
+              <dt>Claims</dt><dd>{glossary[badge.kind].claims}</dd>
+              <dt>We check</dt><dd>{glossary[badge.kind].checks}</dd>
+              <dt>Window</dt><dd>{glossary[badge.kind].window}</dd>
+              <dt>Expires</dt><dd>{glossary[badge.kind].expires}</dd>
+            </dl>
+          </li>
+        ))}
+      </ul>
+      <div class="tag-note">
+        <h3>The commission tag is not a badge</h3>
+        <span class="sd-badge sd-badge--disclosure">We earn a commission on this deal</span>
+        <p>It sits beside deals and buy buttons because we are paid if you buy through that link. It is a disclosure, not an endorsement, and it never affects a score. Links that earn us nothing carry no tag.</p>
+      </div>
+
+      <h2 id="independence"><em>Independence</em>, and how it works</h2>
+      <p>A promise of independence is easy to make. These are the {inWords(INDEPENDENCE_RULES.length)} rules that make ours, and what each one means in practice.</p>
+      <ul class="mech">
+        {INDEPENDENCE_RULES.map((rule, index) => (
+          <li>
+            <span class="num">{String(index + 1).padStart(2, '0')}</span>
+            <h3>{rule.title}</h3>
+            <p>{rule.statement}</p>
+            <span class="check"><b>{rule.proof.label}</b>{rule.proof.text}</span>
+          </li>
+        ))}
+      </ul>
+
+      <h2 id="corrections">Corrections and <em>score changes</em></h2>
+      <p>If we have a fact wrong, we want to fix it rather than defend it. Reporting one takes three things:</p>
+      <ol class="report">
+        <li><b>The article</b>Its title or link.</li>
+        <li><b>The claim</b>The sentence or figure you think is wrong.</li>
+        <li><b>Your source</b>Where the right figure is published, if you have it.</li>
+      </ol>
+      <div class="report-actions">
+        <Button href={contactHref('corrections', 'Correction')} arrow>Report an error</Button>
+        <Button href="#score-changes" variant="outline">See score changes</Button>
+      </div>
+      <p>Email goes to <a href={contactHref('corrections')}>{CONTACT.corrections}</a>. We correct a confirmed error as soon as we can, note the change on the article, and re-stamp its review date. When a correction, a re-check or a new method version moves a score, the change is listed here with the old score, the new one, the date and the reason.</p>
+
+      <section class="changes" id="score-changes" aria-labelledby="score-changes-title">
+        <div class="changes-head">
+          <h3 id="score-changes-title">Score-change log</h3>
+          <span>{scoreChangeCountLabel(scoreChanges.length)}</span>
+        </div>
+        {scoreChanges.length === 0 ? (
+          <div class="changes-empty">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8 12.5l2.5 2.5L16 9.5" /></svg>
+            <div>
+              <p>No published score has changed since {methodLabel(METHOD_VERSIONS[0].version)} took effect.</p>
+              <p>Every future change is listed here with the old score, the new one, the date and the reason.</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <ScoreChangeTable changes={changeLog.shown} />
+            <div class="scroll-hint">Scroll sideways to see the reason.</div>
+            {changeLog.folded.length > 0 && (
+              <details class="fold changes-more">
+                <summary>
+                  <span class="fold-label">Show {plural(changeLog.folded.length, 'earlier change', 'earlier changes')}</span>
+                  <span class="chev" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" /></svg></span>
+                </summary>
+                <ScoreChangeTable changes={changeLog.folded} />
+              </details>
+            )}
+          </>
+        )}
+      </section>
+
+      <h2 id="categories">By <em>category</em></h2>
+      <p>The method above applies to every category in full. Each category also gets its own section here, which will become its own page as its notes grow. Link to any of them directly.</p>
+      <div class="cats">
+        {categories.map((category) => {
+          const anchor = categoryAnchor(category.slug as CategorySlug);
+          return (
+            <section class="cat" id={anchor} aria-labelledby={`${anchor}-title`}>
+              <div class="cat-head">
+                <h3 id={`${anchor}-title`}>{category.name}</h3>
+                <a class="cat-anchor" href={`#${anchor}`} aria-label={`Link to the ${category.name} section`}>#{anchor}</a>
+              </div>
+              <p>{category.blurb}</p>
+              <span class="cadence">Re-checked every {months(reviewIntervalDays(category.name))} months</span>
+              <p class="stub">Category notes coming. Until then, the general method applies in full.</p>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  </LegalLayout>
+</BaseLayout>
+
+<script>
+  // A changelog entry folded into a closed <details> has no box to scroll to.
+  // Chromium opens it on fragment navigation by itself; this does the same
+  // everywhere else, for a link arriving from another page and for in-page
+  // links (run in the capture phase, ahead of the smooth-scroll handler).
+  const openFoldFor = (id: string): boolean => {
+    const target = id ? document.getElementById(id) : null;
+    const fold = target?.closest<HTMLDetailsElement>('details[data-fold-anchors]');
+    if (!fold || fold.open) return false;
+    fold.open = true;
+    return true;
+  };
+  const idOf = (hash: string): string => {
+    try {
+      return decodeURIComponent(hash.slice(1));
+    } catch {
+      return '';
+    }
+  };
+
+  if (openFoldFor(idOf(location.hash))) document.getElementById(idOf(location.hash))?.scrollIntoView();
+  window.addEventListener('hashchange', () => openFoldFor(idOf(location.hash)));
+  document.addEventListener(
+    'click',
+    (event) => {
+      const link = (event.target as Element | null)?.closest<HTMLAnchorElement>('a[href^="#"]');
+      if (link) openFoldFor(idOf(link.getAttribute('href') ?? ''));
+    },
+    true,
+  );
+</script>
+
+<style>
+  /* The current method, first thing under the title. */
+  .rate .method-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 16px; }
+  .method-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    min-height: 32px;
+    padding: 5px 12px;
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--r-full);
+    background: var(--surface);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+  .method-chip:hover { border-color: var(--ink); }
+  .method-chip b { font-weight: 500; }
+  .method-chip .sep { color: var(--muted-2); }
+
+  /* Everything in the body is held under .rate, so these rules outrank the
+     layout's element defaults for prose (list padding, paragraph colour)
+     without touching the layout itself. */
+  .rate > :global(* + *) { margin-top: 1.4em; }
+
+  /* ---- Plain summary: the annotated example score ---- */
+  .rate .anatomy { margin: 20px 0 0; padding: 20px 0 0; border-top: 1px solid var(--hairline-strong); }
+  .rate .anatomy-score { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+  .rate .anatomy-num {
+    font-family: var(--font-display);
+    font-size: 56px;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: var(--ink);
+  }
+  .rate .anatomy-num sup { font-size: 20px; font-style: italic; color: var(--muted); }
+  .rate .band-word {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 11px;
+    border: 1px solid var(--ink);
+    border-radius: var(--r-full);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.4;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .rate .anatomy-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin-top: 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .rate .anatomy-meta a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 6px 0;
+    margin: -6px 0;
+    color: var(--muted);
+    text-decoration-color: var(--hairline-strong);
+  }
+  .rate .anatomy-meta a:hover { color: var(--accent-text); }
+  .rate .anatomy-key {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 24px;
+    list-style: none;
+    padding: 0;
+    margin: 16px 0 0;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .rate .anatomy-key li { display: flex; gap: 10px; margin: 0; color: var(--ink-2); }
+  .rate .anatomy-key b { color: var(--ink); }
+  .rate .anatomy-key .n {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 22px;
+    height: 22px;
+    margin-top: 1px;
+    border-radius: var(--r-full);
+    background: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--paper);
+  }
+
+  /* ---- The scale ---- */
+  .rate .bands { width: 100%; margin: 24px 0; border-collapse: collapse; font-size: 15px; line-height: 1.6; }
+  .rate .bands th,
+  .rate .bands td { padding: 16px; border-bottom: 1px solid var(--hairline); text-align: left; vertical-align: top; }
+  .rate .bands th {
+    padding-top: 0;
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .rate .bands th:first-child { padding-left: 0; }
+  .rate .bands td { color: var(--ink-2); }
+  .rate .bands tbody tr:last-child td { border-bottom: 0; }
+  .rate .bands .range { padding-left: 0; font-family: var(--font-mono); font-size: 14px; white-space: nowrap; color: var(--ink); }
+  .rate .bands .label { white-space: nowrap; }
+  .rate .bands .meaning strong { font-weight: 600; color: var(--ink); }
+  /* The highlight bleeds 12px left of the column as a shadow, so the range
+     text keeps its inset inside the fill. */
+  .rate .bands tr.is-example td,
+  .rate .bands tr:target td { background: var(--surface); }
+  .rate .bands tr.is-example td:first-child,
+  .rate .bands tr:target td:first-child { box-shadow: -12px 0 0 var(--surface); border-radius: var(--r-md) 0 0 var(--r-md); }
+  .rate .bands tr.is-example td:last-child,
+  .rate .bands tr:target td:last-child { border-radius: 0 var(--r-md) var(--r-md) 0; }
+
+  /* ---- Scores we have given ---- */
+  .rate .dist { margin: 24px 0 0; padding: 24px; border: 1px solid var(--hairline); border-radius: var(--r-lg); background: var(--surface); }
+  .rate .dist-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 24px; margin-bottom: 20px; }
+  .rate .dist-head h3 { margin: 0; font-family: var(--font-body); font-size: 15px; font-weight: 700; letter-spacing: 0; color: var(--ink); }
+  .rate .dist-stats { display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.02em; color: var(--muted); }
+  .rate .dist-stats b { font-weight: 500; color: var(--ink); }
+  .rate .dist-rows { display: grid; gap: 12px; list-style: none; padding: 0; margin: 0; }
+  .rate .dist-row {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr) 92px;
+    align-items: center;
+    gap: 14px;
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.3;
+  }
+  .rate .dist-row .who { display: flex; flex-direction: column; }
+  .rate .dist-row .who b { font-weight: 600; color: var(--ink); }
+  .rate .dist-row .who span { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .rate .dist-track { position: relative; height: 18px; overflow: hidden; border-radius: 0 var(--r-xs) var(--r-xs) 0; background: var(--surface-2); }
+  .rate .dist-bar { display: block; width: var(--w); min-width: 3px; height: 100%; border-radius: 0 var(--r-xs) var(--r-xs) 0; background: var(--ink-2); }
+  .rate .dist-row .val { font-family: var(--font-mono); font-size: 13px; text-align: right; white-space: nowrap; color: var(--ink); }
+  .rate .dist-row .val span { color: var(--muted); }
+  .rate .dist-foot { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--hairline); font-size: 13px; line-height: 1.6; color: var(--muted); }
+  .rate .dist-empty { display: flex; align-items: flex-start; gap: 14px; padding: 4px 0; }
+  .rate .dist-empty svg { flex-shrink: 0; width: 32px; height: 32px; fill: none; stroke: var(--ink-2); stroke-width: 1.5; }
+  .rate .dist-empty p { margin: 0; font-size: 15px; color: var(--ink-2); }
+  .rate .dist-empty p + p { margin-top: 6px; font-size: 13px; color: var(--muted); }
+  .rate .low-scores h3 { margin: 0 0 4px; font-family: var(--font-body); font-size: 15px; font-weight: 700; letter-spacing: 0; line-height: 1.4; color: var(--ink); }
+  .rate .low-scores > p { margin: 0; font-size: 15px; }
+  .rate .low-more > summary { min-height: 48px; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
+
+  /* ---- How we assess ---- */
+  .rate .plain-statement {
+    padding: 4px 0 4px 18px;
+    border-left: 3px solid var(--ink);
+    font-family: var(--font-display);
+    font-size: 22px;
+    line-height: 1.45;
+    letter-spacing: -0.005em;
+    color: var(--ink);
+  }
+  .rate .prov-list { display: grid; gap: 10px; list-style: none; padding: 0; margin: 24px 0; }
+  .rate .prov-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 4px 14px;
+    margin: 0;
+    padding: 14px 18px;
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--hairline-strong);
+    border-radius: 0 var(--r-md) var(--r-md) 0;
+    background: var(--surface);
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .rate .prov-item .k { min-width: 22px; padding-top: 3px; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .rate .prov-item .v strong { display: block; font-weight: 700; color: var(--ink); }
+  .rate .prov-item .v span { font-size: 14px; color: var(--muted); }
+  .rate .prov-item.is-current { border-left-color: var(--ink); }
+  .rate .prov-item.is-current .k { color: var(--ink); }
+  .rate .prov-item .prov-now {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: fit-content;
+    margin-top: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .rate .prov-now::before { content: ""; width: 6px; height: 6px; border-radius: var(--r-full); background: var(--ink); }
+
+  /* ---- Changelog ---- */
+  .rate .version-rules { width: 100%; margin: 20px 0 8px; border-collapse: collapse; font-size: 15px; line-height: 1.6; }
+  .rate .version-rules th,
+  .rate .version-rules td { padding: 12px 16px; border-bottom: 1px solid var(--hairline); text-align: left; vertical-align: top; }
+  .rate .version-rules th {
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .rate .version-rules th:first-child,
+  .rate .version-rules td:first-child { padding-left: 0; }
+  .rate .version-rules td { color: var(--ink-2); }
+  .rate .version-rules code { padding: 0; background: none; font-family: var(--font-mono); font-size: 13px; white-space: nowrap; color: var(--ink); }
+  .rate .version-rules tbody tr:last-child td { border-bottom: 0; }
+
+  /* A folded run of older changelog entries or score changes: label left,
+     chevron pinned right. */
+  .rate .fold > summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    list-style: none;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+  .rate .fold > summary::-webkit-details-marker { display: none; }
+  .rate .fold > summary:hover { color: var(--accent-text); }
+  .rate .fold-label { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
+  .rate .fold-label .meta { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--muted); }
+  .rate .fold .chev {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    margin-left: auto;
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--r-full);
+    transition: transform var(--dur-base) var(--ease-out);
+  }
+  .rate .fold .chev svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; }
+  .rate .fold[open] > summary .chev { transform: rotate(180deg); }
+  .rate .log-older { margin-top: 0; border-bottom: 1px solid var(--hairline); }
+  .rate .log-older > summary { min-height: 56px; padding: 8px 0; }
+  .rate .changes-more { border-top: 1px solid var(--hairline); }
+  .rate .changes-more > summary { min-height: 52px; padding: 8px 20px; }
+  .rate .changes-more[open] > summary { border-bottom: 1px solid var(--hairline); }
+
+  /* ---- Badge glossary ---- */
+  .rate .off-note { margin-top: 16px; padding: 10px 14px; border-radius: var(--r-md); background: var(--surface-2); font-size: 13px; line-height: 1.55; color: var(--ink-2); }
+  .rate .badges { display: grid; gap: 16px; list-style: none; padding: 0; margin: 24px 0 0; }
+  .rate .badge-entry {
+    margin: 0;
+    padding: 22px 24px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    scroll-margin-top: 100px;
+  }
+  .rate .badge-entry.is-off { border-style: dashed; border-color: var(--hairline-strong); background: transparent; }
+  .rate .badge-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-bottom: 16px; }
+  .rate .badge-entry h3,
+  .rate .tag-note h3 { margin: 0 0 14px; font-family: var(--font-body); font-size: 16px; font-weight: 700; letter-spacing: 0; line-height: 1.4; color: var(--ink); }
+  .rate .status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; line-height: 1.4; letter-spacing: 0.12em; text-transform: uppercase; }
+  .rate .status svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
+  .rate .status--live { color: var(--success); }
+  .rate .status--off { color: var(--muted); }
+  .rate .facts { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 8px 20px; margin: 0; font-size: 15px; line-height: 1.6; }
+  .rate .facts dt { padding-top: 4px; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .rate .facts dd { margin: 0; color: var(--ink-2); }
+  .rate .sd-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    min-height: 32px;
+    padding: 4px 12px 4px 4px;
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--r-full);
+    background: var(--surface);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--ink);
+  }
+  .rate .sd-badge .num {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 1px;
+    padding: 3px 9px;
+    border-radius: var(--r-full);
+    background: var(--ink);
+    font-family: var(--font-display);
+    font-size: 15px;
+    line-height: 1.2;
+    color: var(--paper);
+  }
+  .rate .sd-badge .num small { font-size: 11px; font-style: italic; opacity: 0.75; }
+  .rate .sd-badge .band { padding-left: 8px; border-left: 1px solid var(--hairline-strong); font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  .rate .sd-badge svg { flex-shrink: 0; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+  .rate .sd-badge.sd-badge--price { gap: 6px; padding: 4px 12px; border-radius: var(--r-lg); }
+  .rate .sd-badge.sd-badge--skip { gap: 6px; padding: 4px 12px; border-color: var(--ink); border-radius: var(--r-lg); }
+  .rate .sd-badge.sd-badge--disclosure { width: fit-content; padding: 4px 12px; border-color: var(--hairline); background: var(--surface-2); font-size: 12px; font-weight: 500; color: var(--ink-2); }
+  .rate .is-off .sd-badge { opacity: 0.75; }
+  .rate .tag-note { display: grid; gap: 12px; margin-top: 24px; padding: 18px 0; border-top: 1px solid var(--hairline-strong); font-size: 15px; line-height: 1.6; }
+  .rate .tag-note h3 { margin: 0; }
+  .rate .tag-note p { margin: 0; }
+
+  /* ---- Independence ---- */
+  .rate .mech { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); list-style: none; padding: 0; margin: 24px 0 0; border-top: 1px solid var(--hairline-strong); }
+  .rate .mech li { margin: 0; padding: 20px 20px 20px 0; border-bottom: 1px solid var(--hairline); font-size: 15px; line-height: 1.6; }
+  .rate .mech li:nth-child(odd) { border-right: 1px solid var(--hairline); }
+  .rate .mech li:nth-child(even) { padding-left: 20px; padding-right: 0; }
+  .rate .mech .num { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; color: var(--muted); }
+  .rate .mech h3 { margin: 6px 0 8px; font-family: var(--font-display); font-size: 21px; font-weight: 400; line-height: 1.3; letter-spacing: -0.01em; color: var(--ink); }
+  .rate .mech p { margin: 0; color: var(--ink-2); }
+  .rate .mech .check { display: block; margin-top: 10px; font-size: 13px; color: var(--muted); }
+  .rate .mech .check b { margin-right: 6px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); }
+
+  /* ---- Corrections and the score-change log ---- */
+  .rate .report { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; list-style: none; padding: 0; margin: 20px 0 0; counter-reset: step; }
+  .rate .report li {
+    margin: 0;
+    padding: 16px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    font-size: 14px;
+    line-height: 1.55;
+    counter-increment: step;
+  }
+  .rate .report li::before {
+    content: counter(step);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-bottom: 8px;
+    border-radius: var(--r-full);
+    background: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--paper);
+  }
+  .rate .report b { display: block; margin-bottom: 2px; font-weight: 700; color: var(--ink); }
+  .rate .report-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+  .rate .changes { margin-top: 24px; overflow: hidden; border: 1px solid var(--hairline); border-radius: var(--r-lg); background: var(--surface); }
+  .rate .changes-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 16px; padding: 16px 20px; border-bottom: 1px solid var(--hairline); }
+  .rate .changes-head h3 { margin: 0; font-family: var(--font-body); font-size: 15px; font-weight: 700; letter-spacing: 0; line-height: 1.4; color: var(--ink); }
+  .rate .changes-head span { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rate .changes-empty { display: flex; align-items: flex-start; gap: 14px; padding: 28px 20px; }
+  .rate .changes-empty svg { flex-shrink: 0; width: 22px; height: 22px; margin-top: 2px; fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .rate .changes-empty p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink-2); }
+  .rate .changes-empty p + p { margin-top: 4px; font-size: 13px; color: var(--muted); }
+  .rate .scroll-hint { display: none; padding: 8px 20px; border-top: 1px solid var(--hairline); font-size: 12px; color: var(--muted); }
+
+  /* ---- By category ---- */
+  .rate .cats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
+  .rate .cat {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    scroll-margin-top: 100px;
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+  .rate .cat:target { border-color: var(--ink); }
+  .rate .cat-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; }
+  .rate .cat h3 { margin: 0; font-family: var(--font-display); font-size: 24px; font-weight: 400; line-height: 1.2; color: var(--ink); }
+  .rate .cat-anchor { display: inline-flex; align-items: center; min-height: 32px; padding: 0 4px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); text-decoration: none; }
+  .rate .cat-anchor:hover { color: var(--accent-text); }
+  .rate .cat p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+  .rate .cat .cadence { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rate .cat .stub { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--hairline); font-size: 13px; color: var(--muted); }
+
+  /* Tables that would scroll sideways on a phone become stacked blocks
+     instead; only the score-change log keeps a scroller, with a hint. */
+  @media (max-width: 700px) {
+    .rate .bands thead,
+    .rate .version-rules thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .rate .bands,
+    .rate .bands tbody { display: block; }
+    .rate .bands tr { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px 12px; padding: 16px 0; border-bottom: 1px solid var(--hairline); }
+    .rate .bands tbody tr:last-child { border-bottom: 0; }
+    .rate .bands td { display: block; padding: 0; border: 0; }
+    .rate .bands .meaning { grid-column: 1 / -1; }
+    .rate .bands tr.is-example,
+    .rate .bands tr:target { margin: 0 -12px; padding: 16px 12px; border-radius: var(--r-md); background: var(--surface); }
+    .rate .bands tr.is-example td,
+    .rate .bands tr:target td { background: transparent; box-shadow: none; border-radius: 0; }
+
+    .rate .version-rules,
+    .rate .version-rules tbody,
+    .rate .version-rules tr,
+    .rate .version-rules td { display: block; }
+    .rate .version-rules tr { padding: 14px 0; border-bottom: 1px solid var(--hairline); }
+    .rate .version-rules tbody tr:last-child { border-bottom: 0; }
+    .rate .version-rules td { padding: 0; border: 0; }
+    .rate .version-rules td + td { margin-top: 6px; }
+    .rate .version-rules td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .rate .mech { grid-template-columns: 1fr; }
+    .rate .mech li,
+    .rate .mech li:nth-child(even) { padding: 18px 0; border-right: 0; }
+    .rate .mech li:nth-child(odd) { border-right: 0; }
+    .rate .report { grid-template-columns: 1fr; }
+    .rate .scroll-hint { display: block; }
+  }
+  @media (max-width: 620px) {
+    .rate .anatomy-key { grid-template-columns: 1fr; }
+    .rate .anatomy-num { font-size: 48px; }
+    .rate .dist { padding: 18px; }
+    .rate .dist-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; }
+    .rate .dist-track { grid-column: 1 / -1; grid-row: 2; }
+    .rate .plain-statement { font-size: 19px; }
+    .rate .badge-entry { padding: 18px; }
+    .rate .facts { grid-template-columns: 1fr; gap: 2px; }
+    .rate .facts dd + dt { margin-top: 10px; }
+    .rate .cats { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .method-chip,
+    .rate .fold > summary,
+    .rate .fold .chev,
+    .rate .cat { transition: none; }
+  }
+</style>

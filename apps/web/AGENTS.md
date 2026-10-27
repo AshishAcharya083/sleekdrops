@@ -115,6 +115,7 @@ sleekdrops/
 | Changing the evidence standard or the review cadence | `src/pages/how-we-research.astro` (and `REVIEW_INTERVAL_DAYS` in `src/lib/sources.ts`) |
 | Changing what the site says about its use of AI | `src/pages/ai-disclosure.astro` |
 | Changing score bands, the scoring method version, provenance or which badges exist | `src/lib/trust.ts` (shared by reviews and deals; the CMS mirror is specified in `docs/trust-model-cms-validate-spec.md`) |
+| Changing the methodology page's copy or what it publishes, or logging a changed score | `src/pages/how-we-rate.astro` and `src/lib/methodology.ts`; score changes go in `src/data/score-changes.ts` |
 | Changing the crawl policy or naming another AI agent | `src/lib/robots-policy.mjs` |
 | Changing what `/llms.txt` says or how articles are ranked | `src/lib/llms-txt.mjs` |
 
