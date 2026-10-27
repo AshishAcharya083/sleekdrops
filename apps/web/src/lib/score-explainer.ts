@@ -12,8 +12,9 @@
  * from the page it links to.
  */
 
+import type { ScoreChange } from '../data/score-changes.ts';
 import { formatMedium } from './format.ts';
-import { methodologyHref, methodVersionHref } from './methodology.ts';
+import { dayAsDate, methodologyHref, methodVersionHref } from './methodology.ts';
 import {
   assessmentProvenance,
   formatScore,
@@ -38,8 +39,9 @@ export interface ScoreExplainerInput {
     methodVersion?: MethodVersion;
     provenance?: Provenance;
     subScores?: readonly SubScore[];
-    scoreChange?: { date: Date; from: number; reason: string };
   };
+  /** This review's entries in the public score-change log, newest first. */
+  scoreChanges: readonly ScoreChange[];
   reviewUnit?: { acquisition: ReviewUnitAcquisition };
   author: { name: string; beat?: string };
   pubDate: Date;
@@ -57,9 +59,12 @@ export type MethodLine =
   | { version: undefined; statement: string; linkText: string; href: string };
 
 export interface ScoreChangeLine {
-  /** "Retested" only when the review was hands-on; a desk revision is "Re-scored". */
+  /**
+   * "Retested" only when a hands-on review's unit was re-checked in hand; any
+   * other move - a desk revision, a new method version, a correction - is
+   * "Re-scored".
+   */
   label: 'Retested' | 'Re-scored';
-  handsOn: boolean;
   date: Day;
   from: string;
   to: string;
@@ -176,6 +181,33 @@ function subScoreBreakdown(rating: number, subScores: readonly SubScore[] | unde
   };
 }
 
+/**
+ * The newest move in the public score-change log. It must land on the score
+ * the review prints, or the box and the log would tell two stories.
+ */
+function latestChange(
+  slug: string,
+  rating: number,
+  changes: readonly ScoreChange[],
+  handsOn: boolean,
+): ScoreChangeLine | undefined {
+  const latest = changes[0];
+  if (!latest) return undefined;
+  if (formatScore(latest.to) !== formatScore(rating)) {
+    throw new Error(
+      `score-changes.ts: the ${latest.date} change for "${slug}" moves the score to ${formatScore(latest.to)}, but the review prints ${formatScore(rating)}`,
+    );
+  }
+  return {
+    label: handsOn && latest.cause === 'retest' ? 'Retested' : 'Re-scored',
+    date: day(dayAsDate(latest.date)),
+    from: formatScore(latest.from),
+    to: formatScore(latest.to),
+    reason: latest.reason.trim().replace(/[.\s]+$/, ''),
+    href: methodologyHref('score-changes'),
+  };
+}
+
 export function scoreExplainer(input: ScoreExplainerInput): ScoreExplainerView {
   const { product } = input;
   const score = formatScore(product.rating);
@@ -187,15 +219,7 @@ export function scoreExplainer(input: ScoreExplainerInput): ScoreExplainerView {
   const published = day(input.pubDate);
   const updated = input.updatedDate ? day(input.updatedDate) : undefined;
 
-  const change = product.scoreChange && {
-    label: handsOn ? ('Retested' as const) : ('Re-scored' as const),
-    handsOn,
-    date: day(product.scoreChange.date),
-    from: formatScore(product.scoreChange.from),
-    to: score,
-    reason: product.scoreChange.reason.trim().replace(/[.\s]+$/, ''),
-    href: methodologyHref('corrections'),
-  };
+  const change = latestChange(input.slug, product.rating, input.scoreChanges, handsOn);
 
   return {
     score,

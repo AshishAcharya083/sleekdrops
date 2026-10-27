@@ -15,7 +15,6 @@
 import { z } from 'astro/zod';
 
 import {
-  formatScore,
   METHOD_VERSION_IDS,
   PROVENANCES,
   productBadgeProblems,
@@ -81,26 +80,11 @@ export const productSchema = z.object({
     )
     .min(2)
     .optional(),
-  /**
-   * The latest revision that moved `rating`: the day, the score it moved
-   * from, and why - a clause that reads on from "score moved 4.1 -> 4.3",
-   * e.g. "after a firmware update fixed the Bluetooth dropouts".
-   */
-  scoreChange: z
-    .object({
-      date: z.coerce.date(),
-      from: z.number().min(1).max(5),
-      reason: z.string().min(1),
-    })
-    .optional(),
 }).superRefine((product, ctx) => {
   const issue = (path: string, message: string) =>
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
   if (product.subScores) {
     for (const message of subScoreProblems(product.rating, product.subScores)) issue('subScores', message);
-  }
-  if (product.scoreChange && formatScore(product.scoreChange.from) === formatScore(product.rating)) {
-    issue('scoreChange', 'a score change must move the printed score');
   }
   if (product.badge !== undefined) {
     for (const message of productBadgeProblems(product.badge)) issue('badge', message);

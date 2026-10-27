@@ -6,6 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import type { ScoreChange } from '../data/score-changes.ts';
 import { scoreExplainer, type ScoreExplainerInput } from './score-explainer.ts';
 import { PROVENANCE_COPY, SCORE_BAND_IDS } from './trust.ts';
 
@@ -13,6 +14,7 @@ import { PROVENANCE_COPY, SCORE_BAND_IDS } from './trust.ts';
 const legacy: ScoreExplainerInput = {
   slug: 'sony-wh-1000xm5-review',
   product: { rating: 4.7 },
+  scoreChanges: [],
   author: { name: 'SleekDrops Editorial Team', beat: 'Tech' },
   pubDate: new Date('2025-03-03'),
 };
@@ -68,21 +70,50 @@ test('a review unit record decides provenance when the product records none', ()
   assert.equal(none.provenance.id, 'not-hands-on');
 });
 
-test('a score revision is "Retested" only when the review was hands-on', () => {
-  const scoreChange = { date: new Date('2026-09-28'), from: 4.1, reason: 'after a firmware update fixed the dropouts.' };
+test('the newest logged score change is "Retested" only when a hands-on unit was re-checked in hand', () => {
+  const retest: ScoreChange = {
+    slug: legacy.slug,
+    date: '2026-09-28',
+    from: 4.1,
+    to: 4.3,
+    cause: 'retest',
+    methodVersion: '1.0',
+    reason: 'a firmware update fixed the dropouts.',
+  };
+  const older: ScoreChange = { ...retest, date: '2026-07-01', from: 3.9, to: 4.1, reason: 'a correction' };
 
-  const retested = scoreExplainer(withProduct({ rating: 4.3, provenance: 'retail', scoreChange }));
-  assert.deepEqual(
-    { label: retested.change?.label, from: retested.change?.from, to: retested.change?.to, reason: retested.change?.reason },
-    { label: 'Retested', from: '4.1', to: '4.3', reason: 'after a firmware update fixed the dropouts' },
+  const retested = scoreExplainer(withProduct({ rating: 4.3, provenance: 'retail' }, { scoreChanges: [retest, older] }));
+  assert.deepEqual(retested.change, {
+    label: 'Retested',
+    date: { iso: '2026-09-28', text: 'Sep 28, 2026' },
+    from: '4.1',
+    to: '4.3',
+    reason: 'a firmware update fixed the dropouts',
+    href: '/how-we-rate#score-changes',
+  });
+
+  const methodMove = scoreExplainer(
+    withProduct({ rating: 4.3, provenance: 'retail' }, { scoreChanges: [{ ...retest, cause: 'method' }] }),
   );
-  assert.equal(retested.change?.href, '/how-we-rate#corrections');
+  assert.equal(methodMove.change?.label, 'Re-scored');
 
-  const rescored = scoreExplainer(withProduct({ rating: 3.8, provenance: 'not-hands-on', scoreChange }));
+  const rescored = scoreExplainer(withProduct({ rating: 4.3 }, { scoreChanges: [retest] }));
   assert.equal(rescored.change?.label, 'Re-scored');
-  assert.equal(rescored.change?.handsOn, false);
   // An unversioned score that was revised no longer claims it never was.
   assert.doesNotMatch(rescored.explainer.paragraphs.join(' '), /not been re-scored/);
+});
+
+test('a logged score change that does not land on the printed score fails the build', () => {
+  const stale: ScoreChange = {
+    slug: legacy.slug,
+    date: '2026-09-28',
+    from: 4.4,
+    to: 3.8,
+    cause: 'correction',
+    methodVersion: '1.0',
+    reason: 'owner reports of hinge cracks',
+  };
+  assert.throws(() => scoreExplainer(withProduct({ rating: 4.7 }, { scoreChanges: [stale] })), /moves the score to 3\.8, but the review prints 4\.7/);
 });
 
 test('sub-scores render with their weights and a total that says how it meets the headline', () => {

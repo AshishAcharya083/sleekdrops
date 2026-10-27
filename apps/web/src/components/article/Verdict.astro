@@ -7,6 +7,7 @@ import { EVENTS } from '@lib/analytics';
 import { methodologyHref } from '@lib/methodology';
 import { scoreExplainer } from '@lib/score-explainer';
 import type { Author } from '@data/authors';
+import { scoreChangesFor } from '@data/score-changes';
 import type { ProductData, ReviewUnitData } from '../../content/config';
 
 /**
@@ -28,7 +29,15 @@ export interface Props {
 }
 const { product, postSlug, author, pubDate, updatedDate, reviewUnit } = Astro.props;
 const href = `/go/${postSlug}`;
-const view = scoreExplainer({ slug: postSlug, product, reviewUnit, author, pubDate, updatedDate });
+const view = scoreExplainer({
+  slug: postSlug,
+  product,
+  scoreChanges: scoreChangesFor(postSlug),
+  reviewUnit,
+  author,
+  pubDate,
+  updatedDate,
+});
 ---
 <aside class="verdict" aria-labelledby="verdict-heading">
   <div class="v-lead">
@@ -69,9 +78,11 @@ const view = scoreExplainer({ slug: postSlug, product, reviewUnit, author, pubDa
 <style>
   /* Every rule is scoped under .verdict so ArticleBody's prose rules
      (`.article-body h3`, `p`, `a`) cannot restyle the eyebrow, paragraphs,
-     links or the CTA. No font-size of its own: the box inherits the body's
-     18px, so its 68ch measure lines up with the prose beside it. */
+     links or the CTA. The base size is the prose paragraphs' own: the
+     inherited 68ch measure resolves against it, so the box's edge lines up
+     with theirs. Every child sets its own size. */
   .verdict {
+    font-size: var(--t-body);
     background: var(--surface);
     border: 1px solid var(--hairline-strong);
     border-radius: 20px;
