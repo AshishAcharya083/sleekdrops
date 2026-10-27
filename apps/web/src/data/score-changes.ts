@@ -19,13 +19,13 @@ export interface ScoreChange {
   from: number;
   /** 1-5, one decimal. */
   to: number;
-  cause: 'retest' | 'method' | 'correction';
   /** The method version the new score was given under. */
   methodVersion: MethodVersion;
-  /** Why it moved, in a sentence: the re-check finding or the correction. */
+  /** Why it moved, in a sentence: the re-check finding, the new method or the correction. */
   reason: string;
 }
 
+/** Newest first. */
 export const SCORE_CHANGES: readonly ScoreChange[] = [];
 
 /** Newest first; changes published on the same day keep their recorded order. */
