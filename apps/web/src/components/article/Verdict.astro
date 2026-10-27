@@ -78,7 +78,8 @@ const view = scoreExplainer({
 <style>
   /* Every rule is scoped under .verdict so ArticleBody's prose rules
      (`.article-body h3`, `p`, `a`) cannot restyle the eyebrow, paragraphs,
-     links or the CTA. The base size is the prose paragraphs' own: the
+     links or the CTA. The base size matches the prose paragraphs, which take
+     --t-body from the global `p` rule rather than the body's 18px: the
      inherited 68ch measure resolves against it, so the box's edge lines up
      with theirs. Every child sets its own size. */
   .verdict {

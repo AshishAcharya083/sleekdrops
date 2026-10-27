@@ -73,9 +73,9 @@ const retested = change?.label === 'Retested';
       <div class="fact fact-changed">
         <dt>{change.label}</dt>
         <dd>
-          {retested ? 'We had the unit in hand again on ' : 'On '}<time datetime={change.date.iso}>{change.date.text}</time>{retested && ', and'}
-          the score moved <span class="delta"><s><span class="sr-only">from </span>{change.from}</s>&nbsp;<span aria-hidden="true">→</span><span class="sr-only"> to</span>&nbsp;{change.to}</span>{!retested && ', not tested in hand'}:
-          {change.reason}.
+          {retested && 'We had the unit in hand again on '}<time datetime={change.date.iso}>{change.date.text}</time>:
+          score moved <span class="delta"><s><span class="sr-only">from </span>{change.from}</s>&nbsp;<span aria-hidden="true">→</span><span class="sr-only"> to</span>&nbsp;{change.to}</span>{!retested && ' - not tested in hand'}.
+          {change.reason}
           {' '}<a href={change.href}>Score changes</a>
         </dd>
       </div>

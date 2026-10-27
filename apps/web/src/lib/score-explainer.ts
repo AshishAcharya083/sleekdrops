@@ -8,16 +8,23 @@
  * provenance reads as not hands-on, no recorded method version is said plainly
  * rather than guessed, and nothing is printed that the record does not hold.
  * The words for bands, method versions and provenances come from the trust
- * model and the links from the methodology module, so the box cannot drift
- * from the page it links to.
+ * model, and the links and the "how we scored this" text from the methodology
+ * module, so the box cannot drift from the page it links to.
  */
 
 import type { ScoreChange } from '../data/score-changes.ts';
 import { formatMedium } from './format.ts';
-import { dayAsDate, methodologyHref, methodVersionHref } from './methodology.ts';
+import {
+  dayAsDate,
+  methodologyHref,
+  methodVersionHref,
+  SCORING_SUMMARY,
+  UNVERSIONED_SCORE_NOTE,
+} from './methodology.ts';
 import {
   assessmentProvenance,
   formatScore,
+  METHOD_VERSIONS,
   methodLabel,
   PROVENANCE_COPY,
   SCORE_BANDS,
@@ -60,15 +67,14 @@ export type MethodLine =
 
 export interface ScoreChangeLine {
   /**
-   * "Retested" only when a hands-on review's unit was re-checked in hand; any
-   * other move - a desk revision, a new method version, a correction - is
-   * "Re-scored".
+   * "Retested" only on a hands-on review; a review assessed from published
+   * data says "Re-scored", so a move is never read as a hands-on test.
    */
   label: 'Retested' | 'Re-scored';
   date: Day;
   from: string;
   to: string;
-  /** Why it moved, without a closing full stop. */
+  /** Why it moved, as a sentence: capitalised, with its closing full stop. */
   reason: string;
   href: string;
 }
@@ -117,24 +123,6 @@ export interface ScoreExplainerView {
   };
 }
 
-const RESEARCH_GIST =
-  'A research score from published tests, owner reports and running costs, not from our own use of the product.';
-const HANDS_ON_GIST =
-  'A score from our own weeks with the unit, checked against published tests, owner reports and running costs.';
-
-const RESEARCH_CRITERIA =
-  'This is a research score, not a test result. Every product is read against the same four criteria: the strength and recency of independent measurements, the measured performance where someone measured it, the failures owners report and how soon they appear, and what it costs to own.';
-const RESEARCH_CAVEAT =
-  'Thin evidence caps the score, however good the product may be. Commission never enters it: our writers do not see what any retailer pays us.';
-// An unversioned score cannot claim the four criteria v1.0 names, so it states
-// only the ones every review has been read against.
-const UNVERSIONED_RESEARCH_CRITERIA =
-  'This is a research score, not a test result. It reads the evidence for the product against the strength and recency of independent measurements, the failures owners report, and what it costs to own.';
-const HANDS_ON_CRITERIA =
-  'We used the unit day to day for at least two weeks, then read what we found against the same criteria every review uses: independent measurements, the failures owners report and how soon, and what it costs to own.';
-const HANDS_ON_CAVEAT =
-  'Where our experience and the published evidence disagree, the review says so and the evidence decides. Commission never enters the score: our writers do not see what any retailer pays us.';
-
 function day(date: Date): Day {
   return { iso: date.toISOString().slice(0, 10), text: formatMedium(date) };
 }
@@ -153,14 +141,15 @@ function scaleRows(current: ScoreBand): ScaleRow[] {
   });
 }
 
-function explainerParagraphs(handsOn: boolean, version: MethodVersion | undefined, rescored: boolean): string[] {
-  if (version) return handsOn ? [HANDS_ON_CRITERIA, HANDS_ON_CAVEAT] : [RESEARCH_CRITERIA, RESEARCH_CAVEAT];
-  const unversioned = [
-    'It was given before we numbered our method, so we cannot tell you which version it used',
-    rescored ? '.' : ', and it has not been re-scored since.',
-    ' Newer reviews name the method version they were scored under.',
-  ].join('');
-  return [handsOn ? HANDS_ON_CRITERIA : UNVERSIONED_RESEARCH_CRITERIA, unversioned];
+/**
+ * What the score was given under: the method version's own summary, or, for
+ * a review that records none, the methodology's note for unversioned scores.
+ */
+function methodNote(version: MethodVersion | undefined): string {
+  if (!version) return UNVERSIONED_SCORE_NOTE;
+  const entry = METHOD_VERSIONS.find((candidate) => candidate.version === version);
+  if (!entry) throw new Error(`score-explainer: no METHOD_VERSIONS entry for method version ${version}`);
+  return entry.summary;
 }
 
 function subScoreBreakdown(rating: number, subScores: readonly SubScore[] | undefined) {
@@ -199,13 +188,19 @@ function latestChange(
     );
   }
   return {
-    label: handsOn && latest.cause === 'retest' ? 'Retested' : 'Re-scored',
+    label: handsOn ? 'Retested' : 'Re-scored',
     date: day(dayAsDate(latest.date)),
     from: formatScore(latest.from),
     to: formatScore(latest.to),
-    reason: latest.reason.trim().replace(/[.\s]+$/, ''),
-    href: methodologyHref('score-changes'),
+    reason: asSentence(latest.reason),
+    href: methodologyHref('corrections'),
   };
+}
+
+/** "owner reports of hinge cracks" -> "Owner reports of hinge cracks." */
+function asSentence(text: string): string {
+  const trimmed = text.trim().replace(/[.\s]+$/, '');
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}.`;
 }
 
 export function scoreExplainer(input: ScoreExplainerInput): ScoreExplainerView {
@@ -244,8 +239,11 @@ export function scoreExplainer(input: ScoreExplainerInput): ScoreExplainerView {
     change,
     subScores: subScoreBreakdown(product.rating, product.subScores),
     explainer: {
-      gist: handsOn ? HANDS_ON_GIST : RESEARCH_GIST,
-      paragraphs: explainerParagraphs(handsOn, version, change !== undefined),
+      // SCORING_SUMMARY says we do not test products, which a hands-on review
+      // would contradict; the methodology exports no hands-on wording, so
+      // those reviews lead with the method note alone.
+      gist: handsOn ? methodNote(version) : SCORING_SUMMARY,
+      paragraphs: handsOn ? [] : [methodNote(version)],
       scale: scaleRows(band),
       methodHref: methodologyHref(),
       distributionHref: methodologyHref('distribution'),

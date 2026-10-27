@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 
 import type { ScoreChange } from '../data/score-changes.ts';
 import { scoreExplainer, type ScoreExplainerInput } from './score-explainer.ts';
-import { PROVENANCE_COPY, SCORE_BAND_IDS } from './trust.ts';
+import { SCORING_SUMMARY, UNVERSIONED_SCORE_NOTE } from './methodology.ts';
+import { METHOD_VERSIONS, PROVENANCE_COPY, SCORE_BAND_IDS } from './trust.ts';
 
 /** A review as the roughly 320 already published carry it: none of the new fields. */
 const legacy: ScoreExplainerInput = {
@@ -42,13 +43,14 @@ test('a legacy review falls back to not hands-on and an unversioned method, inve
   assert.equal(view.byline.updated, undefined);
   assert.equal(view.change, undefined);
   assert.equal(view.subScores, undefined);
-  assert.match(view.explainer.paragraphs.join(' '), /before we numbered our method.*not been re-scored since/);
+  assert.equal(view.explainer.gist, SCORING_SUMMARY);
+  assert.deepEqual(view.explainer.paragraphs, [UNVERSIONED_SCORE_NOTE]);
 });
 
 test('a versioned review names its method and links that version in the changelog', () => {
   const view = scoreExplainer(withProduct({ methodVersion: '1.0' }));
   assert.deepEqual(view.method, { version: '1.0', label: 'Method v1.0', href: '/how-we-rate#method-v1-0' });
-  assert.doesNotMatch(view.explainer.paragraphs.join(' '), /numbered our method/);
+  assert.deepEqual(view.explainer.paragraphs, [METHOD_VERSIONS[0].summary]);
 });
 
 test('the updated date is shown only when it is a different day from the published one', () => {
@@ -64,19 +66,20 @@ test('a review unit record decides provenance when the product records none', ()
   assert.equal(loan.provenance.id, 'brand-sample');
   assert.equal(loan.handsOn, true);
   assert.equal(loan.srSummary, 'Score 4.7 out of 5: Excellent.');
-  assert.match(loan.explainer.gist, /our own weeks with the unit/);
+  // The methodology's scoring summary says we do not test, so a hands-on review leads with its method note instead.
+  assert.equal(loan.explainer.gist, UNVERSIONED_SCORE_NOTE);
+  assert.deepEqual(loan.explainer.paragraphs, []);
 
   const none = scoreExplainer({ ...legacy, reviewUnit: { acquisition: 'none' } });
   assert.equal(none.provenance.id, 'not-hands-on');
 });
 
-test('the newest logged score change is "Retested" only when a hands-on unit was re-checked in hand', () => {
+test('the newest logged score change is "Retested" on a hands-on review and "Re-scored" otherwise', () => {
   const retest: ScoreChange = {
     slug: legacy.slug,
     date: '2026-09-28',
     from: 4.1,
     to: 4.3,
-    cause: 'retest',
     methodVersion: '1.0',
     reason: 'a firmware update fixed the dropouts.',
   };
@@ -88,19 +91,13 @@ test('the newest logged score change is "Retested" only when a hands-on unit was
     date: { iso: '2026-09-28', text: 'Sep 28, 2026' },
     from: '4.1',
     to: '4.3',
-    reason: 'a firmware update fixed the dropouts',
-    href: '/how-we-rate#score-changes',
+    reason: 'A firmware update fixed the dropouts.',
+    href: '/how-we-rate#corrections',
   });
 
-  const methodMove = scoreExplainer(
-    withProduct({ rating: 4.3, provenance: 'retail' }, { scoreChanges: [{ ...retest, cause: 'method' }] }),
-  );
-  assert.equal(methodMove.change?.label, 'Re-scored');
-
-  const rescored = scoreExplainer(withProduct({ rating: 4.3 }, { scoreChanges: [retest] }));
+  const rescored = scoreExplainer(withProduct({ rating: 4.3 }, { scoreChanges: [{ ...retest, reason: 'Owner reports of hinge cracks' }] }));
   assert.equal(rescored.change?.label, 'Re-scored');
-  // An unversioned score that was revised no longer claims it never was.
-  assert.doesNotMatch(rescored.explainer.paragraphs.join(' '), /not been re-scored/);
+  assert.equal(rescored.change?.reason, 'Owner reports of hinge cracks.');
 });
 
 test('a logged score change that does not land on the printed score fails the build', () => {
@@ -109,7 +106,6 @@ test('a logged score change that does not land on the printed score fails the bu
     date: '2026-09-28',
     from: 4.4,
     to: 3.8,
-    cause: 'correction',
     methodVersion: '1.0',
     reason: 'owner reports of hinge cracks',
   };
