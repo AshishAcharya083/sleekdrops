@@ -1,0 +1,29 @@
+---
+import { PAID_LINK_NOTE } from '@lib/methodology';
+
+/**
+ * PaidLinkNote - the commission disclosure that sits beside a buy button.
+ *
+ * The one place the sentence is rendered, so every CTA says the same thing in
+ * the same words. `dark` is for a CTA on an ink panel (ProductCallout).
+ */
+export interface Props {
+  tone?: 'light' | 'dark';
+}
+const { tone = 'light' } = Astro.props;
+---
+<p class:list={['paid-link-note', `paid-link-note--${tone}`]}>{PAID_LINK_NOTE}</p>
+
+<style>
+  .paid-link-note {
+    display: inline-block;
+    margin: 0;
+    max-width: 40ch;
+    font-family: var(--font-body);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: break-word;
+    color: var(--muted);
+  }
+  .paid-link-note--dark { color: var(--paper); opacity: 0.78; }
+</style>
