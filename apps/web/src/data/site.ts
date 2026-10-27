@@ -22,7 +22,11 @@ export const SITE_DESCRIPTION =
 
 /** The public mailboxes readers write to. */
 export const CONTACT = {
+  desk: 'desk@sleekdrops.com',
   corrections: 'corrections@sleekdrops.com',
+  privacy: 'privacy@sleekdrops.com',
+  deals: 'deals@sleekdrops.com',
+  pitch: 'pitch@sleekdrops.com',
 } as const;
 
 /** A `mailto:` link to one of the CONTACT mailboxes, with an optional subject. */

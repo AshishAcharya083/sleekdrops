@@ -8,7 +8,6 @@ import assert from 'node:assert/strict';
 
 import { categories } from '../data/categories.ts';
 import type { CategorySlug } from '../data/categories-types.ts';
-import { SCORE_CHANGES, scoreChangesFor, type ScoreChange } from '../data/score-changes.ts';
 import {
   badgeGlossaryHref,
   bandRange,
@@ -26,8 +25,10 @@ import {
   publishedScoresEffect,
   scoreBandHref,
   scoreChangeCountLabel,
-  scoreChangeWhy,
   scoreDistribution,
+  SCORE_CHANGES,
+  scoreChangesFor,
+  type ScoreChange,
 } from './methodology.ts';
 import {
   BADGE_REGISTRY,
@@ -43,7 +44,7 @@ import {
 test('links land on the frozen anchors, including the one the Review JSON-LD already emits', () => {
   assert.equal(methodologyHref(), '/how-we-rate');
   assert.equal(methodologyHref('bands'), '/how-we-rate#bands');
-  assert.equal(methodologyHref('score-changes'), '/how-we-rate#score-changes');
+  assert.equal(methodologyHref('corrections'), '/how-we-rate#corrections');
   assert.equal(methodVersionHref('1.0'), '/how-we-rate#method-v1-0');
   assert.equal(scoreBandHref('strong'), '/how-we-rate#band-strong');
   assert.equal(badgeGlossaryHref('review-score'), '/how-we-rate#badge-review-score');
@@ -95,27 +96,40 @@ test('band ranges cover the scale without gaps, and the lowest reads "Below"', (
   ]);
 });
 
+const scored = (...ratings: number[]) => ratings.map((rating) => ({ data: { product: { rating } } }));
+
 test('the distribution of no scores is empty, with no average to misquote', () => {
-  const empty = scoreDistribution([]);
-  assert.equal(empty.count, 0);
-  assert.equal(empty.average, undefined);
-  assert.equal(empty.median, undefined);
-  assert.equal(empty.bands.length, SCORE_BANDS.length);
-  assert.ok(empty.bands.every((entry) => entry.count === 0 && entry.share === 0));
+  assert.deepEqual(scoreDistribution([]), {
+    count: 0,
+    average: null,
+    median: null,
+    bands: SCORE_BANDS.map((band) => ({ id: band.id, count: 0 })),
+  });
+  assert.equal(scoreDistribution([{ data: {} }, { data: {} }]).count, 0, 'posts without a product rating are not scores');
 });
 
 test('the distribution counts by printed band and reports mean and median', () => {
-  const dist = scoreDistribution([4.46, 4.7, 4.2, 2.1]);
+  const dist = scoreDistribution([...scored(4.46, 4.7, 4.2, 2.1), { data: {} }]);
   assert.equal(dist.count, 4);
   assert.deepEqual(
-    dist.bands.map((entry) => [entry.band.id, entry.count]),
-    [['excellent', 2], ['strong', 1], ['decent', 0], ['mixed', 0], ['weak', 1]],
+    dist.bands,
+    [
+      { id: 'excellent', count: 2 },
+      { id: 'strong', count: 1 },
+      { id: 'decent', count: 0 },
+      { id: 'mixed', count: 0 },
+      { id: 'weak', count: 1 },
+    ],
     '4.46 prints as 4.5, so it is counted as Excellent',
   );
-  assert.equal(dist.bands[0].share, 0.5);
   assert.ok(Math.abs(dist.average! - 3.865) < 1e-9);
   assert.ok(Math.abs(dist.median! - 4.33) < 1e-9, 'an even count takes the mean of the middle two');
-  assert.equal(scoreDistribution([4.1, 3.2, 4.8]).median, 4.1);
+  assert.equal(scoreDistribution(scored(4.1, 3.2, 4.8)).median, 4.1);
+});
+
+test('band edges are bucketed the way scoreBand prints them', () => {
+  const dist = scoreDistribution(scored(...SCORE_BANDS.map((band) => band.min)));
+  assert.ok(dist.bands.every((entry) => entry.count === 1), 'each band minimum lands in its own band');
 });
 
 test('a share that is there but rounds to nothing still shows', () => {
@@ -162,7 +176,6 @@ const change = (date: string, overrides: Partial<ScoreChange> = {}): ScoreChange
   date,
   from: 4.6,
   to: 4.3,
-  cause: 'retest',
   methodVersion: '1.0',
   reason: 'owner reports of failures rose.',
   ...overrides,
@@ -177,7 +190,7 @@ test('"Published scores" says what is true for the scores that exist', () => {
     /^None moved by this version\. Every score change since, 3 so far,/,
   );
   const [major, minor] = methodChangelog(history('1.0', '1.1', '2.0'));
-  const rescore = change('2027-04-01', { cause: 'method', methodVersion: '2.0' as MethodVersion });
+  const rescore = change('2027-04-01', { methodVersion: '2.0' as MethodVersion });
   assert.match(publishedScoresEffect(major, 320, [rescore, change('2027-02-01')]), /re-checked\. 1 re-scored so far/);
   assert.equal(publishedScoresEffect(minor, 320, []), 'None moved.');
 });
@@ -195,15 +208,6 @@ test('a review\'s score changes come newest first, and none for a review whose s
   assert.deepEqual(scoreChangesFor('no-such-review'), []);
 });
 
-test('the "Why" cell says what moved the score before the reason', () => {
-  assert.equal(scoreChangeWhy(change('2027-01-01')), 'Re-checked: owner reports of failures rose.');
-  assert.equal(scoreChangeWhy(change('2027-01-01', { cause: 'correction' })), 'Correction: owner reports of failures rose.');
-  assert.equal(
-    scoreChangeWhy(change('2027-01-01', { cause: 'method', methodVersion: '2.0' as MethodVersion })),
-    'Re-scored under Method v2.0: owner reports of failures rose.',
-  );
-});
-
 test('every recorded score change is a real move on a real day under a published method version', () => {
   for (const entry of SCORE_CHANGES) {
     assert.ok(isCheckDay(entry.date), `${entry.slug}: ${entry.date} is not a YYYY-MM-DD day`);
@@ -213,6 +217,11 @@ test('every recorded score change is a real move on a real day under a published
     }
     assert.notEqual(entry.from, entry.to, `${entry.slug}: a change has to move the score`);
   }
+  assert.deepEqual(
+    SCORE_CHANGES.map((entry) => entry.date),
+    SCORE_CHANGES.map((entry) => entry.date).toSorted().reverse(),
+    'the log is recorded newest first',
+  );
 });
 
 test('"Last updated" is the later of the newest version and the newest score change', () => {

@@ -7,7 +7,6 @@ import LowScoreList from '@components/methodology/LowScoreList.astro';
 import ScoreChangeTable from '@components/methodology/ScoreChangeTable.astro';
 import { categories } from '@data/categories';
 import type { CategorySlug } from '@data/categories-types';
-import { SCORE_CHANGES, scoreChangesNewestFirst } from '@data/score-changes';
 import { contactHref, CONTACT } from '@data/site';
 import { formatLong, formatMedium } from '@lib/format';
 import {
@@ -15,6 +14,7 @@ import {
   LOW_SCORES_VISIBLE,
   INDEPENDENCE_RULES,
   NOT_TESTED_STATEMENT,
+  SCORE_CHANGES,
   SCORE_CHANGES_VISIBLE,
   SCORING_SUMMARY,
   badgeAnchor,
@@ -30,8 +30,8 @@ import {
   publishedScoresEffect,
   scoreBandAnchor,
   scoreChangeCountLabel,
-  scoreChangeWhy,
   scoreDistribution,
+  scoredPosts,
   type MethodologySection,
 } from '@lib/methodology';
 import { getAllPosts } from '@lib/posts';
@@ -76,21 +76,23 @@ const joinList = (items: string[]) =>
 // --- Scores given -------------------------------------------------------------
 
 const posts = await getAllPosts();
-const scoredReviews = posts.flatMap((post) =>
-  post.data.postType === 'review' && post.data.product
-    ? [{ slug: post.slug, title: post.data.title, rating: post.data.product.rating }]
-    : [],
-);
-const distribution = scoreDistribution(scoredReviews.map((review) => review.rating));
+const distribution = scoreDistribution(posts);
 const hasScores = distribution.count > 0;
-const modalBand = distribution.bands.reduce((top, entry) => (entry.count > top.count ? entry : top));
+const shareOf = (count: number) => (hasScores ? count / distribution.count : 0);
+const bandRows = distribution.bands.map(({ id, count }) => ({
+  band: SCORE_BANDS.find((band) => band.id === id)!,
+  count,
+  share: shareOf(count),
+}));
+const modalBand = bandRows.reduce((top, entry) => (entry.count > top.count ? entry : top));
 const skewsTop = hasScores && modalBand.band.id === SCORE_BANDS[0].id;
 const builtOn = formatLong(new Date());
 
 // A high average is only believable next to the low scores we did publish, so
 // every review scored below the Strong band is listed and linked, lowest first.
 const strongBand = SCORE_BANDS.find((band) => band.id === 'strong')!;
-const belowStrong = scoredReviews
+const belowStrong = scoredPosts(posts)
+  .map((post) => ({ slug: post.slug, title: post.data.title, rating: post.data.product.rating }))
   .filter((review) => scoreBand(review.rating).min < strongBand.min)
   .sort((a, b) => a.rating - b.rating);
 const lowScores = foldAfter(belowStrong, LOW_SCORES_VISIBLE);
@@ -104,22 +106,21 @@ const currentAnchor = methodVersionAnchor(CURRENT_METHOD_VERSION);
 
 // --- Changelog and score changes ----------------------------------------------
 
-const scoreChanges = scoreChangesNewestFirst(SCORE_CHANGES);
 const changelog = methodChangelog().map((entry) => ({
   ...entry,
-  effect: publishedScoresEffect(entry, distribution.count, scoreChanges),
+  effect: publishedScoresEffect(entry, distribution.count, SCORE_CHANGES),
 }));
 const versionLog = foldAfter(changelog, CHANGELOG_VISIBLE);
 const titleBySlug = new Map(posts.map((post) => [post.slug, post.data.title]));
-const scoreChangeRows = scoreChanges.map((change) => {
+const scoreChangeRows = SCORE_CHANGES.map((change) => {
   const title = titleBySlug.get(change.slug);
   if (title === undefined) {
     throw new Error(`score-changes.ts: a ${change.date} change names "${change.slug}", which is not a published post`);
   }
-  return { change, title, why: scoreChangeWhy(change) };
+  return { change, title };
 });
 const changeLog = foldAfter(scoreChangeRows, SCORE_CHANGES_VISIBLE);
-const updated = formatLong(dayAsDate(methodologyUpdated(METHOD_VERSIONS, scoreChanges)));
+const updated = formatLong(dayAsDate(methodologyUpdated(METHOD_VERSIONS, SCORE_CHANGES)));
 const next = nextVersions(CURRENT_METHOD_VERSION);
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 const NUMBER_WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
@@ -295,14 +296,14 @@ const meta = buildMeta({
           <h3>Published review scores, by band</h3>
           <div class="dist-stats">
             <span><b>{distribution.count}</b> {distribution.count === 1 ? 'review' : 'reviews'}</span>
-            {distribution.average !== undefined && <span>average <b>{formatScore(distribution.average)}</b></span>}
-            {distribution.median !== undefined && <span>median <b>{formatScore(distribution.median)}</b></span>}
+            {distribution.average !== null && <span>average <b>{formatScore(distribution.average)}</b></span>}
+            {distribution.median !== null && <span>median <b>{formatScore(distribution.median)}</b></span>}
           </div>
         </div>
         {hasScores ? (
           <>
             <ul class="dist-rows">
-              {distribution.bands.map(({ band, count, share }) => (
+              {bandRows.map(({ band, count, share }) => (
                 <li class="dist-row">
                   <span class="who"><b>{band.label}</b><span>{bandRange(band)}</span></span>
                   <span class="dist-track" aria-hidden="true">
@@ -486,9 +487,9 @@ const meta = buildMeta({
       <section class="changes" id="score-changes" aria-labelledby="score-changes-title">
         <div class="changes-head">
           <h3 id="score-changes-title">Score-change log</h3>
-          <span>{scoreChangeCountLabel(scoreChanges.length)}</span>
+          <span>{scoreChangeCountLabel(SCORE_CHANGES.length)}</span>
         </div>
-        {scoreChanges.length === 0 ? (
+        {SCORE_CHANGES.length === 0 ? (
           <div class="changes-empty">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8 12.5l2.5 2.5L16 9.5" /></svg>
             <div>

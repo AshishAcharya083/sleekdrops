@@ -26,6 +26,8 @@ import {
   type ScoreBandId,
 } from './trust.ts';
 
+export { SCORE_CHANGES, scoreChangesFor, type ScoreChange } from '../data/score-changes.ts';
+
 // --- Addresses ---------------------------------------------------------------
 
 export const METHODOLOGY_PATH = '/how-we-rate';
@@ -38,7 +40,6 @@ export type MethodologySection =
   | 'badges'
   | 'independence'
   | 'corrections'
-  | 'score-changes'
   | 'categories';
 
 /** "/how-we-rate", or "/how-we-rate#bands" for one section. */
@@ -151,30 +152,42 @@ export function bandRange(band: ScoreBand, bands: readonly ScoreBand[] = SCORE_B
   return `${band.min.toFixed(1)}–${top.toFixed(1)}`;
 }
 
-export interface BandCount {
-  band: ScoreBand;
-  count: number;
-  /** count / total, 0-1; 0 when there are no scores. */
-  share: number;
+/** The posts the distribution reads: anything with frontmatter, such as a getAllPosts() entry. */
+export interface ScorablePost {
+  data: { product?: { rating: number } };
 }
 
+/**
+ * The only rule for which reviews count as scored: a post whose product has a
+ * rating. /how-we-rate and /about both go through it, so the two cannot
+ * disagree about how many scores there are.
+ */
+export function scoredPosts<P extends ScorablePost>(posts: readonly P[]): Scored<P>[] {
+  return posts.filter((post): post is Scored<P> => post.data.product !== undefined);
+}
+
+type Scored<P extends ScorablePost> = P & { data: { product: { rating: number } } };
+
 export interface ScoreDistribution {
+  /** Published reviews with a rating. */
   count: number;
-  /** Mean and median of the scores; undefined when there are none. */
-  average?: number;
-  median?: number;
-  /** One entry per band, highest first, including empty bands. */
-  bands: BandCount[];
+  /** null when count is 0. */
+  average: number | null;
+  /** null when count is 0. */
+  median: number | null;
+  /** One per SCORE_BANDS entry, in the same order, bucketed with scoreBand(). */
+  bands: readonly { id: ScoreBandId; count: number }[];
 }
 
 /** How the published scores spread across the bands. */
-export function scoreDistribution(ratings: readonly number[]): ScoreDistribution {
+export function scoreDistribution(posts: readonly ScorablePost[]): ScoreDistribution {
+  const ratings = scoredPosts(posts).map((post) => post.data.product.rating);
   const count = ratings.length;
-  const bands = SCORE_BANDS.map((band) => {
-    const inBand = ratings.filter((rating) => scoreBand(rating).id === band.id).length;
-    return { band, count: inBand, share: count === 0 ? 0 : inBand / count };
-  });
-  if (count === 0) return { count, bands };
+  const bands = SCORE_BANDS.map((band) => ({
+    id: band.id,
+    count: ratings.filter((rating) => scoreBand(rating).id === band.id).length,
+  }));
+  if (count === 0) return { count, average: null, median: null, bands };
   const sorted = [...ratings].sort((a, b) => a - b);
   const middle = Math.floor(count / 2);
   const median = count % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
@@ -259,7 +272,7 @@ export function publishedScoresEffect(
       return `None moved by this version. Every score change since, ${scoreChanges.length} so far, is listed with its reason in the score-change log below.`;
     }
     case 'major': {
-      const rescored = scoreChanges.filter((change) => change.cause === 'method' && change.methodVersion === entry.version).length;
+      const rescored = scoreChanges.filter((change) => change.methodVersion === entry.version).length;
       return `Kept at their old version until each review is re-checked. ${rescored} re-scored so far, each listed in the score-change log below with its old score.`;
     }
     case 'minor':
@@ -277,18 +290,6 @@ export function scoreChangeCountLabel(count: number, firstVersion: MethodVersion
   const since = `since ${methodLabel(firstVersion)}`;
   if (count === 0) return since;
   return `${count} ${count === 1 ? 'change' : 'changes'} ${since}`;
-}
-
-/** The log's "Why" cell: what moved the score, then the reason. */
-export function scoreChangeWhy(change: ScoreChange): string {
-  switch (change.cause) {
-    case 'retest':
-      return `Re-checked: ${change.reason}`;
-    case 'method':
-      return `Re-scored under ${methodLabel(change.methodVersion)}: ${change.reason}`;
-    case 'correction':
-      return `Correction: ${change.reason}`;
-  }
 }
 
 /**
