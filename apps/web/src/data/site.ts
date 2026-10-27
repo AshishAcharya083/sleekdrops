@@ -19,3 +19,14 @@ export const SITE_NAME = 'SleekDrops';
  */
 export const SITE_DESCRIPTION =
   'SleekDrops publishes independent product research, side-by-side comparisons and buying guides for Australian shoppers. No paid placements, quietly opinionated.';
+
+/** The public mailboxes readers write to. */
+export const CONTACT = {
+  corrections: 'corrections@sleekdrops.com',
+} as const;
+
+/** A `mailto:` link to one of the CONTACT mailboxes, with an optional subject. */
+export function contactHref(mailbox: keyof typeof CONTACT, subject?: string): string {
+  const query = subject ? `?subject=${encodeURIComponent(subject)}` : '';
+  return `mailto:${CONTACT[mailbox]}${query}`;
+}

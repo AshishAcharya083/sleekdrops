@@ -10,7 +10,8 @@ import { formatScore } from '@lib/trust';
  * moved and when before the reader has to scroll for the reason.
  */
 export interface Props {
-  changes: readonly ScoreChange[];
+  /** Each change with its review's title and the "Why" cell, resolved by the page. */
+  changes: readonly { change: ScoreChange; title: string; why: string }[];
 }
 const { changes } = Astro.props;
 ---
@@ -21,15 +22,15 @@ const { changes } = Astro.props;
       <tr><th scope="col">Date</th><th scope="col">Score</th><th scope="col">Review</th><th scope="col">Why</th></tr>
     </thead>
     <tbody>
-      {changes.map((change) => (
+      {changes.map(({ change, title, why }) => (
         <tr>
           <td class="mono">{formatMedium(dayAsDate(change.date))}</td>
           <td class="mono">
             <s><span class="visually-hidden">was </span>{formatScore(change.from)}</s>
             <span aria-hidden="true"> → </span><span class="visually-hidden">, now </span>{formatScore(change.to)}
           </td>
-          <td><a href={`/blog/${change.reviewSlug}`}>{change.reviewTitle}</a></td>
-          <td>{change.reason}</td>
+          <td><a href={`/blog/${change.slug}`}>{title}</a></td>
+          <td>{why}</td>
         </tr>
       ))}
     </tbody>

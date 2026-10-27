@@ -8,12 +8,12 @@ import assert from 'node:assert/strict';
 
 import { categories } from '../data/categories.ts';
 import type { CategorySlug } from '../data/categories-types.ts';
-import type { ScoreChange } from '../data/score-changes.ts';
+import { SCORE_CHANGES, scoreChangesFor, type ScoreChange } from '../data/score-changes.ts';
 import {
   badgeGlossaryHref,
   bandRange,
   categoryMethodHref,
-  foldNewestFirst,
+  foldAfter,
   formatShare,
   INDEPENDENCE_MECHANISM,
   methodChangelog,
@@ -21,29 +21,68 @@ import {
   methodologyUpdated,
   methodVersionHref,
   nextVersions,
+  PAID_LINK_NOTE,
+  UNVERSIONED_SCORE_NOTE,
   publishedScoresEffect,
+  scoreBandHref,
   scoreChangeCountLabel,
-  scoreChangesNewestFirst,
+  scoreChangeWhy,
   scoreDistribution,
 } from './methodology.ts';
-import { BADGE_KINDS, METHOD_VERSIONS, SCORE_BANDS, type MethodVersion, type MethodVersionEntry } from './trust.ts';
+import {
+  BADGE_REGISTRY,
+  isCheckDay,
+  METHOD_VERSION_IDS,
+  METHOD_VERSIONS,
+  SCORE_BANDS,
+  type BadgeKind,
+  type MethodVersion,
+  type MethodVersionEntry,
+} from './trust.ts';
 
 test('links land on the frozen anchors, including the one the Review JSON-LD already emits', () => {
   assert.equal(methodologyHref(), '/how-we-rate');
   assert.equal(methodologyHref('bands'), '/how-we-rate#bands');
+  assert.equal(methodologyHref('score-changes'), '/how-we-rate#score-changes');
   assert.equal(methodVersionHref('1.0'), '/how-we-rate#method-v1-0');
+  assert.equal(scoreBandHref('strong'), '/how-we-rate#band-strong');
   assert.equal(badgeGlossaryHref('review-score'), '/how-we-rate#badge-review-score');
   assert.equal(categoryMethodHref('finance'), '/how-we-rate#category-finance');
 });
 
-test('every registry badge and every category gets its own anchor', () => {
+test('every band, registry badge, method version and category gets its own anchor', () => {
+  const kinds = Object.keys(BADGE_REGISTRY) as BadgeKind[];
+  assert.deepEqual(
+    kinds.map(badgeGlossaryHref),
+    kinds.map((kind) => `/how-we-rate#badge-${kind}`),
+  );
+  assert.deepEqual(
+    SCORE_BANDS.map((band) => scoreBandHref(band.id)),
+    SCORE_BANDS.map((band) => `/how-we-rate#band-${band.id}`),
+  );
+  assert.deepEqual(
+    categories.map((category) => categoryMethodHref(category.slug as CategorySlug)),
+    ['tech', 'home', 'fashion', 'health', 'finance', 'travel'].map((slug) => `/how-we-rate#category-${slug}`),
+  );
   const anchors = [
-    ...BADGE_KINDS.map(badgeGlossaryHref),
+    ...kinds.map(badgeGlossaryHref),
+    ...SCORE_BANDS.map((band) => scoreBandHref(band.id)),
     ...categories.map((category) => categoryMethodHref(category.slug as CategorySlug)),
     ...METHOD_VERSIONS.map((entry) => methodVersionHref(entry.version)),
   ];
   assert.equal(new Set(anchors).size, anchors.length);
-  assert.equal(categories.length, 6);
+});
+
+test('a version\'s anchor turns every dot into a dash', () => {
+  assert.equal(methodVersionHref('2.10' as MethodVersion), '/how-we-rate#method-v2-10');
+});
+
+test('the paid-link note is the frozen sentence', () => {
+  assert.equal(PAID_LINK_NOTE, 'Paid link. We may earn a commission if you buy. It never affects the score.');
+});
+
+test('the note beside an unversioned score names no version it cannot vouch for', () => {
+  assert.doesNotMatch(UNVERSIONED_SCORE_NOTE, /\d/);
 });
 
 test('band ranges cover the scale without gaps, and the lowest reads "Below"', () => {
@@ -108,43 +147,72 @@ test('a longer changelog reads newest first, with major and minor steps told apa
     log.map((entry) => [entry.version, entry.kind, entry.current]),
     [['2.0', 'major', true], ['1.2', 'minor', false], ['1.1', 'minor', false], ['1.0', 'first', false]],
   );
-  const { recent, older } = foldNewestFirst(log, 2);
-  assert.deepEqual(recent.map((entry) => entry.version), ['2.0', '1.2']);
-  assert.deepEqual(older.map((entry) => entry.anchor), ['method-v1-1', 'method-v1-0'], 'folded entries keep their ids');
-  assert.equal(foldNewestFirst(log.slice(0, 2), 2).older.length, 0);
+  const { shown, folded } = foldAfter(log, 2);
+  assert.deepEqual(shown.map((entry) => entry.version), ['2.0', '1.2']);
+  assert.deepEqual(folded.map((entry) => entry.anchor), ['method-v1-1', 'method-v1-0'], 'folded entries keep their ids');
+  assert.equal(foldAfter(log.slice(0, 2), 2).folded.length, 0);
 });
 
 test('the version rules name the next steps from the current version', () => {
   assert.deepEqual(nextVersions('1.0'), { major: '2.0', minor: '1.1' });
 });
 
-test('"Published scores" says what is true for the scores that exist', () => {
-  const [first] = methodChangelog();
-  assert.match(publishedScoresEffect(first, 0, 0), /^No scores were published before this version/);
-  assert.match(publishedScoresEffect(first, 320, 0), /^None moved\. Reviews published before this date carry Method v1\.0/);
-  assert.match(publishedScoresEffect(first, 320, 3), /^None moved by the method\./);
-  const [major, minor] = methodChangelog(history('1.0', '1.1', '2.0'));
-  assert.match(publishedScoresEffect(major, 320, 0), /re-checked/);
-  assert.equal(publishedScoresEffect(minor, 320, 0), 'None moved.');
-});
-
-const change = (date: string): ScoreChange => ({
+const change = (date: string, overrides: Partial<ScoreChange> = {}): ScoreChange => ({
+  slug: 'kettle-review',
   date,
-  reviewSlug: 'kettle-review',
-  reviewTitle: 'Kettle review',
   from: 4.6,
   to: 4.3,
-  reason: 'Re-checked.',
+  cause: 'retest',
+  methodVersion: '1.0',
+  reason: 'owner reports of failures rose.',
+  ...overrides,
+});
+
+test('"Published scores" says what is true for the scores that exist', () => {
+  const [first] = methodChangelog();
+  assert.match(publishedScoresEffect(first, 0, []), /^No scores were published before this version/);
+  assert.match(publishedScoresEffect(first, 320, []), /^None moved\. Reviews published before this date were scored the same way/);
+  assert.match(
+    publishedScoresEffect(first, 320, [change('2027-01-01'), change('2027-02-01'), change('2027-03-01')]),
+    /^None moved by this version\. Every score change since, 3 so far,/,
+  );
+  const [major, minor] = methodChangelog(history('1.0', '1.1', '2.0'));
+  const rescore = change('2027-04-01', { cause: 'method', methodVersion: '2.0' as MethodVersion });
+  assert.match(publishedScoresEffect(major, 320, [rescore, change('2027-02-01')]), /re-checked\. 1 re-scored so far/);
+  assert.equal(publishedScoresEffect(minor, 320, []), 'None moved.');
 });
 
 test('the score-change log header counts changes since the first method version', () => {
   assert.equal(scoreChangeCountLabel(0), 'since Method v1.0');
   assert.equal(scoreChangeCountLabel(1), '1 change since Method v1.0');
   assert.equal(scoreChangeCountLabel(14), '14 changes since Method v1.0');
-  assert.deepEqual(
-    scoreChangesNewestFirst([change('2026-12-04'), change('2027-02-11'), change('2027-01-28')]).map((c) => c.date),
-    ['2027-02-11', '2027-01-28', '2026-12-04'],
+});
+
+test('a review\'s score changes come newest first, and none for a review whose score never moved', () => {
+  const log = [change('2026-12-04'), change('2027-02-11'), change('2027-01-28', { slug: 'other-review' }), change('2027-01-02')];
+  assert.deepEqual(scoreChangesFor('kettle-review', log).map((c) => c.date), ['2027-02-11', '2027-01-02', '2026-12-04']);
+  assert.deepEqual(scoreChangesFor('no-such-review', log), []);
+  assert.deepEqual(scoreChangesFor('no-such-review'), []);
+});
+
+test('the "Why" cell says what moved the score before the reason', () => {
+  assert.equal(scoreChangeWhy(change('2027-01-01')), 'Re-checked: owner reports of failures rose.');
+  assert.equal(scoreChangeWhy(change('2027-01-01', { cause: 'correction' })), 'Correction: owner reports of failures rose.');
+  assert.equal(
+    scoreChangeWhy(change('2027-01-01', { cause: 'method', methodVersion: '2.0' as MethodVersion })),
+    'Re-scored under Method v2.0: owner reports of failures rose.',
   );
+});
+
+test('every recorded score change is a real move on a real day under a published method version', () => {
+  for (const entry of SCORE_CHANGES) {
+    assert.ok(isCheckDay(entry.date), `${entry.slug}: ${entry.date} is not a YYYY-MM-DD day`);
+    assert.ok(METHOD_VERSION_IDS.includes(entry.methodVersion), `${entry.slug}: unknown method version`);
+    for (const score of [entry.from, entry.to]) {
+      assert.ok(score >= 1 && score <= 5 && Number(score.toFixed(1)) === score, `${entry.slug}: ${score} is not a 1-5 one-decimal score`);
+    }
+    assert.notEqual(entry.from, entry.to, `${entry.slug}: a change has to move the score`);
+  }
 });
 
 test('"Last updated" is the later of the newest version and the newest score change', () => {

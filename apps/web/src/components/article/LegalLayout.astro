@@ -3,8 +3,7 @@ import Eyebrow from '@components/ui/Eyebrow.astro';
 
 /**
  * LegalLayout — shared chrome for /privacy and /disclaimer. Sticky TOC
- * on the left, prose on the right. The optional `hero` slot sits under the
- * date, for a page's own standing facts (the method chip on /how-we-rate).
+ * on the left, prose on the right.
  */
 export interface Props {
   eyebrow: string;
@@ -19,7 +18,6 @@ const { eyebrow, titleHtml, updated, toc } = Astro.props;
     <Eyebrow>{eyebrow}</Eyebrow>
     <h1 set:html={titleHtml} />
     <div class="updated">Last updated: {updated}</div>
-    <slot name="hero" />
   </div>
 </section>
 

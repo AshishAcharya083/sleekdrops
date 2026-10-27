@@ -2,6 +2,7 @@
 import BrandMark from '@components/ui/BrandMark.astro';
 import IconButton from '@components/ui/IconButton.astro';
 import { getActiveDeals } from '@data/deals';
+import { METHODOLOGY_PATH } from '@lib/methodology';
 import { NAV_ITEM_ATTRIBUTE } from '@lib/nav-experiment';
 
 /**
@@ -36,7 +37,7 @@ const navItems: NavItem[] = [
   { id: 'categories', label: 'Categories', href: '/categories' },
   ...(hasActiveDeals ? [{ id: 'deals' as const, label: 'Deals', href: '/deals' }] : []),
   { id: 'about', label: 'About', href: '/about', experimentFeature: 'remove-about-page' },
-  { id: 'how-we-rate', label: 'How we rate', href: '/how-we-rate', standing: true },
+  { id: 'how-we-rate', label: 'How we rate', href: METHODOLOGY_PATH, standing: true },
   { id: 'contact', label: 'Contact', href: '/contact' },
 ];
 const sectionItems = navItems.filter((item) => !item.standing);

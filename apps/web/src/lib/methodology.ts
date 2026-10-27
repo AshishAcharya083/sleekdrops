@@ -17,11 +17,13 @@ import type { ScoreChange } from '../data/score-changes.ts';
 import {
   METHOD_VERSIONS,
   SCORE_BANDS,
+  methodLabel,
   scoreBand,
   type BadgeKind,
   type MethodVersion,
   type MethodVersionEntry,
   type ScoreBand,
+  type ScoreBandId,
 } from './trust.ts';
 
 // --- Addresses ---------------------------------------------------------------
@@ -36,6 +38,7 @@ export type MethodologySection =
   | 'badges'
   | 'independence'
   | 'corrections'
+  | 'score-changes'
   | 'categories';
 
 /** "/how-we-rate", or "/how-we-rate#bands" for one section. */
@@ -50,6 +53,14 @@ export function methodVersionAnchor(version: MethodVersion): string {
 
 export function methodVersionHref(version: MethodVersion): string {
   return `${METHODOLOGY_PATH}#${methodVersionAnchor(version)}`;
+}
+
+export function scoreBandAnchor(id: ScoreBandId): string {
+  return `band-${id}`;
+}
+
+export function scoreBandHref(id: ScoreBandId): string {
+  return `${METHODOLOGY_PATH}#${scoreBandAnchor(id)}`;
 }
 
 export function badgeAnchor(kind: BadgeKind): string {
@@ -76,6 +87,14 @@ export const PAID_LINK_NOTE = 'Paid link. We may earn a commission if you buy. I
 /** How a score is given, in the few sentences a score explainer prints. */
 export const SCORING_SUMMARY =
   'Every SleekDrops score is a research score out of 5, given in tenths. We do not test products: a score is our reading of published tests, specifications and owner reports. Each score carries a one-word band and the method version it was given under.';
+
+/**
+ * Beside a score whose review records no method version - every review
+ * published before versions were recorded. It names no version, because the
+ * review does not say which one it was given under.
+ */
+export const UNVERSIONED_SCORE_NOTE =
+  'Scored before reviews recorded a method version, on the same scale and bands we publish today.';
 
 /** The plain statement the assessment section opens with. */
 export const NOT_TESTED_STATEMENT =
@@ -108,7 +127,7 @@ export const INDEPENDENCE_RULES: readonly IndependenceRule[] = [
   {
     title: 'No commercial party can change a score',
     statement:
-      'No commercial party can change a published score: it changes only through a re-check or a correction, and every change is logged publicly with its reason.',
+      'No commercial party can change a published score: it changes only through a re-check, a correction or a new method version, and every change is logged publicly with its reason.',
     proof: { label: 'Check', text: 'The score-change log below.' },
   },
   {
@@ -174,6 +193,9 @@ export function formatShare(share: number): string {
 /** Changelog entries shown before the rest fold into a disclosure. */
 export const CHANGELOG_VISIBLE = 2;
 
+/** Published scores below the Strong band listed before the rest fold away. */
+export const LOW_SCORES_VISIBLE = 5;
+
 export type ChangelogKind = 'first' | 'major' | 'minor';
 
 export const CHANGELOG_KIND_LABELS: Record<ChangelogKind, string> = {
@@ -205,9 +227,9 @@ export function methodChangelog(versions: readonly MethodVersionEntry[] = METHOD
     .reverse();
 }
 
-/** The latest entries to show open, and the older ones to fold away. */
-export function foldNewestFirst<T>(entries: readonly T[], visible: number): { recent: T[]; older: T[] } {
-  return { recent: entries.slice(0, visible), older: entries.slice(visible) };
+/** The first `visible` entries to show open, and the rest to fold away. */
+export function foldAfter<T>(entries: readonly T[], visible: number): { shown: T[]; folded: T[] } {
+  return { shown: entries.slice(0, visible), folded: entries.slice(visible) };
 }
 
 /** "2.0" and "1.1": the next major and minor steps from a version, for the version rules. */
@@ -219,23 +241,27 @@ export function nextVersions(version: MethodVersion): { major: string; minor: st
 /**
  * What a version did to the scores already published. The first version
  * reads the scored-review count, because "none moved" is only true of scores
- * that exist; later ones follow the version rules.
+ * that exist; later ones count the re-scores they caused.
  */
 export function publishedScoresEffect(
   entry: ChangelogEntry,
   scoredReviews: number,
-  scoreChanges: number,
+  scoreChanges: readonly ScoreChange[],
 ): string {
   switch (entry.kind) {
-    case 'first':
+    case 'first': {
       if (scoredReviews === 0) {
-        return `No scores were published before this version. Every score from now on carries Method v${entry.version}.`;
+        return `No scores were published before this version. Every score from now on carries ${methodLabel(entry.version)}.`;
       }
-      return scoreChanges === 0
-        ? `None moved. Reviews published before this date carry Method v${entry.version}, because the scoring did not change, only its description.`
-        : 'None moved by the method. Every score change since is a re-check or a correction, listed with its reason in the score-change log below.';
-    case 'major':
-      return 'Kept at their old version until each review is re-checked. Every re-score is listed in the score-change log below with its old score.';
+      if (scoreChanges.length === 0) {
+        return 'None moved. Reviews published before this date were scored the same way: this version wrote the method down, it did not change it.';
+      }
+      return `None moved by this version. Every score change since, ${scoreChanges.length} so far, is listed with its reason in the score-change log below.`;
+    }
+    case 'major': {
+      const rescored = scoreChanges.filter((change) => change.cause === 'method' && change.methodVersion === entry.version).length;
+      return `Kept at their old version until each review is re-checked. ${rescored} re-scored so far, each listed in the score-change log below with its old score.`;
+    }
     case 'minor':
       return 'None moved.';
   }
@@ -246,16 +272,23 @@ export function publishedScoresEffect(
 /** Score changes shown before the rest fold into a disclosure. */
 export const SCORE_CHANGES_VISIBLE = 4;
 
-/** Newest first; a change on the same day keeps its recorded order. */
-export function scoreChangesNewestFirst(changes: readonly ScoreChange[]): ScoreChange[] {
-  return [...changes].sort((a, b) => b.date.localeCompare(a.date));
-}
-
 /** "since Method v1.0", "1 change since Method v1.0", "14 changes since Method v1.0". */
 export function scoreChangeCountLabel(count: number, firstVersion: MethodVersion = METHOD_VERSIONS[0].version): string {
-  const since = `since Method v${firstVersion}`;
+  const since = `since ${methodLabel(firstVersion)}`;
   if (count === 0) return since;
   return `${count} ${count === 1 ? 'change' : 'changes'} ${since}`;
+}
+
+/** The log's "Why" cell: what moved the score, then the reason. */
+export function scoreChangeWhy(change: ScoreChange): string {
+  switch (change.cause) {
+    case 'retest':
+      return `Re-checked: ${change.reason}`;
+    case 'method':
+      return `Re-scored under ${methodLabel(change.methodVersion)}: ${change.reason}`;
+    case 'correction':
+      return `Correction: ${change.reason}`;
+  }
 }
 
 /**

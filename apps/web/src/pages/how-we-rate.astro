@@ -3,13 +3,16 @@ import BaseLayout from '@layouts/BaseLayout.astro';
 import LegalLayout from '@components/article/LegalLayout.astro';
 import Button from '@components/ui/Button.astro';
 import ChangelogList from '@components/methodology/ChangelogList.astro';
+import LowScoreList from '@components/methodology/LowScoreList.astro';
 import ScoreChangeTable from '@components/methodology/ScoreChangeTable.astro';
 import { categories } from '@data/categories';
 import type { CategorySlug } from '@data/categories-types';
-import { SCORE_CHANGES } from '@data/score-changes';
+import { SCORE_CHANGES, scoreChangesNewestFirst } from '@data/score-changes';
+import { contactHref, CONTACT } from '@data/site';
 import { formatLong, formatMedium } from '@lib/format';
 import {
   CHANGELOG_VISIBLE,
+  LOW_SCORES_VISIBLE,
   INDEPENDENCE_RULES,
   NOT_TESTED_STATEMENT,
   SCORE_CHANGES_VISIBLE,
@@ -18,15 +21,16 @@ import {
   bandRange,
   categoryAnchor,
   dayAsDate,
-  foldNewestFirst,
+  foldAfter,
   formatShare,
   methodChangelog,
   methodVersionAnchor,
   methodologyUpdated,
   nextVersions,
   publishedScoresEffect,
+  scoreBandAnchor,
   scoreChangeCountLabel,
-  scoreChangesNewestFirst,
+  scoreChangeWhy,
   scoreDistribution,
   type MethodologySection,
 } from '@lib/methodology';
@@ -71,14 +75,25 @@ const joinList = (items: string[]) =>
 
 // --- Scores given -------------------------------------------------------------
 
-const scored = (await getAllPosts()).flatMap((post) =>
-  post.data.postType === 'review' && post.data.product ? [post.data.product.rating] : [],
+const posts = await getAllPosts();
+const scoredReviews = posts.flatMap((post) =>
+  post.data.postType === 'review' && post.data.product
+    ? [{ slug: post.slug, title: post.data.title, rating: post.data.product.rating }]
+    : [],
 );
-const distribution = scoreDistribution(scored);
+const distribution = scoreDistribution(scoredReviews.map((review) => review.rating));
 const hasScores = distribution.count > 0;
 const modalBand = distribution.bands.reduce((top, entry) => (entry.count > top.count ? entry : top));
 const skewsTop = hasScores && modalBand.band.id === SCORE_BANDS[0].id;
 const builtOn = formatLong(new Date());
+
+// A high average is only believable next to the low scores we did publish, so
+// every review scored below the Strong band is listed and linked, lowest first.
+const strongBand = SCORE_BANDS.find((band) => band.id === 'strong')!;
+const belowStrong = scoredReviews
+  .filter((review) => scoreBand(review.rating).min < strongBand.min)
+  .sort((a, b) => a.rating - b.rating);
+const lowScores = foldAfter(belowStrong, LOW_SCORES_VISIBLE);
 
 // --- The annotated example ----------------------------------------------------
 
@@ -92,10 +107,18 @@ const currentAnchor = methodVersionAnchor(CURRENT_METHOD_VERSION);
 const scoreChanges = scoreChangesNewestFirst(SCORE_CHANGES);
 const changelog = methodChangelog().map((entry) => ({
   ...entry,
-  effect: publishedScoresEffect(entry, distribution.count, scoreChanges.length),
+  effect: publishedScoresEffect(entry, distribution.count, scoreChanges),
 }));
-const versionLog = foldNewestFirst(changelog, CHANGELOG_VISIBLE);
-const changeLog = foldNewestFirst(scoreChanges, SCORE_CHANGES_VISIBLE);
+const versionLog = foldAfter(changelog, CHANGELOG_VISIBLE);
+const titleBySlug = new Map(posts.map((post) => [post.slug, post.data.title]));
+const scoreChangeRows = scoreChanges.map((change) => {
+  const title = titleBySlug.get(change.slug);
+  if (title === undefined) {
+    throw new Error(`score-changes.ts: a ${change.date} change names "${change.slug}", which is not a published post`);
+  }
+  return { change, title, why: scoreChangeWhy(change) };
+});
+const changeLog = foldAfter(scoreChangeRows, SCORE_CHANGES_VISIBLE);
 const updated = formatLong(dayAsDate(methodologyUpdated(METHOD_VERSIONS, scoreChanges)));
 const next = nextVersions(CURRENT_METHOD_VERSION);
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -208,15 +231,14 @@ const meta = buildMeta({
     updated={updated}
     toc={toc.map((item) => ({ href: `#${item.id}`, label: item.label }))}
   >
-    <div class="method-line" slot="hero">
-      <a class="method-chip" href={`#${currentAnchor}`}>
-        <b>{methodLabel(CURRENT_METHOD_VERSION)}</b>
-        <span class="sep" aria-hidden="true">·</span>
-        <span>in effect since {formatMedium(dayAsDate(currentVersion.date))}</span>
-      </a>
-    </div>
-
     <div class="rate">
+      <p class="method-line">
+        <a class="method-chip" href={`#${currentAnchor}`}>
+          <b>{methodLabel(CURRENT_METHOD_VERSION)}</b>
+          <span class="sep" aria-hidden="true">·</span>
+          <span>in effect since {formatMedium(dayAsDate(currentVersion.date))}</span>
+        </a>
+      </p>
       <div class="summary" id="summary">
         <strong>Plain summary</strong>
         {SCORING_SUMMARY} Each one links back to this page.{' '}
@@ -250,7 +272,7 @@ const meta = buildMeta({
         <thead><tr><th scope="col">Score</th><th scope="col">Band</th><th scope="col">What it means</th></tr></thead>
         <tbody>
           {SCORE_BANDS.map((band) => (
-            <tr id={`band-${band.id}`} class:list={{ 'is-example': band.id === exampleBand.id }}>
+            <tr id={scoreBandAnchor(band.id)} class:list={{ 'is-example': band.id === exampleBand.id }}>
               <td class="range">{bandRange(band)}</td>
               <td class="label"><span class="band-word">{band.label}</span></td>
               <td class="meaning"><strong>{band.meaning}</strong></td>
@@ -292,7 +314,7 @@ const meta = buildMeta({
             </ul>
             <figcaption class="dist-foot">
               {formatShare(modalBand.share)} of reviews land in the {modalBand.band.label} band.{' '}
-              {skewsTop && 'That is mostly selection: we start from products that independent testers already rate, so we rarely write up one we would tell you to avoid. It also means the band, not the decimal, is what separates a strong pick from an excellent one. '}
+              {skewsTop && `That is mostly selection: we start from products that independent testers already rate, so we rarely write up one we would tell you to avoid. Every score we did publish below ${formatScore(strongBand.min)} is listed under this chart, so you can check the low end for yourself. It also means the band, not the decimal, is what separates a strong pick from an excellent one. `}
               Counted from all {plural(distribution.count, 'published review', 'published reviews')} on {builtOn}.
             </figcaption>
           </>
@@ -306,6 +328,27 @@ const meta = buildMeta({
           </div>
         )}
       </figure>
+      {hasScores && (
+        <div class="low-scores">
+          <h3>Every score we published below {formatScore(strongBand.min)}</h3>
+          {belowStrong.length === 0 ? (
+            <p>None. Every published review scores {formatScore(strongBand.min)} or higher.</p>
+          ) : (
+            <>
+              <LowScoreList reviews={lowScores.shown} />
+              {lowScores.folded.length > 0 && (
+                <details class="fold low-more">
+                  <summary>
+                    <span class="fold-label">Show {lowScores.folded.length} more</span>
+                    <span class="chev" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" /></svg></span>
+                  </summary>
+                  <LowScoreList reviews={lowScores.folded} />
+                </details>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       <h2 id="assessment">How we assess <em>products</em></h2>
       <p class="plain-statement">{NOT_TESTED_STATEMENT}</p>
@@ -342,17 +385,17 @@ const meta = buildMeta({
           </tr>
         </tbody>
       </table>
-      <ChangelogList entries={versionLog.recent} />
-      {versionLog.older.length > 0 && (
+      <ChangelogList entries={versionLog.shown} />
+      {versionLog.folded.length > 0 && (
         <details class="fold log-older" data-fold-anchors>
           <summary>
             <span class="fold-label">
-              Show {plural(versionLog.older.length, 'earlier version', 'earlier versions')}
-              <span class="meta">v{versionLog.older[0].version}{versionLog.older.length > 1 && ` – v${versionLog.older.at(-1)!.version}`}</span>
+              Show {plural(versionLog.folded.length, 'earlier version', 'earlier versions')}
+              <span class="meta">v{versionLog.folded[0].version}{versionLog.folded.length > 1 && ` – v${versionLog.folded.at(-1)!.version}`}</span>
             </span>
             <span class="chev" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" /></svg></span>
           </summary>
-          <ChangelogList entries={versionLog.older} nested />
+          <ChangelogList entries={versionLog.folded} nested />
         </details>
       )}
 
@@ -435,10 +478,10 @@ const meta = buildMeta({
         <li><b>Your source</b>Where the right figure is published, if you have it.</li>
       </ol>
       <div class="report-actions">
-        <Button href="mailto:corrections@sleekdrops.com?subject=Correction" arrow>Report an error</Button>
+        <Button href={contactHref('corrections', 'Correction')} arrow>Report an error</Button>
         <Button href="#score-changes" variant="outline">See score changes</Button>
       </div>
-      <p>Email goes to <a href="mailto:corrections@sleekdrops.com">corrections@sleekdrops.com</a>. We correct a confirmed error as soon as we can, note the change on the article, and re-stamp its review date. When a correction or a re-check moves a score, the change is listed here with the old score, the new one, the date and the reason.</p>
+      <p>Email goes to <a href={contactHref('corrections')}>{CONTACT.corrections}</a>. We correct a confirmed error as soon as we can, note the change on the article, and re-stamp its review date. When a correction, a re-check or a new method version moves a score, the change is listed here with the old score, the new one, the date and the reason.</p>
 
       <section class="changes" id="score-changes" aria-labelledby="score-changes-title">
         <div class="changes-head">
@@ -455,15 +498,15 @@ const meta = buildMeta({
           </div>
         ) : (
           <>
-            <ScoreChangeTable changes={changeLog.recent} />
+            <ScoreChangeTable changes={changeLog.shown} />
             <div class="scroll-hint">Scroll sideways to see the reason.</div>
-            {changeLog.older.length > 0 && (
+            {changeLog.folded.length > 0 && (
               <details class="fold changes-more">
                 <summary>
-                  <span class="fold-label">Show {plural(changeLog.older.length, 'earlier change', 'earlier changes')}</span>
+                  <span class="fold-label">Show {plural(changeLog.folded.length, 'earlier change', 'earlier changes')}</span>
                   <span class="chev" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" /></svg></span>
                 </summary>
-                <ScoreChangeTable changes={changeLog.older} />
+                <ScoreChangeTable changes={changeLog.folded} />
               </details>
             )}
           </>
@@ -525,8 +568,8 @@ const meta = buildMeta({
 </script>
 
 <style>
-  /* The hero's method chip. */
-  .method-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 14px; }
+  /* The current method, first thing under the title. */
+  .rate .method-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 16px; }
   .method-chip {
     display: inline-flex;
     align-items: center;
@@ -681,6 +724,9 @@ const meta = buildMeta({
   .rate .dist-empty svg { flex-shrink: 0; width: 32px; height: 32px; fill: none; stroke: var(--ink-2); stroke-width: 1.5; }
   .rate .dist-empty p { margin: 0; font-size: 15px; color: var(--ink-2); }
   .rate .dist-empty p + p { margin-top: 6px; font-size: 13px; color: var(--muted); }
+  .rate .low-scores h3 { margin: 0 0 4px; font-family: var(--font-body); font-size: 15px; font-weight: 700; letter-spacing: 0; line-height: 1.4; color: var(--ink); }
+  .rate .low-scores > p { margin: 0; font-size: 15px; }
+  .rate .low-more > summary { min-height: 48px; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
 
   /* ---- How we assess ---- */
   .rate .plain-statement {
