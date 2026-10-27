@@ -7,8 +7,8 @@ import { HeroImageField } from '../HeroImageField';
 import { usePlatform, usePoll } from '../hooks';
 
 /**
- * Published — the live site's content (Cloudflare D1 posts table). Deleting a
- * row removes it from D1 and fires the content-updated dispatch, so the next
+ * Published — the live site's content (the Supabase posts table). Deleting a
+ * row removes it there and fires the content-updated dispatch, so the next
  * site build no longer includes the page (orphaned pipeline-authored affiliate
  * links are cleaned up with it).
  */
@@ -23,7 +23,7 @@ export function Published() {
   const editing = posts.find((p) => p.slug === heroFor) ?? null;
 
   const remove = async (post: PublishedPost) => {
-    if (!window.confirm(`Delete "${post.title}" (${post.slug}) from the site?\nThis removes it from D1 — the next build drops the page.`)) {
+    if (!window.confirm(`Delete "${post.title}" (${post.slug}) from the site?\nThis removes it from Supabase — the next build drops the page.`)) {
       return;
     }
     setBusy(post.slug);
@@ -129,7 +129,7 @@ export function Published() {
             {data && posts.length === 0 && (
               <tr>
                 <td colSpan={10} className="muted" style={{ textAlign: 'center', padding: 24 }}>
-                  no {platform.name} posts in D1
+                  no {platform.name} posts published yet
                 </td>
               </tr>
             )}
@@ -162,7 +162,7 @@ function PostLink({ url, slug }: { url: string | null; slug: string }) {
 }
 
 /**
- * Hero image for a post that is already live. This edits the D1 row itself
+ * Hero image for a post that is already live. This edits the post row itself
  * rather than a pipeline article, which is the only way to re-image the older
  * posts — most of what is on the site was written before the agent platform and
  * has no article behind it. Saving fires a site rebuild.
@@ -186,7 +186,7 @@ function PostHeroDrawer({
     `${what} for ${post.slug}` +
     (res.dispatched
       ? ' — site rebuild dispatched (~90s to live).'
-      : ` — saved in D1, but the rebuild was NOT dispatched: ${res.dispatchError ?? 'unknown'}`);
+      : ` — saved in Supabase, but the rebuild was NOT dispatched: ${res.dispatchError ?? 'unknown'}`);
 
   /** Attach a file, or (file omitted) re-label the hero already there. */
   const save = async (file: File | null) => {

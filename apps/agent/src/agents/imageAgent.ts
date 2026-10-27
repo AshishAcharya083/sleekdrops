@@ -5,13 +5,14 @@
 //      stock-site overlays / promo text?).
 //   2. GENERATE: if nothing usable is found, generate a clean 16:9 editorial
 //      hero with the Gemini image model.
-// Whatever wins is uploaded to our own GCS bucket and the public URL goes into
-// frontmatter (heroImage/heroAlt) — never a hotlink to someone else's server.
+// Whatever wins is uploaded to our own Supabase Storage bucket and the public
+// URL goes into frontmatter (heroImage/heroAlt) — never a hotlink to someone
+// else's server.
 //
 // This stage degrades, never blocks: any failure returns heroImage null and
 // the site keeps rendering its cover-fill fallback.
 import { generateImage, visionJson } from '../llm/genai.js';
-import { gcsConfigured, uploadPublicImage } from '../tools/gcs.js';
+import { storageConfigured, uploadPublicImage } from '../tools/storage.js';
 import { tavilyImageSearch } from '../tools/tavily.js';
 import { agentGoalBlock, type PromptContext } from './context.js';
 import type { HeroImageSource } from '../distribution/types.js';
@@ -72,11 +73,12 @@ export async function runImageAgent(
   article: ArticleRow,
   visionModel: string,
 ): Promise<ImageResult> {
-  if (!gcsConfigured()) {
+  if (!storageConfigured()) {
     return {
       heroImage: null,
       heroAlt: null,
-      summary: 'skipped — GCS_IMAGES_BUCKET not configured; cover fill will render instead',
+      summary:
+        'skipped — Supabase Storage not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY); cover fill will render instead',
       source: null,
     };
   }

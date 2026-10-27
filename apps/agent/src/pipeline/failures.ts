@@ -79,6 +79,15 @@ const TRANSIENT_SIGNATURES: ReadonlyArray<{ signal: string; pattern: RegExp }> =
     signal: 'transport',
     pattern: /\bECONNRESET\b|\bECONNREFUSED\b|\bENOTFOUND\b|\bEAI_AGAIN\b|\bEPIPE\b|fetch failed|socket hang up|network error/i,
   },
+  // The publish stage writes to a remote Postgres now (Supabase's pooler), and
+  // a connection it drops or recycles mid-statement is the same wobble an HTTP
+  // 503 from Cloudflare D1 used to be. node-postgres's own words for the drop,
+  // and the server's SQLSTATEs for an administrator shutdown (57P01) and a
+  // failed connection (08006).
+  {
+    signal: 'database',
+    pattern: /Connection terminated unexpectedly|terminating connection due to administrator command|\b57P01\b|\b08006\b/i,
+  },
   // Provider 429/5xx. Matched through an HTTP-status spelling rather than a
   // bare number, so an error quoting a price or a token count is not mistaken
   // for a throttled provider.

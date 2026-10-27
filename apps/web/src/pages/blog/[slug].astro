@@ -13,6 +13,7 @@ import Sources from '@components/article/Sources.astro';
 import TrustStack from '@components/article/TrustStack.astro';
 import Verdict from '@components/article/Verdict.astro';
 import TableOfContents from '@components/article/TableOfContents.astro';
+import AdUnit from '@components/ads/AdUnit.astro';
 import AffiliateDisclosure from '@components/affiliate/AffiliateDisclosure.astro';
 import ProsConsList from '@components/affiliate/ProsConsList.astro';
 import PickEvidence from '@components/affiliate/PickEvidence.astro';
@@ -26,6 +27,7 @@ import { getCategory } from '@data/categories';
 import { buildFaqSchema, buildMeta, buildPostSchema, extractFaq } from '@lib/seo';
 import { emphasiseLastWord, formatLong, formatMedium, formatMonth } from '@lib/format';
 import { reviewStatus, sourceCountLabel } from '@lib/sources';
+import { adsEnv } from '@lib/ads-env';
 
 export const getStaticPaths = (async () => {
   const posts = await getAllPosts();
@@ -98,6 +100,10 @@ const asideSummary = [
   post.data.sources?.length ? sourceCountLabel(post.data.sources.length) : 'sources inline',
   `${review.inferred ? 'updated' : 'reviewed'} ${formatMedium(review.date)}`,
 ].join(' · ');
+// Journey by Mediavine's sidebar unit needs a static rail at least 300px wide
+// (see the stylesheet below), so the rail changes shape only on a build that
+// actually loads Journey's wrapper. Every other build keeps the sticky rail.
+const journeySidebar = Boolean(adsEnv().mediavineSiteId);
 ---
 <BaseLayout
   {...meta}
@@ -182,7 +188,7 @@ const asideSummary = [
       </div>
     </header>
 
-    <div class="article-grid">
+    <div class:list={['article-grid', journeySidebar && 'article-grid--journey']}>
       <div class="article-main">
         <ArticleBody>
           {product && (
@@ -217,11 +223,11 @@ const asideSummary = [
         />
       </div>
 
-      {/* `journey-sidebar` is the ad partner's landmark for the sidebar: its
-          wrapper appends the sticky sidebar unit to this column and drives the
-          stickiness itself, which is why the column is position: static below
-          and at least 300px wide. Unique per page by construction. */}
-      <aside class="article-aside journey-sidebar">
+      {/* `journey-sidebar` is Journey by Mediavine's landmark for the sidebar:
+          its wrapper appends a sticky sidebar unit to this column and drives
+          the stickiness itself. Inert on a build without a Mediavine site id.
+          Unique per page by construction. */}
+      <aside class:list={['article-aside', 'journey-sidebar', journeySidebar && 'article-aside--journey']}>
         {/* On phones and tablets the rail reflows above the prose, where a
             screenful of metadata otherwise sits between the headline and the
             first paragraph. It collapses into one row there, and the stylesheet
@@ -243,6 +249,7 @@ const asideSummary = [
             />
           </div>
         </details>
+        <AdUnit placement="sidebar" />
       </aside>
     </div>
 
@@ -362,11 +369,8 @@ const asideSummary = [
 
   .article-grid {
     display: grid;
-    /* 300px is the ad partner's floor for a sidebar that can hold its sticky
-       unit (excluding padding), and the column has to stay visible from a
-       1100px viewport up - the single-column breakpoint below is 1000px. */
-    grid-template-columns: 1fr 300px;
-    gap: 56px;
+    grid-template-columns: 1fr 280px;
+    gap: 64px;
     padding: 64px 0 0;
     align-items: start;
   }
@@ -391,7 +395,7 @@ const asideSummary = [
      permanently open sidebar from 1001px up. The element ships closed in the
      HTML and the wide layout opens it in CSS, so the desktop rail is complete
      at first paint - no script, and nothing appears late enough to push the
-     partner's sidebar unit beneath it down the page. */
+     ad slot beneath it down the page. */
   .aside-details { border-bottom: 1px solid var(--hairline); }
   .aside-details > summary {
     display: flex;
@@ -440,17 +444,45 @@ const asideSummary = [
     .aside-details[open] { border-bottom: 0; }
   }
 
-  /* Static, and the full height of the grid row, on purpose. The rail used to
-     be a sticky, viewport-bounded scroll container; the ad partner's wrapper
-     appends its sidebar unit to the end of this column and makes that unit
-     sticky itself once the reader scrolls past the rail's contents, and it
-     requires the container to be position: static for that to hold. A sticky
-     rail alongside would pin the jump list and the unit to the same top edge
-     and stack them. The jump list scrolls with the page instead; its active
-     entry still tracks the reading position while it is on screen. */
   .article-aside {
-    position: static;
-    align-self: stretch;
-    min-width: 0;
+    position: sticky;
+    top: 100px;
+    /* Bounded to the viewport and scrollable within it. A sticky rail taller
+       than the screen moves with the scroll, so its lower half is unreachable —
+       which for the ad slot beneath the contents means an impression that can
+       never be viewed, and for a long table of contents meant entries nobody
+       could reach. */
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* The rail is a scroll container now, so leave room for its scrollbar
+       rather than letting one crop the unit's right edge. */
+    scrollbar-gutter: stable;
+  }
+
+  /* Journey by Mediavine's rail, only on a build that loads its wrapper (the
+     modifiers are set from PUBLIC_MEDIAVINE_SITE_ID). 300px is Journey's floor
+     for a sidebar that can hold its sticky unit, and the column has to stay
+     visible from a 1100px viewport up - the single-column breakpoint above is
+     1000px. Static, and the full height of the grid row, on purpose: Journey's
+     wrapper appends its unit to the end of this column and makes it sticky
+     itself once the reader scrolls past the rail's contents, which needs the
+     container to be position: static and not a scroll container. A sticky
+     rail alongside would pin the jump list and the unit to the same top edge
+     and stack them. Desktop only, so the phone layout's single column wins. */
+  @media (min-width: 1001px) {
+    .article-grid--journey {
+      grid-template-columns: 1fr 300px;
+      gap: 56px;
+    }
+    .article-aside.article-aside--journey {
+      position: static;
+      align-self: stretch;
+      min-width: 0;
+      max-height: none;
+      overflow-y: visible;
+      overscroll-behavior: auto;
+      scrollbar-gutter: auto;
+    }
   }
 </style>

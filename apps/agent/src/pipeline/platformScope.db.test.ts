@@ -45,7 +45,7 @@ const seed: PlatformSeed = {
     name: 'Scope test',
     monetisation: 'none',
     publishTarget: {
-      d1DatabaseIdEnv: 'SCOPE_TEST_D1_DATABASE_ID',
+      contentDatabaseUrlEnv: 'SCOPE_TEST_CONTENT_DATABASE_URL',
       githubRepoEnv: 'SCOPE_TEST_GITHUB_REPO',
       siteUrlEnv: 'SCOPE_TEST_SITE_URL',
       rebuildHookEnv: null,

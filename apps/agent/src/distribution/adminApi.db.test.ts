@@ -84,7 +84,7 @@ test('the panel reads channel staleness and the queue, never a token', { skip },
   const soon = new Date(Date.now() + TOKEN_STALE_WINDOW_MS / 2).toISOString();
   const connection = await connect(soon);
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   const res = await app.request('/api/distribution', { headers: AUTH });
   assert.equal(res.status, 200);
@@ -128,7 +128,7 @@ test('distribution is behind the admin bearer like everything else', { skip }, a
 test('an article carries its own distribution queue', { skip }, async () => {
   const connection = await connect(null);
   const piece = await article();
-  await enqueuePublishedArticle(piece, { d1Status: 'published' });
+  await enqueuePublishedArticle(piece, { postStatus: 'published' });
 
   const res = await app.request(`/api/articles/${piece.id}`, { headers: AUTH });
   assert.equal(res.status, 200);

@@ -7,10 +7,10 @@ import { mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 delete process.env.TAVILY_API_KEY;
-delete process.env.CLOUDFLARE_ACCOUNT_ID;
-delete process.env.CLOUDFLARE_D1_TOKEN;
-delete process.env.D1_DATABASE_ID;
-process.env.GCS_IMAGES_BUCKET = 'platform-prompts-bucket';
+// The image stage stands down without somewhere to upload to; nothing is ever
+// uploaded here, because the model stub answers before any image exists.
+process.env.SUPABASE_URL = 'https://platform-prompts.supabase.co';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'platform-prompts-key';
 
 const { UsageTracker } = await import('../llm/index.js');
 const { withModelStub } = await import('../llm/modelStub.js');
@@ -68,7 +68,7 @@ const seed: PlatformSeed = {
     scoutQueries: ['platform query'],
     agentGoals: Object.fromEntries(AGENTS.map((agent) => [agent, `Goal for the ${agent} stage.`])),
     publishTarget: {
-      d1DatabaseIdEnv: 'TESTBRAND_D1',
+      contentDatabaseUrlEnv: 'TESTBRAND_CONTENT_DATABASE_URL',
       githubRepoEnv: 'TESTBRAND_REPO',
       siteUrlEnv: 'TESTBRAND_URL',
       rebuildHookEnv: null,

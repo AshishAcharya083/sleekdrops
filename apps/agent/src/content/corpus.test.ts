@@ -1,38 +1,34 @@
 // The corpus query is the only I/O the scanner depends on, and it runs inside
 // a review round. So the two things that matter are the SQL it actually sends
-// (D1 is a live table the website builds from) and that nothing it can hit -
-// missing credentials, a 500, a site with no posts yet - is allowed to fail
-// the round.
+// (posts is a live table the website builds from) and that nothing it can hit -
+// an unset database, a failed query, a site with no posts yet - is allowed to
+// fail the round.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
-process.env.D1_DATABASE_ID = 'test-database';
-process.env.CLOUDFLARE_D1_TOKEN = 'test-token';
+// SleekDrops' content database is DATABASE_URL itself, and these tests never
+// open it: every query below is answered by a stand-in for the pool.
+process.env.DATABASE_URL = 'postgres://corpus:test@localhost:5/corpus_test';
 
-const { config } = await import('../config.js');
+const { pool } = await import('../db/pool.js');
 const { loadPublishedCorpus, DEFAULT_CORPUS_LIMIT } = await import('./corpus.js');
 const { detectSlop } = await import('./slop.js');
 
 interface Sent {
-  url: string;
   sql: string;
   params: unknown[];
 }
 
-/** Stand in for D1, capturing the query and replying with `rows`. */
-function stubD1(rows: unknown[], ok = true): { sent: Sent[]; restore: () => void } {
-  const original = globalThis.fetch;
+/** Stand in for the content store, capturing the query and replying with `rows` - or failing with them. */
+function stubStore(rows: unknown[] | Error): { sent: Sent[]; restore: () => void } {
+  const original = pool.query;
   const sent: Sent[] = [];
-  globalThis.fetch = (async (url: string, init: RequestInit) => {
-    const body = JSON.parse(String(init.body)) as { sql: string; params: unknown[] };
-    sent.push({ url: String(url), sql: body.sql, params: body.params });
-    return new Response(JSON.stringify(ok ? { success: true, result: [{ results: rows }] } : { success: false, errors: ['nope'] }), {
-      status: ok ? 200 : 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }) as typeof fetch;
-  return { sent, restore: () => { globalThis.fetch = original; } };
+  pool.query = (async (sql: string, params: unknown[] = []) => {
+    sent.push({ sql, params });
+    if (rows instanceof Error) throw rows;
+    return { rows };
+  }) as unknown as typeof pool.query;
+  return { sent, restore: () => { pool.query = original; } };
 }
 
 /** Run `fn` with console.warn captured rather than printed. */
@@ -54,8 +50,8 @@ const row = (slug: string, body: string, pubDate: string | null = '2026-03-01') 
   pub_date: pubDate,
 });
 
-test('asks D1 for published bodies only, newest first, excluding this article', async () => {
-  const stub = stubD1([row('best-air-fryers', 'The Ninja AF160 holds 5.7 litres.')]);
+test('asks the content store for published bodies only, newest first, excluding this article', async () => {
+  const stub = stubStore([row('best-air-fryers', 'The Ninja AF160 holds 5.7 litres.')]);
   try {
     const corpus = await loadPublishedCorpus({ excludeSlug: 'best-stick-vacuums' });
 
@@ -63,7 +59,7 @@ test('asks D1 for published bodies only, newest first, excluding this article', 
     const [query] = stub.sent;
     assert.match(query.sql, /FROM posts/);
     assert.match(query.sql, /status = 'published'/);
-    assert.match(query.sql, /ORDER BY pub_date DESC/);
+    assert.match(query.sql, /ORDER BY posts\.pub_date DESC/);
     assert.deepEqual(query.params, ['best-stick-vacuums', DEFAULT_CORPUS_LIMIT]);
     assert.deepEqual(corpus, [
       {
@@ -79,7 +75,7 @@ test('asks D1 for published bodies only, newest first, excluding this article', 
 });
 
 test('takes a bare limit as well as an options object, and caps it', async () => {
-  const stub = stubD1([]);
+  const stub = stubStore([]);
   try {
     await loadPublishedCorpus(5);
     assert.deepEqual(stub.sent[0].params, ['', 5]);
@@ -95,7 +91,7 @@ test('takes a bare limit as well as an options object, and caps it', async () =>
 });
 
 test('drops rows with no body rather than handing the scanner an empty document', async () => {
-  const stub = stubD1([row('a', ''), row('b', '   '), row('c', 'Real prose.', null)]);
+  const stub = stubStore([row('a', ''), row('b', '   '), row('c', 'Real prose.', null)]);
   try {
     const corpus = await loadPublishedCorpus();
     assert.deepEqual(
@@ -109,7 +105,7 @@ test('drops rows with no body rather than handing the scanner an empty document'
 });
 
 test('a failed query warns once and returns an empty corpus', async () => {
-  const stub = stubD1([], false);
+  const stub = stubStore(new Error('relation "posts" does not exist'));
   try {
     const { result, warnings } = await quiet(() => loadPublishedCorpus());
     assert.deepEqual(result, []);
@@ -120,30 +116,30 @@ test('a failed query warns once and returns an empty corpus', async () => {
   }
 });
 
-test('missing D1 credentials warn and return an empty corpus, they do not throw', async () => {
-  const accountId = config.d1.accountId;
-  config.d1.accountId = '';
-  const stub = stubD1([]);
+test('an unset content database warns and returns an empty corpus, it does not throw', async () => {
+  const url = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
+  const stub = stubStore([]);
   try {
     const { result, warnings } = await quiet(() => loadPublishedCorpus());
     assert.deepEqual(result, []);
-    assert.equal(stub.sent.length, 0, 'no request is attempted without credentials');
+    assert.equal(stub.sent.length, 0, 'no query is attempted without a database to send it to');
     assert.match(warnings[0], /scanning this draft in isolation/);
+    assert.match(warnings[0], /DATABASE_URL is not set/);
   } finally {
     stub.restore();
-    config.d1.accountId = accountId;
+    process.env.DATABASE_URL = url;
   }
 });
 
-test('the network dying mid-round does not fail the round', async () => {
-  const original = globalThis.fetch;
-  globalThis.fetch = (() => Promise.reject(new Error('ECONNRESET'))) as typeof fetch;
+test('the database dying mid-round does not fail the round', async () => {
+  const stub = stubStore(Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }));
   try {
     const { result, warnings } = await quiet(() => loadPublishedCorpus());
     assert.deepEqual(result, []);
     assert.match(warnings[0], /ECONNRESET/);
   } finally {
-    globalThis.fetch = original;
+    stub.restore();
   }
 });
 
@@ -156,7 +152,7 @@ without a caveat.
 
 JBL rates the Flip 6 at 12 hours of playback, and the IP67 rating means a
 poolside drop by the pool is survivable and not the end of the speaker.`;
-  const stub = stubD1([row('best-portable-bluetooth-speakers', opening)]);
+  const stub = stubStore([row('best-portable-bluetooth-speakers', opening)]);
   try {
     const corpus = await loadPublishedCorpus({ excludeSlug: 'best-stick-vacuums' });
     const draft = opening.replace(/Bluetooth speaker/g, 'stick vacuum').replace(/JBL Flip 6/g, 'Dyson V15');

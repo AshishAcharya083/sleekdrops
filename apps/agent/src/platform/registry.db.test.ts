@@ -139,7 +139,7 @@ function testSeed(id: string): PlatformSeed {
       blockedTopics: ['racing'],
       agentGoals: { write: 'Lead with the verdict.' },
       publishTarget: {
-        d1DatabaseIdEnv: 'TEST_D1_DATABASE_ID',
+        contentDatabaseUrlEnv: 'TEST_CONTENT_DATABASE_URL',
         githubRepoEnv: 'TEST_GITHUB_REPO',
         siteUrlEnv: 'TEST_SITE_URL',
         rebuildHookEnv: 'TEST_REBUILD_HOOK_URL',
@@ -432,7 +432,7 @@ test('a platform row rejects what it must never hold', { skip }, async () => {
     sqlState(`UPDATE platforms SET publish_target = $1::jsonb WHERE id = 'sleekdrops'`, [JSON.stringify(value)]);
   const ref = sleekdropsSeed.platform.publishTarget;
   assert.equal(await target({ ...ref, rebuildHookEnv: 'https://api.example/hook?token=s3cr3t' }), '23514', 'a URL is not a name');
-  assert.equal(await target({ ...ref, d1DatabaseIdEnv: 'ghp_s3cr3tT0kenValue' }), '23514', 'a token is not a name');
+  assert.equal(await target({ ...ref, contentDatabaseUrlEnv: 'ghp_s3cr3tT0kenValue' }), '23514', 'a token is not a name');
   assert.equal(await target({ ...ref, siteUrlEnv: null }), '23514', 'only the rebuild hook may be null');
   const { rebuildHookEnv: _omitted, ...missingHook } = ref;
   assert.equal(await target(missingHook), '23514', 'every reference is stated, even a null one');

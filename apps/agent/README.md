@@ -9,7 +9,7 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 
 | # | Agent | Stage | What it does |
 | - | ----- | ----- | ------------ |
-| 1 | `topic_scout` | (out of band) | Sweeps the live web (Tavily) for trending products/topics **not covered before** (checks D1 posts + every prior suggestion), **verifies each candidate is still current** with its own search, writes suggestions for the admin |
+| 1 | `topic_scout` | (out of band) | Sweeps the live web (Tavily) for trending products/topics **not covered before** (checks published posts + every prior suggestion), **verifies each candidate is still current** with its own search, writes suggestions for the admin |
 | 2 | `researcher` | research | Plans and runs its searches in five strata (primary/manufacturer, independent expert, owner reviews and long-term complaints, price and availability, competing coverage) and fills each dossier field from its own stratum: tiered and dated facts, failure modes, who should not buy, attributed owner complaints, dated price observations, tested claims, products (non-Amazon "amazonUrl"s are dropped deterministically), keywords, competitor gap. **Every price and spec is checked against a primary source** before it is filed, and a **deterministic evidence gate** fails the article here rather than letting a spec-sheet dossier reach the writer |
 | 3 | `keyword_strategist` | keyword | **Reads the live SERP** for 4 candidate queries and picks the one we can win: intent, difficulty, zero-click risk, SERP features, the top 3 to beat, the gaps they leave, PAA questions, entities, snippet target, word-count target |
 | 4 | `angle_editor` | angle | **Decides what the piece argues** before it is outlined: the thesis, the specific reader, the contrarian or non-obvious take, what this piece says that the top-3 results do not, the structural shape and which beat's voice writes it. Grounded in the dossier and the plan's competitor reads only — a topic with no defensible take is **recorded as having none** rather than given a fabricated one |
@@ -17,9 +17,9 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 | 6 | `writer` | write | Full markdown draft in the site voice; answer-first sections, sourced claims, products linked only as `/go/<slug>` with mandated placements (tables, per-product CTAs, conclusion) |
 | 7 | `seo_reviewer` | seo_review | Deterministic anti-slop scan **first**, then a scored review across five dimensions (search / generative-engine / voice / E-E-A-T / links) → pass/fail verdict. **Fact-checks the riskiest claims** against live sources as part of E-E-A-T |
 | 8 | `editor` | edit | Surgical revision resolving the reviewer's issues, the voice-scan findings and any admin feedback (loops with the reviewer, bounded by `max_revision_rounds`) |
-| 9 | `assembler` | assemble | Exact D1 payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
-| 10 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public GCS bucket and stores the URL in frontmatter. Stands down entirely when the operator attached their own image, and skips itself when `GCS_IMAGES_BUCKET` is unset |
-| 11 | `publisher` | publish | Upserts the platform's own D1 `posts` + `affiliate_links` and fires its rebuild (dispatch or deploy hook) → site rebuilds; refuses an event-bound piece after kick-off |
+| 9 | `assembler` | assemble | Exact post payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
+| 10 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public Supabase Storage `images` bucket and stores the URL in frontmatter. Stands down entirely when the operator attached their own image, and skips itself when `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are unset |
+| 11 | `publisher` | publish | Upserts the platform's own `posts` + `affiliate_links` (SleekDrops': the Supabase database itself) and fires its rebuild (dispatch or deploy hook) → site rebuilds; refuses an event-bound piece after kick-off |
 
 Flow: `research → keyword → angle → outline → write → seo_review ⇄ edit → assemble → image → publish`.
 
@@ -59,7 +59,7 @@ back to `queued` at the same stage with its draft kept - at most
 `articles.lease_requeues`; the next lapse fails it with a plain message, and
 an operator retry resets the count. On SIGTERM/SIGINT the process stops
 claiming, hands the articles it holds back to the queue (not counted against
-that cap) and exits inside Cloud Run's 10-second grace period. The worker id
+that cap) and exits inside a container host's usual 10-second grace period. The worker id
 carries `K_REVISION`, and a heartbeat that fires more than twice its interval
 late is logged as `heartbeat_late` with the lag - the trace a throttled or
 frozen instance leaves. A run that discovers its lease is gone - reaped,
@@ -68,7 +68,7 @@ writes nothing, leaving the outcome whoever took the article away recorded.
 Every agent prompt is grounded with today's date (Australia/Sydney) so years
 in titles/copy come from the calendar, not stale training data.
 
-Admin extras: the **Published** tab lists everything in D1 and can delete a
+Admin extras: the **Published** tab lists every post the site builds from and can delete a
 post (plus its orphaned pipeline-authored affiliate links) with an automatic
 site rebuild; the article panel has a **feedback box** that requeues the piece
 through `edit → seo_review → assemble → image → publish` with your notes
@@ -83,7 +83,7 @@ and uploaded to the same public bucket:
 | --- | --- | --- |
 | Manual-topic drawer | the draft topic; copied onto the article on approval | with the article's first publish |
 | Pipeline article panel | `articles.hero_image_url` / `hero_alt` + frontmatter | at publish, or **Publish again** for one already live |
-| **Published** tab | the D1 `posts` row itself | immediately, with a site rebuild |
+| **Published** tab | the `posts` row itself | immediately, with a site rebuild |
 
 The dedicated `articles` columns are what make an operator image stick: the
 assembler stamps them into frontmatter on every pass, so an image attached
@@ -93,7 +93,7 @@ back to the agent (or to the generated cover fill).
 
 The **Published** tab is the one that reaches *older* posts. Most of what is
 live was written before this platform and has no article row at all, so that
-surface edits the published D1 row directly — and when a pipeline article does
+surface edits the published post row directly — and when a pipeline article does
 exist for the slug, its copy is updated too, so a later re-publish can't push
 the old image back over the new one. `updatedDate` is deliberately not stamped:
 swapping a photo is not an editorial revision.
@@ -188,7 +188,7 @@ Every LLM call goes through `src/llm/`, which routes on the model id:
 
 | Engine | Models | Runs | Auth |
 | --- | --- | --- | --- |
-| **Gemini** (Google ADK) | everything not `claude-*` (default `gemini-2.5-flash`) | image agent, plus every other stage when the toggle says so | admin-set AI Studio key → Vertex ADC (`GOOGLE_GENAI_USE_VERTEXAI=true`, keyless on Cloud Run) → `GEMINI_API_KEY` |
+| **Gemini** (Google ADK) | everything not `claude-*` (default `gemini-2.5-flash`) | image agent, plus every other stage when the toggle says so | admin-set AI Studio key → Vertex ADC (`GOOGLE_GENAI_USE_VERTEXAI=true`, keyless where a GCP service account runs it) → `GEMINI_API_KEY` |
 | **Claude subscription** (Claude Agent SDK) | `claude-*` (default **`claude-opus-5`**) | every stage that runs a prompt: topic scout, researcher, keyword strategist, angle editor, outliner, writer, SEO reviewer, editor — switchable in Settings | `claude setup-token` → paste in admin Settings, or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` in `.env` |
 
 The subscription token only works through the Agent SDK/CLI — it is not an API
@@ -263,12 +263,13 @@ stopped.
 - **Article pipeline**: fully autonomous once you approve topics — the worker
   polls Postgres (the light pub/sub) and drives every stage to completion.
 - **Publishing**: gated on your approval by default (`publish_mode=approval`);
-  flip to `auto` for hands-off publishing or `draft` to stage in D1 only.
+  flip to `auto` for hands-off publishing or `draft` to park the post unpublished.
 
 ## Publish targets: one per platform
 
-Every platform publishes to its own D1 database, rebuilds its own site and is
-checked against its own site URL. A platform's profile names the environment
+Every platform publishes to its own content database - a Postgres holding its
+`posts` and `affiliate_links` tables - rebuilds its own site and is checked
+against its own site URL. A platform's profile names the environment
 variables that hold these (never the values), and
 `src/platform/publishTarget.ts` reads them at publish time. Nothing falls back:
 a missing variable fails the publish with
@@ -278,12 +279,16 @@ platform's is refused rather than published into it.
 
 | | SleekDrops | PeakOdds |
 |---|---|---|
-| D1 database id | `D1_DATABASE_ID` | `PEAKODDS_D1_DATABASE_ID` |
+| Content database URL | `DATABASE_URL` (the pipeline's own: the Supabase project) | `PEAKODDS_CONTENT_DATABASE_URL` |
 | GitHub repo (`owner/repo`) | `GITHUB_REPO` | `PEAKODDS_GITHUB_REPO` |
 | Site origin | `SITE_URL` | `PEAKODDS_SITE_URL` |
 | Rebuild | `GITHUB_TOKEN`: `content-updated` repository dispatch to `GITHUB_REPO` | `PEAKODDS_REBUILD_HOOK_URL`: a deploy hook URL the publisher POSTs |
 
-`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_TOKEN` and `GITHUB_TOKEN` are shared.
+`GITHUB_TOKEN` is shared. SleekDrops' content tables live in the same
+database as the pipeline (migration 019 creates them), which is why its
+variable is `DATABASE_URL` itself: whatever database the agent runs against is
+the one a SleekDrops publish goes live from. A content database URL must be a
+`postgres://` connection string and is treated as a credential.
 `GITHUB_REPO` and `SITE_URL` no longer have built-in defaults: a SleekDrops
 deployment must set both (`AshishAcharya083/sleekdrops` and
 `https://sleekdrops.com` in production), or every SleekDrops publish fails
@@ -291,15 +296,16 @@ naming the one that is missing. A platform with no rebuild variable rebuilds
 by dispatch with `GITHUB_TOKEN`; one that names a variable must hold an
 http(s) URL there, and it is treated as a secret: no message quotes it.
 
-`apps/web` is the SleekDrops site and reads SleekDrops' D1 only. PeakOdds has
-no site in this repository yet.
+`apps/web` is the SleekDrops site and reads SleekDrops' Supabase project only,
+through its Data API with the public publishable key. PeakOdds has no site in
+this repository yet.
 
 ### Event-bound pieces
 
 An article with `event_starts_at` set (a match preview) is refused at publish
 from kick-off on, with an error naming the event time, however it reached the
 publish stage. Before kick-off the publisher writes `event_starts_at` and
-`odds_as_at` (ISO 8601 UTC text) onto the D1 post, so a site can show "This
+`odds_as_at` (ISO 8601 UTC) onto its post row, so a site can show "This
 preview has expired" once the event starts; a corrected kick-off time is a
 change that rebuilds the site. The two columns are written only for an
 event-bound piece, so SleekDrops' posts table needs neither.
@@ -309,8 +315,9 @@ event-bound piece, so SleekDrops' posts table needs neither.
 None of this blocks a build or a test - PeakOdds publishes fail with the
 message above until it is done.
 
-1. Create the database: `wrangler d1 create peakodds`, and set its id as
-   `PEAKODDS_D1_DATABASE_ID`. Create its tables:
+1. Create its content database - a Postgres of its own, such as a second
+   Supabase project (a URL equal to `DATABASE_URL` is refused) - and set its
+   connection string as `PEAKODDS_CONTENT_DATABASE_URL`. Create its tables:
 
    ```sql
    CREATE TABLE IF NOT EXISTS posts (
@@ -320,22 +327,22 @@ message above until it is done.
      category         TEXT NOT NULL,
      post_type        TEXT NOT NULL,
      author           TEXT NOT NULL,
-     pub_date         TEXT NOT NULL,          -- YYYY-MM-DD
-     frontmatter_json TEXT NOT NULL,
+     pub_date         DATE NOT NULL,
+     frontmatter_json JSONB NOT NULL,
      body_md          TEXT NOT NULL,
-     event_starts_at  TEXT,                   -- ISO 8601 UTC; NULL when tied to no event
-     odds_as_at       TEXT,                   -- ISO 8601 UTC; when the quoted prices were seen
-     created_at       TEXT NOT NULL,
-     updated_at       TEXT NOT NULL
+     event_starts_at  TIMESTAMPTZ,            -- NULL when tied to no event
+     odds_as_at       TIMESTAMPTZ,            -- when the quoted prices were seen
+     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
    );
    CREATE TABLE IF NOT EXISTS affiliate_links (
      slug         TEXT PRIMARY KEY,
      default_url  TEXT NOT NULL,
-     regions_json TEXT,
+     regions_json JSONB,
      note         TEXT,
-     expires_at   TEXT,
-     created_at   TEXT NOT NULL,
-     updated_at   TEXT NOT NULL
+     expires_at   DATE,
+     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
    );
    ```
 
@@ -346,9 +353,8 @@ message above until it is done.
    `PEAKODDS_REBUILD_HOOK_URL`.
 3. Set `PEAKODDS_SITE_URL` to the origin the site deploys to and
    `PEAKODDS_GITHUB_REPO` to its repository.
-4. On Cloud Run, add the four to the agent service (Secret Manager for the
-   hook URL) - with `--update-env-vars`/`--update-secrets`, never
-   `--set-env-vars`, which replaces the whole set.
+4. Add the four to wherever the agent runs (`apps/agent/.env` locally); the
+   hook URL and the database URL are secrets.
 
 ## Social distribution
 
@@ -357,7 +363,7 @@ posting inline. Publish is re-entered by `/api/articles/:id/republish`, by a
 retry-from-stage and by the editorial feedback loop, so an inline post would
 fire again for the same slug every time; `distribution_queue` is unique on
 `(slug, channel_connection_id)`, which makes the second pass and every pass
-after it a no-op. A piece parked in D1 as a draft enqueues nothing, on the same
+after it a no-op. A piece parked as a draft enqueues nothing, on the same
 reading of `publish_mode` that keeps the rebuild dispatch from firing.
 
 - **Per platform, never across.** An article is queued only for the
@@ -397,7 +403,7 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
 - **Credentials.** A connection stores a `token_ref` - the *name* of a secret -
   resolved at post time from the `channel_credentials` settings row, else from
   the environment variable that name maps to (`facebook-page-token` →
-  `FACEBOOK_PAGE_TOKEN`), which is how Secret Manager arrives on Cloud Run.
+  `FACEBOOK_PAGE_TOKEN`), which is how a deployment's secret store arrives.
   Only names reserved for channel secrets resolve from the environment: the
   env form must start with the network's own name (`FACEBOOK_`) or `CHANNEL_`,
   and must not be a variable the agent reads as its own configuration
@@ -534,8 +540,8 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
   brand text, audience, categories, post types, article shapes, editorial
   rules, monetisation (`amazon` | `none`), blocked link domains and topic
   classes, scout queries, per-agent goals, the profile version in force, and
-  its publish target as the *names* of the env variables holding the D1
-  database id, GitHub repo, site URL and rebuild hook (null = repository
+  its publish target as the *names* of the env variables holding the content
+  database URL, GitHub repo, site URL and rebuild hook (null = repository
   dispatch)
 - `editions` - one audience of a platform (SleekDrops has `au`): time zone,
   currency, locale, its own scout queries and a compliance footer. A new
@@ -552,7 +558,7 @@ reading of `publish_mode` that keeps the rebuild dispatch from firing.
   only lookup, and an unknown or missing platform id throws
 - `topics` — scout suggestions; `suggested → approved/rejected` (unique per
   platform on normalized title = the "never repeat a topic" guard, alongside
-  the D1 check)
+  the published-posts check)
 - `articles` — the work unit ("card"): stage, status, dossier/keyword plan/
   brief/draft/review/frontmatter JSONB, revision round, error, failure class
   (`transient`/`genuine`) and the attempts the last stage run took
@@ -585,12 +591,17 @@ pnpm dev:agent                              # migrate + API + worker + admin UI 
 ```
 
 Required env: `GEMINI_API_KEY` (or Vertex on GCP) and `TAVILY_API_KEY`; add
-`CLAUDE_CODE_OAUTH_TOKEN` to write prose on your Claude plan. For publishing:
-`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_TOKEN` (D1 Edit), plus each platform's
-publish target - for SleekDrops `D1_DATABASE_ID`, `GITHUB_REPO`, `SITE_URL` and
-`GITHUB_TOKEN` (repo dispatch); see [Publish targets](#publish-targets-one-per-platform).
-Optional: `ADMIN_TOKEN` to protect the API —
-required in practice when the API is deployed on Cloud Run.
+`CLAUDE_CODE_OAUTH_TOKEN` to write prose on your Claude plan. For publishing,
+each platform's publish target - for SleekDrops `DATABASE_URL` (the Supabase
+Session pooler URI), `GITHUB_REPO`, `SITE_URL` and `GITHUB_TOKEN` (repo
+dispatch); see [Publish targets](#publish-targets-one-per-platform). For hero
+images, `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Optional:
+`ADMIN_TOKEN` to protect the API — required in practice once the API is
+reachable from anywhere but your own machine.
+
+`pnpm db:up` gives you a throwaway local database, and publishing against it
+writes that database's `posts` table - nothing reaches the live site. Point
+`DATABASE_URL` at the Supabase project to work on production data.
 
 `DATABASE_URL` has no built-in default. Left unset, the `pg` driver resolves
 the connection from `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` and

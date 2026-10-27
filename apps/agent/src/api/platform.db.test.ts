@@ -5,15 +5,12 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import pg from 'pg';
 
 process.env.ADMIN_TOKEN = 'test-admin-token';
-// D1 is answered by a stub below, never the network.
-process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account';
-process.env.D1_DATABASE_ID = 'test-d1';
-process.env.PEAKODDS_D1_DATABASE_ID = 'test-peakodds-d1';
-process.env.CLOUDFLARE_D1_TOKEN = 'test-d1-token';
 
 const { pool, q } = await import('../db/pool.js');
+const { endContentPools } = await import('../tools/contentStore.js');
 const { migrate } = await import('../db/migrate.js');
 const { clearPlatformCache, loadPlatform } = await import('../platform/registry.js');
 const { removeCredential, resolveCredential, storeCredential } = await import(
@@ -33,6 +30,22 @@ const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to 
 const app = createApp();
 /** A platform of this file's own, so nothing here touches another test's rows. */
 const OTHER = `odds-${randomUUID().slice(0, 8)}`;
+
+// That platform's published posts live in a content database of its own, as
+// they would in production: a scratch database beside the test one, named by
+// the variable its publish target reads.
+const contentName = `agent_platform_content_${randomUUID().replaceAll('-', '')}`;
+const contentUrl = new URL(process.env.DATABASE_URL || 'postgres://localhost/unused');
+contentUrl.pathname = `/${contentName}`;
+
+async function onServer(url: string, sql: string, params: unknown[] = []): Promise<void> {
+  const admin = new pg.Pool({ connectionString: url, max: 1 });
+  try {
+    await admin.query(sql, params);
+  } finally {
+    await admin.end();
+  }
+}
 const SLEEKDROPS = 'sleekdrops';
 const TAG = `platform-test-${randomUUID()}`;
 
@@ -102,6 +115,17 @@ let otherChannelId = '';
 before(async () => {
   if (!reachable) return;
   await migrate();
+  await onServer(process.env.DATABASE_URL!, `CREATE DATABASE "${contentName}"`);
+  await onServer(
+    contentUrl.href,
+    `CREATE TABLE posts (
+       slug TEXT PRIMARY KEY, status TEXT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL,
+       post_type TEXT NOT NULL, author TEXT NOT NULL, pub_date DATE NOT NULL,
+       frontmatter_json JSONB NOT NULL, body_md TEXT NOT NULL,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+     )`,
+  );
+  process.env.PEAKODDS_CONTENT_DATABASE_URL = contentUrl.href;
   await q(
     `INSERT INTO platforms
        (id, name, byline_name, brand_text, audience, categories, post_types, article_shapes,
@@ -118,7 +142,7 @@ before(async () => {
       JSON.stringify(OTHER_PROFILE.scout_queries),
       JSON.stringify(OTHER_PROFILE.agent_goals),
       JSON.stringify({
-        d1DatabaseIdEnv: 'PEAKODDS_D1_DATABASE_ID',
+        contentDatabaseUrlEnv: 'PEAKODDS_CONTENT_DATABASE_URL',
         githubRepoEnv: 'PEAKODDS_GITHUB_REPO',
         siteUrlEnv: 'PEAKODDS_SITE_URL',
         rebuildHookEnv: 'PEAKODDS_REBUILD_HOOK_URL',
@@ -174,7 +198,10 @@ after(async () => {
     await q('UPDATE platforms SET profile_version = NULL WHERE id = $1', [OTHER]);
     await q('DELETE FROM platform_profile_versions WHERE platform_id = $1', [OTHER]);
     await q('DELETE FROM platforms WHERE id = $1', [OTHER]);
+    await q('DELETE FROM posts WHERE slug LIKE $1', [`${TAG}%`]);
     clearPlatformCache();
+    await endContentPools();
+    await onServer(process.env.DATABASE_URL!, `DROP DATABASE IF EXISTS "${contentName}" WITH (FORCE)`);
   }
   unregisterProvider(NETWORK);
   await pool.end();
@@ -363,42 +390,41 @@ test('a platform connects a new account as its own, and reconnects it', { skip }
 test("a live post carries the edition and event time of its own platform's article", { skip }, async () => {
   const slug = `${TAG}-grand-final-preview`;
   await q('UPDATE articles SET slug = $2 WHERE id = $1', [otherArticleId, slug]);
-  const posts = [slug, `${TAG}-older-post`].map((postSlug) => ({
-    slug: postSlug,
-    status: 'published',
-    title: postSlug,
-    category: 'AFL',
-    post_type: 'preview',
-    author: 'PeakOdds Tipping Team',
-    pub_date: '2026-10-01',
-    updated_at: '2026-10-01',
-    hero_image: null,
-    hero_alt: null,
-  }));
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = async () =>
-    new Response(JSON.stringify({ success: true, result: [{ results: posts }] }), { status: 200 });
-  try {
-    const other = await call(OTHER, '/api/published');
-    assert.equal(other.status, 200);
-    assert.deepEqual(
-      other.body.posts.map((p: { slug: string; edition_id: string | null; event_starts_at: string | null }) => [
-        p.slug,
-        p.edition_id,
-        p.event_starts_at && new Date(p.event_starts_at).toISOString(),
-      ]),
-      [
-        [slug, 'global', '2026-10-03T04:30:00.000Z'],
-        [`${TAG}-older-post`, null, null],
-      ],
+  for (const postSlug of [slug, `${TAG}-older-post`]) {
+    await onServer(
+      contentUrl.href,
+      `INSERT INTO posts (slug, status, title, category, post_type, author, pub_date, frontmatter_json, body_md)
+       VALUES ($1, 'published', $1, 'AFL', 'preview', 'PeakOdds Tipping Team', '2026-10-01', '{}', 'Body.')`,
+      [postSlug],
     );
-    assert.equal(other.body.posts[0].title, slug, 'the D1 fields are unchanged');
-
-    const sleekdrops = await call(SLEEKDROPS, '/api/published');
-    assert.equal(sleekdrops.body.posts[0].edition_id, null, "another platform's article is not joined");
-  } finally {
-    globalThis.fetch = realFetch;
   }
+  // The same slug on SleekDrops' own site: its list must not pick up the
+  // other platform's article just because the slugs match.
+  await q(
+    `INSERT INTO posts (slug, status, title, category, post_type, author, pub_date, frontmatter_json, body_md)
+     VALUES ($1, 'published', $1, 'Tech', 'article', 'desk', '2026-10-01', '{}', 'Body.')`,
+    [slug],
+  );
+
+  const other = await call(OTHER, '/api/published');
+  assert.equal(other.status, 200);
+  assert.deepEqual(
+    other.body.posts.map((p: { slug: string; edition_id: string | null; event_starts_at: string | null }) => [
+      p.slug,
+      p.edition_id,
+      p.event_starts_at && new Date(p.event_starts_at).toISOString(),
+    ]),
+    [
+      [slug, 'global', '2026-10-03T04:30:00.000Z'],
+      [`${TAG}-older-post`, null, null],
+    ],
+  );
+  assert.equal(other.body.posts[0].title, slug, 'the post fields are unchanged');
+  assert.equal(other.body.posts[0].pub_date, '2026-10-01');
+
+  const sleekdrops = await call(SLEEKDROPS, '/api/published');
+  const mine = sleekdrops.body.posts.find((p: { slug: string }) => p.slug === slug);
+  assert.equal(mine.edition_id, null, "another platform's article is not joined");
 });
 
 test('the overview counts only its own platform', { skip }, async () => {

@@ -80,8 +80,8 @@ import {
   type ResearchDossier,
   type Stage,
 } from '../pipeline/types.js';
-import { deleteD1Post, getD1PostHero, listD1Posts, setD1PostHero } from '../tools/d1.js';
-import { gcsConfigured } from '../tools/gcs.js';
+import { deletePost, getPostHero, listPosts, setPostHero } from '../tools/contentStore.js';
+import { storageConfigured } from '../tools/storage.js';
 import { dispatchContentUpdated } from '../tools/github.js';
 import {
   MAX_HERO_IMAGE_BYTES,
@@ -97,7 +97,7 @@ import {
 } from './platform.js';
 import { articleBelongs, channelBelongs, platformQueueItemIds, queueItemBelongs, topicBelongs } from './scope.js';
 import { TRACE_HEADER, traceMiddleware } from './trace.js';
-import { d1TargetFor, publishTargetFor } from '../platform/publishTarget.js';
+import { contentTargetFor, publishTargetFor } from '../platform/publishTarget.js';
 
 const log = createLogger('api');
 
@@ -351,7 +351,7 @@ const MAX_ALT_CHARS = 300;
 const MULTIPART_OVERHEAD = 64 * 1024;
 
 const NO_IMAGE_STORAGE =
-  'hero-image storage is not configured - set GCS_IMAGES_BUCKET on the agent platform';
+  'hero-image storage is not configured - set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the agent platform';
 
 interface HeroImageBody {
   /** Absent when the request is an alt-text-only edit. */
@@ -431,7 +431,7 @@ async function syncArticleHero(
 }
 
 /**
- * Ask GitHub to rebuild the site. The D1 write has already happened by the time
+ * Ask GitHub to rebuild the site. The content write has already happened by the time
  * this runs, so a failed dispatch is reported rather than thrown - the operator
  * needs to know the change is saved but not yet live.
  */
@@ -842,7 +842,7 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
     const parsed = await readHeroImageBody(c);
     if (!parsed.ok) return c.json({ error: parsed.error }, parsed.status);
     if (!parsed.value.upload) return c.json({ error: 'expected an image in the "file" part' }, 400);
-    if (!gcsConfigured()) return c.json({ error: NO_IMAGE_STORAGE }, 503);
+    if (!storageConfigured()) return c.json({ error: NO_IMAGE_STORAGE }, 503);
 
     const id = c.req.param('id');
     const platformId = c.get('platform').id;
@@ -1085,7 +1085,7 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
 
   // Admin feedback → one editor pass. Requires a draft to edit; works on done
   // (published) articles too — the piece re-runs edit → seo_review → assemble
-  // → image → publish, upserting the same D1 slug.
+  // → image → publish, upserting the same post slug.
   app.post('/api/articles/:id/feedback', async (c) => {
     const { feedback } = (await c.req.json()) as { feedback?: string };
     if (!feedback?.trim()) return c.json({ error: 'feedback required' }, 400);
@@ -1116,7 +1116,7 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
   app.post('/api/articles/:id/hero-image', async (c) => {
     const parsed = await readHeroImageBody(c);
     if (!parsed.ok) return c.json({ error: parsed.error }, parsed.status);
-    if (parsed.value.upload && !gcsConfigured()) {
+    if (parsed.value.upload && !storageConfigured()) {
       return c.json({ error: NO_IMAGE_STORAGE }, 503);
     }
 
@@ -1320,11 +1320,11 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
     return c.json({ ok: true });
   });
 
-  // ── Published site content (Cloudflare D1 — what the website builds from) ─
+  // ── Published site content (the content store — what the website builds from) ─
   // Each live post carries the edition and event time of the pipeline article
   // that wrote it, when there is one - most of the site predates the pipeline.
   app.get('/api/published', async (c) => {
-    const posts = await listD1Posts(await d1TargetFor(c.get('platform').id));
+    const posts = await listPosts(await contentTargetFor(c.get('platform').id));
     const articles = await q<{ slug: string; edition_id: string; event_starts_at: Date | null }>(
       'SELECT slug, edition_id, event_starts_at FROM articles WHERE platform_id = $1 AND slug = ANY($2)',
       [c.get('platform').id, posts.map((post) => post.slug)],
@@ -1341,7 +1341,7 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
 
   // Hero image on a post that is already live. The pipeline only knows about
   // articles it wrote itself; most of what is on the site predates it and has
-  // no articles row at all, so this route edits the published D1 row directly -
+  // no articles row at all, so this route edits the published post row directly -
   // it is the only way to re-image an older post. When a pipeline article does
   // exist for the slug, its copy is updated too, so a later re-publish can't
   // push the old image back over this one.
@@ -1351,10 +1351,10 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
   app.post('/api/published/:slug/hero-image', async (c) => {
     const parsed = await readHeroImageBody(c);
     if (!parsed.ok) return c.json({ error: parsed.error }, parsed.status);
-    if (parsed.value.upload && !gcsConfigured()) return c.json({ error: NO_IMAGE_STORAGE }, 503);
+    if (parsed.value.upload && !storageConfigured()) return c.json({ error: NO_IMAGE_STORAGE }, 503);
 
     const slug = c.req.param('slug');
-    const current = await getD1PostHero(await d1TargetFor(c.get('platform').id), slug);
+    const current = await getPostHero(await contentTargetFor(c.get('platform').id), slug);
     if (!current) return c.json({ error: 'no live post with that slug' }, 404);
 
     const heroImage = parsed.value.upload
@@ -1363,7 +1363,7 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
     if (!heroImage) return c.json({ error: 'attach an image file first' }, 400);
     const heroAlt = parsed.value.alt;
 
-    await setD1PostHero(await d1TargetFor(c.get('platform').id), slug, { heroImage, heroAlt });
+    await setPostHero(await contentTargetFor(c.get('platform').id), slug, { heroImage, heroAlt });
     await syncArticleHero(c.get('platform').id, slug, heroImage, heroAlt);
     const rebuild = await requestRebuild(c.get('platform').id);
     log.info('hero image set on a live post', {
@@ -1376,7 +1376,10 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
 
   app.delete('/api/published/:slug/hero-image', async (c) => {
     const slug = c.req.param('slug');
-    const removed = await setD1PostHero(await d1TargetFor(c.get('platform').id), slug, { heroImage: null, heroAlt: null });
+    const removed = await setPostHero(await contentTargetFor(c.get('platform').id), slug, {
+      heroImage: null,
+      heroAlt: null,
+    });
     if (!removed) return c.json({ error: 'no live post with that slug' }, 404);
     await syncArticleHero(c.get('platform').id, slug, null, null);
     const rebuild = await requestRebuild(c.get('platform').id);
@@ -1386,11 +1389,11 @@ export function createApp(options: AppOptions = {}): Hono<ApiEnv> {
 
   app.delete('/api/published/:slug', async (c) => {
     const slug = c.req.param('slug');
-    const result = await deleteD1Post(await d1TargetFor(c.get('platform').id), slug);
+    const result = await deletePost(await contentTargetFor(c.get('platform').id), slug);
     if (!result) return c.json({ error: 'not found' }, 404);
     // The publisher skips the site rebuild when what it is about to push
     // matches `published_digest`, the receipt of the last version pushed live.
-    // The post it describes has just been removed from D1, so the receipt has
+    // The post it describes has just been removed from the site, so the receipt has
     // to go with it: leaving it would make the operator's usual
     // delete-then-republish recovery compute the same digest, skip the
     // dispatch, and leave the page missing from the live site. `pub_date`

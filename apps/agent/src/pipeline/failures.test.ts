@@ -81,7 +81,8 @@ test('a parse failure out of repromptJson is tagged as one', async () => {
 test('timeouts, socket faults and throttled providers are transient', () => {
   for (const message of [
     'Tavily HTTP 429: rate limit exceeded',
-    'D1 query failed (HTTP 503): {"errors":[]}',
+    'Supabase Storage upload of heroes/quiet.png failed (HTTP 503): {"statusCode":"503"}',
+    'Connection terminated unexpectedly',
     'HTTP 502 fetching www.choice.com.au',
     'The operation was aborted',
     'Claude engine returned an empty completion',
@@ -97,6 +98,13 @@ test('timeouts, socket faults and throttled providers are transient', () => {
     cause: Object.assign(new Error('connect ETIMEDOUT 1.2.3.4:443'), { code: 'ETIMEDOUT' }),
   });
   assert.equal(classOf(fetchFailed), 'transient');
+
+  // The pooler recycling a connection under a publish: the server says why in
+  // its SQLSTATE, which node-postgres puts on `code`.
+  const recycled = Object.assign(new Error('terminating connection due to administrator command'), {
+    code: '57P01',
+  });
+  assert.equal(classifyFailure(recycled).signal, 'database');
 });
 
 test('an engine that hangs or falls over is transient', () => {
@@ -139,7 +147,8 @@ test('content and contract failures are genuine, and so is anything unrecognised
     'the post\'s frontmatter is not valid JSON — refusing to overwrite it',
     'researcher is set to run on claude-opus-5. No Claude credential is configured',
     'TAVILY_API_KEY is not set — add it to apps/agent/.env',
-    'Cloudflare D1 env missing — need CLOUDFLARE_ACCOUNT_ID, D1_DATABASE_ID, CLOUDFLARE_D1_TOKEN',
+    'publish target for sleekdrops: DATABASE_URL is not set',
+    'relation "posts" does not exist',
     'something nobody has seen before',
   ]) {
     assert.equal(classOf(new Error(message)), 'genuine', message);

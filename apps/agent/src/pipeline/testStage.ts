@@ -3,7 +3,7 @@
 // The same agent call the pipeline makes, against the same stored input, with
 // every write to the article removed: nothing is stamped on `articles`, no
 // stage routing happens, and the publisher is never reached (a test that
-// pushed to D1 would not be a test). What it does record is an agent_sessions
+// pushed to the site would not be a test). What it does record is an agent_sessions
 // row marked `kind = 'test'`, because the tokens are spent either way and
 // spend that does not show up in /api/usage is spend nobody can govern.
 import { q } from '../db/pool.js';

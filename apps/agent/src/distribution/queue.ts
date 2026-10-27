@@ -249,7 +249,7 @@ export interface EnqueueOptions {
    * is nothing for a reader to be sent to - the same guard
    * `dispatchContentUpdated` is behind, read off the same value.
    */
-  d1Status: 'published' | 'draft';
+  postStatus: 'published' | 'draft';
 }
 
 /**
@@ -281,7 +281,7 @@ export async function enqueuePublishedArticle(
   options: EnqueueOptions,
 ): Promise<EnqueueOutcome> {
   const none: EnqueueOutcome = { created: 0, alreadyQueued: 0, skipped: null };
-  if (options.d1Status !== 'published') return { ...none, skipped: 'draft' };
+  if (options.postStatus !== 'published') return { ...none, skipped: 'draft' };
   if (!article.slug) return { ...none, skipped: 'no-slug' };
   const platformId = await articlePlatform(article);
   if (!(await distributionEnabled(platformId))) return { ...none, skipped: 'disabled' };

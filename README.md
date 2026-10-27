@@ -4,8 +4,8 @@ Everything SleekDrops in one repo:
 
 | App                        | What it is                                                                                                   | Stack                                                                                                                  |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| [`apps/web`](apps/web)     | The public website — sleekdrops.com                                                                          | Astro → Cloudflare Pages, content from Cloudflare D1                                                                   |
-| [`apps/agent`](apps/agent) | The agent platform — a multi-agent pipeline that discovers trending topics and writes SEO-optimized articles | Node/TypeScript, PostgreSQL, Gemini via Google ADK + Claude subscription via the Claude Agent SDK, hosted on Cloud Run |
+| [`apps/web`](apps/web)     | The public website — sleekdrops.com                                                                          | Astro → Cloudflare Pages, content and images from Supabase                                                             |
+| [`apps/agent`](apps/agent) | The agent platform — a multi-agent pipeline that discovers trending topics and writes SEO-optimized articles | Node/TypeScript, PostgreSQL (Supabase), Gemini via Google ADK + Claude subscription via the Claude Agent SDK           |
 | [`apps/admin`](apps/admin) | Admin panel for the agent platform — pick topics, watch progress, approve publishes, track AI spend          | React + Vite → Cloudflare Pages                                                                                        |
 
 The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archived.
@@ -17,23 +17,25 @@ The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archive
         │      Topics · Pipeline board · Sessions · Usage · Settings      │
         └───────────────────────────┬─────────────────────────────────────┘
                                     │ REST (/api/*, ADMIN_TOKEN bearer)
-┌─ apps/agent (Cloud Run, min-instances 1) ─▼─────────────────────────────┐
+┌─ apps/agent (./up.sh on the operator's machine) ▼───────────────────────┐
 │ topic scout → [you approve topics] → research → outline → write         │
 │    → SEO review ⇄ edit (bounded loop) → assemble → image → publish      │
 │                                                                          │
-│ State:  Cloud SQL PostgreSQL (topics, articles, agent_sessions, settings)│
 │ LLM:    two engines, routed by model id —                                │
-│           gemini-*  → Google ADK → Vertex AI (service-account ADC)       │
+│           gemini-*  → Google ADK → AI Studio key (or Vertex ADC)         │
 │           claude-*  → Claude Agent SDK → your Claude subscription        │
 │                        (CLAUDE_CODE_OAUTH_TOKEN, pasted in Settings)     │
 │           verifying stages also get live web search + a page reader      │
-└──────────────┬───────────────────────────────────────────┬──────────────┘
-               │ posts + affiliate_links                    │ repository_dispatch
-               ▼                                            ▼ (content-updated)
-        Cloudflare D1  ◄──────────── build-time fetch ── GitHub Actions
-        (sleekdrops-content)                                │
-                                                            ▼
-                                              apps/web → Cloudflare Pages
+└──────┬──────────────────────────────┬────────────────────┬──────────────┘
+       │ pipeline state,              │ hero images        │ repository_dispatch
+       │ posts + affiliate_links      │ (service role)     ▼ (content-updated)
+       ▼                              ▼              GitHub Actions
+┌─ Supabase: SleekDrops ──────────────────────────┐        │ build-time fetch
+│ Postgres  topics · articles · sessions · ...    │◄───────┤ (Data API,
+│           posts · affiliate_links (RLS: public  │        │  publishable key)
+│           read of published content only)       │        ▼
+│ Storage   images (public bucket)  ◄─────────────┼── <img> apps/web → Cloudflare Pages
+└─────────────────────────────────────────────────┘
 ```
 
 - **Two LLM engines.** Every stage that runs a prompt — scout, researcher,
@@ -49,9 +51,14 @@ The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archive
   from what those stages confirmed, and no competing article is ever cited,
   quoted or mirrored.
 - **PostgreSQL** holds pipeline/operational state (atomic job claims, JSONB
-  dossiers, usage aggregation) — Cloud SQL in the cloud, Docker locally.
-- **Cloudflare D1** stays the publish target — the website's build reads it,
-  so the existing deploy flow is untouched (~90s from publish to live).
+  dossiers, usage aggregation) — the Supabase project in production, Docker
+  for a throwaway local copy.
+- **The same database is the publish target.** The posts and affiliate links
+  the website builds from are two tables beside the pipeline's, and a publish
+  is an upsert into them plus a rebuild dispatch (~90s from publish to live).
+  They were in Cloudflare D1 until October 2026; the columns are unchanged.
+- **Images are in Supabase Storage** (public bucket `images`), served straight
+  from their public URLs.
 - **Launch-window offers are attached by hand.** A SKU announced today is in no
   affiliate feed and cannot be read through Amazon's Product Advertising API, so
   the admin panel's offer screens let an editor attach the commissionable link
@@ -73,68 +80,63 @@ The old `sleekdrops-agent` repo is superseded by `apps/agent` and can be archive
 First run creates `apps/agent/.env` from the example — add `GEMINI_API_KEY`
 (aistudio.google.com) and `TAVILY_API_KEY`, plus `CLAUDE_CODE_OAUTH_TOKEN`
 (from `claude setup-token`), which every article stage needs unless you switch
-the engine toggle to Gemini in admin Settings.
+the engine toggle to Gemini in admin Settings. With the example's
+`DATABASE_URL` everything runs against a local Docker Postgres; set it to the
+Supabase Session pooler URI (and `SUPABASE_SERVICE_ROLE_KEY` for images) to run
+against production - `./up.sh` then skips the container.
 All three can also be pasted straight into admin **Settings**, no restart.
 Logs live in `.run/`.
 
 Piecemeal alternatives: `pnpm db:up`, `pnpm dev:agent`, `pnpm dev:admin`,
 `pnpm dev:web`, `pnpm build`.
 
-## Cloud deployment (single environment)
+## Where everything runs
 
-The agent platform runs as **one Cloud Run service** in the `sleekdrops` GCP
-project; there are no develop/production splits anywhere except the website.
+Everything SleekDrops stores lives in one **Supabase** project, `SleekDrops`
+(ref `ofcujovpxfoxvpfkszmf`, Sydney, in the Vitalize organisation). The GCP
+project is gone, and with it Cloud Run, Cloud SQL, Secret Manager and the
+image bucket.
 
-| What                                              | Where                                            | Trigger                                      |
-| ------------------------------------------------- | ------------------------------------------------ | -------------------------------------------- |
-| Agent platform (API + worker + scheduler + admin) | Cloud Run `sleekdrops-agent`, us-central1        | push to `develop` touching `apps/agent`, `apps/admin` or the Dockerfile |
-| Pipeline state                                    | Cloud SQL Postgres `sleekdrops-pg` (db-f1-micro) | —                                            |
-| Secrets (Tavily, D1 token, admin token)           | GCP Secret Manager                               | —                                            |
-| Admin panel                                       | sleekdrops-admin.pages.dev                       | push to `develop` touching `apps/admin`      |
-| Website (develop)                                 | sleekdrops.pages.dev                             | push to `develop` touching `apps/web`        |
-| Website (production)                              | sleekdrops.com                                   | push to `main` or `content-updated` dispatch |
+| What                                              | Where                                                         | Trigger / how it changes                         |
+| ------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------ |
+| Published posts + affiliate links                 | Supabase `posts`, `affiliate_links` (public schema)           | the agent's publisher, or the Supabase table editor |
+| Hero images                                       | Supabase Storage, public bucket `images`                      | the image stage and the admin hero-image drops   |
+| Pipeline state                                    | the same Supabase database (topics, articles, sessions, ...)  | the agent's migrations, applied on boot          |
+| Agent platform (API + worker + scheduler + admin) | the operator's machine (`./up.sh`), against Supabase          | —                                                |
+| Admin panel (hosted copy)                         | sleekdrops-admin.pages.dev                                    | push to `develop` touching `apps/admin`          |
+| Website (develop)                                 | sleekdrops.pages.dev                                          | push to `develop` touching `apps/web`            |
+| Website (production)                              | sleekdrops.com                                                | push to `main` or `content-updated` dispatch     |
 
-Gemini calls on Cloud Run go through **Vertex AI with the service account's
-ADC** — no API key anywhere. The Claude subscription token is pasted in admin
-Settings (stored in Postgres) or set as the `CLAUDE_CODE_OAUTH_TOKEN` env var.
+The website build reads the posts and affiliate links through Supabase's Data
+API with the project's **publishable key** (`SUPABASE_URL`,
+`SUPABASE_PUBLISHABLE_KEY` repository variables). Row-level security lets that
+key read published posts and the affiliate links and nothing else; every other
+table - settings with a pasted Claude token, drafts, channel credentials - has
+RLS on and no grant to the Data API roles at all (migration 019 sets this up,
+including for tables later migrations create). Hero images are plain public
+object URLs, `https://ofcujovpxfoxvpfkszmf.supabase.co/storage/v1/object/public/images/<path>`.
 
-Redeploying is automatic: a push to `develop` that touches `apps/agent`,
-`apps/admin`, the Dockerfile or the lockfile runs
-[`deploy-agent.yml`](.github/workflows/deploy-agent.yml), which type-checks and
-tests the platform, builds the admin panel into the image, pushes it to
-Artifact Registry and rolls out a new Cloud Run revision — then health-checks
-it. The container migrates the database on boot, so a green check also means
-migrations applied.
+The agent needs two Supabase credentials, both kept in `apps/agent/.env` and
+nowhere else: `DATABASE_URL` (the **Session pooler** URI with the database
+password, plus `?sslmode=no-verify` - see `apps/agent/.env.example`) and
+`SUPABASE_SERVICE_ROLE_KEY` for uploading images. Supabase cannot host the
+worker itself - it is a long-running Node process that drives the Claude Agent
+SDK - so until it gets a host it runs where `./up.sh` runs it; the
+[`Dockerfile`](Dockerfile) still builds it for any container host, and the
+hosted admin panel takes that host's URL from the `AGENT_API_BASE` repository
+variable (or the **API base** field in its header).
 
-GitHub authenticates to GCP with **Workload Identity Federation** — its OIDC
-token is exchanged for short-lived credentials, so there is no service-account
-key in the repo. The provider is pinned to this repository, and
-`github-deployer@sleekdrops.iam.gserviceaccount.com` may only push to Artifact
-Registry, deploy Cloud Run, and act as the agent's runtime service account.
+Gemini calls go to the AI Studio key (`GEMINI_API_KEY`, or pasted in admin
+Settings); Vertex AI is still supported where a GCP service account exists.
 
-Each deploy also pins the instance shape the worker needs, because it is a
-background loop rather than a request handler: `--no-cpu-throttling` (CPU
-always on, so heartbeats keep renewing a stage's claim between requests),
-`--min-instances 1 --max-instances 1` (one worker per revision, never scaled
-to zero or out to a second one; during a rollout the old revision's instance
-is the one that gets SIGTERM) and `--memory` (default `2Gi`, overridable with
-the `AGENT_MEMORY` repository variable). A setting changed by hand in the
-console is put back by the next deploy - change it in the workflow instead.
-
-Everything else about the service is left untouched - runtime service account
-and the Secret Manager wiring for `DATABASE_URL`, `ADMIN_TOKEN`,
-`TAVILY_API_KEY`, `CLOUDFLARE_D1_TOKEN` and `GITHUB_TOKEN`. Change those with
-`gcloud run services update`, never with `--set-env-vars` in the workflow
-(that flag replaces the whole set).
-
-When an instance stops mid-stage anyway (a rollout, a memory kill, a host
-move), nothing is lost: on SIGTERM the agent hands the articles it holds back
-to the queue before the 10-second grace period ends (the image runs `node`
-as PID 1 rather than `pnpm start`, because pnpm does not pass the signal on),
-and a claim whose worker died without that is re-queued once its lease
-lapses. The same article is re-queued at most twice per attempt; the third
-lapse fails the card with a plain message, draft kept, and **Retry from this
-stage** starts the count again. Stages stopped by their own time budget still end as timed out.
+When an instance stops mid-stage (a restart, a memory kill, Ctrl-C), nothing is
+lost: on SIGTERM the agent hands the articles it holds back to the queue before
+its 10-second grace period ends (the image runs `node` as PID 1 rather than
+`pnpm start`, because pnpm does not pass the signal on), and a claim whose
+worker died without that is re-queued once its lease lapses. The same article
+is re-queued at most twice per attempt; the third lapse fails the card with a
+plain message, draft kept, and **Retry from this stage** starts the count
+again. Stages stopped by their own time budget still end as timed out.
 
 ### Connecting the Facebook Page
 
@@ -149,16 +151,14 @@ token does not expire) with all three of:
 | `pages_read_engagement`    | reading the Page and its post insights            |
 | `pages_manage_engagement`  | writing the first comment that carries the link   |
 
-The token is never an env var this repo names. Store it as the Secret Manager
-secret `facebook-page-token` and point the channel's `token_ref` at that name.
-The adapter resolves the name at post time, from the `channel_credentials`
-settings row first and then from the `FACEBOOK_PAGE_TOKEN` env var that name
-maps to. The admin **Channels** tab connects the Page from either: paste the
-token (it is checked with Meta, then stored by reference and never shown
-again), or leave the token empty and name `facebook-page-token` to use the
-mounted secret. Adding the secret to the service is a `gcloud run services update
---update-secrets` call, for the same reason as above: `--set-env-vars` in the
-workflow would replace the whole set.
+The token is never an env var this repo names. Keep it as the secret
+`facebook-page-token` and point the channel's `token_ref` at that name. The
+adapter resolves the name at post time, from the `channel_credentials` settings
+row first and then from the `FACEBOOK_PAGE_TOKEN` env var that name maps to.
+The admin **Channels** tab connects the Page from either: paste the token (it
+is checked with Meta, then stored by reference and never shown again), or leave
+the token empty and name `facebook-page-token` to read `FACEBOOK_PAGE_TOKEN`
+from the agent's environment (`apps/agent/.env`).
 
 Two optional deployment knobs, both with working defaults:
 `FACEBOOK_BODY_LINK_CAP` (organic link posts Meta allows the Page per calendar
@@ -173,39 +173,11 @@ exempt publisher Page. Until they are answered the default placement is
 `first_comment` (admin Channels tab or Settings → `facebook_link_placement`), which never
 depends on the cap.
 
-The hosted admin panel is pre-pointed at the Cloud Run URL (baked in at build
-time via `VITE_API_BASE`); paste the admin token (Secret Manager `admin-token`)
-into its header field once. The **API base** field still accepts
-`http://localhost:8787` to steer a locally-running platform instead.
+The agent serves the admin panel itself on http://localhost:8787. The hosted
+copy (sleekdrops-admin.pages.dev) defaults to that same local platform, baked in
+at build time via `VITE_API_BASE` from the `AGENT_API_BASE` repository
+variable; paste the platform's `ADMIN_TOKEN` into its header field once, and
+point the **API base** field elsewhere when the agent has a host.
 
 See [`apps/agent/README.md`](apps/agent/README.md) for the pipeline design and
 [`apps/web/README.md`](apps/web/README.md) for the editorial rules.
-
-### Manual deploy (fallback)
-
-Two constraints shaped this, and they are why `gcloud run deploy --source`
-isn't used: the default compute service account lacks
-`roles/cloudbuild.builds.builder` on the run-sources bucket, and esbuild's Go
-runtime crashes under the QEMU amd64 emulation a cross-build from Apple
-Silicon needs — so the admin panel is built natively first and the image is
-built with buildx.
-
-```bash
-# from the repo root, with N one past the highest existing tag
-pnpm --filter @sleekdrops/admin build
-
-docker buildx build --platform linux/amd64 \
-  -t us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent:vN \
-  --push .
-
-gcloud run deploy sleekdrops-agent \
-  --image us-central1-docker.pkg.dev/sleekdrops/cloud-run-source-deploy/sleekdrops-agent:vN \
-  --region us-central1 --project sleekdrops \
-  --no-cpu-throttling --min-instances 1 --max-instances 1 --memory 2Gi
-```
-
-The admin token for the hosted panel:
-
-```bash
-gcloud secrets versions access latest --secret=admin-token --project sleekdrops | pbcopy
-```

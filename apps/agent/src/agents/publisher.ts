@@ -1,19 +1,20 @@
-// Publisher — writes the finished article into its platform's Cloudflare D1
-// database (the same tables that platform's website builds from) and fires
-// that platform's rebuild. No LLM involved: this stage is deterministic.
+// Publisher — writes the finished article into its platform's content
+// database (the posts and affiliate_links tables that platform's website
+// builds from - for SleekDrops, in the pipeline's own Supabase database) and
+// fires that platform's rebuild. No LLM involved: this stage is deterministic.
 //
 // Re-entrant by design: a retry-forward run passes through here again, as does
-// a republish and the admin-feedback loop. The D1 writes are slug upserts and
-// were always safe to repeat; what was not safe is everything that is only
+// a republish and the admin-feedback loop. The content writes are slug upserts
+// and were always safe to repeat; what was not safe is everything that is only
 // true the first time - the publication date the site prints, and the rebuild
 // dispatch. Both are keyed on the article now: `pub_date` is stamped once and
-// reused, and the dispatch fires only when the content that reaches D1 is
-// actually different from what was pushed last time.
+// reused, and the dispatch fires only when the content that reaches the site
+// is actually different from what was pushed last time.
 import { createHash } from 'node:crypto';
 import { todayInSydney } from '../content/contract.js';
 import { getSetting, q } from '../db/pool.js';
 import { createLogger } from '../lib/log.js';
-import { d1Query } from '../tools/d1.js';
+import { contentQuery } from '../tools/contentStore.js';
 import { dispatchContentUpdated } from '../tools/github.js';
 import { claimHeld, LeaseLostError, updateClaimed } from '../pipeline/lease.js';
 import { isReviewStale, PUBLISHER_REVIEW_STALE_ERROR } from '../pipeline/retry.js';
@@ -37,26 +38,27 @@ export interface PublishOptions {
 
 export interface PublishResult {
   slug: string;
-  d1Status: 'published' | 'draft';
+  /** The status the post row was written with. */
+  postStatus: 'published' | 'draft';
   /** Whether *this* pass rebuilt the site. A repeat pass over unchanged
    *  content returns false. */
   dispatched: boolean;
 }
 
 /**
- * What the last pass pushed to D1, as one comparable value. The D1 status is
- * part of it as well as the content: a piece parked as a draft and later
+ * What the last pass pushed live, as one comparable value. The post's status
+ * is part of it as well as the content: a piece parked as a draft and later
  * published again is unchanged text that still has to rebuild the site.
  */
 function publishedDigest(
   slug: string,
-  d1Status: string,
+  postStatus: string,
   frontmatter: unknown,
   body: string,
   event: EventFields | null,
 ): string {
   const hash = createHash('sha256').update(
-    `${slug}\n${d1Status}\n${JSON.stringify(frontmatter)}\n${body}`,
+    `${slug}\n${postStatus}\n${JSON.stringify(frontmatter)}\n${body}`,
   );
   // Only an event-bound piece hashes its event, so every other piece keeps the
   // digest it was last pushed under. A corrected kick-off time is a change the
@@ -105,7 +107,7 @@ export function kickOffRefusal(eventStartsAt: Date | null, now: Date): string | 
   return `refusing to publish: the event this piece previews started at ${eventStartsAt.toISOString()}`;
 }
 
-/** The event columns of a D1 post, as ISO 8601 UTC text (D1 is SQLite). */
+/** The event columns of an event-bound post, as ISO 8601 UTC text. */
 interface EventFields {
   event_starts_at: string;
   odds_as_at: string | null;
@@ -127,19 +129,21 @@ function eventFields(state: PublishState): EventFields | null {
 
 /** The slug upsert for a posts row with these columns, `slug` first. */
 function upsertPostSql(columns: string[]): string {
-  const placeholders = columns.map((_, i) => `?${i + 1}`);
+  const placeholders = columns.map((column, i) =>
+    column === 'frontmatter_json' ? `$${i + 1}::jsonb` : `$${i + 1}`,
+  );
   const updates = columns.slice(1).map((column) => `${column} = excluded.${column}`);
   return `INSERT INTO posts (${columns.join(', ')}, created_at, updated_at)
-     VALUES (${placeholders.join(', ')}, datetime('now'), datetime('now'))
+     VALUES (${placeholders.join(', ')}, now(), now())
      ON CONFLICT (slug) DO UPDATE SET
-       ${[...updates, "updated_at = datetime('now')"].join(',\n       ')}`;
+       ${[...updates, 'updated_at = now()'].join(',\n       ')}`;
 }
 
 /**
  * The publish receipt, written the way every other stage writes to its
  * article: only while this run still holds the claim it started under. The
- * push to D1 has already happened by the time these run, so a lost claim is
- * noted rather than thrown - the live post stands, and the article row now
+ * push to the site has already happened by the time these run, so a lost claim
+ * is noted rather than thrown - the live post stands, and the article row now
  * belongs to whatever replaced this run.
  */
 async function stamp(article: ArticleRow, fields: Record<string, unknown>): Promise<void> {
@@ -179,8 +183,8 @@ export async function runPublisher(
   // pushes a post to the live site and asks GitHub to rebuild it. So the claim
   // is read directly, where the run can still stop for free. Publish is the
   // stage that hangs on an external service, which is exactly when an operator
-  // reaches for cancel - and a cancelled article that is live in D1 with no
-  // published_at is the state that lever exists to prevent.
+  // reaches for cancel - and a cancelled article that is live on the site with
+  // no published_at is the state that lever exists to prevent.
   const abandonIfTaken = async () => {
     if (!(await claimHeld(article))) throw new LeaseLostError();
   };
@@ -188,8 +192,8 @@ export async function runPublisher(
 
   const publishMode =
     options.publishMode ?? (await getSetting<string>(platform.id, 'publish_mode', 'approval'));
-  // "draft" mode parks the row in D1 unpublished; anything else goes live.
-  const d1Status = publishMode === 'draft' ? 'draft' : 'published';
+  // "draft" mode parks the row unpublished; anything else goes live.
+  const postStatus = publishMode === 'draft' ? 'draft' : 'published';
 
   // Affiliate links first — fetch-content.mjs fails the site build if a
   // /go/ slug in a published body has no matching row.
@@ -209,11 +213,11 @@ export async function runPublisher(
            default_url = excluded.default_url,
            regions_json = excluded.regions_json,
            note = excluded.note,
-           updated_at = datetime('now')`;
-    await d1Query(
+           updated_at = now()`;
+    await contentQuery(
       target,
       `INSERT INTO affiliate_links (slug, default_url, regions_json, note, created_at, updated_at)
-       VALUES (?1, ?2, ?3, ?4, datetime('now'), datetime('now'))
+       VALUES ($1, $2, $3::jsonb, $4, now(), now())
        ON CONFLICT (slug) ${onSlugTaken}`,
       [link.slug, link.default_url, link.regions_json ? JSON.stringify(link.regions_json) : null, link.note ?? null],
     );
@@ -228,14 +232,14 @@ export async function runPublisher(
       : todayInSydney());
 
   // Asked again on the doorstep of the push itself: every affiliate write
-  // above is a D1 round trip, and the cancel worth honouring is the one that
-  // arrives while one of them is hanging.
+  // above is a database round trip, and the cancel worth honouring is the one
+  // that arrives while one of them is hanging.
   await abandonIfTaken();
 
   const event = eventFields(state);
   const post: Record<string, unknown> = {
     slug,
-    status: d1Status,
+    status: postStatus,
     title: String(frontmatter.title ?? article.title),
     category: article.category,
     post_type: article.post_type,
@@ -245,7 +249,7 @@ export async function runPublisher(
     body_md: body,
     ...event,
   };
-  await d1Query(target, upsertPostSql(Object.keys(post)), Object.values(post));
+  await contentQuery(target, upsertPostSql(Object.keys(post)), Object.values(post));
 
   // One dispatch per published version. Re-entering publish with the same
   // content (a retry that reached here again, a republish after a no-op edit)
@@ -260,15 +264,15 @@ export async function runPublisher(
   // contract owner on SLE-104 rather than settled here: no counterpart card
   // reads published_digest, so the pin can be amended without a re-pin of the
   // payload, but the amendment is theirs to make.
-  const digest = publishedDigest(slug, d1Status, frontmatter, body, event);
+  const digest = publishedDigest(slug, postStatus, frontmatter, body, event);
   await stamp(article, { pub_date: pubDate });
 
-  const dispatched = d1Status === 'published' && digest !== state.published_digest;
+  const dispatched = postStatus === 'published' && digest !== state.published_digest;
   if (dispatched) await dispatchContentUpdated(target);
   // Recorded only once the rebuild has actually been asked for, so a failed
   // dispatch is retried by the next pass rather than silently marked as
   // delivered.
   await stamp(article, { published_digest: digest });
 
-  return { slug, d1Status, dispatched };
+  return { slug, postStatus, dispatched };
 }

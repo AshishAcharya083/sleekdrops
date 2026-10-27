@@ -5,10 +5,8 @@ import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 delete process.env.TAVILY_API_KEY;
-delete process.env.CLOUDFLARE_ACCOUNT_ID;
-delete process.env.CLOUDFLARE_D1_TOKEN;
-delete process.env.D1_DATABASE_ID;
-delete process.env.PEAKODDS_D1_DATABASE_ID;
+// PeakOdds' avoid-list read fails fast with no content database named.
+delete process.env.PEAKODDS_CONTENT_DATABASE_URL;
 
 const { pool, q } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');

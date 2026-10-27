@@ -1,19 +1,22 @@
-// Fetch editorial content from Cloudflare D1 (database: sleekdrops-content)
-// at build time. Published posts → src/content/blog/*.md, affiliate links →
-// .d1-cache/affiliate-links.json where generate-redirects.mjs reads them.
+// Fetch editorial content from Supabase at build time. Published posts →
+// src/content/blog/*.md, affiliate links → .content-cache/affiliate-links.json
+// where generate-redirects.mjs reads them.
 //
-// Replaces the old sleekdrops-cms git-clone flow (decommissioned 2026-06-13).
-// Content now lives in two D1 tables:
+// Content lives in two tables of the SleekDrops Supabase project, written by
+// the agent platform's publisher (apps/agent/src/db/migrations/019_content_store.sql):
 //   posts(slug, status, …, frontmatter_json, body_md)   — status='published' is live
 //   affiliate_links(slug, default_url, regions_json, note, expires_at)
+// They were Cloudflare D1 tables until October 2026; the columns are the same.
+//
+// Read through Supabase's Data API with the project's publishable key. That
+// key is public by design - row-level security lets it read published posts
+// and the affiliate links and nothing else - so the build needs no secret.
 //
 // Run by prebuild and dev scripts; idempotent and safe to re-run.
 //
-// Env vars (set in .env locally, GitHub secrets in CI):
-//   CLOUDFLARE_ACCOUNT_ID   — Cloudflare account id
-//   D1_DATABASE_ID          — sleekdrops-content database id (not secret)
-//   CLOUDFLARE_D1_TOKEN     — API token with "Account → D1 → Read" permission
-//                             (falls back to CLOUDFLARE_API_TOKEN if unset)
+// Env vars (set in .env locally, repository variables in CI):
+//   SUPABASE_URL              — https://<project-ref>.supabase.co
+//   SUPABASE_PUBLISHABLE_KEY  — the project's publishable (or legacy anon) key
 
 import {
   existsSync,
@@ -28,7 +31,7 @@ import { normalizeArticleBody } from '../src/lib/content-normalize.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
-const CACHE = resolve(ROOT, '.d1-cache');
+const CACHE = resolve(ROOT, '.content-cache');
 const BLOG_TARGET = resolve(ROOT, 'src/content/blog');
 
 function log(msg) {
@@ -54,36 +57,49 @@ if (existsSync(envFile)) {
   }
 }
 
-const ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
-const DATABASE_ID = process.env.D1_DATABASE_ID;
-// `||` not `??`: CI sets unset secrets to empty strings, which must fall back.
-const TOKEN = process.env.CLOUDFLARE_D1_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+// `||` not `??`: CI sets unset variables to empty strings, which must count as unset.
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+const KEY = (process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();
 
-if (!ACCOUNT_ID || !DATABASE_ID || !TOKEN) {
+if (!SUPABASE_URL || !KEY) {
   fail(
-    'Missing env. Need CLOUDFLARE_ACCOUNT_ID, D1_DATABASE_ID and ' +
-      'CLOUDFLARE_D1_TOKEN (or CLOUDFLARE_API_TOKEN). Locally: copy ' +
-      '.env.example to .env and fill in the D1 section.',
+    'Missing env. Need SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY. Locally: copy ' +
+      '.env.example to .env and fill in the Supabase section.',
   );
 }
 
-async function queryD1(sql, params = []) {
-  const res = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/d1/database/${DATABASE_ID}/query`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ sql, params }),
-    },
-  );
-  const json = await res.json();
-  if (!res.ok || !json.success) {
-    fail(`D1 query failed (HTTP ${res.status}): ${JSON.stringify(json.errors ?? json)}`);
+/** Rows per request. Supabase caps a Data API response at 1,000 by default. */
+const PAGE = 1000;
+
+/**
+ * Every row of `table` the publishable key may read, in `order`, a page at a
+ * time. `filters` is the Data API query string (`status=eq.published`).
+ */
+async function selectAll(table, columns, order, filters = '') {
+  const rows = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const query = [`select=${columns}`, filters, `order=${order}`, `limit=${PAGE}`, `offset=${offset}`]
+      .filter(Boolean)
+      .join('&');
+    let res;
+    try {
+      res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+        headers: { apikey: KEY, Accept: 'application/json' },
+      });
+    } catch (err) {
+      fail(`Supabase unreachable reading ${table}: ${err.message}`);
+    }
+    const body = await res.text();
+    if (!res.ok) fail(`Supabase query on ${table} failed (HTTP ${res.status}): ${body}`);
+    const page = JSON.parse(body);
+    rows.push(...page);
+    if (page.length < PAGE) return rows;
   }
-  return json.result[0].results;
+}
+
+/** A JSON column: an object from the Data API (JSONB), or text from an older export. */
+function jsonValue(value) {
+  return typeof value === 'string' ? JSON.parse(value) : value;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +108,7 @@ async function queryD1(sql, params = []) {
 // emitted with JSON.stringify — no YAML library needed, no escaping bugs.
 // ---------------------------------------------------------------------------
 function toFrontmatterYaml(fmJson) {
-  const fm = JSON.parse(fmJson);
+  const fm = jsonValue(fmJson);
   const lines = ['---'];
   for (const [key, value] of Object.entries(fm)) {
     if (value === null || value === undefined) continue;
@@ -110,12 +126,8 @@ function toFrontmatterYaml(fmJson) {
 const RAW_MERCHANT = /(amazon\.[a-z.]+\/(dp|gp\/product)\/|amzn\.to\/|[?&]tag=)/i;
 const GO_LINK = /\/go\/([a-z0-9]+(?:-[a-z0-9]+)*)/g;
 
-const posts = await queryD1(
-  "SELECT slug, frontmatter_json, body_md FROM posts WHERE status = 'published' ORDER BY slug",
-);
-const links = await queryD1(
-  'SELECT slug, default_url, regions_json, note FROM affiliate_links ORDER BY slug',
-);
+const posts = await selectAll('posts', 'slug,frontmatter_json,body_md', 'slug.asc', 'status=eq.published');
+const links = await selectAll('affiliate_links', 'slug,default_url,regions_json,note', 'slug.asc');
 
 const linkSlugs = new Set(links.map((l) => l.slug));
 const errors = [];
@@ -149,7 +161,7 @@ const linksOut = {};
 for (const l of links) {
   linksOut[l.slug] = {
     default: l.default_url,
-    ...(l.regions_json ? JSON.parse(l.regions_json) : {}),
+    ...(l.regions_json ? jsonValue(l.regions_json) : {}),
     ...(l.note ? { note: l.note } : {}),
   };
 }
@@ -161,4 +173,4 @@ writeFileSync(
 );
 
 log(`wrote ${posts.length} published post(s) → src/content/blog/`);
-log(`wrote ${links.length} affiliate link(s) → .d1-cache/affiliate-links.json`);
+log(`wrote ${links.length} affiliate link(s) → .content-cache/affiliate-links.json`);

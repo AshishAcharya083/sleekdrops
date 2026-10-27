@@ -34,7 +34,7 @@ function article(fields: Partial<DistributableArticle> = {}): DistributableArtic
     frontmatter: {
       title: 'The headphones for a quiet commute',
       dek: 'Four weeks on the 7:12, ranked.',
-      heroImage: 'https://storage.googleapis.com/images/heroes/quiet-commutes.png',
+      heroImage: 'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet-commutes.png',
     },
     hero_image_url: null,
     hero_image_source: 'generated',
@@ -95,7 +95,7 @@ test('a hero we generated may be uploaded; one we found may not', () => {
   const generated = renderPayload(article(), SITE, 'facebook', 'first_comment');
   assert.equal(
     generated.imageUrl,
-    'https://storage.googleapis.com/images/heroes/quiet-commutes.png',
+    'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet-commutes.png',
   );
   assert.equal(generated.imageSource, 'generated');
 
@@ -133,7 +133,7 @@ test('the readiness expectation is the live page contract, not the caption', () 
   assert.equal(payload.expected.ogTitle, 'The headphones for a quiet commute');
   assert.equal(
     payload.expected.ogImage,
-    'https://storage.googleapis.com/images/heroes/quiet-commutes.png',
+    'https://example.supabase.co/storage/v1/object/public/images/heroes/quiet-commutes.png',
   );
 });
 
