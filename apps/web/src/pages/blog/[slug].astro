@@ -191,7 +191,16 @@ const journeySidebar = Boolean(adsEnv().mediavineSiteId);
     <div class:list={['article-grid', journeySidebar && 'article-grid--journey']}>
       <div class="article-main">
         <ArticleBody>
-          {product && <Verdict product={product} postSlug={post.slug} />}
+          {product && (
+            <Verdict
+              product={product}
+              postSlug={post.slug}
+              author={author}
+              pubDate={post.data.pubDate}
+              updatedDate={post.data.updatedDate}
+              reviewUnit={post.data.reviewUnit}
+            />
+          )}
           <Content />
           {offerPicks.length > 0 && (
             <section class="offer-block" aria-label="Where to buy">
