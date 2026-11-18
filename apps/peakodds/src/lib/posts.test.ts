@@ -80,9 +80,9 @@ test('a post with an unknown edition fails the build naming the slug and the edi
 
 test('a malformed column fails the build naming the post and the column', () => {
   assert.throws(() => parsePostRows([row({ post_type: 'review' })]), /'swans-v-giants-preview' has an unknown post_type 'review'/);
-  assert.throws(() => parsePostRows([row({ pub_date: '16/07/2026' })]), /'swans-v-giants-preview' has a pub_date that is not a YYYY-MM-DD date/);
-  assert.throws(() => parsePostRows([row({ event_starts_at: 'soon' })]), /has a event_starts_at that is not a timestamp/);
-  assert.throws(() => parsePostRows([row({ frontmatter_json: '{' })]), /has a frontmatter_json that is not valid JSON/);
+  assert.throws(() => parsePostRows([row({ pub_date: '16/07/2026' })]), /'swans-v-giants-preview' has an invalid pub_date: expected a YYYY-MM-DD date/);
+  assert.throws(() => parsePostRows([row({ event_starts_at: 'soon' })]), /has an invalid event_starts_at: expected a timestamp/);
+  assert.throws(() => parsePostRows([row({ frontmatter_json: '{' })]), /has an invalid frontmatter_json: expected valid JSON/);
 });
 
 test('a missing content cache fails with the command that fills it', async () => {

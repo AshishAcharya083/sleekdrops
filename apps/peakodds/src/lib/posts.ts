@@ -121,7 +121,7 @@ function parsePostRow(row: unknown, index: number): PeakOddsPost {
 /** Reads one row's columns, naming the post and the column in every refusal. */
 function rowReader(slug: string, row: Record<string, unknown>) {
   const invalid = (column: string, expected: string): Error =>
-    new Error(`PeakOdds post '${slug}' has a ${column} that is not ${expected}`);
+    new Error(`PeakOdds post '${slug}' has an invalid ${column}: expected ${expected}`);
 
   const string = (column: string): string => {
     const value = row[column];
