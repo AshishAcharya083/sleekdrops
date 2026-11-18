@@ -13,6 +13,7 @@ pnpm install
 pnpm --filter @sleekdrops/peakodds dev             # http://localhost:4321
 ```
 
+The root `pnpm build` builds every app, PeakOdds included, so it needs these Supabase values too.
 `docs/build-and-deploy.md` covers the environment, the build steps, the checks and the deploy.
 
 ## Where things go
