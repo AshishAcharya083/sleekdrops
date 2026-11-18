@@ -34,6 +34,6 @@ runs:
         apiToken: ${{ inputs.api-token }}
         accountId: ${{ inputs.account-id }}
         workingDirectory: ${{ inputs.working-directory }}
-        # The wrangler apps/web and apps/admin pin.
+        # The wrangler version in the pnpm catalog, which the deployed apps install.
         wranglerVersion: 4.93.1
         command: pages deploy "${{ inputs.directory }}" --project-name="${{ inputs.project-name }}" --branch="${{ inputs.branch }}"
