@@ -1,7 +1,9 @@
 // Publisher — writes the finished article into its platform's content
 // database (the posts and affiliate_links tables that platform's website
-// builds from - for SleekDrops, in the pipeline's own Supabase database) and
-// fires that platform's rebuild. No LLM involved: this stage is deterministic.
+// builds from - for SleekDrops, in the pipeline's own Supabase database; for
+// any other platform, a database of its own that db/contentSchema.ts sets up)
+// and fires that platform's rebuild. No LLM involved: this stage is
+// deterministic.
 //
 // Re-entrant by design: a retry-forward run passes through here again, as does
 // a republish and the admin-feedback loop. The content writes are slug upserts
@@ -12,6 +14,7 @@
 // is actually different from what was pushed last time.
 import { createHash } from 'node:crypto';
 import { todayInSydney } from '../content/contract.js';
+import { ensureContentSchema, hasEditionColumn } from '../db/contentSchema.js';
 import { getSetting, q } from '../db/pool.js';
 import { createLogger } from '../lib/log.js';
 import { contentQuery } from '../tools/contentStore.js';
@@ -179,6 +182,10 @@ export async function runPublisher(
   // last word on that is here, where the push actually happens.
   if (await isReviewStale(article.id)) throw new Error(PUBLISHER_REVIEW_STALE_ERROR);
 
+  // Before the claim check below, so that check also covers a content
+  // database slow to answer here.
+  await ensureContentSchema(platform.id, target);
+
   // Nothing below this line is an article write the claim guard can drop: it
   // pushes a post to the live site and asks GitHub to rebuild it. So the claim
   // is read directly, where the run can still stop for free. Publish is the
@@ -247,6 +254,9 @@ export async function runPublisher(
     pub_date: pubDate,
     frontmatter_json: JSON.stringify(frontmatter),
     body_md: body,
+    // A site with more than one edition lists each piece under its own;
+    // SleekDrops' posts table has no such column.
+    ...(hasEditionColumn(target) ? { edition_id: article.edition_id } : {}),
     ...event,
   };
   await contentQuery(target, upsertPostSql(Object.keys(post)), Object.values(post));
