@@ -145,7 +145,8 @@ before(async () => {
         contentDatabaseUrlEnv: 'PEAKODDS_CONTENT_DATABASE_URL',
         githubRepoEnv: 'PEAKODDS_GITHUB_REPO',
         siteUrlEnv: 'PEAKODDS_SITE_URL',
-        rebuildHookEnv: 'PEAKODDS_REBUILD_HOOK_URL',
+        rebuildHookEnv: null,
+        dispatchEventType: 'peakodds-content-updated',
       }),
     ],
   );

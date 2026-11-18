@@ -96,12 +96,13 @@ test('every agent goal is keyed by a real agent id', () => {
   assert.deepEqual(Object.keys(platform.agentGoals).sort(), [...AGENTS].sort());
 });
 
-test('the publish target names environment variables, never values', () => {
+test('the publish target names environment variables, and rebuilds by its own repository dispatch', () => {
   assert.deepEqual(platform.publishTarget, {
     contentDatabaseUrlEnv: 'PEAKODDS_CONTENT_DATABASE_URL',
     githubRepoEnv: 'PEAKODDS_GITHUB_REPO',
     siteUrlEnv: 'PEAKODDS_SITE_URL',
-    rebuildHookEnv: 'PEAKODDS_REBUILD_HOOK_URL',
+    rebuildHookEnv: null,
+    dispatchEventType: 'peakodds-content-updated',
   });
 });
 

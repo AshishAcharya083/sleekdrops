@@ -3,7 +3,8 @@
 // this file's own, so the PeakOdds fixture platform and the gate rows it flips
 // cannot be seen by - or see - any other suite's. That database is also
 // SleekDrops' content store (its publish target names DATABASE_URL), and
-// PeakOdds gets a second scratch database as its own.
+// PeakOdds gets a second, empty scratch database as its own: the publisher
+// sets up its tables itself.
 //
 // Every outside call is answered by a stub that records where it was sent;
 // the assertions are about those destinations, and about which database each
@@ -39,23 +40,6 @@ peakoddsUrl.pathname = `/${scratchName}_peakodds`;
 if (reachable) {
   await onServer(liveUrl, `CREATE DATABASE "${scratchName}"`);
   await onServer(liveUrl, `CREATE DATABASE "${scratchName}_peakodds"`);
-  // PeakOdds' own content tables, as its site would define them: the same two
-  // tables, with the event columns an event-bound preview writes.
-  await onServer(
-    peakoddsUrl.href,
-    `CREATE TABLE posts (
-       slug TEXT PRIMARY KEY, status TEXT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL,
-       post_type TEXT NOT NULL, author TEXT NOT NULL, pub_date DATE NOT NULL,
-       frontmatter_json JSONB NOT NULL, body_md TEXT NOT NULL,
-       event_starts_at TIMESTAMPTZ, odds_as_at TIMESTAMPTZ,
-       created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-     );
-     CREATE TABLE affiliate_links (
-       slug TEXT PRIMARY KEY, default_url TEXT NOT NULL, regions_json JSONB, note TEXT,
-       expires_at DATE,
-       created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-     )`,
-  );
   process.env.DATABASE_URL = scratchUrl.href;
 }
 
@@ -68,7 +52,6 @@ const PEAKODDS_ENV = {
   PEAKODDS_CONTENT_DATABASE_URL: peakoddsUrl.href,
   PEAKODDS_GITHUB_REPO: 'example/peakodds',
   PEAKODDS_SITE_URL: 'https://peakodds.example',
-  PEAKODDS_REBUILD_HOOK_URL: 'https://hooks.example/peakodds-deploy-secret',
 };
 process.env.ADMIN_TOKEN = 'test-admin-token';
 Object.assign(process.env, SLEEKDROPS_ENV, PEAKODDS_ENV);
@@ -77,6 +60,7 @@ const { pool, q, setSetting } = await import('../db/pool.js');
 const { migrate } = await import('../db/migrate.js');
 const { PLATFORM_SEEDS, seedPlatforms } = await import('./profiles.js');
 const { sleekdropsSeed } = await import('./sleekdrops/index.js');
+const { peakoddsSeed: realPeakoddsSeed } = await import('./peakodds/index.js');
 const { runPublisher } = await import('../agents/publisher.js');
 const { contentPool, endContentPools } = await import('../tools/contentStore.js');
 const { claimNextItem, enqueuePublishedArticle } = await import('../distribution/queue.js');
@@ -104,12 +88,7 @@ if (reachable) {
       id: PEAKODDS,
       name: 'PeakOdds',
       monetisation: 'none',
-      publishTarget: {
-        contentDatabaseUrlEnv: 'PEAKODDS_CONTENT_DATABASE_URL',
-        githubRepoEnv: 'PEAKODDS_GITHUB_REPO',
-        siteUrlEnv: 'PEAKODDS_SITE_URL',
-        rebuildHookEnv: 'PEAKODDS_REBUILD_HOOK_URL',
-      },
+      publishTarget: realPeakoddsSeed.platform.publishTarget,
     },
     editions: [
       { ...sleekdropsSeed.editions[0], scoutQueries: [], complianceFooter: '' },
@@ -248,10 +227,29 @@ test("a PeakOdds article is written to PeakOdds' content database and rebuilds P
   assert.equal(result.dispatched, true);
   assert.deepEqual(await postRows(piece.slug!), { sleekdrops: 0, peakodds: 1 }, 'never the SleekDrops database');
   assert.deepEqual(
-    sent.map((call) => [call.method, call.url]),
-    [['POST', PEAKODDS_ENV.PEAKODDS_REBUILD_HOOK_URL]],
-    "PeakOdds' own deploy hook, and no dispatch to the SleekDrops repo",
+    sent.map((call) => [call.method, call.url, JSON.parse(call.body)]),
+    [['POST', 'https://api.github.com/repos/example/peakodds/dispatches', { event_type: 'peakodds-content-updated' }]],
+    "PeakOdds' own repository and event, never SleekDrops' content-updated",
   );
+});
+
+test('a PeakOdds post carries the edition its article was written for', { skip }, async () => {
+  recordCalls();
+  const edition = async (slug: string) =>
+    (
+      await contentPool({ contentDatabaseUrl: peakoddsUrl.href }).query<{ edition_id: string }>(
+        'SELECT edition_id FROM posts WHERE slug = $1',
+        [slug],
+      )
+    ).rows[0].edition_id;
+
+  const au = await article(PEAKODDS, { editionId: 'au' });
+  const global = await article(PEAKODDS, { editionId: 'global' });
+  await runPublisher(au);
+  await runPublisher(global);
+
+  assert.equal(await edition(au.slug!), 'au');
+  assert.equal(await edition(global.slug!), 'global');
 });
 
 test("a SleekDrops article still goes to SleekDrops' content database and repository dispatch", { skip }, async () => {
@@ -263,8 +261,8 @@ test("a SleekDrops article still goes to SleekDrops' content database and reposi
 
   assert.deepEqual(await postRows(piece.slug!), { sleekdrops: 1, peakodds: 0 });
   assert.deepEqual(
-    sent.map((call) => call.url),
-    ['https://api.github.com/repos/example/sleekdrops/dispatches'],
+    sent.map((call) => [call.url, JSON.parse(call.body)]),
+    [['https://api.github.com/repos/example/sleekdrops/dispatches', { event_type: 'content-updated' }]],
   );
 });
 

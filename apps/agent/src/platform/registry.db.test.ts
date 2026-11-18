@@ -143,6 +143,7 @@ function testSeed(id: string): PlatformSeed {
         githubRepoEnv: 'TEST_GITHUB_REPO',
         siteUrlEnv: 'TEST_SITE_URL',
         rebuildHookEnv: 'TEST_REBUILD_HOOK_URL',
+        dispatchEventType: 'seeded-content-updated',
       },
     },
     editions: [
@@ -437,6 +438,10 @@ test('a platform row rejects what it must never hold', { skip }, async () => {
   const { rebuildHookEnv: _omitted, ...missingHook } = ref;
   assert.equal(await target(missingHook), '23514', 'every reference is stated, even a null one');
   assert.equal(await target({ ...ref, rebuildHookEnv: 'SLEEKDROPS_REBUILD_HOOK_URL' }), null);
+  const { dispatchEventType: _noEvent, ...missingEvent } = ref;
+  assert.equal(await target(missingEvent), '23514', 'every target names its dispatch event');
+  assert.equal(await target({ ...ref, dispatchEventType: 'CONTENT_UPDATED' }), '23514', 'an event type is not a name');
+  assert.equal(await target({ ...ref, dispatchEventType: null }), '23514');
   assert.equal(await target(ref), null);
   assert.equal(
     await sqlState(`UPDATE platforms SET monetisation = 'bookmaker' WHERE id = 'sleekdrops'`),

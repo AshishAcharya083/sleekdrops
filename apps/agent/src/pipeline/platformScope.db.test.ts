@@ -49,6 +49,7 @@ const seed: PlatformSeed = {
       githubRepoEnv: 'SCOPE_TEST_GITHUB_REPO',
       siteUrlEnv: 'SCOPE_TEST_SITE_URL',
       rebuildHookEnv: null,
+      dispatchEventType: 'scope-test-content-updated',
     },
   },
   editions: [

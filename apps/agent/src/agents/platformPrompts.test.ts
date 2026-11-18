@@ -72,6 +72,7 @@ const seed: PlatformSeed = {
       githubRepoEnv: 'TESTBRAND_REPO',
       siteUrlEnv: 'TESTBRAND_URL',
       rebuildHookEnv: null,
+      dispatchEventType: 'testbrand-content-updated',
     },
   },
   editions: [
