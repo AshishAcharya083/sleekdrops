@@ -43,6 +43,17 @@ test('two editions: Australia in Sydney time, and a neutral Global one with no c
   }
 });
 
+test('the editions match the PeakOdds site: Australia in Sydney time, and Global in UTC', () => {
+  // The same literals as apps/peakodds/src/data/editions.test.ts.
+  assert.deepEqual(
+    editions.map(({ id, name, timeZone, locale }) => ({ id, name, timeZone, locale })),
+    [
+      { id: 'au', name: 'Australia', timeZone: 'Australia/Sydney', locale: 'en-AU' },
+      { id: 'global', name: 'Global', timeZone: 'UTC', locale: 'en-GB' },
+    ],
+  );
+});
+
 test('no scout query, platform or edition, goes looking for racing', () => {
   for (const query of [...platform.scoutQueries, ...editions.flatMap((e) => e.scoutQueries)]) {
     assert.ok(!RACING.test(query), `racing scout query: ${query}`);
