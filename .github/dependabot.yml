@@ -1,0 +1,10 @@
+# Keeps the commit SHAs the workflows and shared actions pin current: each
+# update moves a pin and its release-tag comment together.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly

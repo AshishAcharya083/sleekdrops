@@ -195,6 +195,9 @@ because someone paid for it.`,
       rebuildHookEnv: 'PEAKODDS_REBUILD_HOOK_URL',
     },
   },
+  // Mirrors apps/peakodds/src/data/editions.ts: the site shows each post under
+  // the edition with its id, name, time zone and locale. Both sides' tests
+  // assert the same literals.
   editions: [
     {
       id: 'au',

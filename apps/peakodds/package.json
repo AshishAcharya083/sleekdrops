@@ -1,0 +1,30 @@
+{
+  "name": "@sleekdrops/peakodds",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PeakOdds - independent sports-betting previews and guides, AU and Global editions. Astro site built from PeakOdds' own Supabase content.",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "fetch-content": "node --experimental-strip-types scripts/fetch-content.mjs",
+    "dev": "node --experimental-strip-types scripts/fetch-content.mjs && astro dev",
+    "prebuild": "node --experimental-strip-types scripts/fetch-content.mjs",
+    "build": "astro check && astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "check": "astro check",
+    "test": "node --experimental-strip-types --test 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "@astrojs/check": "catalog:",
+    "@astrojs/markdown-remark": "5.3.0",
+    "astro": "catalog:",
+    "typescript": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

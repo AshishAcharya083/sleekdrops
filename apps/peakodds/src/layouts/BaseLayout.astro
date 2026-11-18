@@ -1,0 +1,40 @@
+---
+// The document shell every PeakOdds page renders inside: its title,
+// description and canonical URL, and named slots the site's header, footer
+// and consent notice fill. It loads no analytics and sets no cookies.
+interface Props {
+  title: string;
+  description: string;
+  /** Site-relative, such as '/au/afl'. */
+  canonicalPath: string;
+  /** The page's language, for <html lang>. */
+  locale?: string;
+}
+
+const { title, description, canonicalPath, locale = 'en-GB' } = Astro.props;
+
+if (!Astro.site) {
+  throw new Error('PEAKODDS_SITE_URL is not set, so the page has no canonical URL. Set it in apps/peakodds/.env.');
+}
+const canonicalUrl = new URL(canonicalPath, Astro.site).href;
+---
+
+<!doctype html>
+<html lang={locale}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonicalUrl} />
+    <slot name="head" />
+  </head>
+  <body>
+    <slot name="header" />
+    <main id="main">
+      <slot />
+    </main>
+    <slot name="footer" />
+    <slot name="consent" />
+  </body>
+</html>

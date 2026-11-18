@@ -4,6 +4,24 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@astrojs/check':
+      specifier: ^0.9.9
+      version: 0.9.9
+    '@types/node':
+      specifier: ^25.9.1
+      version: 25.9.5
+    astro:
+      specifier: ^4.16.19
+      version: 4.16.19
+    typescript:
+      specifier: ^5.6.0
+      version: 5.9.3
+    wrangler:
+      specifier: 4.93.1
+      version: 4.93.1
+
 patchedDependencies:
   '@getdevteam/analytics-web@0.3.1':
     hash: 928ca701c591591c093b6357beea76df175306c6fbb017f79b415287dc574e50
@@ -35,13 +53,13 @@ importers:
         specifier: ^4.7.0
         version: 4.7.0(vite@6.4.3(@types/node@25.9.5)(tsx@4.23.0)(yaml@2.9.0))
       typescript:
-        specifier: ^5.6.0
+        specifier: 'catalog:'
         version: 5.9.3
       vite:
         specifier: ^6.3.5
         version: 6.4.3(@types/node@25.9.5)(tsx@4.23.0)(yaml@2.9.0)
       wrangler:
-        specifier: 4.93.1
+        specifier: 'catalog:'
         version: 4.93.1
 
   apps/agent:
@@ -72,7 +90,7 @@ importers:
         version: 3.25.76
     devDependencies:
       '@types/node':
-        specifier: ^25.9.1
+        specifier: 'catalog:'
         version: 25.9.5
       '@types/pg':
         specifier: ^8.15.0
@@ -81,13 +99,35 @@ importers:
         specifier: ^4.20.0
         version: 4.23.0
       typescript:
-        specifier: ^5.6.0
+        specifier: 'catalog:'
         version: 5.9.3
+
+  apps/peakodds:
+    dependencies:
+      '@astrojs/check':
+        specifier: 'catalog:'
+        version: 0.9.9(prettier@3.9.5)(typescript@5.9.3)
+      '@astrojs/markdown-remark':
+        specifier: 5.3.0
+        version: 5.3.0
+      astro:
+        specifier: 'catalog:'
+        version: 4.16.19(@types/node@25.9.5)(rollup@4.62.2)(typescript@5.9.3)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.9.5
+      wrangler:
+        specifier: 'catalog:'
+        version: 4.93.1
 
   apps/web:
     dependencies:
       '@astrojs/check':
-        specifier: ^0.9.9
+        specifier: 'catalog:'
         version: 0.9.9(prettier@3.9.5)(typescript@5.9.3)
       '@astrojs/rss':
         specifier: ^4.0.18
@@ -102,7 +142,7 @@ importers:
         specifier: ^1.6.5
         version: 1.6.5
       astro:
-        specifier: ^4.16.19
+        specifier: 'catalog:'
         version: 4.16.19(@types/node@25.9.5)(rollup@4.62.2)(typescript@5.9.3)
       remark-gfm:
         specifier: ^4.0.1
@@ -114,14 +154,14 @@ importers:
         specifier: ^0.34.5
         version: 0.34.5
       typescript:
-        specifier: ^5.6.0
+        specifier: 'catalog:'
         version: 5.9.3
     devDependencies:
       '@types/node':
-        specifier: ^25.9.1
+        specifier: 'catalog:'
         version: 25.9.5
       wrangler:
-        specifier: 4.93.1
+        specifier: 'catalog:'
         version: 4.93.1
 
 packages:
@@ -1111,6 +1151,7 @@ packages:
   '@google-cloud/opentelemetry-cloud-monitoring-exporter@0.21.0':
     resolution: {integrity: sha512-+lAew44pWt6rA4l8dQ1gGhH7Uo95wZKfq/GBf9aEyuNDDLQ2XppGEEReu6ujesSqTtZ8ueQFt73+7SReSHbwqg==}
     engines: {node: '>=18'}
+    deprecated: Google Cloud Platform now supports native OpenTelemetry Protocol (OTLP) endpoints via the Telemetry API. Please follow https://github.com/GoogleCloudPlatform/opentelemetry-operations-js/blob/main/MIGRATION.md
     peerDependencies:
       '@opentelemetry/api': ^1.9.0
       '@opentelemetry/core': ^2.0.0
@@ -1120,6 +1161,7 @@ packages:
   '@google-cloud/opentelemetry-cloud-trace-exporter@3.0.0':
     resolution: {integrity: sha512-mUfLJBFo+ESbO0dAGboErx2VyZ7rbrHcQvTP99yH/J72dGaPbH2IzS+04TFbTbEd1VW5R9uK3xq2CqawQaG+1Q==}
     engines: {node: '>=18'}
+    deprecated: Google Cloud Platform now supports native OpenTelemetry Protocol (OTLP) endpoints via the Telemetry API. Please follow https://github.com/GoogleCloudPlatform/opentelemetry-operations-js/blob/main/MIGRATION.md
     peerDependencies:
       '@opentelemetry/api': ^1.0.0
       '@opentelemetry/core': ^2.0.0
@@ -1129,6 +1171,7 @@ packages:
   '@google-cloud/opentelemetry-resource-util@3.0.0':
     resolution: {integrity: sha512-CGR/lNzIfTKlZoZFfS6CkVzx+nsC9gzy6S8VcyaLegfEJbiPjxbMLP7csyhJTvZe/iRRcQJxSk0q8gfrGqD3/Q==}
     engines: {node: '>=18'}
+    deprecated: Google Cloud Platform now supports native OpenTelemetry Protocol (OTLP) endpoints via the Telemetry API. Please follow https://github.com/GoogleCloudPlatform/opentelemetry-operations-js/blob/main/MIGRATION.md
     peerDependencies:
       '@opentelemetry/core': ^2.0.0
       '@opentelemetry/resources': ^2.0.0
@@ -1657,18 +1700,21 @@ packages:
   '@opentelemetry/sdk-trace-base@2.1.0':
     resolution: {integrity: sha512-uTX9FBlVQm4S2gVQO1sb5qyBLq/FPjbp+tmGoxu4tIgtYGmBYB44+KX/725RFDe30yBSaA9Ml9fqphe1hbUyLQ==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
   '@opentelemetry/sdk-trace-base@2.9.0':
     resolution: {integrity: sha512-cp9zmTl62R8PJrpvFcmc8N2JQU/xfa0S+61q511Nji+QxCfZ8Ifvg7H27G8cANe4crg4RTrWsVvanHiXjSp6ag==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
   '@opentelemetry/sdk-trace-node@2.9.0':
     resolution: {integrity: sha512-ec9a7ps37huy5itYk0MalaZdSLlM6AXWp/FhtEjgMpp5leEGojBDvAl/UWttQnkMZOvFHKzRESn8TD3yKTF5nQ==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
 

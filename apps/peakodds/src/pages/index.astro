@@ -1,0 +1,21 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import { EDITIONS, editionHref } from '@data/editions';
+---
+
+<BaseLayout
+  title="PeakOdds"
+  description="Independent sports previews and guides for adults 18+, in an Australian and a Global edition."
+  canonicalPath="/"
+>
+  <h1>PeakOdds</h1>
+  <nav aria-label="Editions">
+    <ul>
+      {EDITIONS.map((edition) => (
+        <li>
+          <a href={editionHref(edition.id)} hreflang={edition.locale}>{edition.name}</a>
+        </li>
+      ))}
+    </ul>
+  </nav>
+</BaseLayout>

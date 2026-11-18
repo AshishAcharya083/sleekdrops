@@ -1,0 +1,48 @@
+name: PR checks (PeakOdds)
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'apps/peakodds/**'
+      - '.github/workflows/pr-checks-peakodds.yml'
+      - '.github/actions/setup/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+
+concurrency:
+  group: pr-checks-peakodds-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Type-check PeakOdds
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the shared actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: .github/actions
+      - name: Set up the workspace
+        uses: ./.github/actions/setup
+      - name: Type-check
+        run: pnpm --filter @sleekdrops/peakodds check
+
+  test:
+    name: Test PeakOdds
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the shared actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: .github/actions
+      - name: Set up the workspace
+        uses: ./.github/actions/setup
+      - name: Test
+        run: pnpm --filter @sleekdrops/peakodds test
