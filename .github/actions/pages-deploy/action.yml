@@ -1,0 +1,39 @@
+name: Deploy to Cloudflare Pages
+description: >-
+  Upload a built directory to a Cloudflare Pages project by direct upload.
+  A deploy to the project's production branch goes live on its domain; any
+  other branch becomes a preview deployment.
+
+inputs:
+  project-name:
+    description: The Cloudflare Pages project to deploy to.
+    required: true
+  branch:
+    description: The branch the deployment is recorded under.
+    required: true
+  directory:
+    description: The built site to upload, relative to working-directory.
+    required: true
+  working-directory:
+    description: Where wrangler runs, so it finds a functions/ folder beside the build.
+    required: false
+    default: .
+  api-token:
+    description: A Cloudflare API token with Pages edit access to the account.
+    required: true
+  account-id:
+    description: The Cloudflare account the project belongs to.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Deploy to Cloudflare Pages
+      uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
+      with:
+        apiToken: ${{ inputs.api-token }}
+        accountId: ${{ inputs.account-id }}
+        workingDirectory: ${{ inputs.working-directory }}
+        # The wrangler apps/web and apps/admin pin.
+        wranglerVersion: 4.93.1
+        command: pages deploy "${{ inputs.directory }}" --project-name="${{ inputs.project-name }}" --branch="${{ inputs.branch }}"

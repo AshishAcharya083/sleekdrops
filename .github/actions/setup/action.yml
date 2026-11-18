@@ -1,0 +1,25 @@
+name: Set up the workspace
+description: >-
+  Check out the repository, set up pnpm and the Node version package.json's
+  engines field allows, with the pnpm store cached, and install dependencies
+  exactly as pnpm-lock.yaml records them.
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+    # Reads the pnpm version from package.json's packageManager field.
+    - name: Set up pnpm
+      uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+    - name: Set up Node
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version-file: package.json
+        cache: pnpm
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile
