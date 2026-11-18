@@ -4,6 +4,21 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@astrojs/check':
+      specifier: ^0.9.9
+      version: 0.9.9
+    '@types/node':
+      specifier: ^25.9.1
+      version: 25.9.5
+    astro:
+      specifier: ^4.16.19
+      version: 4.16.19
+    typescript:
+      specifier: ^5.6.0
+      version: 5.9.3
+
 patchedDependencies:
   '@getdevteam/analytics-web@0.3.1':
     hash: 928ca701c591591c093b6357beea76df175306c6fbb017f79b415287dc574e50
@@ -83,6 +98,25 @@ importers:
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
+
+  apps/peakodds:
+    dependencies:
+      '@astrojs/check':
+        specifier: 'catalog:'
+        version: 0.9.9(prettier@3.9.5)(typescript@5.9.3)
+      '@astrojs/markdown-remark':
+        specifier: 5.3.0
+        version: 5.3.0
+      astro:
+        specifier: 'catalog:'
+        version: 4.16.19(@types/node@25.9.5)(rollup@4.62.2)(typescript@5.9.3)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.9.5
 
   apps/web:
     dependencies:

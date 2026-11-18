@@ -23,3 +23,11 @@ minimumReleaseAgeExclude:
 # patches/README.md.
 patchedDependencies:
   '@getdevteam/analytics-web@0.3.1': patches/@getdevteam__analytics-web@0.3.1.patch
+
+# One version of each package more than one app installs, referenced from an
+# app's package.json as `catalog:`.
+catalog:
+  '@astrojs/check': ^0.9.9
+  '@types/node': ^25.9.1
+  astro: ^4.16.19
+  typescript: ^5.6.0

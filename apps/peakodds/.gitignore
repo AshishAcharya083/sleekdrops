@@ -1,0 +1,2 @@
+# Written by scripts/fetch-content.mjs before every build; never commit.
+.content-cache/

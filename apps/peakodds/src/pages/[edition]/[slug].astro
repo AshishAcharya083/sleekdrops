@@ -1,0 +1,46 @@
+---
+import type { GetStaticPaths } from 'astro';
+import BaseLayout from '@layouts/BaseLayout.astro';
+import { EDITIONS, editionHref, type Edition } from '@data/editions';
+import { getEditionPosts, type PeakOddsPost } from '@lib/posts';
+import { renderMarkdown } from '@lib/markdown';
+
+export const getStaticPaths = (async () => {
+  const paths = await Promise.all(
+    EDITIONS.map(async (edition) =>
+      (await getEditionPosts(edition.id)).map((post) => ({
+        params: { edition: edition.id, slug: post.slug },
+        props: { edition, post },
+      })),
+    ),
+  );
+  return paths.flat();
+}) satisfies GetStaticPaths;
+
+interface Props {
+  edition: Edition;
+  post: PeakOddsPost;
+}
+
+const { edition, post } = Astro.props;
+const bodyHtml = await renderMarkdown(post.body);
+---
+
+<BaseLayout
+  title={`${post.title} | PeakOdds ${edition.name}`}
+  description={post.description || `${post.title}, from the PeakOdds ${edition.name} edition.`}
+  canonicalPath={editionHref(edition.id, post.slug)}
+  locale={edition.locale}
+>
+  <article>
+    <header>
+      <p>{post.sport}</p>
+      <h1>{post.title}</h1>
+      {post.description && <p>{post.description}</p>}
+      <p>
+        {post.author} · <time datetime={post.pubDate}>{post.pubDate}</time>
+      </p>
+    </header>
+    <div set:html={bodyHtml} />
+  </article>
+</BaseLayout>

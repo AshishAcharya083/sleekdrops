@@ -1,0 +1,51 @@
+---
+import type { GetStaticPaths } from 'astro';
+import BaseLayout from '@layouts/BaseLayout.astro';
+import { EDITIONS, editionHref, type Edition } from '@data/editions';
+import { getEditionPosts, type PeakOddsPost } from '@lib/posts';
+
+export const getStaticPaths = (async () =>
+  Promise.all(
+    EDITIONS.map(async (edition) => ({
+      params: { edition: edition.id },
+      props: { edition, posts: await getEditionPosts(edition.id) },
+    })),
+  )) satisfies GetStaticPaths;
+
+interface Props {
+  edition: Edition;
+  posts: PeakOddsPost[];
+}
+
+const { edition, posts } = Astro.props;
+---
+
+<BaseLayout
+  title={`PeakOdds ${edition.name}`}
+  description={`Match previews, guides and articles from the PeakOdds ${edition.name} edition.`}
+  canonicalPath={editionHref(edition.id)}
+  locale={edition.locale}
+>
+  <h1>PeakOdds {edition.name}</h1>
+  {
+    posts.length === 0 ? (
+      <p>Nothing published in this edition yet.</p>
+    ) : (
+      <ul>
+        {posts.map((post) => (
+          <li>
+            <article>
+              <h2>
+                <a href={editionHref(edition.id, post.slug)}>{post.title}</a>
+              </h2>
+              <p>
+                {post.sport} · <time datetime={post.pubDate}>{post.pubDate}</time>
+              </p>
+              {post.description && <p>{post.description}</p>}
+            </article>
+          </li>
+        ))}
+      </ul>
+    )
+  }
+</BaseLayout>
