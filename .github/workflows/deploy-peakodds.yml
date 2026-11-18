@@ -1,0 +1,92 @@
+name: Deploy PeakOdds
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/peakodds/**'
+      - '.github/workflows/deploy-peakodds.yml'
+      - '.github/actions/setup/**'
+      - '.github/actions/pages-deploy/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+  # Sent by the agent after it publishes or changes a PeakOdds post:
+  #   POST /repos/<owner>/<repo>/dispatches {"event_type": "peakodds-content-updated"}
+  # Its own event name, so a PeakOdds publish never redeploys SleekDrops.
+  repository_dispatch:
+    types: [peakodds-content-updated]
+  workflow_dispatch:
+
+# One deploy at a time. A newer run waits rather than cancelling one that is
+# mid-upload, and only the newest waiting run is kept.
+concurrency:
+  group: deploy-peakodds
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build & deploy PeakOdds
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PEAKODDS_CLOUDFLARE_PROJECT_NAME: ${{ vars.PEAKODDS_CLOUDFLARE_PROJECT_NAME }}
+      # Public by design: the publishable key reads published posts and nothing
+      # else, so these are repository variables rather than secrets.
+      PEAKODDS_SUPABASE_URL: ${{ vars.PEAKODDS_SUPABASE_URL }}
+      PEAKODDS_SUPABASE_PUBLISHABLE_KEY: ${{ vars.PEAKODDS_SUPABASE_PUBLISHABLE_KEY }}
+      PEAKODDS_SITE_URL: ${{ vars.PEAKODDS_SITE_URL }}
+
+    steps:
+      # Until the PeakOdds hosting is set up (apps/peakodds/docs/build-and-deploy.md)
+      # there is nowhere to deploy, so the run says what is missing and stops
+      # green instead of failing every push to main.
+      - name: Check the deploy is configured
+        id: config
+        env:
+          HAS_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          HAS_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+        run: |
+          missing=()
+          for name in PEAKODDS_CLOUDFLARE_PROJECT_NAME PEAKODDS_SUPABASE_URL PEAKODDS_SUPABASE_PUBLISHABLE_KEY PEAKODDS_SITE_URL; do
+            [ -n "${!name}" ] || missing+=("variable $name")
+          done
+          [ "$HAS_API_TOKEN" = true ] || missing+=("secret CLOUDFLARE_API_TOKEN")
+          [ "$HAS_ACCOUNT_ID" = true ] || missing+=("secret CLOUDFLARE_ACCOUNT_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            printf -v list '%s, ' "${missing[@]}"
+            echo "::warning::PeakOdds was not deployed. Missing: ${list%, }. See apps/peakodds/docs/build-and-deploy.md."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # GitHub reads a local action from the workspace, so fetch the shared
+      # actions first; the setup action then checks out the whole repository.
+      - name: Check out the shared actions
+        if: steps.config.outputs.ready == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: .github/actions
+
+      - name: Set up the workspace
+        if: steps.config.outputs.ready == 'true'
+        uses: ./.github/actions/setup
+
+      - name: Build
+        if: steps.config.outputs.ready == 'true'
+        run: pnpm --filter @sleekdrops/peakodds build
+
+      - name: Deploy to Cloudflare Pages
+        if: steps.config.outputs.ready == 'true'
+        uses: ./.github/actions/pages-deploy
+        with:
+          project-name: ${{ vars.PEAKODDS_CLOUDFLARE_PROJECT_NAME }}
+          branch: main
+          directory: dist
+          working-directory: apps/peakodds
+          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
