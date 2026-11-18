@@ -19,7 +19,7 @@ agent session per stage, verdict-driven routing, token/cost ledger).
 | 8 | `editor` | edit | Surgical revision resolving the reviewer's issues, the voice-scan findings and any admin feedback (loops with the reviewer, bounded by `max_revision_rounds`) |
 | 9 | `assembler` | assemble | Exact post payload: frontmatter (validated against the site's Zod schema) + affiliate link rows built deterministically — liveness-verified per-marketplace ASINs with an Amazon-search fallback that can't 404; Amazon is the only approved merchant |
 | 10 | `image_agent` | image | Hero image: Tavily image search → Gemini vision check (related, watermark-free) → else generate with the Gemini image model; uploads to the public Supabase Storage `images` bucket and stores the URL in frontmatter. Stands down entirely when the operator attached their own image, and skips itself when `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are unset |
-| 11 | `publisher` | publish | Upserts the platform's own `posts` + `affiliate_links` (SleekDrops': the Supabase database itself) and fires its rebuild (dispatch or deploy hook) → site rebuilds; refuses an event-bound piece after kick-off |
+| 11 | `publisher` | publish | Upserts the platform's own `posts` + `affiliate_links` (SleekDrops': the Supabase database itself) and fires its rebuild (a repository dispatch with the platform's own event type) → site rebuilds; refuses an event-bound piece after kick-off |
 
 Flow: `research → keyword → angle → outline → write → seo_review ⇄ edit → assemble → image → publish`.
 
@@ -282,7 +282,7 @@ platform's is refused rather than published into it.
 | Content database URL | `DATABASE_URL` (the pipeline's own: the Supabase project) | `PEAKODDS_CONTENT_DATABASE_URL` |
 | GitHub repo (`owner/repo`) | `GITHUB_REPO` | `PEAKODDS_GITHUB_REPO` |
 | Site origin | `SITE_URL` | `PEAKODDS_SITE_URL` |
-| Rebuild | `GITHUB_TOKEN`: `content-updated` repository dispatch to `GITHUB_REPO` | `PEAKODDS_REBUILD_HOOK_URL`: a deploy hook URL the publisher POSTs |
+| Rebuild | `GITHUB_TOKEN`: `content-updated` repository dispatch to `GITHUB_REPO` | `GITHUB_TOKEN`: `peakodds-content-updated` repository dispatch to `PEAKODDS_GITHUB_REPO` |
 
 `GITHUB_TOKEN` is shared. SleekDrops' content tables live in the same
 database as the pipeline (migration 019 creates them), which is why its
@@ -292,9 +292,26 @@ the one a SleekDrops publish goes live from. A content database URL must be a
 `GITHUB_REPO` and `SITE_URL` no longer have built-in defaults: a SleekDrops
 deployment must set both (`AshishAcharya083/sleekdrops` and
 `https://sleekdrops.com` in production), or every SleekDrops publish fails
-naming the one that is missing. A platform with no rebuild variable rebuilds
-by dispatch with `GITHUB_TOKEN`; one that names a variable must hold an
-http(s) URL there, and it is treated as a secret: no message quotes it.
+naming the one that is missing. Each platform's dispatch carries an event type
+of its own (`dispatchEventType` in its publish target), so the workflow that
+deploys one brand's site never runs for the other's publish. A platform that
+names a rebuild hook variable instead must hold an http(s) URL there, and it is
+treated as a secret: no message quotes it. None does today: a Cloudflare deploy
+hook only rebuilds a project Cloudflare builds from git, and this repository
+uploads its builds from GitHub Actions.
+
+A platform whose content database is its own - PeakOdds - has its tables set
+up by the agent: `src/db/contentSchema.ts` runs at boot and again before that
+platform's first publish in a process. It creates `posts` and
+`affiliate_links` when missing (and adds any column an older copy lacks), and,
+on a database with Supabase's Data API roles, locks it down the way migration
+019 locks down SleekDrops': no grants on any table, present or future,
+row-level security on every table, and the publishable key may `SELECT`
+published `posts` and nothing else. Every post there carries the `edition_id`
+of the article it came from, so the site can list it under `/au` or `/global`;
+posts written before the column existed get theirs from the `articles` table,
+and a post no article accounts for stops the setup, naming its slug, until it
+is given an edition or deleted.
 
 `apps/web` is the SleekDrops site and reads SleekDrops' Supabase project only,
 through its Data API with the public publishable key. PeakOdds has no site in
@@ -317,44 +334,14 @@ message above until it is done.
 
 1. Create its content database - a Postgres of its own, such as a second
    Supabase project (a URL equal to `DATABASE_URL` is refused) - and set its
-   connection string as `PEAKODDS_CONTENT_DATABASE_URL`. Create its tables:
-
-   ```sql
-   CREATE TABLE IF NOT EXISTS posts (
-     slug             TEXT PRIMARY KEY,
-     status           TEXT NOT NULL,          -- 'published' | 'draft'
-     title            TEXT NOT NULL,
-     category         TEXT NOT NULL,
-     post_type        TEXT NOT NULL,
-     author           TEXT NOT NULL,
-     pub_date         DATE NOT NULL,
-     frontmatter_json JSONB NOT NULL,
-     body_md          TEXT NOT NULL,
-     event_starts_at  TIMESTAMPTZ,            -- NULL when tied to no event
-     odds_as_at       TIMESTAMPTZ,            -- when the quoted prices were seen
-     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-   );
-   CREATE TABLE IF NOT EXISTS affiliate_links (
-     slug         TEXT PRIMARY KEY,
-     default_url  TEXT NOT NULL,
-     regions_json JSONB,
-     note         TEXT,
-     expires_at   DATE,
-     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-   );
-   ```
-
-   (`affiliate_links` stays empty for a platform with monetisation `none`; it
-   exists so a site build can read the same two tables SleekDrops' does.)
-2. Create the PeakOdds site's deploy hook (Cloudflare Pages → the project →
-   Settings → Builds → Deploy hooks) and store the URL as the secret
-   `PEAKODDS_REBUILD_HOOK_URL`.
-3. Set `PEAKODDS_SITE_URL` to the origin the site deploys to and
-   `PEAKODDS_GITHUB_REPO` to its repository.
-4. Add the four to wherever the agent runs (`apps/agent/.env` locally); the
-   hook URL and the database URL are secrets.
+   connection string as `PEAKODDS_CONTENT_DATABASE_URL`. Leave it empty: the
+   agent creates and locks down its tables itself (see above).
+2. Set `PEAKODDS_SITE_URL` to the origin the site deploys to and
+   `PEAKODDS_GITHUB_REPO` to the repository whose workflow deploys it on a
+   `peakodds-content-updated` dispatch. `GITHUB_TOKEN` must be allowed to
+   dispatch to that repository too.
+3. Add the three to wherever the agent runs (`apps/agent/.env` locally); the
+   database URL is a secret.
 
 ## Social distribution
 
