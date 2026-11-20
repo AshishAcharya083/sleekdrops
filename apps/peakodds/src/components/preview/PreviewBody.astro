@@ -1,0 +1,222 @@
+---
+// The writer's article: markdown as written, the recognised picks as pick
+// cards with their reasoning, and the verdict set apart.
+import PickCard from '@components/ui/PickCard.astro';
+import type { Edition } from '@data/editions';
+import { renderMarkdown } from '@lib/markdown';
+import type { PreviewSegment, RecognisedPick } from '@lib/picks';
+
+interface Props {
+  segments: readonly PreviewSegment[];
+  /** The post's odds_as_at. Set whenever a segment holds picks, which are only recognised when it is. */
+  oddsAsAt: Date | null;
+  edition: Edition;
+  expired: boolean;
+}
+
+const { segments, oddsAsAt, edition, expired } = Astro.props;
+
+type Block =
+  | { readonly kind: 'markdown' | 'verdict'; readonly html: string }
+  | {
+      readonly kind: 'picks';
+      readonly asAt: Date;
+      readonly picks: ReadonlyArray<RecognisedPick & { readonly reasoningHtml: string | null }>;
+    };
+
+const blocks = await Promise.all(
+  segments.map(async (segment): Promise<Block> => {
+    switch (segment.kind) {
+      case 'markdown':
+      case 'verdict':
+        return { kind: segment.kind, html: await renderMarkdown(segment.markdown) };
+      case 'picks': {
+        if (!oddsAsAt) throw new Error('Recognised picks need the post odds_as_at time');
+        const picks = await Promise.all(
+          segment.picks.map(async (pick) => ({
+            ...pick,
+            reasoningHtml: pick.reasoning === null ? null : await renderMarkdown(pick.reasoning),
+          })),
+        );
+        return { kind: segment.kind, picks, asAt: oddsAsAt };
+      }
+      default: {
+        const unknown: never = segment;
+        throw new Error(`Unknown preview segment ${JSON.stringify(unknown)}`);
+      }
+    }
+  }),
+);
+---
+
+<div class="pv-body">
+  {
+    blocks.map((block) => {
+      if (block.kind !== 'picks') {
+        return block.kind === 'verdict' ? <div class="verdict" set:html={block.html} /> : <Fragment set:html={block.html} />;
+      }
+      return (
+        <ol class="picks">
+          {block.picks.map((pick) => (
+            <li id={`pick-${pick.number}`}>
+              {pick.reasoningHtml === null ? (
+                <PickCard
+                  market={pick.market}
+                  selection={pick.selection}
+                  odds={pick.odds}
+                  asAt={block.asAt}
+                  edition={edition}
+                  expired={expired}
+                />
+              ) : (
+                <PickCard
+                  market={pick.market}
+                  selection={pick.selection}
+                  odds={pick.odds}
+                  asAt={block.asAt}
+                  edition={edition}
+                  expired={expired}
+                >
+                  <Fragment set:html={pick.reasoningHtml} />
+                </PickCard>
+              )}
+            </li>
+          ))}
+        </ol>
+      );
+    })
+  }
+</div>
+
+<style>
+  .pv-body {
+    min-width: 0;
+  }
+
+  .pv-body > :global(h2) {
+    margin: var(--space-6) 0 var(--space-3);
+    font: 600 clamp(var(--text-xl), 2.6vw, var(--text-2xl)) / 1.15 var(--font-display);
+    letter-spacing: -0.02em;
+    color: var(--color-text);
+  }
+
+  .pv-body > :global(h2:first-child) {
+    margin-top: 0;
+  }
+
+  .pv-body > :global(h3) {
+    margin: var(--space-5) 0 var(--space-2);
+    font: 600 var(--text-xl) / 1.2 var(--font-display);
+    color: var(--color-text);
+  }
+
+  .pv-body > :global(:is(p, ul, ol:not(.picks))) {
+    max-width: 68ch;
+    margin: 0 0 var(--space-4);
+    font-size: var(--text-lg);
+    line-height: 1.7;
+    color: var(--color-text);
+  }
+
+  .pv-body > :global(:is(ul, ol:not(.picks))) {
+    padding-left: var(--space-5);
+  }
+
+  .pv-body > :global(:is(ul, ol:not(.picks)) li) {
+    margin: 0 0 var(--space-2);
+    padding-left: var(--space-1);
+  }
+
+  .pv-body > :global(:is(ul, ol:not(.picks)) li::marker) {
+    color: var(--color-accent);
+  }
+
+  .pv-body :global(a) {
+    text-decoration-color: var(--color-accent);
+    text-underline-offset: 3px;
+  }
+
+  /* A table the picks step did not recognise, as the writer wrote it. */
+  .pv-body > :global(table) {
+    width: 100%;
+    margin: 0 0 var(--space-4);
+    overflow: hidden;
+    overflow-wrap: break-word;
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-md);
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--color-surface);
+    font-size: var(--text-sm);
+  }
+
+  .pv-body > :global(table th) {
+    padding: var(--space-3);
+    border-bottom: var(--border-width) solid var(--color-contour);
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-align: left;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+
+  .pv-body > :global(table td) {
+    padding: var(--space-3);
+    border-bottom: var(--border-width) solid var(--color-border);
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pv-body > :global(table tr:last-child td) {
+    border-bottom: 0;
+  }
+
+  .picks {
+    display: grid;
+    gap: var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .picks > li {
+    min-width: 0;
+    scroll-margin-top: var(--space-5);
+  }
+
+  .verdict {
+    max-width: 68ch;
+    margin: 0 0 var(--space-4);
+    padding: var(--space-4) var(--space-5);
+    border: var(--border-width) solid var(--color-border);
+    border-left: 3px solid var(--color-text);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+  }
+
+  .verdict > :global(*) {
+    margin: 0;
+    font-size: var(--text-lg);
+    line-height: 1.65;
+    color: var(--color-text);
+  }
+
+  .verdict > :global(* + *) {
+    margin-top: var(--space-3);
+  }
+
+  @media (max-width: 640px) {
+    .pv-body > :global(table) :global(:is(th, td)) {
+      padding: var(--space-2);
+    }
+
+    .pv-body > :global(table th) {
+      letter-spacing: 0.04em;
+    }
+
+    .pv-body > :global(:is(p, ul, ol:not(.picks))),
+    .verdict > :global(*) {
+      font-size: var(--text-base);
+    }
+  }
+</style>
