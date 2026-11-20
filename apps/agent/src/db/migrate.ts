@@ -12,7 +12,12 @@ import {
 
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'migrations');
 
-export async function migrate(): Promise<void> {
+export interface MigrateOptions {
+  /** Apply only the migrations named before this file: an upgrade test's starting schema. */
+  readonly before?: string;
+}
+
+export async function migrate({ before }: MigrateOptions = {}): Promise<void> {
   await pool.query(
     `CREATE TABLE IF NOT EXISTS schema_migrations (
        name TEXT PRIMARY KEY,
@@ -24,7 +29,9 @@ export async function migrate(): Promise<void> {
       (r) => r.name,
     ),
   );
-  const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
+  const files = readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith('.sql') && (before === undefined || f < before))
+    .sort();
   for (const file of files) {
     if (applied.has(file)) continue;
     const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');

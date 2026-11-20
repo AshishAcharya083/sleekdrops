@@ -12,35 +12,14 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import pg from 'pg';
+import { reachable, scratchDatabase, skip } from '../db/scratchDatabase.js';
 
-const liveUrl = process.env.DATABASE_URL ?? '';
-
-async function onServer(url: string, sql: string): Promise<void> {
-  const admin = new pg.Pool({ connectionString: url, max: 1 });
-  try {
-    await admin.query(sql);
-  } finally {
-    await admin.end();
-  }
-}
-
-const reachable = liveUrl
-  ? await onServer(liveUrl, 'SELECT 1')
-      .then(() => true)
-      .catch(() => false)
-  : false;
-const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to run these';
-
-const scratchName = `agent_publish_target_${randomUUID().replaceAll('-', '')}`;
-const scratchUrl = new URL(liveUrl || 'postgres://localhost/unused');
-scratchUrl.pathname = `/${scratchName}`;
-const peakoddsUrl = new URL(scratchUrl.href);
-peakoddsUrl.pathname = `/${scratchName}_peakodds`;
+const sleekdropsDatabase = scratchDatabase('agent_publish_target');
+const peakoddsDatabase = scratchDatabase('agent_publish_target_peakodds');
 if (reachable) {
-  await onServer(liveUrl, `CREATE DATABASE "${scratchName}"`);
-  await onServer(liveUrl, `CREATE DATABASE "${scratchName}_peakodds"`);
-  process.env.DATABASE_URL = scratchUrl.href;
+  await sleekdropsDatabase.create();
+  await peakoddsDatabase.create();
+  process.env.DATABASE_URL = sleekdropsDatabase.url;
 }
 
 const SLEEKDROPS_ENV = {
@@ -49,7 +28,7 @@ const SLEEKDROPS_ENV = {
   GITHUB_TOKEN: 'test-github-token',
 };
 const PEAKODDS_ENV = {
-  PEAKODDS_CONTENT_DATABASE_URL: peakoddsUrl.href,
+  PEAKODDS_CONTENT_DATABASE_URL: peakoddsDatabase.url,
   PEAKODDS_GITHUB_REPO: 'example/peakodds',
   PEAKODDS_SITE_URL: 'https://peakodds.example',
 };
@@ -117,8 +96,8 @@ after(async () => {
   await endContentPools();
   await pool.end();
   if (reachable) {
-    await onServer(liveUrl, `DROP DATABASE IF EXISTS "${scratchName}" WITH (FORCE)`);
-    await onServer(liveUrl, `DROP DATABASE IF EXISTS "${scratchName}_peakodds" WITH (FORCE)`);
+    await sleekdropsDatabase.drop();
+    await peakoddsDatabase.drop();
   }
 });
 
@@ -152,8 +131,8 @@ async function postRows(slug: string): Promise<{ sleekdrops: number; peakodds: n
         .rows[0].n,
     );
   return {
-    sleekdrops: await count({ contentDatabaseUrl: scratchUrl.href }),
-    peakodds: await count({ contentDatabaseUrl: peakoddsUrl.href }),
+    sleekdrops: await count({ contentDatabaseUrl: sleekdropsDatabase.url }),
+    peakodds: await count({ contentDatabaseUrl: peakoddsDatabase.url }),
   };
 }
 
@@ -237,7 +216,7 @@ test('a PeakOdds post carries the edition its article was written for', { skip }
   recordCalls();
   const edition = async (slug: string) =>
     (
-      await contentPool({ contentDatabaseUrl: peakoddsUrl.href }).query<{ edition_id: string }>(
+      await contentPool({ contentDatabaseUrl: peakoddsDatabase.url }).query<{ edition_id: string }>(
         'SELECT edition_id FROM posts WHERE slug = $1',
         [slug],
       )
@@ -283,7 +262,7 @@ test('a missing PeakOdds variable fails the publish, naming it, with nothing sen
 
 test("a PeakOdds target pointing at SleekDrops' database or site is refused", { skip }, async () => {
   for (const [name, value] of [
-    ['PEAKODDS_CONTENT_DATABASE_URL', scratchUrl.href],
+    ['PEAKODDS_CONTENT_DATABASE_URL', sleekdropsDatabase.url],
     ['PEAKODDS_SITE_URL', `${SLEEKDROPS_ENV.SITE_URL}/`],
   ]) {
     const sent = recordCalls();
@@ -294,7 +273,7 @@ test("a PeakOdds target pointing at SleekDrops' database or site is refused", { 
         (err: unknown) =>
           err instanceof Error &&
           new RegExp(`${name} names the same .* as sleekdrops`).test(err.message) &&
-          !err.message.includes(scratchName),
+          !err.message.includes(sleekdropsDatabase.name),
       );
     });
     assert.deepEqual(sent, [], 'nothing was sent while the targets collide');
@@ -325,7 +304,7 @@ test('an event-bound preview before kick-off carries its event fields to its pos
 
   await runPublisher(piece, { now: () => new Date(kickOff.getTime() - 3_600_000) });
 
-  const { rows } = await contentPool({ contentDatabaseUrl: peakoddsUrl.href }).query<{
+  const { rows } = await contentPool({ contentDatabaseUrl: peakoddsDatabase.url }).query<{
     event_starts_at: Date;
     odds_as_at: Date;
   }>('SELECT event_starts_at, odds_as_at FROM posts WHERE slug = $1', [piece.slug]);
@@ -335,7 +314,7 @@ test('an event-bound preview before kick-off carries its event fields to its pos
   // A corrected kick-off reaches the row on the next pass, not only the first.
   await q("UPDATE articles SET event_starts_at = '2026-09-26T05:00:00Z' WHERE id = $1", [piece.id]);
   await runPublisher(piece, { now: () => new Date(kickOff.getTime() - 3_600_000) });
-  const { rows: again } = await contentPool({ contentDatabaseUrl: peakoddsUrl.href }).query<{
+  const { rows: again } = await contentPool({ contentDatabaseUrl: peakoddsDatabase.url }).query<{
     event_starts_at: Date;
   }>('SELECT event_starts_at FROM posts WHERE slug = $1', [piece.slug]);
   assert.equal(again[0].event_starts_at.toISOString(), '2026-09-26T05:00:00.000Z');

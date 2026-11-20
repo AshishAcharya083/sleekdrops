@@ -5,40 +5,16 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import pg from 'pg';
+import { reachable, scratchDatabase, skip } from '../db/scratchDatabase.js';
 import type { PlatformSeed } from './types.js';
 
-const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
 const FIRST_PLATFORM_MIGRATION = '018_platforms.sql';
 
-const liveUrl = process.env.DATABASE_URL ?? '';
-
-async function onServer(url: string, sql: string): Promise<void> {
-  const admin = new pg.Pool({ connectionString: url, max: 1 });
-  try {
-    await admin.query(sql);
-  } finally {
-    await admin.end();
-  }
-}
-
-const reachable = liveUrl
-  ? await onServer(liveUrl, 'SELECT 1')
-      .then(() => true)
-      .catch(() => false)
-  : false;
-const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to run these';
-
-const scratchName = `agent_platforms_${randomUUID().replaceAll('-', '')}`;
-const scratchUrl = new URL(liveUrl || 'postgres://localhost/unused');
-scratchUrl.pathname = `/${scratchName}`;
+const scratch = scratchDatabase('agent_platforms');
 if (reachable) {
-  await onServer(liveUrl, `CREATE DATABASE "${scratchName}"`);
+  await scratch.create();
   // Everything imported below connects through this.
-  process.env.DATABASE_URL = scratchUrl.href;
+  process.env.DATABASE_URL = scratch.url;
 }
 process.env.ADMIN_TOKEN = 'test-admin-token';
 
@@ -54,20 +30,6 @@ const AUTH = { Authorization: 'Bearer test-admin-token', 'Content-Type': 'applic
 
 /** The pre-018 rows, by table, so the backfill can be checked row for row. */
 const legacy: Record<string, string[]> = {};
-
-/** Apply every migration before 018 exactly as the runner does. */
-async function migrateTo017(): Promise<void> {
-  await q(
-    `CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`,
-  );
-  const files = readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith('.sql') && f < FIRST_PLATFORM_MIGRATION)
-    .sort();
-  for (const file of files) {
-    await pool.query(readFileSync(join(MIGRATIONS_DIR, file), 'utf8'));
-    await q('INSERT INTO schema_migrations (name) VALUES ($1)', [file]);
-  }
-}
 
 /** SleekDrops data as it looks in production today, written with pre-018 SQL. */
 async function seedLegacyData(): Promise<void> {
@@ -116,14 +78,14 @@ async function seedLegacyData(): Promise<void> {
 
 before(async () => {
   if (!reachable) return;
-  await migrateTo017();
+  await migrate({ before: FIRST_PLATFORM_MIGRATION });
   await seedLegacyData();
   await migrate();
 });
 
 after(async () => {
   await pool.end();
-  if (reachable) await onServer(liveUrl, `DROP DATABASE IF EXISTS "${scratchName}" WITH (FORCE)`);
+  if (reachable) await scratch.drop();
 });
 
 
