@@ -65,6 +65,7 @@ test('the publish target names environment variables, and rebuilds by repository
     githubRepoEnv: 'GITHUB_REPO',
     siteUrlEnv: 'SITE_URL',
     rebuildHookEnv: null,
+    dispatchEventType: 'content-updated',
   });
 });
 

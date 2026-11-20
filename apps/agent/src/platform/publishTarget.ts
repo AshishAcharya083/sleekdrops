@@ -14,12 +14,14 @@ export interface ResolvedPublishTarget {
    * error message - those name the variable it came from instead.
    */
   contentDatabaseUrl: string;
-  /** owner/repo the content-updated dispatch is sent to. */
+  /** owner/repo the rebuild dispatch is sent to. */
   githubRepo: string;
   /** Origin the site deploys to, with no trailing slash. */
   siteUrl: string;
   /** A deploy hook to POST, or null to send the repository dispatch instead. */
   rebuildHookUrl: string | null;
+  /** The event_type of the repository dispatch that rebuilds the site. */
+  dispatchEventType: string;
 }
 
 /**
@@ -102,7 +104,7 @@ export function resolvePublishTarget(platform: TargetSource): ResolvedPublishTar
     rebuildHookUrl = hook;
   }
 
-  return { contentDatabaseUrl, githubRepo, siteUrl, rebuildHookUrl };
+  return { contentDatabaseUrl, githubRepo, siteUrl, rebuildHookUrl, dispatchEventType: ref.dispatchEventType };
 }
 
 /** The publish target of the platform `platformId`. */

@@ -2,34 +2,13 @@
 // database of this file's own.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import pg from 'pg';
+import { reachable, scratchDatabase, skip } from '../../db/scratchDatabase.js';
 
-const liveUrl = process.env.DATABASE_URL ?? '';
-
-async function onServer(url: string, sql: string): Promise<void> {
-  const admin = new pg.Pool({ connectionString: url, max: 1 });
-  try {
-    await admin.query(sql);
-  } finally {
-    await admin.end();
-  }
-}
-
-const reachable = liveUrl
-  ? await onServer(liveUrl, 'SELECT 1')
-      .then(() => true)
-      .catch(() => false)
-  : false;
-const skip = reachable ? false : 'no reachable DATABASE_URL - start Postgres to run these';
-
-const scratchName = `agent_peakodds_${randomUUID().replaceAll('-', '')}`;
-const scratchUrl = new URL(liveUrl || 'postgres://localhost/unused');
-scratchUrl.pathname = `/${scratchName}`;
+const scratch = scratchDatabase('agent_peakodds');
 if (reachable) {
-  await onServer(liveUrl, `CREATE DATABASE "${scratchName}"`);
+  await scratch.create();
   // Everything imported below connects through this.
-  process.env.DATABASE_URL = scratchUrl.href;
+  process.env.DATABASE_URL = scratch.url;
 }
 
 const { getSetting, pool, setSetting } = await import('../../db/pool.js');
@@ -47,7 +26,7 @@ before(async () => {
 
 after(async () => {
   await pool.end();
-  if (reachable) await onServer(liveUrl, `DROP DATABASE IF EXISTS "${scratchName}" WITH (FORCE)`);
+  if (reachable) await scratch.drop();
 });
 
 test('the boot seed makes PeakOdds a platform the registry loads', { skip }, async () => {

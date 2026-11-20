@@ -1,7 +1,8 @@
 // The publish target's content: the posts and affiliate_links tables a
 // platform's website builds from (apps/web/scripts/fetch-content.mjs reads the
 // same two). Migration 019 creates them in the pipeline's own database, which
-// is where SleekDrops publishes; another platform names a database of its own.
+// is where SleekDrops publishes; another platform names a database of its own,
+// which db/contentSchema.ts sets up.
 //
 // Every call names the database it runs against: each platform has its own,
 // and there is no default one to land in.
@@ -20,12 +21,20 @@ export type ContentTarget = Pick<ResolvedPublishTarget, 'contentDatabaseUrl'>;
 const contentPools = new Map<string, pg.Pool>();
 
 /**
+ * Whether the target is the pipeline's own database - SleekDrops', whose
+ * variable is DATABASE_URL itself, and whose content tables migration 019 owns.
+ */
+export function isPipelineDatabase(target: ContentTarget): boolean {
+  return target.contentDatabaseUrl === config.databaseUrl;
+}
+
+/**
  * The pool a target's statements run on. The pipeline's own pool when the
- * target is the pipeline's database - SleekDrops', whose variable is
- * DATABASE_URL itself - so publishing opens no second set of connections to it.
+ * target is the pipeline's database, so publishing opens no second set of
+ * connections to it.
  */
 export function contentPool(target: ContentTarget): pg.Pool {
-  if (target.contentDatabaseUrl === config.databaseUrl) return pool;
+  if (isPipelineDatabase(target)) return pool;
   let own = contentPools.get(target.contentDatabaseUrl);
   if (!own) {
     // Small, and never what keeps the process alive: a platform publishes a

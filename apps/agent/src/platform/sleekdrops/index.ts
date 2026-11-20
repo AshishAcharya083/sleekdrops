@@ -86,6 +86,7 @@ Editorial rules (non-negotiable):
       siteUrlEnv: 'SITE_URL',
       // The rebuild is a repository_dispatch to GITHUB_REPO, not a hook URL.
       rebuildHookEnv: null,
+      dispatchEventType: 'content-updated',
     },
   },
   editions: [

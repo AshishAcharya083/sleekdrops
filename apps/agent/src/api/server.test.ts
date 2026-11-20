@@ -39,6 +39,7 @@ function fixturePlatform(id: string, overrides: Partial<Platform> = {}): Platfor
       githubRepoEnv: 'GITHUB_REPO',
       siteUrlEnv: 'SITE_URL',
       rebuildHookEnv: null,
+      dispatchEventType: 'content-updated',
     },
     profileVersion: 1,
     editions: [

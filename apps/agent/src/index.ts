@@ -2,6 +2,7 @@
 // and on SIGTERM/SIGINT hand held work back to the queue before exiting.
 import { constants } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
+import { ensureContentSchemas } from './db/contentSchema.js';
 import { migrate } from './db/migrate.js';
 import { databaseConnectionHint, isDatabaseConnectionError, waitForDatabase } from './db/pool.js';
 import { startInsightsCollector, stopInsightsCollector } from './distribution/insights.js';
@@ -76,6 +77,9 @@ async function main(): Promise<void> {
   await waitForDatabase();
   await migrate();
   await seedPlatforms();
+  // Not awaited: another platform's content database being slow must not hold
+  // up the pipeline. It never rejects, and a publish applies it again first.
+  void ensureContentSchemas();
   await recoverStranded();
   startServer();
   startWorker();

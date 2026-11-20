@@ -32,8 +32,14 @@ export interface PublishTargetRef {
   contentDatabaseUrlEnv: string;
   githubRepoEnv: string;
   siteUrlEnv: string;
-  /** null = repository_dispatch to the repo (SleekDrops today). */
+  /** null = repository_dispatch to the repo (every platform today). */
   rebuildHookEnv: string | null;
+  /**
+   * The event_type of the repository_dispatch that rebuilds the site - a
+   * value, not a variable name. Each platform has its own, so the workflow
+   * deploying one brand's site never runs for another brand's publish.
+   */
+  dispatchEventType: string;
 }
 
 export interface Edition {

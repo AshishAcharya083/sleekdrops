@@ -17,6 +17,7 @@ const sleekdrops = {
     githubRepoEnv: 'GITHUB_REPO',
     siteUrlEnv: 'SITE_URL',
     rebuildHookEnv: null,
+    dispatchEventType: 'content-updated',
   },
 };
 const peakodds = {
@@ -25,8 +26,14 @@ const peakodds = {
     contentDatabaseUrlEnv: 'PEAKODDS_CONTENT_DATABASE_URL',
     githubRepoEnv: 'PEAKODDS_GITHUB_REPO',
     siteUrlEnv: 'PEAKODDS_SITE_URL',
-    rebuildHookEnv: 'PEAKODDS_REBUILD_HOOK_URL',
+    rebuildHookEnv: null,
+    dispatchEventType: 'peakodds-content-updated',
   },
+};
+/** A platform rebuilt by a deploy hook instead of a dispatch. */
+const hooked = {
+  id: 'hooked',
+  publishTarget: { ...peakodds.publishTarget, rebuildHookEnv: 'HOOKED_REBUILD_HOOK_URL' },
 };
 
 const ENV = {
@@ -37,7 +44,7 @@ const ENV = {
   PEAKODDS_CONTENT_DATABASE_URL: 'postgresql://peakodds:peakodds-pw@db.example:5432/peakodds',
   PEAKODDS_GITHUB_REPO: 'example/peakodds',
   PEAKODDS_SITE_URL: 'https://peakodds.example',
-  PEAKODDS_REBUILD_HOOK_URL: 'https://hooks.example/deploy-secret',
+  HOOKED_REBUILD_HOOK_URL: 'https://hooks.example/deploy-secret',
 };
 
 function withEnv(overrides: Record<string, string | undefined>, run: () => void): void {
@@ -61,23 +68,32 @@ test('SleekDrops rebuilds by repository dispatch to its own repo', () => {
       githubRepo: 'example/sleekdrops',
       siteUrl: 'https://sleekdrops.example',
       rebuildHookUrl: null,
+      dispatchEventType: 'content-updated',
     });
   });
 });
 
-test('PeakOdds resolves only its own variables, and rebuilds through its deploy hook', () => {
+test('PeakOdds resolves only its own variables, and rebuilds by a dispatch event of its own', () => {
   withEnv({}, () => {
     assert.deepEqual(resolvePublishTarget(peakodds), {
       contentDatabaseUrl: 'postgresql://peakodds:peakodds-pw@db.example:5432/peakodds',
       githubRepo: 'example/peakodds',
       siteUrl: 'https://peakodds.example',
-      rebuildHookUrl: 'https://hooks.example/deploy-secret',
+      rebuildHookUrl: null,
+      dispatchEventType: 'peakodds-content-updated',
     });
   });
 });
 
+test('a platform with a deploy hook resolves its URL', () => {
+  withEnv({}, () => {
+    assert.equal(resolvePublishTarget(hooked).rebuildHookUrl, 'https://hooks.example/deploy-secret');
+  });
+});
+
 test('a missing variable throws its name, and nothing falls back to SleekDrops', () => {
-  for (const name of Object.values(peakodds.publishTarget)) {
+  const { contentDatabaseUrlEnv, githubRepoEnv, siteUrlEnv } = peakodds.publishTarget;
+  for (const name of [contentDatabaseUrlEnv, githubRepoEnv, siteUrlEnv]) {
     withEnv({ [name]: undefined }, () => {
       assert.throws(() => resolvePublishTarget(peakodds), {
         name: 'PublishTargetError',
@@ -91,12 +107,12 @@ test('a missing variable throws its name, and nothing falls back to SleekDrops',
 });
 
 test('a malformed value is refused without echoing it', () => {
-  withEnv({ PEAKODDS_REBUILD_HOOK_URL: 'not-a-url-but-maybe-a-secret' }, () => {
+  withEnv({ HOOKED_REBUILD_HOOK_URL: 'not-a-url-but-maybe-a-secret' }, () => {
     assert.throws(
-      () => resolvePublishTarget(peakodds),
+      () => resolvePublishTarget(hooked),
       (err: unknown) =>
         err instanceof PublishTargetError &&
-        /PEAKODDS_REBUILD_HOOK_URL must be an http\(s\) deploy hook URL/.test(err.message) &&
+        /HOOKED_REBUILD_HOOK_URL must be an http\(s\) deploy hook URL/.test(err.message) &&
         !err.message.includes('not-a-url-but-maybe-a-secret'),
     );
   });
@@ -119,7 +135,7 @@ test('a malformed value is refused without echoing it', () => {
 });
 
 test('the partial resolvers need only their own variable', () => {
-  withEnv({ PEAKODDS_GITHUB_REPO: undefined, PEAKODDS_REBUILD_HOOK_URL: undefined }, () => {
+  withEnv({ PEAKODDS_GITHUB_REPO: undefined, GITHUB_TOKEN: undefined }, () => {
     assert.deepEqual(resolveContentTarget(peakodds), {
       contentDatabaseUrl: 'postgresql://peakodds:peakodds-pw@db.example:5432/peakodds',
     });
