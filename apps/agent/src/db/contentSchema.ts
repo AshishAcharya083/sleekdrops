@@ -10,6 +10,7 @@
 // an older README, or by another instance, is brought forward rather than
 // rejected.
 import { createLogger } from '../lib/log.js';
+import type { ArticleRow } from '../pipeline/types.js';
 import { PublishTargetError, resolveContentTarget } from '../platform/publishTarget.js';
 import { listPlatforms } from '../platform/registry.js';
 import type { Platform } from '../platform/types.js';
@@ -134,7 +135,7 @@ export class ContentSchemaError extends Error {
 async function backfillEditions(platformId: string, target: ContentTarget): Promise<void> {
   const missing = await contentQuery<{ slug: string }>(target, 'SELECT slug FROM posts WHERE edition_id IS NULL');
   if (missing.length > 0) {
-    const editions = await q<{ slug: string; edition_id: string }>(
+    const editions = await q<Pick<ArticleRow, 'slug' | 'edition_id'>>(
       'SELECT slug, edition_id FROM articles WHERE platform_id = $1 AND slug = ANY($2::text[])',
       [platformId, missing.map((row) => row.slug)],
     );
