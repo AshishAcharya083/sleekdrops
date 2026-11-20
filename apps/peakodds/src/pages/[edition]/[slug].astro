@@ -4,6 +4,8 @@ import BaseLayout from '@layouts/BaseLayout.astro';
 import { EDITIONS, editionHref, type Edition } from '@data/editions';
 import { getEditionPosts, type PeakOddsPost } from '@lib/posts';
 import { renderMarkdown } from '@lib/markdown';
+import ArticleHead from '@components/preview/ArticleHead.astro';
+import MatchPreview from '@components/preview/MatchPreview.astro';
 
 export const getStaticPaths = (async () => {
   const paths = await Promise.all(
@@ -23,7 +25,8 @@ interface Props {
 }
 
 const { edition, post } = Astro.props;
-const bodyHtml = await renderMarkdown(post.body);
+const isPreview = post.postType === 'preview';
+const bodyHtml = isPreview ? '' : await renderMarkdown(post.body);
 ---
 
 <BaseLayout
@@ -32,15 +35,22 @@ const bodyHtml = await renderMarkdown(post.body);
   canonicalPath={editionHref(edition.id, post.slug)}
   locale={edition.locale}
 >
-  <article>
-    <header>
-      <p>{post.sport}</p>
-      <h1>{post.title}</h1>
-      {post.description && <p>{post.description}</p>}
-      <p>
-        {post.author} · <time datetime={post.pubDate}>{post.pubDate}</time>
-      </p>
-    </header>
-    <div set:html={bodyHtml} />
-  </article>
+  <ArticleHead slot="head" edition={edition} post={post} />
+  {
+    isPreview ? (
+      <MatchPreview edition={edition} post={post} now={new Date()} />
+    ) : (
+      <article>
+        <header>
+          <p>{post.sport}</p>
+          <h1>{post.title}</h1>
+          {post.description && <p>{post.description}</p>}
+          <p>
+            {post.author} · <time datetime={post.pubDate}>{post.pubDate}</time>
+          </p>
+        </header>
+        <div set:html={bodyHtml} />
+      </article>
+    )
+  }
 </BaseLayout>

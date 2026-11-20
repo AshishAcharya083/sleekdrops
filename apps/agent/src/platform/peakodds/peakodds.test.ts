@@ -54,6 +54,11 @@ test('the editions match the PeakOdds site: Australia in Sydney time, and Global
   );
 });
 
+test('the picks table columns match the header the PeakOdds site recognises', () => {
+  // The same literal as the header in apps/peakodds/src/lib/picks.test.ts.
+  assert.deepEqual(PICKS_TABLE_COLUMNS, ['Market', 'Selection', 'Indicative odds (decimal)', 'As at']);
+});
+
 test('no scout query, platform or edition, goes looking for racing', () => {
   for (const query of [...platform.scoutQueries, ...editions.flatMap((e) => e.scoutQueries)]) {
     assert.ok(!RACING.test(query), `racing scout query: ${query}`);

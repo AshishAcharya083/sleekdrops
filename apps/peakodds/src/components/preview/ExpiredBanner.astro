@@ -1,0 +1,124 @@
+---
+// The bordered notice an expired preview opens with. It is always rendered,
+// hidden until expired, so SiteLayout's expiry script can reveal it on a page
+// built before the start without building anything in the browser.
+import { editionHref, type Edition } from '@data/editions';
+import { formatKickOff } from '@lib/format';
+import type { StartLabel } from '@lib/preview';
+
+interface Props {
+  edition: Edition;
+  startsAt: Date;
+  startLabel: StartLabel;
+  /** The sport as it reads mid-sentence, e.g. 'football'. */
+  sport: string;
+  expired: boolean;
+}
+
+const { edition, startsAt, startLabel, sport, expired } = Astro.props;
+---
+
+<section class="expired" aria-labelledby="expired-title" data-expiry-notice hidden={!expired}>
+  <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+    <path d="M3 27 11.5 13.5 15.5 19 19.5 11 29 27Z"></path>
+    <path d="M19.5 11V3.5L25.5 5.75 19.5 8"></path>
+    <path d="M8 22.5 11.5 19 14 22M17 22l2.5-4 3 4.5"></path>
+  </svg>
+  <div>
+    <h2 id="expired-title">This preview has expired</h2>
+    <p>
+      {startLabel} was <time datetime={startsAt.toISOString()}>{formatKickOff(startsAt, edition)}</time>. The odds below
+      are from before the start and are no longer current.
+    </p>
+  </div>
+  <a class="link" href={editionHref(edition.id)}>Current {sport} previews</a>
+</section>
+
+<style>
+  .expired {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--space-4) var(--space-5);
+    align-items: center;
+    margin: 0 0 var(--space-6);
+    padding: var(--space-4) var(--space-5);
+    border: 2px solid var(--color-text);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg);
+  }
+
+  .expired[hidden] {
+    display: none;
+  }
+
+  svg {
+    width: 32px;
+    height: 32px;
+    fill: none;
+    stroke: var(--color-text);
+    stroke-width: 1.6;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  h2 {
+    margin: 0;
+    font: 600 var(--text-xl) / 1.2 var(--font-display);
+    letter-spacing: -0.01em;
+    color: var(--color-text);
+  }
+
+  p {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-base);
+    line-height: 1.5;
+    color: var(--color-text);
+  }
+
+  time {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0 var(--space-4);
+    border: 1.5px solid var(--color-text);
+    border-radius: 999px;
+    background: var(--color-surface);
+    font: 700 var(--text-sm) / 1 var(--font-body);
+    color: var(--color-text);
+    text-decoration: none;
+    white-space: nowrap;
+    transition:
+      background-color var(--motion-duration) var(--motion-ease),
+      color var(--motion-duration) var(--motion-ease);
+  }
+
+  .link:hover {
+    background: var(--color-text);
+    color: var(--color-surface);
+  }
+
+  @media (max-width: 640px) {
+    .expired {
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: start;
+      gap: var(--space-3);
+      padding: var(--space-4);
+    }
+
+    svg {
+      width: 26px;
+      height: 26px;
+      margin-top: 2px;
+    }
+
+    .link {
+      grid-column: 1 / -1;
+    }
+  }
+</style>

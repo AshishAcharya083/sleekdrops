@@ -1,0 +1,274 @@
+---
+// 'The range': every recognised pick's implied chance as a peak on one shared
+// baseline and 0-100% scale, each linking to its pick card. Like every price
+// on the site it carries its as-at time and the not-a-prediction label.
+import type { Edition } from '@data/editions';
+import { formatAsAt } from '@lib/format';
+import { formatDecimalOdds, impliedChance } from '@lib/odds';
+import type { RecognisedPick } from '@lib/picks';
+import { PEAK_BASELINE_Y, PEAK_TOP_Y, peakDrawing } from '@lib/preview';
+
+interface Props {
+  picks: readonly RecognisedPick[];
+  oddsAsAt: Date;
+  edition: Edition;
+}
+
+const { picks, oddsAsAt, edition } = Astro.props;
+const gridlines = `M0 ${PEAK_TOP_Y}H64M0 ${(PEAK_TOP_Y + PEAK_BASELINE_Y) / 2}H64`;
+const ridge = picks.map((pick) => {
+  const chance = impliedChance(pick.odds);
+  return { ...pick, chance, price: formatDecimalOdds(pick.odds), peak: peakDrawing(chance) };
+});
+---
+
+<section class="range" aria-labelledby="range-title">
+  <h2 id="range-title">The range</h2>
+  <ol class="ridge">
+    {
+      ridge.map((pick) => (
+        <li>
+          <a href={`#pick-${pick.number}`}>
+            <span class="chance">{pick.chance}%</span>
+            <svg class="peak" viewBox="0 0 64 52" aria-hidden="true" focusable="false">
+              <path class="grid" d={gridlines} />
+              <g class="rise">
+                <polygon class="mass" points={pick.peak.outline} />
+                <path class="strata" d={pick.peak.contours} />
+                <circle class="summit" cx={pick.peak.summit.x} cy={pick.peak.summit.y} r="3.2" />
+              </g>
+            </svg>
+            <span class="visually-hidden">
+              {' '}
+              - Pick {pick.number}, {pick.selection}, decimal odds {pick.price}
+            </span>
+          </a>
+        </li>
+      ))
+    }
+  </ol>
+  <ul class="key" aria-hidden="true">
+    {
+      ridge.map((pick) => (
+        <li>
+          <b>Pick {pick.number}</b>
+          <span>{pick.price}</span>
+        </li>
+      ))
+    }
+  </ul>
+  <p class="label">Implied by the odds, not our prediction</p>
+  <p class="as-at">As at <time datetime={oddsAsAt.toISOString()}>{formatAsAt(oddsAsAt, edition)}</time></p>
+</section>
+
+<style>
+  .range {
+    padding: var(--space-5) var(--space-5) var(--space-4);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+  }
+
+  h2 {
+    margin: 0 0 var(--space-4);
+    font: 700 var(--text-sm) / 1.4 var(--font-body);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+
+  .ridge,
+  .key {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .ridge {
+    padding-bottom: var(--space-1);
+    border-bottom: 1.5px solid var(--color-text);
+  }
+
+  .ridge a {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 44px;
+    padding: var(--space-2) 2px 0;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    color: var(--color-text);
+    text-decoration: none;
+    transition: background-color var(--motion-duration) var(--motion-ease);
+  }
+
+  .ridge a:hover {
+    background: var(--color-bg);
+  }
+
+  .ridge a:focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  .chance {
+    font-size: var(--text-base);
+    font-weight: 500;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .peak {
+    display: block;
+    width: 100%;
+    max-width: 76px;
+    height: auto;
+    aspect-ratio: 64 / 52;
+    overflow: hidden;
+  }
+
+  .grid {
+    fill: none;
+    stroke: var(--color-contour);
+    stroke-width: 1;
+    stroke-dasharray: 2 3;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .mass {
+    fill: var(--color-bg);
+    stroke: var(--color-text);
+    stroke-width: 1.3;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .strata {
+    fill: none;
+    stroke: var(--color-accent);
+    stroke-opacity: 0.55;
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .summit {
+    fill: var(--color-accent);
+    stroke: var(--color-surface);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .rise {
+    transform-box: fill-box;
+    animation: rise var(--motion-duration) var(--motion-ease) both;
+  }
+
+  @keyframes rise {
+    from {
+      transform: translateY(100%);
+    }
+
+    to {
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rise {
+      animation: none;
+    }
+  }
+
+  .key {
+    margin-top: var(--space-2);
+    text-align: center;
+  }
+
+  .key li {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .key b {
+    font-size: var(--text-sm);
+    font-weight: 700;
+    line-height: 1.3;
+    color: var(--color-text);
+  }
+
+  .key span {
+    font-size: var(--text-sm);
+    line-height: 1.3;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text-muted);
+  }
+
+  .label {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin: var(--space-4) 0 0;
+    padding-top: var(--space-3);
+    border-top: var(--border-width) solid var(--color-border);
+    font: 700 var(--text-sm) / 1.4 var(--font-body);
+    color: var(--color-text);
+  }
+
+  .label::before {
+    content: '';
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    transform: translateY(-1px);
+  }
+
+  .as-at {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-sm);
+    line-height: 1.4;
+    color: var(--color-text-muted);
+  }
+
+  .as-at time {
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text);
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  :global([data-expired]) .chance,
+  :global([data-expired]) .key b,
+  :global([data-expired]) .label,
+  :global([data-expired]) .as-at time {
+    color: var(--color-expired);
+  }
+
+  :global([data-expired]) .ridge {
+    border-color: var(--color-expired);
+  }
+
+  :global([data-expired]) .label::before,
+  :global([data-expired]) .summit {
+    background: var(--color-expired);
+    fill: var(--color-expired);
+  }
+
+  :global([data-expired]) .mass,
+  :global([data-expired]) .strata {
+    stroke: var(--color-expired);
+  }
+</style>

@@ -1,0 +1,25 @@
+---
+// A post's Open Graph tags and Article JSON-LD, for the layout's head slot.
+// Expired previews get exactly the same head: they stay indexed.
+import { editionHref, type Edition } from '@data/editions';
+import type { PeakOddsPost } from '@lib/posts';
+import { articleStructuredData, jsonLdText } from '@lib/preview';
+
+interface Props {
+  edition: Edition;
+  post: PeakOddsPost;
+}
+
+const { edition, post } = Astro.props;
+// BaseLayout has already failed the page, naming the setting, when there is no site.
+if (!Astro.site) throw new Error('PEAKODDS_SITE_URL is not set');
+const canonicalUrl = new URL(editionHref(edition.id, post.slug), Astro.site).href;
+const structuredData = jsonLdText(articleStructuredData(post, edition, canonicalUrl));
+---
+
+<meta property="og:type" content="article" />
+<meta property="og:title" content={post.title} />
+<meta property="og:description" content={post.description || post.title} />
+<meta property="og:url" content={canonicalUrl} />
+<meta property="og:site_name" content="PeakOdds" />
+<script type="application/ld+json" set:html={structuredData} />

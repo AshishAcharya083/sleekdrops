@@ -10,7 +10,10 @@
 import type { PostTypeDef } from '../../content/catalogue.js';
 import type { ArticleShape } from '../../content/shapes.js';
 
-/** The picks table header, column for column. `content/compliance.ts` rejects any other. */
+/**
+ * The picks table header, column for column. `content/compliance.ts` rejects any other.
+ * Mirrors apps/peakodds/src/lib/picks.ts (PICKS_HEADER), which draws only a table with this header as picks.
+ */
 export const PICKS_TABLE_COLUMNS = ['Market', 'Selection', 'Indicative odds (decimal)', 'As at'] as const;
 
 export const PEAKODDS_POST_TYPES: PostTypeDef[] = [

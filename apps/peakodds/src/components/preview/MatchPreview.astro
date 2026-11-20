@@ -1,0 +1,218 @@
+---
+// A match preview: its header and artwork, then the body beside the range of
+// its picks. The article is the expiry scope: built expired it carries
+// data-expired, and SiteLayout's expiry script adds it in the browser once a
+// page built before the start is read after it.
+import PostArtwork from '@components/ui/PostArtwork.astro';
+import { editionHref, type Edition } from '@data/editions';
+import { formatAsAt, formatKickOff } from '@lib/format';
+import type { PeakOddsPost } from '@lib/posts';
+import { buildPreview } from '@lib/preview';
+import ExpiredBanner from './ExpiredBanner.astro';
+import PreviewBody from './PreviewBody.astro';
+import PreviewRange from './PreviewRange.astro';
+
+interface Props {
+  edition: Edition;
+  post: PeakOddsPost;
+  /** The moment the page is built, which decides whether it is built expired. */
+  now: Date;
+}
+
+const { edition, post, now } = Astro.props;
+const preview = buildPreview(post, now);
+const { eventStartsAt } = post;
+const oddsAsAt = preview.picks.length > 0 ? post.oddsAsAt : null;
+---
+
+<article
+  class="preview"
+  aria-labelledby="preview-title"
+  data-event-starts-at={eventStartsAt?.toISOString()}
+  data-expired={preview.expired ? '' : undefined}
+>
+  {
+    eventStartsAt && (
+      <ExpiredBanner
+        edition={edition}
+        startsAt={eventStartsAt}
+        startLabel={preview.startLabel}
+        sport={preview.sportInSentence}
+        expired={preview.expired}
+      />
+    )
+  }
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a href={editionHref(edition.id)}>{edition.name}</a>
+    <span aria-hidden="true">/</span>
+    <span>{post.sport}</span>
+  </nav>
+  <p class="eyebrow">Match preview <span class="dot" aria-hidden="true">·</span> {post.sport}</p>
+  <h1 class="title" id="preview-title">{post.title}</h1>
+  {post.description && <p class="lede">{post.description}</p>}
+  {
+    (eventStartsAt || oddsAsAt) && (
+      <dl class="facts">
+        {eventStartsAt && (
+          <div>
+            <dt>{preview.startLabel}</dt>
+            <dd>
+              <time datetime={eventStartsAt.toISOString()}>{formatKickOff(eventStartsAt, edition)}</time>
+            </dd>
+          </div>
+        )}
+        {oddsAsAt && (
+          <div>
+            <dt>Odds as at</dt>
+            <dd>
+              <time datetime={oddsAsAt.toISOString()}>{formatAsAt(oddsAsAt, edition)}</time>
+            </dd>
+          </div>
+        )}
+      </dl>
+    )
+  }
+  <div class="page-art">
+    <PostArtwork post={post} />
+  </div>
+  <div class:list={['pv', { solo: !oddsAsAt }]}>
+    {
+      oddsAsAt && (
+        <aside class="pv-aside" aria-labelledby="range-title">
+          <PreviewRange picks={preview.picks} oddsAsAt={oddsAsAt} edition={edition} />
+        </aside>
+      )
+    }
+    <PreviewBody segments={preview.segments} oddsAsAt={post.oddsAsAt} edition={edition} expired={preview.expired} />
+  </div>
+</article>
+
+<style>
+  .crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  .crumbs a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    text-decoration: underline;
+    text-decoration-color: var(--color-contour);
+    text-underline-offset: 3px;
+  }
+
+  .eyebrow {
+    margin: 0;
+    font: 700 var(--text-sm) / 1.4 var(--font-body);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+
+  .dot {
+    color: var(--color-accent);
+  }
+
+  .title {
+    max-width: 24ch;
+    margin: var(--space-3) 0 0;
+    font: 600 clamp(var(--text-2xl), 4.4vw, calc(var(--text-2xl) * 1.5)) / 1.08 var(--font-display);
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+    color: var(--color-text);
+  }
+
+  .lede {
+    max-width: 62ch;
+    margin: var(--space-4) 0 0;
+    font-size: var(--text-xl);
+    line-height: 1.5;
+    color: var(--color-text);
+  }
+
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-5);
+    margin: var(--space-5) 0 0;
+    font-size: var(--text-sm);
+  }
+
+  .facts div {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .facts dt {
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+
+  .facts dd {
+    margin: 0;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text);
+  }
+
+  .page-art {
+    margin-top: var(--space-6);
+  }
+
+  .pv {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: var(--space-6);
+    align-items: start;
+    margin-top: var(--space-6);
+  }
+
+  .pv.solo {
+    grid-template-columns: minmax(0, 820px);
+  }
+
+  .pv-aside {
+    position: sticky;
+    top: var(--space-5);
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .pv > :global(.pv-body) {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  @media (max-width: 1020px) {
+    .pv {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .pv-aside,
+    .pv > :global(.pv-body) {
+      position: static;
+      grid-column: 1;
+      grid-row: auto;
+    }
+
+    .pv-aside {
+      max-width: 520px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .lede {
+      font-size: var(--text-lg);
+    }
+
+    .pv-aside {
+      max-width: none;
+    }
+  }
+</style>
