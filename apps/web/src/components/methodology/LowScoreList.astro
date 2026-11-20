@@ -1,0 +1,44 @@
+---
+import { formatScore, scoreBand } from '@lib/trust';
+
+/**
+ * Published reviews scored below the Strong band on /how-we-rate, each linked
+ * with its score and band, so a reader can check the low end of the
+ * distribution instead of taking the skew on trust.
+ */
+export interface Props {
+  reviews: readonly { slug: string; title: string; rating: number }[];
+}
+const { reviews } = Astro.props;
+---
+<ol class="low-list">
+  {reviews.map((review) => (
+    <li>
+      <a href={`/blog/${review.slug}`}>{review.title}</a>
+      <span class="score">{formatScore(review.rating)}<span class="of">/5</span> · {scoreBand(review.rating).label}</span>
+    </li>
+  ))}
+</ol>
+
+<style>
+  .low-list { list-style: none; padding: 0; margin: 0; }
+  .low-list li {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 2px 16px;
+    margin: 0;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--hairline);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  .low-list a { font-weight: 600; color: var(--ink); transition: color var(--dur-fast) var(--ease-out); }
+  .low-list a:hover { color: var(--accent-text); }
+  .low-list .score { font-family: var(--font-mono); font-size: 13px; white-space: nowrap; color: var(--ink); }
+  .low-list .of { color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) {
+    .low-list a { transition: none; }
+  }
+</style>

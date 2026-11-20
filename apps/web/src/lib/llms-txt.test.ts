@@ -301,7 +301,7 @@ test('no affiliate redirect reaches either file, even from a lead paragraph', ()
 test('llms.txt closes with the trust pages, in a section an agent will not skip', () => {
   assert.ok(!llms.includes('## Optional'), '`## Optional` is the section the convention says may be dropped');
   const about = llms.slice(llms.indexOf('## About this site'));
-  for (const path of ['/about', '/disclaimer', '/privacy', '/rss.xml']) {
+  for (const path of ['/about', '/how-we-research', '/how-we-rate', '/disclaimer', '/privacy', '/rss.xml']) {
     assert.ok(about.includes(`${SITE}${path}`), `${path} is missing from the trust section`);
   }
 });

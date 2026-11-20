@@ -1,0 +1,125 @@
+---
+import { formatMedium } from '@lib/format';
+import { CHANGELOG_KIND_LABELS, dayAsDate, type ChangelogEntry } from '@lib/methodology';
+
+/**
+ * A run of method changelog entries on /how-we-rate. Rendered twice when the
+ * history is long - the newest entries open, the rest inside a disclosure -
+ * and each entry keeps its own stable `method-v<major>-<minor>` id either way.
+ */
+export interface Props {
+  entries: (ChangelogEntry & { effect: string })[];
+  nested?: boolean;
+}
+const { entries, nested = false } = Astro.props;
+---
+<ol class:list={['log', { 'log--nested': nested }]}>
+  {entries.map((entry) => (
+    <li class="log-entry" id={entry.anchor}>
+      <div class="log-when">
+        <a class="log-ver" href={`#${entry.anchor}`}>v{entry.version}</a>
+        <span class="log-date">{formatMedium(dayAsDate(entry.date))}</span>
+        <span class:list={['kind', { 'kind--major': entry.kind !== 'minor' }]}>{CHANGELOG_KIND_LABELS[entry.kind]}</span>
+        {entry.current && <span class="log-current">Current</span>}
+      </div>
+      <div class="log-body">
+        <p>{entry.summary}</p>
+        <div class="log-effect"><b>Published scores</b><span>{entry.effect}</span></div>
+      </div>
+    </li>
+  ))}
+</ol>
+
+<style>
+  /* No top margin of its own: the page's prose rhythm spaces it. */
+  .log {
+    list-style: none;
+    padding: 0;
+    margin-bottom: 0;
+    border-top: 1px solid var(--hairline-strong);
+  }
+  .log.log--nested { margin: 0; border-top-color: var(--hairline); }
+  .log .log-entry {
+    display: grid;
+    grid-template-columns: 132px minmax(0, 1fr);
+    gap: 24px;
+    margin: 0;
+    padding: 24px 0;
+    border-bottom: 1px solid var(--hairline);
+    scroll-margin-top: 100px;
+  }
+  .log--nested .log-entry:last-child { border-bottom: 0; }
+  .log .log-when { display: flex; flex-direction: column; gap: 6px; }
+  .log .log-ver {
+    font-family: var(--font-mono);
+    font-size: 20px;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    text-decoration: none;
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+  .log .log-ver:hover { color: var(--accent-text); }
+  .log .log-date { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .log .kind {
+    align-self: flex-start;
+    display: inline-flex;
+    padding: 3px 9px;
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--r-full);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.5;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+  .log .kind.kind--major { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .log .log-current {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent-text);
+  }
+  .log .log-current::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: var(--r-full);
+    background: var(--accent);
+  }
+  .log .log-body p { margin: 0; font-size: 15px; line-height: 1.7; color: var(--ink-2); }
+  .log .log-effect {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    padding: 10px 14px;
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--ink-2);
+  }
+  .log .log-effect b {
+    padding-top: 1px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--muted);
+  }
+  @media (max-width: 620px) {
+    .log .log-entry { grid-template-columns: 1fr; gap: 12px; padding: 20px 0; }
+    .log .log-when { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+    .log .log-effect { flex-direction: column; gap: 2px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .log .log-ver { transition: none; }
+  }
+</style>
