@@ -2,6 +2,7 @@
 import BrandMark from '@components/ui/BrandMark.astro';
 import { categories } from '@data/categories';
 import { getActiveDeals } from '@data/deals';
+import { METHODOLOGY_PATH } from '@lib/methodology';
 import { getPostsByType } from '@lib/posts';
 
 const [reviews, guides] = await Promise.all([
@@ -35,6 +36,7 @@ const year = new Date().getFullYear();
         <h6>How we work</h6>
         <ul>
           <li><a href="/how-we-research">How we research</a></li>
+          <li><a href={METHODOLOGY_PATH}>How we rate</a></li>
           <li><a href="/disclaimer">Affiliate disclaimer</a></li>
           <li><a href="/about">About SleekDrops</a></li>
         </ul>

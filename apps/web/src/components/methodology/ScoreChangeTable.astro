@@ -1,0 +1,90 @@
+---
+import { formatMedium } from '@lib/format';
+import { dayAsDate, type ScoreChange } from '@lib/methodology';
+import { formatScore } from '@lib/trust';
+
+/**
+ * Rows of the score-change log on /how-we-rate, in their own sideways
+ * scroller. Date and Score stay the first two columns so a phone shows what
+ * moved and when before the reader has to scroll for the reason.
+ */
+export interface Props {
+  /** Each change with its review's title, resolved by the page. */
+  changes: readonly { change: ScoreChange; title: string }[];
+}
+const { changes } = Astro.props;
+---
+<div class="changes-scroll">
+  <table>
+    <colgroup><col class="col-date" /><col class="col-score" /><col class="col-review" /><col /></colgroup>
+    <thead>
+      <tr><th scope="col">Date</th><th scope="col">Score</th><th scope="col">Review</th><th scope="col">Why</th></tr>
+    </thead>
+    <tbody>
+      {changes.map(({ change, title }) => (
+        <tr>
+          <td class="mono">{formatMedium(dayAsDate(change.date))}</td>
+          <td class="mono">
+            <s><span class="visually-hidden">was </span>{formatScore(change.from)}</s>
+            <span aria-hidden="true"> → </span><span class="visually-hidden">, now </span>{formatScore(change.to)}
+          </td>
+          <td><a href={`/blog/${change.slug}`}>{title}</a></td>
+          <td>{change.reason}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
+
+<style>
+  .changes-scroll { overflow-x: auto; }
+  /* Fixed layout with a floor, so the Review title wraps to two lines at most
+     and the reason gets what is left instead of squeezing the date. */
+  table {
+    width: 100%;
+    min-width: 560px;
+    table-layout: fixed;
+    border-collapse: collapse;
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .col-date { width: 140px; }
+  .col-score { width: 100px; }
+  .col-review { width: 28%; }
+  th,
+  td {
+    text-align: left;
+    vertical-align: top;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--hairline);
+    overflow-wrap: break-word;
+    color: var(--ink-2);
+  }
+  th:first-child,
+  td:first-child { padding-left: 20px; }
+  th {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.mono { font-family: var(--font-mono); font-size: 13px; white-space: nowrap; color: var(--ink); }
+  td.mono s { color: var(--muted); }
+  td a { font-weight: 600; color: var(--ink); }
+  td a:hover { color: var(--accent-text); }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  @media (max-width: 700px) {
+    table { min-width: 640px; }
+  }
+</style>

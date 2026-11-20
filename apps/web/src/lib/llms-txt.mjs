@@ -464,6 +464,7 @@ export function buildLlmsTxt({
     '',
     linkLine('About', `${site}/about`, 'who writes this site and how a pick is made'),
     linkLine('How we research', `${site}/how-we-research`, 'the evidence standard behind every recommendation, and what we do not do'),
+    linkLine('How we rate', `${site}/how-we-rate`, 'what a score means, the scores we have given, the method changelog and the badge glossary'),
     linkLine('Affiliate disclaimer', `${site}/disclaimer`, 'how the site is funded and how links are labelled'),
     linkLine('Privacy', `${site}/privacy`, 'what is collected and what is not'),
     linkLine('RSS feed', `${site}/rss.xml`, 'new articles as they publish'),
